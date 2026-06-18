@@ -33,8 +33,8 @@ projects/composablekernel/dispatcher/heuristics/
   data_pipeline.py                — parquet loader / builder used by train.py
   feature_engine_grouped_conv.py  — 101-feature extractor for grouped conv (see Features)
   feature_engine.py               — base class imported by feature_engine_grouped_conv.py
-  generate_wide_coverage_conv.py      — wide-coverage training shapes
-  generate_edge_dims_conv.py          — edge-case training shapes
+  generate_wide_coverage_conv.py      — wide-coverage training shapes (full retrain)
+  generate_edge_dims_conv.py          — edge-case training shapes (full retrain)
   generate_targeted_shapes_conv.py    — OOF-driven targeted top-up shape generation
   sample_shapes_conv.py               — stratified merge + shard
 ```
@@ -305,6 +305,7 @@ Key flags:
 | `--target` | all | Cap on output shapes; stratified sampling preserves bucket diversity |
 | `--density` | 1 | `2` = denser grid (adds intermediate N/spatial/channel values) |
 | `--threshold` | 0.90 | Mean efficiency below which a subset is targeted |
+| `--force-subsets` | — | Always target named subsets, e.g. `"N=1,grouped"` `"spatial=large"` |
 | `--analytics` | off | Print global stats and worst 20 shapes |
 | `--dry-run` | off | Analyse only; do not write shape files |
 
@@ -348,31 +349,6 @@ cp $MODEL_SRC/train_manifest.json             $MODEL_DST/
 
 git add $MODEL_DST
 git commit -m "[CK DSL] conv model: retrain fp16/gfx942 ($(date +%Y-%m-%d))"
-```
-
-Validate heuristic efficiency using the OOF predictions produced during training:
-
-```bash
-# Inspect per-subset efficiency from the last training run.
-python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
-    --oof      oof_predictions.parquet \
-    --train    conv_fp16_<arch>_dsl.parquet \
-    --analytics --dry-run
-# Target: mean efficiency >= 0.90 across all subsets.
-```
-
-If subsets are below threshold, generate a targeted top-up shape set and re-sweep:
-
-```bash
-# Generate shapes covering hard subsets (zero overlap with existing training data).
-python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
-    --oof   oof_predictions.parquet \
-    --train conv_fp16_<arch>_dsl.parquet \
-    --out   all_shapes.csv \
-    --shards 32
-
-# Sweep the targeted shapes, convert, and warm-start retrain.
-# See sweep/build.sh and the full retraining workflow above.
 ```
 
 ---
