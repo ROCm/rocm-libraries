@@ -2362,7 +2362,7 @@ Tests:
 
 # Regression: int32 alpha 1065353216 (== float 1.0 bits) once crashed kernel selection.
 # unit_check off: alpha overflows int32 math; the guard is API success, not numerics.
-- name: matmul_gemm_i8_dst_i32_alpha_intbits
+- name: matmul_gemm_i8_dst_i32_alpha_float_bits
   category: pre_checkin
   function:
     matmul: *i8_precision_dst_i32
