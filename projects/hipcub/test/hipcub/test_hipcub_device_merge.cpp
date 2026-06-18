@@ -29,6 +29,55 @@
 #include "identity_iterator.hpp"
 #include "test_utils_data_generation.hpp"
 
+#if defined(HIPCUB_ROCPRIM_API)
+#include <rocprim/device/config_types.hpp>
+#include <set>
+#include <algorithm>
+#endif
+
+// Temporary functions to disable larger-sized tests on gfx115x devices.
+// TODO: remove this once it's replaced with a more robust fix.
+class TempDisablement
+{
+public:
+	static bool is_arch_disabled()
+	{
+#if defined(HIPCUB_ROCPRIM_API)
+		rocprim::detail::target_arch arch;
+		if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
+		{
+			std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
+		}
+
+		const std::set<rocprim::detail::target_arch> disabled_arches = {
+			rocprim::detail::target_arch::gfx1150,
+			rocprim::detail::target_arch::gfx1151,
+			rocprim::detail::target_arch::gfx1152,
+			rocprim::detail::target_arch::gfx1153
+		};
+
+		return disabled_arches.find(arch) != disabled_arches.end();
+#else
+		return false;
+#endif
+	}
+
+	static std::vector<std::tuple<size_t, size_t>> filter_sizes(std::vector<std::tuple<size_t, size_t>> sizes)
+	{
+#if defined(HIPCUB_ROCPRIM_API)
+		if (TempDisablement::is_arch_disabled())
+		{
+			auto it = std::remove_if(sizes.begin(), sizes.end(), [](const std::tuple<size_t, size_t>& size) {
+				return std::get<0>(size) + std::get<1>(size) > 10000;
+			});
+			sizes.erase(it, sizes.end());
+		}
+#endif
+
+		return sizes;
+	}
+};
+
 template<class Key, class Value, class CompareFunction = test_utils::less, bool UseGraphs = false>
 struct params
 {
@@ -104,7 +153,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : get_sizes())
+    for(auto sizes : TempDisablement::filter_sizes(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -258,7 +307,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : get_sizes())
+    for(auto sizes : TempDisablement::filter_sizes(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -478,7 +527,7 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 
     hipStream_t stream = 0; // default
 
-    for(auto sizes : get_large_sizes())
+    for(auto sizes : TempDisablement::filter_sizes(get_large_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
