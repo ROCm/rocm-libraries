@@ -476,7 +476,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
     if(analysis_policy == rocsparse_analysis_policy_reuse)
     {
         rocsparse::trm_info_t* p = info->get_csrsv_info(trans, descr->fill_mode);
-        
+
         if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans == rocsparse_operation_none))
         {
             p = (p != nullptr) ? p : info->get_csrilu0_info(trans, descr->fill_mode);
