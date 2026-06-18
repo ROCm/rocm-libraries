@@ -549,7 +549,15 @@ def runCodeQLCompileCommand (platform, project, jobName)
 
                     ${sshBlock}
 
-                    ./codeql/setup_codeql
+                    python3 -m venv .venv
+                    source .venv/bin/activate
+                    pip install --upgrade pip setuptools wheel
+                    pip install -r requirements.txt
+
+                    CODEQL_INSTALL_DIR=\$PWD/codeql/install
+                    export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
+
+                    ./codeql/setup_codeql \${CODEQL_INSTALL_DIR}
                     ./codeql/create_database
                     """
 
@@ -564,6 +572,11 @@ def runCodeQLTestCommand (platform, project)
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
+
+                CODEQL_INSTALL_DIR=\$PWD/codeql/install
+                export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
+
+                source .venv/bin/activate
 
                 # Run CodeQL unit tests
                 ./codeql/run_tests

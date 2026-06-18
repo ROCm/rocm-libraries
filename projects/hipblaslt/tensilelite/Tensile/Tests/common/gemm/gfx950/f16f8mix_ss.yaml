@@ -14,7 +14,6 @@ GlobalParameters:
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  NumElementsToValidate: -1
   BoundsCheck: 2
   KeepBuildTmp: True
 #  GenerateSourcesAndExit : True
@@ -30,8 +29,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True

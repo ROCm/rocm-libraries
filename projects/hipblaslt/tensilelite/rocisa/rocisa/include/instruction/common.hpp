@@ -247,6 +247,82 @@ namespace rocisa
         }
     };
 
+    struct _SAddU64 : public CommonInstruction
+    {
+        _SAddU64(const std::shared_ptr<Container>& dst,
+                 const InstructionInput&           src0,
+                 const InstructionInput&           src1,
+                 const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const std::shared_ptr<Container>&    dst,
+                 const std::vector<InstructionInput>& srcs,
+                 const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const _SAddU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SAddU64>(*this);
+        }
+    };
+
+    struct SAddU64 : public CompositeInstruction
+    {
+        SAddU64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["s_add_u64"])
+            {
+                instructions = {std::make_shared<_SAddU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
+                instructions
+                    = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
+                       std::make_shared<SAddCU32>(dst2, srcs2[0], srcs2[1], comment)};
+            }
+            return std::move(instructions);
+        }
+
+        SAddU64(const SAddU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddU64>(*this);
+        }
+    };
+
     struct SMulI32 : public CommonInstruction
     {
         SMulI32(const std::shared_ptr<RegisterContainer>& dst,
@@ -1393,12 +1469,38 @@ namespace rocisa
 
     struct SBarrier : public Instruction
     {
-        SBarrier(const std::string& comment = "")
+        SBarrier(const bool separate = false, const bool wait = false,
+                 const bool clusterBarrier = false, const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
+            , separate(separate)
+            , wait(wait)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
         {
-            if(getAsmCaps()["HasNewBarrier"])
+            if(hasNewBarrier)
             {
-                setInst("s_barrier_signal -1 \ns_barrier_wait -1");
+                int code = -1;
+                if (hasClusterBarrier and clusterBarrier)
+                {
+                    code = -3;
+                }
+
+                if(separate)
+                {
+                    if(wait)
+                    {
+                        setInst("s_barrier_wait " + std::to_string(code));
+                    }
+                    else
+                    {
+                        setInst("s_barrier_signal " + std::to_string(code));
+                    }
+                }
+                else
+                {
+                    setInst("s_barrier_signal " + std::to_string(code) + "\ns_barrier_wait " + std::to_string(code));
+                }
             }
             else
             {
@@ -1408,6 +1510,11 @@ namespace rocisa
 
         SBarrier(const SBarrier& other)
             : Instruction(other)
+            , separate(other.separate)
+            , wait(other.wait)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
         {
         }
 
@@ -1435,6 +1542,88 @@ namespace rocisa
         {
             return formatWithComment(instStr);
         }
+
+        bool getSeparate() const { return separate; }
+        bool getWait() const { return wait; }
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        // Constructor arguments preserved so downstream consumers (e.g. the
+        // rocisa -> stinkytofu conversion) can recover the requested barrier
+        // form without parsing the textual instStr.
+        bool separate;
+        bool wait;
+        bool clusterBarrier;
+        // Snapshot of the asm caps at construction time so consumers see the
+        // exact form that was emitted into instStr.
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
+    };
+
+    // s_barrier_signal_isfirst: like SBarrier signal, but the first wave to
+    // arrive at the barrier gets SCC=1 (the rest SCC=0).  Used to elect a
+    // single wave to drive a cluster-scope handshake without a separate
+    // WaveIdx compare.  Signal-only; pair with an SBarrier wait.
+    struct SBarrierSignalIsFirst : public Instruction
+    {
+        SBarrierSignalIsFirst(const bool clusterBarrier = false,
+                              const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
+        {
+            int code = -1;
+            if(hasClusterBarrier and clusterBarrier)
+            {
+                code = -3;
+            }
+            setInst("s_barrier_signal_isfirst " + std::to_string(code));
+        }
+
+        SBarrierSignalIsFirst(const SBarrierSignalIsFirst& other)
+            : Instruction(other)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBarrierSignalIsFirst>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        bool clusterBarrier;
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
     };
 
     // Virtual scheduling fence: emits no assembly, but carries MemTokenData
@@ -3058,6 +3247,88 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VAddCCOU32>(*this);
+        }
+    };
+
+    struct _VAddNCU64 : public CommonInstruction
+    {
+        _VAddNCU64(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const std::shared_ptr<Container>&    dst,
+                   const std::vector<InstructionInput>& srcs,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const _VAddNCU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_VAddNCU64>(*this);
+        }
+    };
+
+    struct VAddNCU64 : public CompositeInstruction
+    {
+        VAddNCU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["v_add_nc_u64"])
+            {
+                instructions = {std::make_shared<_VAddNCU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                auto vcc = std::make_shared<VCC>();
+                instructions
+                    = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),
+                       std::make_shared<VAddCCOU32>(
+                           dst2,
+                           vcc,
+                           srcs2[0],
+                           srcs2[1],
+                           InstructionInput(std::static_pointer_cast<Container>(vcc)),
+                           comment)};
+            }
+            return std::move(instructions);
+        }
+
+        VAddNCU64(const VAddNCU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAddNCU64>(*this);
         }
     };
 

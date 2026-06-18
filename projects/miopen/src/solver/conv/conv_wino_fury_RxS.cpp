@@ -680,13 +680,13 @@ bool ConvWinoFuryRxSFused<Winodata, Winofilter>::IsApplicable(
     if(activ_idx != -1)
     {
         const auto& activ_op = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[activ_idx]);
-        switch(activ_op.activMode)
+
+        if(activ_op.activMode != miopenActivationPASTHRU &&
+           activ_op.activMode != miopenActivationLOGISTIC &&
+           activ_op.activMode != miopenActivationTANH &&
+           activ_op.activMode != miopenActivationLEAKYRELU)
         {
-        case miopenActivationPASTHRU:
-        case miopenActivationLOGISTIC:
-        case miopenActivationTANH:
-        case miopenActivationLEAKYRELU: break;
-        default: return false;
+            return false;
         }
     }
 

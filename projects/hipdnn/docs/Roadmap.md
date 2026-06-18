@@ -16,17 +16,14 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 ### Conv
 - **Convolution MIOpen plugin support** ✅
   - Including basic fusions ✅
-- **Convolution Fusilli plugin support** ✅
 
 ### Normalization
 - **Batch normalization MIOpen plugin support** ✅
   - Including basic fusions ✅
-- **Batch normalization Fusilli plugin support** ✅
 - **LayerNorm & RMSNorm frontend API** ✅
 
 ### GEMM
 - **Initial frontend GEMM API support** ✅
-- Fusilli plugin integration (see note) ✅
 - hipBLASLt plugin initial enablement ✅
 
 ### SDPA
@@ -40,7 +37,6 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Initial benchmarking & performance tooling ✅
 
 > **Notes:**
-> - Fusilli plugin is opt-in, and not defaulted on yet.
 > - PyTorch integration was moved to early Q2
 
 ## P1 ~ Q2 2026 (Current milestone)

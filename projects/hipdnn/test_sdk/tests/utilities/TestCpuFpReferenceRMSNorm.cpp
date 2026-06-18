@@ -545,3 +545,437 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdScaleNormAxis3)
     EXPECT_NEAR(outputTensor.getHostValue(1, 1, 1, 0), 3.0 * invRmsC1 * 2.0, tolerance);
     EXPECT_NEAR(outputTensor.getHostValue(1, 1, 1, 1), 4.0 * invRmsC1 * 2.5, tolerance);
 }
+
+template <typename DyT, typename XT, typename ScaleT, typename DxT, typename ComputeT>
+struct BwdTypeGroup
+{
+    using Dy = DyT;
+    using X = XT;
+    using Scale = ScaleT;
+    using Dx = DxT;
+    using Compute = ComputeT;
+};
+
+using RMSNormBwdTypes = ::testing::Types<BwdTypeGroup<float, float, float, float, float>,
+                                         BwdTypeGroup<half, half, float, half, float>,
+                                         BwdTypeGroup<bfloat16, bfloat16, float, bfloat16, float>>;
+
+template <class T>
+class CpuFpReferenceRMSNormBwdNchw : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceRMSNormBwdNchw, RMSNormBwdTypes, );
+
+TYPED_TEST(CpuFpReferenceRMSNormBwdNchw, RMSNormBwdNchw)
+{
+    using DyT = typename TypeParam::Dy;
+    using XT = typename TypeParam::X;
+    using ScaleT = typename TypeParam::Scale;
+    using DxT = typename TypeParam::Dx;
+    using ComputeT = typename TypeParam::Compute;
+
+    const std::vector<int64_t> dims = {4, 16, 8, 8};
+
+    Tensor<DyT> dy(dims, TensorLayout::NCHW);
+    Tensor<XT> x(dims, TensorLayout::NCHW);
+    Tensor<ScaleT> scale({1, 16, 8, 8});
+    Tensor<ComputeT> invRms({4, 1, 1, 1});
+
+    Tensor<DxT> dx(dims, TensorLayout::NCHW);
+    Tensor<ScaleT> dscale({1, 16, 8, 8});
+    Tensor<ScaleT> dbias({1, 16, 8, 8});
+
+    dy.fillWithValue(safeTestTypeCast<DyT>(1.0));
+    x.fillWithValue(safeTestTypeCast<XT>(1.0));
+    scale.fillWithValue(safeTestTypeCast<ScaleT>(1.0));
+    invRms.fillWithValue(safeTestTypeCast<ComputeT>(0.5));
+
+    CpuFpReferenceRMSNorm::backward<DyT, XT, ScaleT, DxT, ComputeT>(
+        dy, x, scale, invRms, dx, dscale, &dbias);
+}
+
+template <class T>
+class CpuFpReferenceRMSNormBwdNhwc : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceRMSNormBwdNhwc, RMSNormBwdTypes, );
+
+TYPED_TEST(CpuFpReferenceRMSNormBwdNhwc, RMSNormBwdNhwc)
+{
+    using DyT = typename TypeParam::Dy;
+    using XT = typename TypeParam::X;
+    using ScaleT = typename TypeParam::Scale;
+    using DxT = typename TypeParam::Dx;
+    using ComputeT = typename TypeParam::Compute;
+
+    const std::vector<int64_t> dims = {4, 8, 8, 16};
+
+    Tensor<DyT> dy(dims, TensorLayout::NHWC);
+    Tensor<XT> x(dims, TensorLayout::NHWC);
+    Tensor<ScaleT> scale({1, 8, 8, 16});
+    Tensor<ComputeT> invRms({4, 1, 1, 1});
+
+    Tensor<DxT> dx(dims, TensorLayout::NHWC);
+    Tensor<ScaleT> dscale({1, 8, 8, 16});
+    Tensor<ScaleT> dbias({1, 8, 8, 16});
+
+    dy.fillWithValue(safeTestTypeCast<DyT>(1.0));
+    x.fillWithValue(safeTestTypeCast<XT>(1.0));
+    scale.fillWithValue(safeTestTypeCast<ScaleT>(1.0));
+    invRms.fillWithValue(safeTestTypeCast<ComputeT>(0.5));
+
+    CpuFpReferenceRMSNorm::backward<DyT, XT, ScaleT, DxT, ComputeT>(
+        dy, x, scale, invRms, dx, dscale, &dbias);
+}
+
+TEST(TestCpuFpReferenceRMSNorm, RMSNormBwdRejectsRankMismatch)
+{
+    const Tensor<float> dy({2, 3, 4, 4});
+    const Tensor<float> x({2, 3, 4, 4});
+    const Tensor<float> scale({2, 3, 4, 4});
+    const Tensor<float> invRms({1, 3, 4}); // wrong rank
+    Tensor<float> dx({2, 3, 4, 4});
+    Tensor<float> dScale({2, 3, 4, 4});
+
+    EXPECT_THROW(CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dScale),
+                 std::runtime_error);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormBwd2D)
+{
+    Tensor<float> dy({4, 3});
+    Tensor<float> x({4, 3});
+    Tensor<float> scale({1, 3});
+    Tensor<float> invRms({4, 1});
+
+    Tensor<float> dx({4, 3});
+    Tensor<float> dscale({1, 3});
+
+    dy.fillWithValue(1.0f);
+    x.fillWithValue(1.0f);
+    scale.fillWithValue(1.0f);
+    invRms.fillWithValue(0.5f);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormBwd3D)
+{
+    Tensor<float> dy({2, 3, 10});
+    Tensor<float> x({2, 3, 10});
+    Tensor<float> scale({1, 3, 10});
+    Tensor<float> invRms({2, 1, 1});
+
+    Tensor<float> dx({2, 3, 10});
+    Tensor<float> dscale({1, 3, 10});
+
+    dy.fillWithValue(0.5f);
+    x.fillWithValue(2.0f);
+    scale.fillWithValue(1.0f);
+    invRms.fillWithValue(0.1f);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormBwdNcdhw)
+{
+    Tensor<float> dy({2, 3, 4, 5, 6});
+    Tensor<float> x({2, 3, 4, 5, 6});
+    Tensor<float> scale({1, 3, 4, 5, 6});
+    Tensor<float> invRms({2, 1, 1, 1, 1});
+
+    Tensor<float> dx({2, 3, 4, 5, 6});
+    Tensor<float> dscale({1, 3, 4, 5, 6});
+    Tensor<float> dbias({1, 3, 4, 5, 6});
+
+    dy.fillWithValue(1.0f);
+    x.fillWithValue(1.2f);
+    scale.fillWithValue(1.0f);
+    invRms.fillWithValue(0.8f);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale, &dbias);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormBwdNdhwc)
+{
+    Tensor<float> dy({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
+    Tensor<float> x({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
+    Tensor<float> scale({1, 1, 1, 1, 6}, TensorLayout::NDHWC);
+    Tensor<float> invRms({2, 3, 4, 5, 1}, TensorLayout::NDHWC);
+
+    Tensor<float> dx({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
+    Tensor<float> dscale({1, 1, 1, 1, 6}, TensorLayout::NDHWC);
+
+    dy.fillWithValue(0.1f);
+    x.fillWithValue(1.0f);
+    scale.fillWithValue(1.0f);
+    invRms.fillWithValue(0.9f);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormBwdSanityValidation)
+{
+    const std::vector<int64_t> dims = {1, 4, 1, 1};
+    const double epsilon = 1e-5;
+
+    Tensor<double> dy(dims);
+    Tensor<double> x(dims);
+    Tensor<double> scale(dims);
+    Tensor<double> dx(dims);
+    Tensor<double> dscale(dims);
+    Tensor<double> invRms({1, 1, 1, 1});
+
+    // Inputs: x = [1, 2, 3, 4], scale = [1, 1, 1, 1], dy = [0.1, 0.2, 0.3, 0.4]
+    for(int i = 0; i < 4; i++)
+    {
+        x.setHostValue(static_cast<double>(i + 1), 0, i, 0, 0);
+        dy.setHostValue(static_cast<double>(i + 1) * 0.1, 0, i, 0, 0);
+        scale.setHostValue(1.0, 0, i, 0, 0);
+    }
+
+    // Forward stats: mean(x^2) = 7.5
+    const double invRmsVal = 1.0 / std::sqrt(7.5 + epsilon);
+    invRms.setHostValue(invRmsVal, 0, 0, 0, 0);
+
+    // Manual gradient calculation:
+    // 1. Dot product: sum(dy * scale * x) = (0.1*1*1 + 0.2*1*2 + 0.3*1*3 + 0.4*1*4) = 0.1+0.4+0.9+1.6 = 3.0
+    // 2. Mean projection: m = 3.0 / 4 = 0.75
+    // 3. dx[i] = (dy[i]*scale[i]*invRms) - (m * x[i] * invRms^3)
+    const double projection = 0.75;
+    const double invRmsCubed = invRmsVal * invRmsVal * invRmsVal;
+
+    std::vector<double> expectedDx(4);
+    std::vector<double> expectedDScale(4);
+    for(size_t i = 0; i < 4; i++)
+    {
+        const auto valX = static_cast<double>(i + 1);
+        const double valDy = valX * 0.1;
+        expectedDx[i] = (valDy * 1.0 * invRmsVal) - (projection * valX * invRmsCubed);
+        expectedDScale[i] = valDy * (valX * invRmsVal);
+    }
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+
+    const double tolerance = 1e-6;
+    for(size_t i = 0; i < 4; i++)
+    {
+        EXPECT_NEAR(dx.getHostValue(0, i, 0, 0), expectedDx[i], tolerance);
+        EXPECT_NEAR(dscale.getHostValue(0, i, 0, 0), expectedDScale[i], tolerance);
+    }
+}
+
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormBwdDbiasValidation)
+{
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
+    Tensor<double> dy(dims);
+    Tensor<double> x(dims);
+    Tensor<double> scale(dims);
+    Tensor<double> dx(dims);
+    Tensor<double> dscale(dims);
+    Tensor<double> dbias(dims);
+    Tensor<double> invRms({1, 1, 1, 1});
+
+    x.setHostValue(1.0, 0, 0);
+    x.setHostValue(2.0, 0, 1);
+    dy.setHostValue(0.5, 0, 0);
+    dy.setHostValue(0.5, 0, 1);
+    scale.setHostValue(1.0, 0, 0);
+    scale.setHostValue(1.0, 0, 1);
+
+    const double invRmsVal = 1.0 / std::sqrt(2.5);
+    invRms.setHostValue(invRmsVal, 0, 0, 0, 0);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale, &dbias);
+
+    // dbias is simply the sum of dy over the batch. Since batch=1, dbias == dy.
+    EXPECT_NEAR(dbias.getHostValue(0, 0, 0, 0), 0.5, 1e-10);
+    EXPECT_NEAR(dbias.getHostValue(0, 1, 0, 0), 0.5, 1e-10);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormBwdPartialSuffixScale)
+{
+    const std::vector<int64_t> dims = {1, 2, 1, 2};
+    const std::vector<int64_t> scaleDims = {1, 1, 1, 2};
+    const std::vector<int64_t> invRmsDims = {1, 2, 1, 1};
+
+    Tensor<double> dy(dims);
+    Tensor<double> x(dims);
+    Tensor<double> scale(scaleDims);
+    Tensor<double> dx(dims);
+    Tensor<double> dscale(scaleDims);
+    Tensor<double> invRms(invRmsDims);
+
+    // C=0: x=[1, 2], dy=[0.1, 0.1]
+    x.setHostValue(1.0, 0, 0, 0, 0);
+    x.setHostValue(2.0, 0, 0, 0, 1);
+    dy.setHostValue(0.1, 0, 0, 0, 0);
+    dy.setHostValue(0.1, 0, 0, 0, 1);
+
+    // C=1: x=[3, 4], dy=[0.2, 0.2]
+    x.setHostValue(3.0, 0, 1, 0, 0);
+    x.setHostValue(4.0, 0, 1, 0, 1);
+    dy.setHostValue(0.2, 0, 1, 0, 0);
+    dy.setHostValue(0.2, 0, 1, 0, 1);
+
+    // Scale varies over scale: [1.0, 0.5]
+    scale.setHostValue(1.0, 0, 0, 0, 0);
+    scale.setHostValue(0.5, 0, 0, 0, 1);
+
+    // Pre-calculated invRms (mean(1,4) = 2.5, mean(9,16) = 12.5)
+    const double invRmsC0 = 1.0 / std::sqrt(2.5);
+    const double invRmsC1 = 1.0 / std::sqrt(12.5);
+    invRms.setHostValue(invRmsC0, 0, 0, 0, 0);
+    invRms.setHostValue(invRmsC1, 0, 1, 0, 0);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+
+    // dscale[w] = sum_{n,c,h} (dy[n,c,h,w] * x[n,c,h,w] * invRms[n,c,h,w])
+    // dscale[0] = (dy[0,0,0,0]*x[0,0,0,0]*invRmsC0) + (dy[0,1,0,0]*x[0,1,0,0]*invRmsC1)
+    const double expectedDs0 = (0.1 * 1.0 * invRmsC0) + (0.2 * 3.0 * invRmsC1);
+    // dscale[1] = (dy[0,0,0,1]*x[0,0,0,1]*invRmsC0) + (dy[0,1,0,1]*x[0,1,0,1]*invRmsC1)
+    const double expectedDs1 = (0.1 * 2.0 * invRmsC0) + (0.2 * 4.0 * invRmsC1);
+
+    EXPECT_NEAR(dscale.getHostValue(0, 0, 0, 0), expectedDs0, 1e-10);
+    EXPECT_NEAR(dscale.getHostValue(0, 0, 0, 1), expectedDs1, 1e-10);
+
+    // For C=0: x=[1, 2], dy=[0.1, 0.1], scale=[1.0, 0.5], N=2
+    // sum(dy*w*x) = (0.1*1.0*1.0) + (0.1*0.5*2.0) = 0.1 + 0.1 = 0.2
+    // m_C0 = 0.2 / 2 = 0.1
+    const double mC0 = 0.1;
+    const double invRmsC03 = invRmsC0 * invRmsC0 * invRmsC0;
+    const double expDxC0W0 = (0.1 * 1.0 * invRmsC0) - (mC0 * 1.0 * invRmsC03);
+    const double expDxC0W1 = (0.1 * 0.5 * invRmsC0) - (mC0 * 2.0 * invRmsC03);
+
+    // For C=1: x=[3, 4], dy=[0.2, 0.2], scale=[1.0, 0.5], N=2
+    // sum(dy*w*x) = (0.2*1.0*3.0) + (0.2*0.5*4.0) = 0.6 + 0.4 = 1.0
+    // m_C1 = 1.0 / 2 = 0.5
+    const double mC1 = 0.5;
+    const double invRmsC13 = invRmsC1 * invRmsC1 * invRmsC1;
+    const double expDxC1W0 = (0.2 * 1.0 * invRmsC1) - (mC1 * 3.0 * invRmsC13);
+    const double expDxC1W1 = (0.2 * 0.5 * invRmsC1) - (mC1 * 4.0 * invRmsC13);
+
+    EXPECT_NEAR(dx.getHostValue(0, 0, 0, 0), expDxC0W0, 1e-10);
+    EXPECT_NEAR(dx.getHostValue(0, 0, 0, 1), expDxC0W1, 1e-10);
+    EXPECT_NEAR(dx.getHostValue(0, 1, 0, 0), expDxC1W0, 1e-10);
+    EXPECT_NEAR(dx.getHostValue(0, 1, 0, 1), expDxC1W1, 1e-10);
+}
+
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormBwdConstantInput)
+{
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+    Tensor<double> dy(dims);
+    Tensor<double> x(dims);
+    Tensor<double> scale(dims);
+    Tensor<double> dx(dims);
+    Tensor<double> dscale(dims);
+    Tensor<double> dbias(dims);
+    Tensor<double> invRms({1, 1, 1, 1});
+
+    const double valX = 3.0;
+    const double valDy = 0.5;
+    const double valScale = 2.0;
+    const double epsilon = 1e-5;
+
+    x.fillWithValue(valX);
+    dy.fillWithValue(valDy);
+    scale.fillWithValue(valScale);
+
+    const double invRmsVal = 1.0 / std::sqrt(valX * valX + epsilon);
+    invRms.fillWithValue(invRmsVal);
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale, &dbias);
+
+    const double expectedDx = (valDy * valScale * invRmsVal)
+                              - (valDy * valScale * valX * valX * std::pow(invRmsVal, 3));
+    const double expectedDScale = valDy * valX * invRmsVal;
+    const double expectedDBias = valDy;
+
+    const double tolerance = 1e-10;
+    for(size_t i = 0; i < 2; i++)
+    {
+        for(size_t j = 0; j < 2; j++)
+        {
+            EXPECT_NEAR(dx.getHostValue(0, 0, i, j), expectedDx, tolerance);
+            EXPECT_NEAR(dscale.getHostValue(0, 0, i, j), expectedDScale, tolerance);
+            EXPECT_NEAR(dbias.getHostValue(0, 0, i, j), expectedDBias, tolerance);
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormBwdScaleNormAxis2)
+{
+    const std::vector<int64_t> dims = {2, 2, 2, 2};
+    const std::vector<int64_t> scaleDims = {1, 1, 2, 2};
+    const std::vector<int64_t> invRmsDims = {2, 2, 1, 1};
+
+    Tensor<double> dy(dims);
+    Tensor<double> x(dims);
+    Tensor<double> scale(scaleDims);
+    Tensor<double> dx(dims);
+    Tensor<double> dscale(scaleDims);
+    Tensor<double> invRms(invRmsDims);
+
+    // Setup:
+    // C=0: x=1.0, dy=0.1 -> Mean(x^2)=1.0, invRms=1.0
+    // C=1: x=2.0, dy=0.1 -> Mean(x^2)=4.0, invRms=0.5
+    // scale=1.0 everywhere
+    x.fillWithValue(1.0);
+    for(int n = 0; n < 2; ++n)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                x.setHostValue(2.0, n, 1, h, w);
+            }
+        }
+    }
+
+    dy.fillWithValue(0.1);
+    scale.fillWithValue(1.0);
+
+    const double rstdC0 = 1.0 / std::sqrt(1.0);
+    const double rstdC1 = 1.0 / std::sqrt(4.0);
+    for(int n = 0; n < 2; ++n)
+    {
+        invRms.setHostValue(rstdC0, n, 0, 0, 0);
+        invRms.setHostValue(rstdC1, n, 1, 0, 0);
+    }
+
+    CpuFpReferenceRMSNorm::backward(dy, x, scale, invRms, dx, dscale);
+
+    // Verify dscale
+    // Each (h,w) position in dscale = sum_{n} (dy[n,0,h,w]*x[n,0,h,w]*rstd[n,0] + dy[n,1,h,w]*x[n,1,h,w]*rstd[n,1])
+    // dscale = 2 * (0.1 * 1.0 * 1.0) + 2 * (0.1 * 2.0 * 0.5) = 0.2 + 0.2 = 0.4
+    const double tolerance = 1e-10;
+    const double expectedDs = 2.0 * (0.1 * 1.0 * rstdC0) + 2.0 * (0.1 * 2.0 * rstdC1);
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int w = 0; w < 2; ++w)
+        {
+            EXPECT_NEAR(dscale.getHostValue(0, 0, h, w), expectedDs, tolerance);
+        }
+    }
+
+    // Verify dx
+    // For C=0: dy=0.1, w=1.0, x=1.0, rstd=1.0, N_elements=4 (H*W)
+    //   sum(dy*w*x) = 4 * (0.1 * 1.0 * 1.0) = 0.4
+    //   dx = 1.0 * (0.1*1.0 - 1.0 * 0.4 * 1.0^2 / 4) = 1.0 * (0.1 - 0.1) = 0.0
+    // For C=1: dy=0.1, w=1.0, x=2.0, rstd=0.5, N_elements=4
+    //   sum(dy*w*x) = 4 * (0.1 * 1.0 * 2.0) = 0.8
+    //   dx = 0.5 * (0.1*1.0 - 2.0 * 0.8 * 0.5^2 / 4) = 0.5 * (0.1 - 0.1) = 0.0
+    for(int n = 0; n < 2; ++n)
+    {
+        for(int h = 0; h < 2; ++h)
+        {
+            for(int w = 0; w < 2; ++w)
+            {
+                EXPECT_NEAR(dx.getHostValue(n, 0, h, w), 0.0, tolerance);
+                EXPECT_NEAR(dx.getHostValue(n, 1, h, w), 0.0, tolerance);
+            }
+        }
+    }
+}

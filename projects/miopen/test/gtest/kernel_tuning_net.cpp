@@ -197,7 +197,7 @@ template <typename PerfConfig>
 class KernelTuningNetTest : public ::testing::TestWithParam<KernelTuningNetTestCase>
 {
 protected:
-    void TestParameterPredictionModel(std::string solver_nm)
+    void TestParameterPredictionModel([[maybe_unused]] std::string solver_nm)
     {
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING && MIOPEN_USE_COMPOSABLEKERNEL
         auto test_case = GetParam();

@@ -177,7 +177,7 @@ inline T igemm_get_max_gks(T gemm_k, T gemm_k_per_block, T max_log2_splits)
         return 0;
     T rem      = gemm_k / gemm_k_per_block;
     T rem_pow2 = rem & (~(rem - 1));
-    T gks      = (T)log2(rem_pow2);
+    T gks      = static_cast<T>(log2(rem_pow2));
 
     if(gks > max_log2_splits)
         gks = max_log2_splits;

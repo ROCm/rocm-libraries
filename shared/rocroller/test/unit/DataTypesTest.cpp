@@ -43,7 +43,11 @@ using InputTypes = ::testing::Types<std::tuple<float>,
                                     std::tuple<rocRoller::FP6x16>,
                                     std::tuple<rocRoller::BF6x16>,
                                     std::tuple<rocRoller::E8M0>,
-                                    std::tuple<rocRoller::E8M0x4>>;
+                                    std::tuple<rocRoller::E8M0x4>,
+                                    std::tuple<rocRoller::E5M3>,
+                                    std::tuple<rocRoller::E5M3x4>,
+                                    std::tuple<rocRoller::E4M3>,
+                                    std::tuple<rocRoller::E4M3x4>>;
 
 TYPED_TEST_SUITE(TypedDataTypesTest, InputTypes);
 
@@ -103,6 +107,10 @@ static_assert(rocRoller::TypeInfo<rocRoller::Buffer>::Var
                   == rocRoller::VariableType(rocRoller::DataType::None,
                                              rocRoller::PointerType::Buffer),
               "Buffer");
+static_assert(rocRoller::TypeInfo<rocRoller::TDM>::Var
+                  == rocRoller::VariableType(rocRoller::DataType::None,
+                                             rocRoller::PointerType::TDM),
+              "TDM");
 static_assert(rocRoller::TypeInfo<rocRoller::BF8>::Var == rocRoller::DataType::BF8, "BF8");
 static_assert(rocRoller::TypeInfo<rocRoller::FP8>::Var == rocRoller::DataType::FP8, "FP8");
 static_assert(rocRoller::TypeInfo<rocRoller::BF6>::Var == rocRoller::DataType::BF6, "BF6");
@@ -134,6 +142,7 @@ static_assert(rocRoller::TypeInfo<rocRoller::BFloat16>::Packing == 1, "BFloat16"
 static_assert(rocRoller::TypeInfo<rocRoller::PointerLocal>::Packing == 1, "PointerLocal");
 static_assert(rocRoller::TypeInfo<rocRoller::PointerGlobal>::Packing == 1, "PointerGlobal");
 static_assert(rocRoller::TypeInfo<rocRoller::Buffer>::Packing == 1, "Buffer");
+static_assert(rocRoller::TypeInfo<rocRoller::TDM>::Packing == 1, "TDM");
 static_assert(rocRoller::TypeInfo<rocRoller::BF8>::Packing == 1, "BF8");
 static_assert(rocRoller::TypeInfo<rocRoller::FP8>::Packing == 1, "FP8");
 static_assert(rocRoller::TypeInfo<rocRoller::BF6>::Packing == 1, "BF6");
@@ -165,6 +174,7 @@ static_assert(rocRoller::TypeInfo<rocRoller::BFloat16>::RegisterCount == 1, "BFl
 static_assert(rocRoller::TypeInfo<rocRoller::PointerLocal>::RegisterCount == 1, "PointerLocal");
 static_assert(rocRoller::TypeInfo<rocRoller::PointerGlobal>::RegisterCount == 2, "PointerGlobal");
 static_assert(rocRoller::TypeInfo<rocRoller::Buffer>::RegisterCount == 4, "Buffer");
+static_assert(rocRoller::TypeInfo<rocRoller::TDM>::RegisterCount == 12, "TDM");
 static_assert(rocRoller::TypeInfo<rocRoller::BF8>::RegisterCount == 1, "BF8");
 static_assert(rocRoller::TypeInfo<rocRoller::FP8>::RegisterCount == 1, "FP8");
 static_assert(rocRoller::TypeInfo<rocRoller::BF6>::RegisterCount == 1, "BF6");

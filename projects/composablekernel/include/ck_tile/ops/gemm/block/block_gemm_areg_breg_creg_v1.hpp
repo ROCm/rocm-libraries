@@ -328,62 +328,75 @@ struct BlockGemmARegBRegCRegV1
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         // hot loop:
-        static_for<0, KPerSubTile, 1>{}([&](auto kIter) {
+        static_ford<sequence<KPerSubTile, MIterPerWarp>>{}([&](auto km) {
+            constexpr auto kIter          = number<km[number<0>{}]>{};
+            constexpr auto mIter          = number<km[number<1>{}]>{};
             constexpr index_t scale_k_idx = SubTileIdx * KPerSubTile + decltype(kIter)::value;
-            static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                // read A warp tensor from A block tensor
-                AWarpTensor a_warp_tensor;
-                a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
-                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            // read A warp tensor from A block tensor
+            AWarpTensor a_warp_tensor;
+            a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
-                index_t scale_a = a_scale_tensor.get_y_sliced_thread_data(
-                    sequence<mIter, scale_k_idx, 0>{}, sequence<1, 1, 1>{})[0];
+            // Extract scale value(s) for this M-iteration.
+            // For scale32: 1 int32_t element (4 packed e8m0 bytes).
+            // For scale16: 2 int32_t elements packed into int64_t (8 packed e8m0 bytes).
+            // The scale thread buffer spans the whole block-K (scale_k_idx ranges over
+            // [0, KIterPerWarp)), so divide by KIterPerWarp, not one sub-tile's KPerSubTile.
+            constexpr index_t scale_k_len =
+                AScaleBlockTensor::get_thread_buffer_size() / (MIterPerWarp * KIterPerWarp);
+            static_assert(scale_k_len == 1 || scale_k_len == 2,
+                          "scale_k_len must be 1 (scale32, int32_t) or 2 (scale16, int64_t)");
+            auto scale_a_slice = a_scale_tensor.get_y_sliced_thread_data(
+                sequence<mIter, scale_k_idx * scale_k_len, 0>{}, sequence<1, scale_k_len, 1>{});
+            auto scale_a =
+                bit_cast<std::conditional_t<scale_k_len == 2, int64_t, int32_t>>(scale_a_slice);
 
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    // read B warp tensor from B block tensor
-                    BWarpTensor b_warp_tensor;
-                    b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+            static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                // read B warp tensor from B block tensor
+                BWarpTensor b_warp_tensor;
+                b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                    index_t scale_b = b_scale_tensor.get_y_sliced_thread_data(
-                        sequence<nIter, scale_k_idx, 0>{}, sequence<1, 1, 1>{})[0];
+                auto scale_b_slice = b_scale_tensor.get_y_sliced_thread_data(
+                    sequence<nIter, scale_k_idx * scale_k_len, 0>{}, sequence<1, scale_k_len, 1>{});
+                auto scale_b =
+                    bit_cast<std::conditional_t<scale_k_len == 2, int64_t, int32_t>>(scale_b_slice);
 
-                    // read C warp tensor from C block tensor
-                    using c_iter_idx = std::
-                        conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
-                    CWarpTensor c_warp_tensor;
-                    c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                // read C warp tensor from C block tensor
+                using c_iter_idx =
+                    std::conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
+                CWarpTensor c_warp_tensor;
+                c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                    // warp GEMM with scale
-                    if constexpr(nIter != 0)
-                    {
-                        WarpGemm{}
-                            .template operator()<ReuseA<true>,
-                                                 ReuseB<false>,
-                                                 AScaleDataType<AScaleTypeVal>,
-                                                 BScaleDataType<BScaleTypeVal>>(
-                                c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
-                    }
-                    else
-                    {
-                        WarpGemm{}
-                            .template operator()<ReuseA<false>,
-                                                 ReuseB<false>,
-                                                 AScaleDataType<AScaleTypeVal>,
-                                                 BScaleDataType<BScaleTypeVal>>(
-                                c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
-                    }
+                // warp GEMM with scale
+                if constexpr(nIter != 0)
+                {
+                    WarpGemm{}
+                        .template operator()<ReuseA<true>,
+                                             ReuseB<false>,
+                                             AScaleDataType<AScaleTypeVal>,
+                                             BScaleDataType<BScaleTypeVal>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
+                }
+                else
+                {
+                    WarpGemm{}
+                        .template operator()<ReuseA<false>,
+                                             ReuseB<false>,
+                                             AScaleDataType<AScaleTypeVal>,
+                                             BScaleDataType<BScaleTypeVal>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
+                }
 
-                    // write C warp tensor into C block tensor
-                    c_block_tensor.set_y_sliced_thread_data(
-                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                        c_warp_tensor.get_thread_buffer());
-                });
+                // write C warp tensor into C block tensor
+                c_block_tensor.set_y_sliced_thread_data(
+                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                    c_warp_tensor.get_thread_buffer());
             });
         });
     }

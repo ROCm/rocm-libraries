@@ -24,7 +24,7 @@ using ::testing::Return;
 
 TEST(TestHipblasltEngineManager, ReturnsApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<IEngine>> const engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -40,7 +40,7 @@ TEST(TestHipblasltEngineManager, ReturnsApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -50,7 +50,7 @@ TEST(TestHipblasltEngineManager, ReturnsApplicableEngineIds)
 
 TEST(TestHipblasltEngineManager, ReturnsMultipleApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<IEngine>> const engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -66,7 +66,7 @@ TEST(TestHipblasltEngineManager, ReturnsMultipleApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -77,7 +77,7 @@ TEST(TestHipblasltEngineManager, ReturnsMultipleApplicableEngineIds)
 
 TEST(TestHipblasltEngineManager, ReturnsNoApplicableEngineIds)
 {
-    std::set<std::unique_ptr<IEngine>> engines;
+    std::set<std::unique_ptr<IEngine>> const engines;
 
     auto mockEngine1 = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine1, id()).WillRepeatedly(Return(1));
@@ -93,7 +93,7 @@ TEST(TestHipblasltEngineManager, ReturnsNoApplicableEngineIds)
     manager.addEngine(std::move(mockEngine1));
     manager.addEngine(std::move(mockEngine2));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     HipdnnEnginePluginHandle dummyHandle;
     auto applicable = manager.getApplicableEngineIds(dummyHandle, mockGraph);
 
@@ -118,7 +118,7 @@ TEST(TestHipblasltEngineManager, ReturnsEngineDetails)
 
     manager.addEngine(std::move(mockEngine));
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     HipdnnEnginePluginHandle dummyHandle = {};
     hipdnnPluginConstData_t details;
     manager.getEngineDetails(dummyHandle, mockGraph, 1, details);
@@ -131,7 +131,7 @@ TEST(TestHipblasltEngineManager, ThrowsOnInvalidEngineId)
 {
     EngineManager manager;
 
-    MockGraph mockGraph;
+    MockGraph const mockGraph;
     hipdnnPluginConstData_t engineDetails;
 
     HipdnnEnginePluginHandle dummyHandle = {};
@@ -145,21 +145,21 @@ TEST(TestHipblasltEngineManager, GetWorkspaceSizeReturnsCorrectValue)
 
     auto mockEngine = std::make_unique<MockEngine>();
     EXPECT_CALL(*mockEngine, id()).WillRepeatedly(Return(42));
-    HipdnnEnginePluginHandle dummyHandle = {};
-    MockGraph mockGraph;
+    HipdnnEnginePluginHandle const dummyHandle = {};
+    MockGraph const mockGraph;
     EXPECT_CALL(*mockEngine, getWorkspaceSize(::testing::_, ::testing::_)).WillOnce(Return(4096));
 
     manager.addEngine(std::move(mockEngine));
 
-    size_t workspaceSize = manager.getWorkspaceSize(dummyHandle, 42, mockGraph);
+    size_t const workspaceSize = manager.getWorkspaceSize(dummyHandle, 42, mockGraph);
     EXPECT_EQ(workspaceSize, 4096);
 }
 
 TEST(TestHipblasltEngineManager, GetWorkspaceSizeThrowsOnInvalidEngineId)
 {
-    EngineManager manager;
-    HipdnnEnginePluginHandle dummyHandle = {};
-    MockGraph mockGraph;
+    EngineManager const manager;
+    HipdnnEnginePluginHandle const dummyHandle = {};
+    MockGraph const mockGraph;
 
     EXPECT_THROW(manager.getWorkspaceSize(dummyHandle, 999, mockGraph),
                  hipdnn_plugin_sdk::HipdnnPluginException);
@@ -174,9 +174,9 @@ TEST(TestHipblasltEngineManager, InitializeExecutionContextCallsEngine)
 
     EngineManager manager;
     manager.addEngine(std::move(mockEngine));
-    HipdnnEnginePluginHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    HipdnnEnginePluginHandle const dummyHandle = {};
+    MockGraph const mockGraph;
+    MockEngineConfig const mockEngineConfig;
     ON_CALL(mockEngineConfig, engineId()).WillByDefault(Return(7));
     EXPECT_CALL(mockEngineConfig, engineId()).Times(testing::AnyNumber()); // Uninteresting call
     MockHipdnnEnginePluginExecutionContext execCtx;
@@ -187,10 +187,10 @@ TEST(TestHipblasltEngineManager, InitializeExecutionContextCallsEngine)
 TEST(TestHipblasltEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
 {
     MockHipdnnEnginePluginExecutionContext execCtx;
-    EngineManager manager;
-    HipdnnEnginePluginHandle dummyHandle = {};
-    MockGraph mockGraph;
-    MockEngineConfig mockEngineConfig;
+    EngineManager const manager;
+    HipdnnEnginePluginHandle const dummyHandle = {};
+    MockGraph const mockGraph;
+    MockEngineConfig const mockEngineConfig;
 
     EXPECT_CALL(mockEngineConfig, engineId()).Times(testing::AnyNumber()); // Uninteresting call
     EXPECT_THROW(

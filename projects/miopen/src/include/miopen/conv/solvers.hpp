@@ -1649,9 +1649,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsmImplicitGemmGTCDynamicBwdXdlops final : Co
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-/// Holds common member functions for the Solvers which share the same
-/// "legacy exhaustive search" machinery.
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdLegacyExhaustiveSearch
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdLegacyExhaustiveSearch
     : ConvTunableSolver<LegacyPerformanceConfig>
 {
     LegacyPerformanceConfig
@@ -1668,9 +1666,9 @@ private:
                                        const AnyInvokeParams& invoke_ctx) const;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyExhaustiveSearch
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd final : ConvHipDirectFwdLegacyExhaustiveSearch
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd>(); }
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvHipDirectFwd>(); }
 
     static ConvSolution BaseGetSolution(const ExecutionContext&,
                                         const miopen::conv::ProblemDescription&,
@@ -2264,9 +2262,14 @@ struct ConvAsmBwdWrW1x1 final : ConvTunableSolver<PerformanceConfigConvAsmBwdWrW
                              const PerformanceConfigConvAsmBwdWrW1x1&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW53 final : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT ConvHipBwdWrW53 final : ConvSolver
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclBwdWrW53>(); }
+    // Preserve legacy perf-db key after class rename from ConvOclBwdWrW53.
+    const std::string& SolverDbId() const override
+    {
+        static const std::string id{"ConvOclBwdWrW53"};
+        return id;
+    }
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
@@ -4676,18 +4679,24 @@ struct ConvWinogradNHWCTransposingTunableSolver
 
 struct TransposedConvBinWinograd3x3U final : ConvWinogradNHWCTransposingSolver<ConvBinWinograd3x3U>
 {
-    const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinograd3x3U>(); }
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<TransposedConvBinWinograd3x3U>();
+    }
 };
 
 struct TransposedConvBinWinogradRxS final : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxS>
 {
-    const std::string& SolverDbId() const { return GetSolverDbId<TransposedConvBinWinogradRxS>(); }
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<TransposedConvBinWinogradRxS>();
+    }
 };
 
 struct TransposedConvBinWinogradRxSf2x3g1 final
     : ConvWinogradNHWCTransposingSolver<ConvBinWinogradRxSf2x3g1>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return GetSolverDbId<TransposedConvBinWinogradRxSf2x3g1>();
     }
@@ -4697,7 +4706,7 @@ struct TransposedConvMPBidirectWinograd final
     : ConvWinogradNHWCTransposingSolver<
           ConvMPBidirectWinograd<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return this->template GetSolverDbId<
             TransposedConvMPBidirectWinograd<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>();
@@ -4709,7 +4718,7 @@ struct TransposedConvWinograd3x3MultipassWrW final
     : ConvWinogradNHWCTransposingSolver<
           ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return this->template GetSolverDbId<TransposedConvWinograd3x3MultipassWrW<WinoDataH,
                                                                                   WinoFilterH,
@@ -4722,7 +4731,7 @@ template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoFuryRxS final
     : ConvWinogradNHWCTransposingSolver<ConvWinoFuryRxS<Winodata, Winofilter>>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return this->template GetSolverDbId<TransposedConvWinoFuryRxS<Winodata, Winofilter>>();
     }
@@ -4732,7 +4741,7 @@ template <uint32_t Winodata, uint32_t Winofilter>
 struct TransposedConvWinoRageRxS final
     : ConvWinogradNHWCTransposingSolver<ConvWinoRageRxS<Winodata, Winofilter>>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return this->template GetSolverDbId<TransposedConvWinoRageRxS<Winodata, Winofilter>>();
     }
@@ -4754,7 +4763,7 @@ struct TransposedConvMPBidirectWinograd_xdlops final
     : ConvWinogradNHWCTransposingTunableSolver<
           ConvMPBidirectWinograd_xdlops<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>>
 {
-    const std::string& SolverDbId() const
+    const std::string& SolverDbId() const override
     {
         return this->template GetSolverDbId<TransposedConvMPBidirectWinograd_xdlops<WinoDataH,
                                                                                     WinoFilterH,

@@ -82,3 +82,24 @@ Tests:
   transA: [HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   graph_test: true
+
+- name: spvv_mixed
+  category: quick
+  function: spvv
+  indextype: *i32_i64
+  precision: *spvv_mixed_precisions
+  N: [50, 750, 2135]
+  nnz: [5, 45]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: spvv_mixed
+  category: pre_checkin
+  function: spvv
+  indextype: *i32_i64
+  precision: *spvv_mixed_precisions
+  N: [23419, 54689]
+  nnz: [12345, 17823]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  

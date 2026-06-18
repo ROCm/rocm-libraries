@@ -261,6 +261,23 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("srcs"),
              nb::arg("comment") = "");
 
+    nb::class_<rocisa::SMemAtomicIncInstruction, rocisa::AtomicReadWriteInstruction>(
+        m_mem, "SMemAtomicIncInstruction")
+        .def(nb::init<rocisa::InstType,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset"),
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SMemAtomicIncInstruction::getParams)
+        .def("__str__", &rocisa::SMemAtomicIncInstruction::toString);
+
     nb::class_<rocisa::SMemAtomicDecInstruction, rocisa::AtomicReadWriteInstruction>(
         m_mem, "SMemAtomicDecInstruction")
         .def(nb::init<rocisa::InstType,
@@ -497,6 +514,40 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::BufferLoadD16B16& self, const nb::dict&) {
             return new rocisa::BufferLoadD16B16(self);
+        });
+
+    nb::class_<rocisa::BufferLoadB16, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("dst").none(),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferLoadB16& self, const nb::dict&) {
+            return new rocisa::BufferLoadB16(self);
+        });
+
+    nb::class_<rocisa::BufferLoadU16, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadU16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("dst").none(),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferLoadU16& self, const nb::dict&) {
+            return new rocisa::BufferLoadU16(self);
         });
 
     nb::class_<rocisa::BufferLoadB32, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB32")
@@ -1010,6 +1061,23 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::FlatAtomicCmpswapB32(self);
         });
 
+    nb::class_<rocisa::FlatAtomicDecU32, rocisa::FLATStoreInstruction>(m_mem,
+                                                                       "FlatAtomicDecU32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::FLATModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("addr"),
+             nb::arg("data"),
+             nb::arg("modifier") = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__str__", &rocisa::FlatAtomicDecU32::toString)
+        .def("__deepcopy__", [](const rocisa::FlatAtomicDecU32& self, const nb::dict&) {
+            return new rocisa::FlatAtomicDecU32(self);
+        });
+
     nb::class_<rocisa::DSLoadU8, rocisa::DSLoadInstruction>(m_mem, "DSLoadU8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -1419,6 +1487,21 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::DSBPermuteB32(self);
         });
 
+    nb::class_<rocisa::SAtomicInc, rocisa::SMemAtomicIncInstruction>(m_mem, "SAtomicInc")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset"),
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SAtomicInc& self, nb::dict&) {
+            return new rocisa::SAtomicInc(self);
+        });
+
     nb::class_<rocisa::SAtomicDec, rocisa::SMemAtomicDecInstruction>(m_mem, "SAtomicDec")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,
@@ -1589,4 +1672,18 @@ void mem_inst(nb::module_ m_mem)
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);
         });
+
+    nb::class_<rocisa::GlobalPrefetchB8, rocisa::Instruction>(m_mem, "GlobalPrefetchB8")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      std::optional<rocisa::GLOBALModifiers>,
+                      const std::string&>(),
+             nb::arg("v_addr"),
+             nb::arg("s_addr").none(),
+             nb::arg("gm")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::GlobalPrefetchB8::getParams)
+        .def("__str__", &rocisa::GlobalPrefetchB8::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GlobalPrefetchB8& self, nb::dict&) { return new rocisa::GlobalPrefetchB8(self); });
 }

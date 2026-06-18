@@ -38,37 +38,57 @@ Useful flags (selected): `-d` install deps, `-n` install package after build, `-
 
 `install.sh` is a deprecated compatibility wrapper that just shells out to `invoke build`; new instructions and tooling should call `invoke build` directly.
 
-Raw cmake still works if you need it (e.g. for custom configures). After activating `build/venv`:
+For raw cmake invocations, cmake presets, and running tests — see `AGENTS_reference.md`. Read that file automatically whenever the task involves any of those topics.
 
-```bash
-cmake -B build -S . \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DGPU_TARGETS=gfx942 \
-  -DPython_EXECUTABLE="$(pwd)/build/venv/bin/python" \
-  -DPython3_EXECUTABLE="$(pwd)/build/venv/bin/python"
-cmake --build build --parallel
+## License headers
+
+New source files MUST begin with the short SPDX license header, not the legacy verbose MIT block. The header goes at the very top of the file (immediately after a `#!` shebang line, if one is present).
+
+For C / C++ / HIP files (`//` comments):
+
+```cpp
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 ```
 
-CMake presets (`cmake --list-presets`): `default:release`, `hipblaslt` (host lib only, no device libs), `gemm-libs` (device libs only), `hipblaslt-clients`, `tensilelite`, `rocisa`, plus pinned configs `rocm-7.0.0` / `rocm-7.0.2`.
+For Python / shell / CMake / YAML files (`#` comments):
 
-## Tests
-
-Test data is **generated at build time** from `clients/tests/data/*.yaml` by `clients/tests/hipblaslt_gentest.py` into `build/clients/hipblaslt_gtest.data`. The binary looks for that file in its own directory, so:
-
-```bash
-cmake --build build --target tensilelite-device-libraries  # one-time per GPU config; slow
-cmake --build build --target hipblaslt-test
-cd build/clients && ./hipblaslt-test --gtest_filter='*quick*'
+```python
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 ```
 
-Runtime device-library lookup: `HIPBLASLT_TENSILE_LIBPATH` must point **directly** at the dir containing `TensileLibrary_lazy_<arch>.dat` and the code objects (e.g. `build/Tensile/library` or `/opt/rocm/lib/hipblaslt/library`). If unset, the loader resolves relative to the loaded shared library. Matmul tests will fail without a device library for the running GPU.
+Do NOT paste the legacy verbose multi-line MIT block (the `Permission is hereby granted, free of charge, …` text through `… THE SOFTWARE.` plus the warranty disclaimer) into new files.
 
-To skip a test on a known-broken platform, add an entry under `clients/tests/data/known_bugs.yaml` (matched by `function`/`initialization`/`known_bug_platforms`).
+Existing files that still carry the legacy verbose MIT block MAY be migrated to the SPDX header when you are already editing them, but only when it does not materially grow the PR. If swapping headers would substantially increase the diff's line footprint (e.g. many files touched solely to change the header), leave those headers unchanged and keep the SPDX requirement scoped to net-new files.
 
-`rtest.py` at the repo root is a build-driven test runner — not the usual entry point for local dev.
+## Pull requests
+
+Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it):
+
+```markdown
+## Motivation
+<why this change is needed: the problem, bug, or feature being addressed>
+
+## Technical Details
+<what changed and how; key design decisions and trade-offs>
+
+## Test Plan
+<how the change was/should be validated: builds, unit/gtest, smoke, manual steps>
+
+## Test Result
+<outcome of the test plan: passing suites, benchmark numbers, before/after>
+
+## Submission Checklist
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+
+## Risk level
+<None/Low/Medium/High, with a short justification>
+
+**Associated ticket**: <JIRA/issue id, or N/A>
+```
+
+Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.
 
 ## When working in `tensilelite/`
 

@@ -978,6 +978,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         auto r2c_calls_per_transform = quarter_N / tpt;
         if(quarter_N % tpt > 0)
             r2c_calls_per_transform += 1;
+        StatementList tmp;
         for(unsigned int i = 0; i < r2c_calls_per_transform; ++i)
         {
             TemplateList tpls;
@@ -989,8 +990,13 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                          lds_complex + offset_lds,
                                          0,
                                          twiddles + twd_offset};
-            stmts += Call{function_name, tpls, args};
+            tmp += Call{function_name, tpls, args};
         }
+        if(factors2d.empty())
+            stmts += tmp;
+        else
+            stmts += If{write, tmp};
+
         if(ebtype == EmbeddedType::C2Real_PRE)
         {
             stmts += SyncThreads();

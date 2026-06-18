@@ -79,6 +79,21 @@ Tests:
   function:
     - aux_matmul_pref_get_attr: *hpa_half_precision
 
+- name: aux_matmul_sm_count_target
+  category: pre_checkin
+  function:
+    - aux_matmul_sm_count_target: *hpa_half_precision
+
+- name: aux_matmul_dyn_persistent_tile_ext
+  category: pre_checkin
+  function:
+    - aux_matmul_dyn_persistent_tile_ext: *hpa_half_precision
+
+- name: aux_matmul_pref_sm_count_target
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_sm_count_target: *hpa_half_precision
+
 - name: aux_matmul_alg_init_bad_arg
   category: pre_checkin
   function:

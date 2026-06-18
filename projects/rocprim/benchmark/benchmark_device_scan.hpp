@@ -125,69 +125,60 @@ struct device_scan_benchmark : public primbench::benchmark_interface
                          const size_t      input_size,
                          ScanOp            scan_op,
                          const hipStream_t stream,
-                         const bool        debug = false) const ->
-        typename std::enable_if<excl, hipError_t>::type
+                         const bool        debug = false) const
     {
-        if constexpr(!Deterministic)
+        if constexpr(excl)
         {
-            return rocprim::exclusive_scan<Config>(temporary_storage,
-                                                   storage_size,
-                                                   input,
-                                                   output,
-                                                   initial_value,
-                                                   input_size,
-                                                   scan_op,
-                                                   stream,
-                                                   debug);
+            if constexpr(!Deterministic)
+            {
+                return rocprim::exclusive_scan<Config>(temporary_storage,
+                                                       storage_size,
+                                                       input,
+                                                       output,
+                                                       initial_value,
+                                                       input_size,
+                                                       scan_op,
+                                                       stream,
+                                                       debug);
+            }
+            else
+            {
+                return rocprim::deterministic_exclusive_scan<Config>(temporary_storage,
+                                                                     storage_size,
+                                                                     input,
+                                                                     output,
+                                                                     initial_value,
+                                                                     input_size,
+                                                                     scan_op,
+                                                                     stream,
+                                                                     debug);
+            }
         }
         else
         {
-            return rocprim::deterministic_exclusive_scan<Config>(temporary_storage,
-                                                                 storage_size,
-                                                                 input,
-                                                                 output,
-                                                                 initial_value,
-                                                                 input_size,
-                                                                 scan_op,
-                                                                 stream,
-                                                                 debug);
-        }
-    }
-
-    template<bool excl = Exclusive>
-    auto run_device_scan(void*             temporary_storage,
-                         size_t&           storage_size,
-                         T*                input,
-                         T*                output,
-                         const T           initial_value,
-                         const size_t      input_size,
-                         ScanOp            scan_op,
-                         const hipStream_t stream,
-                         const bool        debug = false) const ->
-        typename std::enable_if<!excl, hipError_t>::type
-    {
-        (void)initial_value;
-        if constexpr(!Deterministic)
-        {
-            return rocprim::inclusive_scan<Config>(temporary_storage,
-                                                   storage_size,
-                                                   input,
-                                                   output,
-                                                   input_size,
-                                                   scan_op,
-                                                   stream,
-                                                   debug);
-        }
-        else
-        {
-            return rocprim::deterministic_inclusive_scan<Config>(temporary_storage,
-                                                                 storage_size,
-                                                                 input,
-                                                                 output,
-                                                                 input_size,
-                                                                 scan_op,
-                                                                 stream,
-                                                                 debug);
+            (void)initial_value;
+            if constexpr(!Deterministic)
+            {
+                return rocprim::inclusive_scan<Config>(temporary_storage,
+                                                       storage_size,
+                                                       input,
+                                                       output,
+                                                       input_size,
+                                                       scan_op,
+                                                       stream,
+                                                       debug);
+            }
+            else
+            {
+                return rocprim::deterministic_inclusive_scan<Config>(temporary_storage,
+                                                                     storage_size,
+                                                                     input,
+                                                                     output,
+                                                                     input_size,
+                                                                     scan_op,
+                                                                     stream,
+                                                                     debug);
+            }
         }
     }
 

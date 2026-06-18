@@ -10,7 +10,7 @@ using namespace hipblaslt_plugin;
 TEST(TestHipblasltMatmulDesc, CanCreateAndDestroy)
 {
     EXPECT_NO_THROW({
-        HipblasltMatmulDesc desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+        HipblasltMatmulDesc const desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
         EXPECT_NE(desc.matmulDesc(), nullptr);
     });
 }

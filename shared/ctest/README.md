@@ -82,11 +82,18 @@ flowchart TD
 test_categories:
   category_name:
     description: "Human-readable description"
-    test_patterns: ["*pattern1*", "*pattern2*"]
-    exclude: ["*pattern_to_exclude*"]
-    exclude_windows: ["*linux_only_tests*"]
-    exclude_linux: ["*windows_only_tests*"]
-    labels: ["quick", "label2"]
+    test_patterns:
+      - "*pattern1*"
+      - "*pattern2*"
+    exclude:
+      - "*pattern_to_exclude*"
+    exclude_windows:
+      - "*linux_only_tests*"
+    exclude_linux:
+      - "*windows_only_tests*"
+    labels:
+      - "quick"
+      - "label2"
 
 exclude_gpu:
   # Common pattern definitions using YAML anchors for reusability
@@ -128,6 +135,31 @@ execution_settings:
 
 **Environment (optional):** Under `execution_settings`, an `environment` map sets env vars for all category tests (e.g. `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`). Keys and values are strings; they are passed to CTest as `ENVIRONMENT "VAR1=val1;VAR2=val2"`.
 
+**Extra arguments (optional, per-category):** A category may set `extra_args` to a list (or single string) of additional command-line arguments that the parser appends to the test command after `--gtest_filter=...`. Useful for projects whose test binary accepts runtime flags beyond gtest filtering (for example, a flag to select a reduced subset of tests, or to scale a sampling/iteration parameter). Each entry is shell-quoted with `shlex.quote`, so values with spaces or shell metacharacters are preserved as a single argument by CTest.
+
+```yaml
+test_categories:
+  quick:
+    test_patterns:
+      - "*"
+    extra_args:           # appended after --gtest_filter
+      - "--quick-subset"
+    labels:
+      - "quick"
+  standard:
+    test_patterns:
+      - "*"
+    exclude:
+      - "*excluded_pattern*"
+    extra_args:           # multi-token args are passed verbatim
+      - "--sample-probability"
+      - "0.02"
+    labels:
+      - "standard"
+```
+
+`extra_args` flow through identically to category tests and to GPU-exclusion test variants, in both the build-tree CTest definitions and the install-tree `CTestTestfile.cmake`.
+
 ### **Enhanced Structure (Optional Fields)**
 
 All fields below are **optional** and can be added incrementally. Teams can use them for richer test documentation and enable future capabilities like AI-assisted test selection:
@@ -137,8 +169,12 @@ test_categories:
   category_name:
     # Required fields (same as base)
     description: "Human-readable description"
-    test_patterns: ["*pattern1*", "*pattern2*"]
-    labels: ["label1", "label2"]
+    test_patterns:
+      - "*pattern1*"
+      - "*pattern2*"
+    labels:
+      - "label1"
+      - "label2"
 
     # Optional enhancement fields - add only if useful for your project
     notes: |
@@ -157,9 +193,12 @@ test_categories:
       - "other_category"  # Metadata for related categories (not enforced by parser; for documentation/tooling)
 
     # Standard fields (from base)
-    exclude: ["*always_exclude*"]
-    exclude_windows: ["*linux_only*"]
-    exclude_linux: ["*windows_only*"]
+    exclude:
+      - "*always_exclude*"
+    exclude_windows:
+      - "*linux_only*"
+    exclude_linux:
+      - "*windows_only*"
 
 # Optional: Top-level context for AI/LLM tools
 llm_context:
@@ -347,11 +386,15 @@ test_categories:
     test_patterns: *all_patterns
     exclude:
       - "*SlowTest*"
-    labels: ["standard", "pr"]
+    labels:
+      - "standard"
+      - "pr"
 
   comprehensive:
     test_patterns: *all_patterns
-    labels: ["comprehensive", "nightly"]
+    labels:
+      - "comprehensive"
+      - "nightly"
 ```
 
 ### Adding OS-Specific Exclusions
@@ -361,11 +404,16 @@ Exclude tests that only work on a specific OS:
 ```yaml
 test_categories:
   standard:
-    test_patterns: ["*TestSuite*"]
-    exclude: ["*KnownBroken*"]
-    exclude_windows: ["*LinuxOnlyFeature*"]
-    exclude_linux: ["*WindowsOnlyFeature*"]
-    labels: ["standard"]
+    test_patterns:
+      - "*TestSuite*"
+    exclude:
+      - "*KnownBroken*"
+    exclude_windows:
+      - "*LinuxOnlyFeature*"
+    exclude_linux:
+      - "*WindowsOnlyFeature*"
+    labels:
+      - "standard"
 ```
 
 ### Adding GPU-Specific Exclusions
@@ -544,11 +592,16 @@ Each test gets labels that enable flexible CTest filtering:
 test_categories:
   <category_name>:
     description: "..."                 # Optional: human-readable description
-    test_patterns: [...]               # Required: gtest filter patterns (positive match)
-    exclude: [...]                     # Optional: patterns to exclude from this category
-    exclude_windows: [...]             # Optional: additional exclusions on Windows
-    exclude_linux: [...]               # Optional: additional exclusions on Linux
-    labels: [...]                      # Required: CTest labels for filtering
+    test_patterns:               # Required: gtest filter patterns (positive match)
+      - "..."
+    exclude:                     # Optional: patterns to exclude from this category
+      - "..."
+    exclude_windows:             # Optional: additional exclusions on Windows
+      - "..."
+    exclude_linux:               # Optional: additional exclusions on Linux
+      - "..."
+    labels:                      # Required: CTest labels for filtering
+      - "..."
 ```
 
 ### `exclude_gpu` (optional)
@@ -556,13 +609,13 @@ test_categories:
 ```yaml
 exclude_gpu:
   exclude_gpu_<arch>:
-    test_patterns: [...]               # Required: patterns to exclude on this GPU
+    test_patterns:               # Required: patterns to exclude on this GPU
+      - "..."
     labels:                            # Required: must include applicable category names
       - "<category_name>"             #   and an ex_gpu_<arch> label
       - "ex_gpu_<arch>"
 ```
 
-<<<<<<< users/dravindr/ctest_docs
 ### `execution_settings` (optional)
 
 ```yaml
@@ -591,7 +644,7 @@ See the MIOpen integration for a complete working example:
 - **CMake integration:** [projects/miopen/test/gtest/CMakeLists.txt](../../projects/miopen/test/gtest/CMakeLists.txt)
 - **Shared module:** [shared/ctest/TestCategories.cmake](./TestCategories.cmake)
 - **Parser script:** [shared/ctest/parse_test_categories.py](./parse_test_categories.py)
-=======
+
 ### **Install-time CTestTestfile (TheRock / install tree)**
 
 When tests are installed (e.g. into `/opt/rocm/bin/`), the **build-tree** test definitions are not installed. To run CTest from the **installed** location (e.g. on TheRock or any system that only has the install tree), projects can generate an **install-time CTestTestfile** that uses **relative paths** to the test executable.
@@ -617,4 +670,3 @@ Projects that use this pattern (e.g. MIOpen, rocBLAS) document it in their Integ
 
 - **miopen** - [test_categories.yaml](../../projects/miopen/test/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/miopen/test/gtest/CMakeLists.txt)
 - **rocblas** - [test_categories.yaml](../../projects/rocblas/clients/gtest/test_categories.yaml) | [CMakeLists.txt](../../projects/rocblas/clients/gtest/CMakeLists.txt)
->>>>>>> develop

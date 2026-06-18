@@ -3,6 +3,25 @@
 import pytest
 
 
+@pytest.fixture
+def _force_strict_gate_on(monkeypatch):
+    """Force _STRICT_GATE_ENABLED True for tests that exercise the strict gate.
+
+    The kill switch lives at module scope in
+    Tensile/Common/TypeValidationErrors.py and is False so the
+    validation infrastructure can land inert in the first commit.
+    Tests that exercise gate-dependent validators opt in via
+    ``pytestmark`` or by requesting this fixture directly.
+
+    This fixture is removed in the same commit that removes the
+    kill switch.
+    """
+    monkeypatch.setattr(
+        "Tensile.Common.TypeValidationErrors._STRICT_GATE_ENABLED",
+        True,
+    )
+
+
 @pytest.fixture(autouse=True)
 def skip_parametrized_if_cli(request):
     """Skip all tests except test_storeD_cli when CLI options (--mn) are provided."""

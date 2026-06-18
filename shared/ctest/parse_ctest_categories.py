@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+
+"""Parse test_categories.yaml and generate CMake code that applies
+category labels to CTest tests.
+
+Generated CMake code is printed to stdout for the calling CMake function
+to capture via OUTPUT_VARIABLE. If install_test_file is provided, the
+label code is also appended to that file.
+
+To change test categorization, edit test_categories.yaml only.
+"""
+
+import argparse
+import sys
+import os
+import re
+import yaml
+
+
+_REGEX_META = re.compile(r"[.*+?^${}()|[\]\\]")
+
+TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
+
+# Matches the test name in CTest add_test() invocations. Supports both
+# the short form `add_test(<name> <command> [args...])` and the long form
+# `add_test(NAME <name> COMMAND <command> [args...])`. Test names may be
+# either bare CMake identifiers (alphanumeric, _, -) or double-quoted
+# strings (which is how callers spell test names containing spaces, e.g.
+# `add_test("foo smoke" ...)` in rocWMMA's hand-rolled install
+# CTestTestfile.cmake fragments). Bracket arguments ([=[ ... ]=]) are
+# uncommon in hand-rolled CTestTestfiles and not supported here.
+_ADD_TEST_NAME_RE = re.compile(
+    r"""^\s*add_test\s*\(\s*(?:NAME\s+)?
+        (?:"(?P<quoted>[^"]+)"|(?P<bare>[A-Za-z_][A-Za-z0-9_\-]*))""",
+    re.IGNORECASE | re.MULTILINE | re.VERBOSE,
+)
+
+
+def is_regex_pattern(name):
+    return bool(_REGEX_META.search(name))
+
+
+def scan_add_test_names(path):
+    """Return the ordered list of test names found in add_test() calls
+    in the given file. Used to auto-derive --explicit-tests when an
+    install_test_file is provided. Duplicates are removed while
+    preserving first-seen order.
+    """
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError:
+        return []
+    names = []
+    seen = set()
+    for match in _ADD_TEST_NAME_RE.finditer(text):
+        name = match.group("quoted") or match.group("bare")
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def parse_yaml(path):
+    """Parse the test_categories YAML using PyYAML.
+
+    Returns (categories, general_excludes) where:
+      - categories: dict of tiered test categories (quick, standard, etc.)
+      - general_excludes: dict of platform/gpu exclude sections
+    """
+    with open(path, "r") as f:
+        data = yaml.safe_load(f)
+
+    if "test_categories" in data and isinstance(data["test_categories"], dict):
+        categories = data["test_categories"]
+    else:
+        categories = data
+
+    for cat in categories:
+        if not isinstance(categories[cat], dict):
+            categories[cat] = {
+                "test_patterns": categories[cat] or [],
+                "test_labels": [],
+                "exclude": [],
+                "labels": [],
+            }
+        else:
+            categories[cat].setdefault("test_patterns", [])
+            categories[cat].setdefault("test_labels", [])
+            categories[cat].setdefault("exclude", [])
+            categories[cat].setdefault("labels", [])
+
+    general_excludes = {}
+    if "general_exclude" in data and isinstance(data["general_exclude"], dict):
+        general_excludes = data["general_exclude"]
+        for section in general_excludes:
+            if not isinstance(general_excludes[section], dict):
+                general_excludes[section] = {"test_patterns": [], "labels": []}
+            else:
+                general_excludes[section].setdefault("test_patterns", [])
+                general_excludes[section].setdefault("labels", [])
+
+    return categories, general_excludes
+
+
+def tier_labels(category_name):
+    """Return the tiered labels for a category.
+
+    quick       -> quick, standard, comprehensive, full
+    standard    -> standard, comprehensive, full
+    comprehensive -> comprehensive, full
+    full        -> full
+
+    Helps to add one or more labels to a test based on the category it belongs to.
+    """
+    try:
+        idx = TIER_ORDER.index(category_name)
+    except ValueError:
+        return [category_name]
+    return TIER_ORDER[idx:]
+
+
+def _emit_label_block(lines, test_names, labels_str, comment, explicit_tests=None):
+    """Append CMake code to apply labels to a list of test names/patterns.
+
+    When explicit_tests is provided (a list of test names known at parse
+    time), regex patterns are expanded against it and the emitted code
+    uses explicit per-test set_property() calls. This is required for
+    install-tree CTestTestfile.cmake files: ctest's own script
+    interpreter does not maintain the directory model that
+    get_property(DIRECTORY ... PROPERTY TESTS) relies on, so a runtime
+    enumeration loop would be a silent no-op there. When explicit_tests
+    is None, the legacy get_property loop is emitted -- that path works
+    for the build tree because CMake configure time materialises
+    set_property(TEST ...) into explicit set_tests_properties lines in
+    the autogenerated CTestTestfile.cmake files.
+    """
+    exact = [t for t in test_names if not is_regex_pattern(t)]
+    regex = [t for t in test_names if is_regex_pattern(t)]
+
+    if exact:
+        lines.append(f"# {comment} (exact match)")
+        lines.append("foreach(_test")
+        for t in exact:
+            lines.append(f"    {t}")
+        lines.append(")")
+        lines.append("    if(TEST ${_test})")
+        lines.append(
+            f'        set_property(TEST ${{_test}} APPEND PROPERTY LABELS "{labels_str}")'
+        )
+        lines.append("    endif()")
+        lines.append("endforeach()")
+        lines.append("")
+
+    if regex:
+        if explicit_tests is not None:
+            # Install-tree path: emit explicit per-test set_property lines
+            # for each test name matched by any regex pattern.
+            matched = []
+            for pattern in regex:
+                pat_re = re.compile(f"^{pattern}$")
+                for t in explicit_tests:
+                    if pat_re.match(t) and t not in matched:
+                        matched.append(t)
+            if matched:
+                lines.append(f"# {comment} (regex match, expanded)")
+                lines.append("foreach(_test")
+                for t in matched:
+                    lines.append(f"    {t}")
+                lines.append(")")
+                lines.append("    if(TEST ${_test})")
+                lines.append(
+                    f'        set_property(TEST ${{_test}} APPEND PROPERTY LABELS "{labels_str}")'
+                )
+                lines.append("    endif()")
+                lines.append("endforeach()")
+                lines.append("")
+        else:
+            # Build-tree path: rely on CMake configure-time directory
+            # property + later materialisation to set_tests_properties.
+            lines.append(f"# {comment} (regex match)")
+            lines.append(
+                "get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)"
+            )
+            lines.append("foreach(_test ${_all_tests})")
+            for pattern in regex:
+                lines.append(f'    if(_test MATCHES "^{pattern}$")')
+                lines.append(
+                    f'        set_property(TEST ${{_test}} APPEND PROPERTY LABELS "{labels_str}")'
+                )
+                lines.append("    endif()")
+            lines.append("endforeach()")
+            lines.append("")
+
+
+def _emit_label_match_block(lines, test_labels, labels_str, comment):
+    """Append CMake code to apply labels to tests that already carry any of
+    the given existing labels."""
+    if not test_labels:
+        return
+    lines.append(f"# {comment} (match by existing label)")
+    lines.append(
+        "get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)"
+    )
+    lines.append("foreach(_test ${_all_tests})")
+    lines.append("    get_property(_test_labels TEST ${_test} PROPERTY LABELS)")
+    for label in test_labels:
+        lines.append(f'    if("{label}" IN_LIST _test_labels)')
+        lines.append(
+            f'        set_property(TEST ${{_test}} APPEND PROPERTY LABELS "{labels_str}")'
+        )
+        lines.append("    endif()")
+    lines.append("endforeach()")
+    lines.append("")
+
+
+def _compute_install_labels(categories, general_excludes, test_names):
+    """Compute the final, ordered, deduplicated label list per test by
+    walking the YAML rules against an explicit list of test names.
+
+    Used only for the install-tree emission path. In that path,
+    set_property(TEST ... APPEND PROPERTY LABELS ...) is honoured at the
+    CMake-script level but NOT consulted by ctest's `--print-labels` /
+    `-L` query, which only reads labels set via `set_tests_properties()`.
+    So we precompute the full label set per test in Python and emit
+    a single `set_tests_properties()` line per test.
+
+    Returns dict[test_name -> list[label]].
+    """
+    labels = {t: [] for t in test_names}
+
+    def append_labels(test, new_labels):
+        for lbl in new_labels:
+            if lbl not in labels[test]:
+                labels[test].append(lbl)
+
+    def match_pattern_to_tests(pattern):
+        if is_regex_pattern(pattern):
+            pat_re = re.compile(f"^{pattern}$")
+            return [t for t in test_names if pat_re.match(t)]
+        return [pattern] if pattern in labels else []
+
+    for category, config in categories.items():
+        test_patterns = config.get("test_patterns") or []
+        test_label_matches = config.get("test_labels") or []
+        excludes = config.get("exclude") or []
+        custom_labels = config.get("labels") or []
+        all_labels = list(dict.fromkeys(tier_labels(category) + custom_labels))
+
+        for pattern in test_patterns:
+            for t in match_pattern_to_tests(pattern):
+                append_labels(t, all_labels)
+
+        for existing_label in test_label_matches:
+            for t in test_names:
+                if existing_label in labels[t]:
+                    append_labels(t, all_labels)
+
+        exclude_label = f"{category}_exclude"
+        for pattern in excludes:
+            for t in match_pattern_to_tests(pattern):
+                append_labels(t, [exclude_label])
+
+    for section, config in (general_excludes or {}).items():
+        section_patterns = config.get("test_patterns") or []
+        section_labels = config.get("labels") or []
+        if not section_patterns or not section_labels:
+            continue
+        for pattern in section_patterns:
+            if is_regex_pattern(pattern):
+                pat_re = re.compile(f"^{pattern}$")
+                matches = [t for t in test_names if pat_re.match(t)]
+            else:
+                matches = [pattern] if pattern in labels else []
+            for t in matches:
+                append_labels(t, section_labels)
+
+    return labels
+
+
+def generate_cmake_install(categories, general_excludes, test_names):
+    """Install-tree emission. Emits one `set_tests_properties()` line per
+    test with its final, deduplicated label set.
+
+    `set_tests_properties()` is the ctest-readable form -- it's what
+    CMake's own generator writes into build-tree CTestTestfile.cmake
+    files. `set_property(TEST ... APPEND PROPERTY LABELS ...)` would
+    parse cleanly under ctest's script interpreter but the resulting
+    labels are invisible to `ctest --print-labels` and `ctest -L`.
+    """
+    lines = [
+        "# Auto-generated by parse_ctest_categories.py (install-tree)",
+        "# DO NOT EDIT - modify test_categories.yaml instead",
+        "",
+    ]
+    labels_per_test = _compute_install_labels(categories, general_excludes, test_names)
+    for test in test_names:
+        labels_list = labels_per_test.get(test) or []
+        if not labels_list:
+            continue
+        labels_str = ";".join(labels_list)
+        # Quote the test name so names containing spaces (e.g. rocWMMA's
+        # "<target> smoke" install entries) survive ctest's tokeniser.
+        lines.append(f'set_tests_properties("{test}" PROPERTIES LABELS "{labels_str}")')
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def generate_cmake(categories, explicit_tests=None):
+    lines = [
+        "# Auto-generated by parse_ctest_categories.py",
+        "# DO NOT EDIT - modify test_categories.yaml instead",
+        "",
+    ]
+
+    for category, config in categories.items():
+        test_patterns = config.get("test_patterns") or []
+        test_labels = config.get("test_labels") or []
+        excludes = config.get("exclude") or []
+        custom_labels = config.get("labels") or []
+
+        # Combine the tier labels and custom labels, and remove duplicates
+        all_labels = list(dict.fromkeys(tier_labels(category) + custom_labels))
+        labels_str = ";".join(all_labels)
+
+        _emit_label_block(
+            lines,
+            test_patterns,
+            labels_str,
+            f"Category: {category} - test_patterns",
+            explicit_tests=explicit_tests,
+        )
+
+        if test_labels:
+            _emit_label_match_block(
+                lines, test_labels, labels_str, f"Category: {category} - test_labels"
+            )
+
+        if excludes:
+            _emit_label_block(
+                lines,
+                excludes,
+                f"{category}_exclude",
+                f"Category: {category} - exclude",
+                explicit_tests=explicit_tests,
+            )
+
+    # Deduplicate labels across all tests. With explicit_tests we know
+    # the names already and can iterate them directly (works at install
+    # time); otherwise fall back to the directory-property loop (build
+    # tree only).
+    lines.append("# Deduplicate labels across all tests")
+    if explicit_tests is not None:
+        lines.append("foreach(_test")
+        for t in explicit_tests:
+            lines.append(f"    {t}")
+        lines.append(")")
+    else:
+        lines.append(
+            "get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)"
+        )
+        lines.append("foreach(_test ${_all_tests})")
+    lines.append("    if(TEST ${_test})")
+    lines.append("        get_property(_labels TEST ${_test} PROPERTY LABELS)")
+    lines.append("        if(_labels)")
+    lines.append("            list(REMOVE_DUPLICATES _labels)")
+    lines.append('            set_property(TEST ${_test} PROPERTY LABELS "${_labels}")')
+    lines.append("        endif()")
+    lines.append("    endif()")
+    lines.append("endforeach()")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_cmake_general_excludes(general_excludes, explicit_tests=None):
+    """Generate CMake code for general_exclude sections.
+
+    Each subsection (e.g. exclude_windows, exclude_gpu_gfx950) applies its
+    labels directly to matching test patterns -- no tier inheritance.
+    """
+    lines = [
+        "# General exclude labels",
+        "",
+    ]
+
+    for section, config in general_excludes.items():
+        test_patterns = config.get("test_patterns") or []
+        labels = config.get("labels") or []
+
+        if not test_patterns or not labels:
+            continue
+
+        labels_str = ";".join(labels)
+        _emit_label_block(
+            lines,
+            test_patterns,
+            labels_str,
+            f"General exclude: {section}",
+            explicit_tests=explicit_tests,
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Parse test_categories.yaml and generate CMake code "
+        "that applies category labels to CTest tests."
+    )
+    parser.add_argument("input_yaml", help="Path to test_categories.yaml")
+    parser.add_argument(
+        "install_test_file",
+        nargs="?",
+        default=None,
+        help="Optional file to append the generated CMake label code to",
+    )
+    parser.add_argument(
+        "--explicit-tests",
+        default=None,
+        help="Semicolon-separated list of test names known at parse time. "
+        "Regex patterns are expanded against this list, avoiding ctest's "
+        "unsupported get_property(DIRECTORY ... PROPERTY TESTS) loop. "
+        "Combined with install_test_file, emits one set_tests_properties() "
+        "line per test (the only label form ctest --print-labels / -L "
+        "honour in installed CTestTestfile.cmake fragments); otherwise "
+        "emits per-test set_property(TEST ...) calls.",
+    )
+    args = parser.parse_args()
+
+    input_path = args.input_yaml
+    install_test_file = args.install_test_file
+    explicit_tests = None
+    if args.explicit_tests:
+        # Manual override: caller knows the test list explicitly.
+        explicit_tests = [t for t in args.explicit_tests.split(";") if t]
+    elif install_test_file and os.path.exists(install_test_file):
+        # Implicit: when an install_test_file is provided, the snippet we
+        # emit is going to be evaluated by ctest's own script interpreter
+        # at install time, not by CMake at configure time. ctest does not
+        # implement get_property(DIRECTORY ... PROPERTY TESTS), so we
+        # need explicit per-test set_property() lines. Recover the list
+        # of test names by scanning the add_test() lines that the caller
+        # has already written into the install file.
+        explicit_tests = scan_add_test_names(install_test_file)
+
+    if not os.path.exists(input_path):
+        print(f"Error: {input_path} not found", file=sys.stderr)
+        sys.exit(1)
+
+    categories, general_excludes = parse_yaml(input_path)
+
+    if install_test_file and explicit_tests:
+        # Install-tree path. Emit `set_tests_properties()` lines with the
+        # final per-test label set precomputed in Python. ctest's script
+        # interpreter does not surface labels set via
+        # `set_property(TEST ...)` to `--print-labels` / `-L`, so the
+        # ordinary build-tree emission would be a silent no-op here.
+        cmake_code = generate_cmake_install(
+            categories, general_excludes, explicit_tests
+        )
+    else:
+        cmake_code = generate_cmake(categories, explicit_tests=explicit_tests)
+        if general_excludes:
+            cmake_code += generate_cmake_general_excludes(
+                general_excludes, explicit_tests=explicit_tests
+            )
+
+    # Print to stdout for CMake OUTPUT_VARIABLE capture
+    print(cmake_code, end="")
+    # The following is a dummy code for install_test_file parameter.
+    # It will be used to append the generated CMake code to a file for install-time use if needed.
+    if install_test_file:
+        with open(install_test_file, "a") as f:
+            f.write(cmake_code)
+
+    total = sum(len(c.get("test_patterns") or []) for c in categories.values())
+    exclude_total = sum(
+        len(c.get("test_patterns") or []) for c in general_excludes.values()
+    )
+    print(
+        f"Generated labels for {total} test entries "
+        f"across {len(categories)} categories, "
+        f"{exclude_total} general exclude entries "
+        f"across {len(general_excludes)} exclude sections",
+        file=sys.stderr,
+    )
+
+
+if __name__ == "__main__":
+    main()

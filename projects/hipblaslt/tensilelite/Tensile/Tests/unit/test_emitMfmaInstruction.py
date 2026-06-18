@@ -46,6 +46,9 @@ def _mkKernel(dA, dB, miK=128, sourceSwap=False, miArchVgpr=True):
         "MatrixInstK": miK,
         "MIArchVgpr": miArchVgpr,
         "SourceSwap": sourceSwap,
+        # Pre-allocated unit-scale VGPR (initialized to 0x7f7f7f7f in mainLoop).
+        # emitMfmaInstruction requires this when no real scale VGPRs are supplied.
+        "_subtileUnitScaleVgpr": 250,
         "ProblemType": {
             "DataTypeA": DataType(dA) if dA else None,
             "DataTypeB": DataType(dB) if dB else None,
@@ -165,8 +168,8 @@ def test_F8_real_scale_path_uses_op_sel_and_real_mxsa_mxsb(writer):
 
 
 def test_F8_hardcoded_scale_path_allocates_tmp_with_0x7f7f7f7f(writer):
-    """No real scale VGPRs -> fallback writes 0x7f7f7f7f (E8M0 = 1.0 in every
-    byte) into a tmp VGPR and uses it for both mxsa/mxsb."""
+    """No real scale VGPRs -> fallback uses _subtileUnitScaleVgpr (pre-initialized
+    to 0x7f7f7f7f in mainLoop) for both mxsa/mxsb. No tmp VGPR is allocated here."""
     kernel = _mkKernel("F8", "F8", miK=128, sourceSwap=False)
     tA = _mkTile(0, 8, writer.vgprPool)
     tB = _mkTile(16, 8, writer.vgprPool)
@@ -177,8 +180,8 @@ def test_F8_hardcoded_scale_path_allocates_tmp_with_0x7f7f7f7f(writer):
     after = writer.vgprPool._next
     _assertScaledMfmaOpcode(asm)
     assert "cbsz:0 blgp:0" in asm
-    assert "0x7f7f7f7f" in asm, "fallback must load 0x7f7f7f7f into tmp scale"
-    assert after > before, "fallback path must check out one tmp VGPR"
+    assert "v250" in asm, "fallback must use _subtileUnitScaleVgpr (v250) for mxsa/mxsb"
+    assert after == before, "fallback path must NOT check out a tmp VGPR"
 
 
 # ---- Backward-compat (FP4) ------------------------------------------------
@@ -225,8 +228,8 @@ def test_FP4_no_scale_unchanged_fallback(writer):
     after = writer.vgprPool._next
     _assertScaledMfmaOpcode(asm)
     assert "cbsz:4 blgp:4" in asm
-    assert "0x7f7f7f7f" in asm
-    assert after > before
+    assert "v250" in asm, "fallback must use _subtileUnitScaleVgpr (v250) for mxsa/mxsb"
+    assert after == before, "fallback path must NOT check out a tmp VGPR"
 
 
 def test_legacy_no_DataType_falls_back_to_F4(writer):

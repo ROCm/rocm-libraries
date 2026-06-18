@@ -437,14 +437,29 @@ namespace rocRoller
         };
     }
 
+    bool isUnpackedF8F6F4(DataType type)
+    {
+        return isUnpackedF8(type) || isUnpackedF6(type) || isUnpackedF4(type);
+    }
+
     bool isUnpackedF4(DataType type)
     {
         return type == DataType::FP4;
     }
 
-    bool isUnpackedF8F6F4(DataType type)
+    bool isE8M0(DataType type)
     {
-        return isUnpackedF8(type) || isUnpackedF6(type) || isUnpackedF4(type);
+        return type == DataType::E8M0 or type == DataType::E8M0x4;
+    }
+
+    bool isE5M3(DataType type)
+    {
+        return type == DataType::E5M3 or type == DataType::E5M3x4;
+    }
+
+    bool isE4M3(DataType type)
+    {
+        return type == DataType::E4M3 or type == DataType::E4M3x4;
     }
 
     uint packingFactorForDataType(DataType type)
@@ -471,6 +486,12 @@ namespace rocRoller
         case DataType::E8M0:
             scale = static_cast<uint8_t>(floatToScale<E8M0>(value));
             break;
+        case DataType::E5M3:
+            scale = static_cast<uint8_t>(floatToScale<E5M3>(value));
+            break;
+        case DataType::E4M3:
+            scale = static_cast<uint8_t>(floatToScale<E4M3>(value));
+            break;
         default:
             AssertFatal(
                 false, "floatToScale is unimplemented for scale type: ", ShowValue(scaleType));
@@ -489,6 +510,12 @@ namespace rocRoller
         case DataType::E8M0:
             value = scaleToFloat<E8M0>(static_cast<E8M0>(scale));
             break;
+        case DataType::E5M3:
+            value = scaleToFloat<E5M3>(static_cast<E5M3>(scale));
+            break;
+        case DataType::E4M3:
+            value = scaleToFloat<E4M3>(static_cast<E4M3>(scale));
+            break;
         default:
             AssertFatal(
                 false, "scaleToFloat is unimplemented for scale type: ", ShowValue(scaleType));
@@ -497,4 +524,41 @@ namespace rocRoller
         return value;
     }
 
+    bool isValidDataTypeScaleTypeCombination(DataType A,
+                                             DataType B,
+                                             DataType scaleA,
+                                             DataType scaleB)
+    {
+        AssertFatal(isScaleType(scaleA));
+        AssertFatal(isScaleType(scaleB));
+
+        auto isF8F6F4
+            = [](DataType type) -> bool { return isF8(type) or isF6(type) or isF4(type); };
+        auto isSameScaleType = [&](DataType a, DataType b) -> bool {
+            return (isE8M0(a) and isE8M0(b)) or (isE5M3(a) and isE5M3(b))
+                   or (isE4M3(a) and isE4M3(b));
+        };
+
+        // A and B must be MX types
+        if(!isF8F6F4(A) or !isF8F6F4(B))
+            return false;
+
+        if(isF6(A) or isF8(A))
+        {
+            if(!isE8M0(scaleA))
+                return false;
+            if(isF4(B))
+                return true;
+        }
+
+        if(isF6(B) or isF8(B))
+        {
+            if(!isE8M0(scaleB))
+                return false;
+            if(isF4(A))
+                return true;
+        }
+
+        return isSameScaleType(scaleA, scaleB);
+    }
 };
