@@ -999,15 +999,23 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
 ################################################################################
 
 def tdmGlobalOffsetSubtile(writer, kernel, tP):
-  """Axis-aware per-wave global address for subtile TDM."""
+  """Per-wave global address for subtile TDM.
+
+  All waves cooperatively load the tile: wave w covers M-rows
+  [w*mt/numWaves, (w+1)*mt/numWaves) across the full wave count, rather
+  than only this tensor's wave axis. Splitting over every wave avoids the
+  duplicate loads the axis-only split issued for waves sharing an axis id.
+  The LDS tile end-state (identity map global-row r -> LDS-row r) is
+  unchanged; the barrier before local reads (WaitGROp has_sync) makes
+  every wave's rows visible to all consumers.
+  """
   tc = tP["tensorChar"]
   ti = tP["idx"]
   bpe = tP["bpeGR"]
   tlu = tP["tlu"]
   mt = kernel[f"MacroTile{ti}"]
   wavelen = kernel["WavefrontSize"]
-  wgM, wgN = kernel["MIWaveGroup"]
-  numWavesThisAxis = wgM if ti == 0 else wgN
+  numWaves = prod(kernel["MIWaveGroup"])
   mod = Module(f"TDM Global Offset Subtile {tc}")
 
   with writer.allocTmpSgpr(3) as tmpSgprRes:
@@ -1020,19 +1028,13 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
     mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
                      comment="*= wgId"))
 
-    if numWavesThisAxis > 1:
+    if numWaves > 1:
       mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"), comment="first tId"))
       mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
                                shiftHex=hex(int(ceil(log2(wavelen)))), comment=f"wId = tId / {wavelen}"))
-      if ti == 0 and wgN > 1:
-        mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgM - 1,
-                         comment=f"waveIdM = waveId %% {wgM}"))
-      elif ti == 1 and wgM > 1:
-        mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
-                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
       tileStrideSep = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, ti)
-      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=int(mt // numWavesThisAxis * bpe),
-                       comment=f"waveOff = waveId_axis * {mt // numWavesThisAxis} * {bpe}"))
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=int(mt // numWaves * bpe),
+                       comment=f"waveOff = waveId * {mt // numWaves} * {bpe}"))
       mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=tileStrideSep,
                        comment="waveOff *= stride"))
       mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff), comment="+= waveOff"))
@@ -1082,8 +1084,6 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   bpe = tP["bpeGR"]
   numWaves = prod(kernel["MIWaveGroup"])
   wavelen = kernel["WavefrontSize"]
-  wgM, wgN = kernel["MIWaveGroup"]
-  numWavesThisAxis = wgM if ti == 0 else wgN
 
   # Use subtile LDS offsets from writer state (not kernel["LdsOffset{tc}"])
   ldsOffsetMap = {
@@ -1110,21 +1110,17 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
     waveOffsetSgprIdx = tmpSgprRes.idx
     mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
     mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-    # Decompose wave ID to axis component for multi-wave
-    if numWavesThisAxis < numWaves:
-      if ti == 0 and wgN > 1:
-        mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
-                         comment=f"waveIdM = waveId %% {wgM}"))
-      elif ti == 1 and wgM > 1:
-        mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
-                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+    # Each wave writes its mt/numWaves rows to a distinct LDS region,
+    # matching the cooperative full-wave global split in
+    # tdmGlobalOffsetSubtile. The union over all waves covers the whole
+    # mt-row tile (identity map global-row r -> LDS-row r).
     if padIntervalBytes != 0 and padAmountBytes != 0:
-      tileBytes = round(mt // numWavesThisAxis * du * bpe)
+      tileBytes = round(mt // numWaves * du * bpe)
       padBytes = tileBytes // padIntervalBytes * padAmountBytes
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
               f"woffset = wId * ({tileBytes}+{padBytes})"))
     else:
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe),
               "woffset = wId * (mt // numWaves * du * bpe)"))
     mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
             f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
@@ -1148,7 +1144,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
   sizeShifterTile = sizeShifter
   mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, writer, sizeShifterTile))
-  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWavesThisAxis, writer))
+  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, writer))
   mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
   return mod
 
