@@ -218,6 +218,7 @@ jobs:
           merge-multiple: true
 
       - name: Merge profraw and generate coverage report
+        shell: bash
         run: |
           set -euo pipefail
           OBJECTS_DIR="${GITHUB_WORKSPACE}/coverage-objects"
