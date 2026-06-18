@@ -38,12 +38,14 @@ WIDTH = 1920
 HEIGHT = 1080
 NUM_IMAGES = 128
 
+
 def create_output_dir():
     """Create output directory if it doesn't exist."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_path = os.path.join(script_dir, OUTPUT_DIR)
     os.makedirs(output_path, exist_ok=True)
     return output_path
+
 
 def generate_gradient_image(index, output_path):
     """Generate a gradient image."""
@@ -60,6 +62,7 @@ def generate_gradient_image(index, output_path):
     filename = os.path.join(output_path, f"gradient_{index:03d}.jpg")
     img.save(filename, 'JPEG', quality=95)
     return filename
+
 
 def generate_checkerboard_image(index, output_path):
     """Generate a checkerboard pattern."""
@@ -81,9 +84,11 @@ def generate_checkerboard_image(index, output_path):
     img.save(filename, 'PNG')
     return filename
 
+
 def generate_circle_image(index, output_path):
     """Generate random circles."""
-    img = Image.new('RGB', (WIDTH, HEIGHT), color=(random.randint(0, 100), random.randint(0, 100), random.randint(0, 100)))
+    bg_color = (random.randint(0, 100), random.randint(0, 100), random.randint(0, 100))
+    img = Image.new('RGB', (WIDTH, HEIGHT), color=bg_color)
     draw = ImageDraw.Draw(img)
 
     num_circles = 10 + (index % 20)
@@ -92,11 +97,13 @@ def generate_circle_image(index, output_path):
         y = random.randint(0, HEIGHT)
         radius = random.randint(20, 200)
         color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color, outline=color)
+        draw.ellipse([x - radius, y - radius, x + radius, y + radius],
+                     fill=color, outline=color)
 
     filename = os.path.join(output_path, f"circles_{index:03d}.jpg")
     img.save(filename, 'JPEG', quality=95)
     return filename
+
 
 def generate_noise_image(index, output_path):
     """Generate random noise."""
@@ -107,6 +114,7 @@ def generate_noise_image(index, output_path):
     filename = os.path.join(output_path, f"noise_{index:03d}.png")
     img.save(filename, 'PNG')
     return filename
+
 
 def generate_stripes_image(index, output_path):
     """Generate striped pattern."""
@@ -130,6 +138,7 @@ def generate_stripes_image(index, output_path):
     img.save(filename, 'JPEG', quality=95)
     return filename
 
+
 def generate_solid_color_image(index, output_path):
     """Generate solid color image."""
     r = (index * 17) % 256
@@ -141,6 +150,7 @@ def generate_solid_color_image(index, output_path):
     filename = os.path.join(output_path, f"solid_{index:03d}.jpg")
     img.save(filename, 'JPEG', quality=95)
     return filename
+
 
 def generate_radial_pattern_image(index, output_path):
     """Generate radial pattern from center."""
@@ -168,6 +178,7 @@ def generate_radial_pattern_image(index, output_path):
     filename = os.path.join(output_path, f"radial_{index:03d}.png")
     img.save(filename, 'PNG')
     return filename
+
 
 def main():
     # Set random seeds for reproducibility
@@ -206,6 +217,7 @@ def main():
     print(f"\nDataset is ready for benchmarking!")
     print("\nTo run the benchmark:")
     print("  ./run_benchmarking.sh")
+
 
 if __name__ == "__main__":
     main()

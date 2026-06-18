@@ -22,16 +22,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "benchmarks_common.h"
 #include <cstring>
+
+#include "benchmarks_common.h"
 
 void printUsage(const char* programName) {
     cout << "Usage: " << programName << " [OPTIONS]\n" << endl;
     cout << "Options:" << endl;
     cout << "  -t, --threads <N>        Number of threads to use (default: auto-detect)" << endl;
     cout << "  -n, --num-runs <N>       Number of benchmark runs (default: 100)" << endl;
-    cout << "  -g, --gray-path <PATH>   Path to grayscale images (default: " << DEFAULT_GRAY_IMAGE_PATH << ")" << endl;
-    cout << "  -r, --rgb-path <PATH>    Path to RGB images (default: " << DEFAULT_RGB_IMAGE_PATH << ")" << endl;
+    cout << "  -g, --gray-path <PATH>   Path to grayscale images (default: "
+         << DEFAULT_GRAY_IMAGE_PATH << ")" << endl;
+    cout << "  -r, --rgb-path <PATH>    Path to RGB images (default: " << DEFAULT_RGB_IMAGE_PATH
+         << ")" << endl;
     cout << "  -h, --help               Display this help message" << endl;
     cout << "\nExamples:" << endl;
     cout << "  " << programName << "                           # Auto-detect threads, 100 runs (default)" << endl;
@@ -47,71 +50,47 @@ int main(int argc, char* argv[]) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printUsage(argv[0]);
             return 0;
-        }
-        else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--threads") == 0)
-        {
-            if (i + 1 < argc)
-            {
+        } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--threads") == 0) {
+            if (i + 1 < argc) {
                 NUM_THREADS = atoi(argv[++i]);
-                if (NUM_THREADS <= 0)
-                {
+                if (NUM_THREADS <= 0) {
                     cerr << "Error: Thread count must be a positive integer" << endl;
                     return 1;
                 }
-            }
-            else
-            {
+            } else {
                 cerr << "Error: --threads requires a value" << endl;
                 printUsage(argv[0]);
                 return 1;
             }
-        }
-        else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--num-runs") == 0)
-        {
-            if (i + 1 < argc)
-            {
+        } else if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--num-runs") == 0) {
+            if (i + 1 < argc) {
                 NUM_RUNS = atoi(argv[++i]);
-                if (NUM_RUNS <= 0)
-                {
+                if (NUM_RUNS <= 0) {
                     cerr << "Error: Number of runs must be a positive integer" << endl;
                     return 1;
                 }
-            }
-            else
-            {
+            } else {
                 cerr << "Error: --num-runs requires a value" << endl;
                 printUsage(argv[0]);
                 return 1;
             }
-        }
-        else if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gray-path") == 0)
-        {
-            if (i + 1 < argc)
-            {
+        } else if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--gray-path") == 0) {
+            if (i + 1 < argc) {
                 GRAY_IMAGE_PATH = argv[++i];
-            }
-            else
-            {
+            } else {
                 cerr << "Error: --gray-path requires a value" << endl;
                 printUsage(argv[0]);
                 return 1;
             }
-        }
-        else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--rgb-path") == 0)
-        {
-            if (i + 1 < argc)
-            {
+        } else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--rgb-path") == 0) {
+            if (i + 1 < argc) {
                 RGB_IMAGE_PATH = argv[++i];
-            }
-            else
-            {
+            } else {
                 cerr << "Error: --rgb-path requires a value" << endl;
                 printUsage(argv[0]);
                 return 1;
             }
-        }
-        else
-        {
+        } else {
             cerr << "Error: Unknown option: " << argv[i] << endl;
             printUsage(argv[0]);
             return 1;
@@ -120,8 +99,7 @@ int main(int argc, char* argv[]) {
 
     // Auto-detect thread count if not specified
     int maxAvailableThreads = omp_get_max_threads();
-    if (NUM_THREADS == 0)
-    {
+    if (NUM_THREADS == 0) {
         NUM_THREADS = maxAvailableThreads;
         cout << "Auto-detected " << NUM_THREADS << " available threads" << endl;
     }
@@ -129,38 +107,37 @@ int main(int argc, char* argv[]) {
     rppHandle_t handle;
     rppStatus_t status;
     status = rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
-    if (status != rppStatusSuccess)
-    {
-        cerr << "Error: Failed to initialize RPP handle with " << NUM_THREADS << " threads (Status: " << status << ")" << endl;
+    if (status != rppStatusSuccess) {
+        cerr << "Error: Failed to initialize RPP handle with " << NUM_THREADS
+             << " threads (Status: " << status << ")" << endl;
         return 1;
     }
     // Control OpenCV threading to match RPP configuration for fair comparison
     cv::setNumThreads(NUM_THREADS);
 
     int batchSizeGray = 0, maxWidthGray = 0, maxHeightGray = 0;
-    int batchSizeRGB  = 0, maxWidthRGB  = 0, maxHeightRGB  = 0;
+    int batchSizeRGB = 0, maxWidthRGB = 0, maxHeightRGB = 0;
 
-    vector<Mat> imgsGray = loadBatchImages(GRAY_IMAGE_PATH, batchSizeGray, maxWidthGray, maxHeightGray, false);
-    vector<Mat> imgsRGB  = loadBatchImages(RGB_IMAGE_PATH,  batchSizeRGB,  maxWidthRGB,  maxHeightRGB,  true);
+    vector<Mat> imgsGray =
+        loadBatchImages(GRAY_IMAGE_PATH, batchSizeGray, maxWidthGray, maxHeightGray, false);
+    vector<Mat> imgsRGB =
+        loadBatchImages(RGB_IMAGE_PATH, batchSizeRGB, maxWidthRGB, maxHeightRGB, true);
 
-    if (imgsGray.empty() && imgsRGB.empty())
-    {
+    if (imgsGray.empty() && imgsRGB.empty()) {
         cerr << "No images found in the dataset directories!" << endl;
         rppDestroy(handle, RPP_HOST_BACKEND);
         return -1;
     }
 
     // Initialize global image metadata for Excel output
-    if (!imgsGray.empty())
-    {
+    if (!imgsGray.empty()) {
         ostringstream oss;
         oss << maxWidthGray << "x" << maxHeightGray;
         grayImageSize = oss.str();
         grayImageDtype = getDtypeString(imgsGray[0].type());
         grayBatchSize = batchSizeGray;
     }
-    if (!imgsRGB.empty())
-    {
+    if (!imgsRGB.empty()) {
         ostringstream oss;
         oss << maxWidthRGB << "x" << maxHeightRGB;
         rgbImageSize = oss.str();
@@ -169,32 +146,32 @@ int main(int argc, char* argv[]) {
     }
 
     // Parameters
-    const float  alpha          = 1.2f;
-    const float  beta           = 20.0f;
-    const float  blendAlpha     = 0.5f;
-    const float  gamma          = 1.5f;
-    const float  hueDelta       = 10.f;
-    const float  satFactor      = 1.2f;
-    const float  contrastFactor = 1.3f;
-    const float  contrastCenter = 128.f;
-    const float  exposureStop   = 0.5f;
-    const float  exposureFactor = 1.4f;
-    const float  addVal         = 10.f;
-    const float  subVal         = 10.f;
-    const float  mulVal         = 1.2f;
-    const float  noiseProb      = 0.05f;
-    const float  noiseMean      = 0.f;
-    const float  noiseStd       = 15.f;
-    const int    resizeW        = 960;
-    const int    resizeH        = 540;
-    const int    cropW          = 800;
-    const int    cropH          = 600;
-    const int    filterKernel   = 3;
-    const int    medianKernel   = 3;
-    const double gaussSigma     = 5.0;
-    const float  angleDeg       = 45.f;
-    const double threshVal      = 128.0;
-    const int    morphKernel    = 3;
+    const float alpha = 1.2f;
+    const float beta = 20.0f;
+    const float blendAlpha = 0.5f;
+    const float gamma = 1.5f;
+    const float hueDelta = 10.f;
+    const float satFactor = 1.2f;
+    const float contrastFactor = 1.3f;
+    const float contrastCenter = 128.f;
+    const float exposureStop = 0.5f;
+    const float exposureFactor = 1.4f;
+    const float addVal = 10.f;
+    const float subVal = 10.f;
+    const float mulVal = 1.2f;
+    const float noiseProb = 0.05f;
+    const float noiseMean = 0.f;
+    const float noiseStd = 15.f;
+    const int resizeW = 960;
+    const int resizeH = 540;
+    const int cropW = 800;
+    const int cropH = 600;
+    const int filterKernel = 3;
+    const int medianKernel = 3;
+    const double gaussSigma = 5.0;
+    const float angleDeg = 45.f;
+    const double threshVal = 128.0;
+    const int morphKernel = 3;
 
     cout << "\n========================================" << endl;
     cout << "OPENCV vs RPP HOST BENCHMARKING" << endl;
@@ -216,10 +193,9 @@ int main(int argc, char* argv[]) {
     cout << "RGB Dataset: " << RGB_IMAGE_PATH << endl;
     cout << "========================================" << endl;
 
-    
+
     // ==================== GRAYSCALE ====================
-    if (!imgsGray.empty())
-    {
+    if (!imgsGray.empty()) {
         cout << "\n========== GRAYSCALE IMAGES ==========" << endl;
 
         cout << "\n--- Color Augmentations ---" << endl;
@@ -244,7 +220,7 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_GaussianFilter(imgsGray, false, filterKernel, gaussSigma, handle);
         benchmark_OpenCV_GaussianFilter(imgsGray, false, filterKernel, gaussSigma);
-        
+
         benchmark_RPP_SobelFilter(imgsGray, false, 0, handle);
         benchmark_OpenCV_SobelFilter(imgsGray, false, 0);
 
@@ -253,7 +229,7 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_SobelFilter(imgsGray, false, 2, handle);
         benchmark_OpenCV_SobelFilter(imgsGray, false, 2);
-        
+
         benchmark_RPP_Emboss(imgsGray, false, 3, 1.0f, handle);
         benchmark_OpenCV_Emboss(imgsGray, false, 3, 1.0f);
 
@@ -300,7 +276,7 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_Dilate(imgsGray, false, morphKernel, handle);
         benchmark_OpenCV_Dilate(imgsGray, false, morphKernel);
-        
+
         cout << "\n--- Arithmetic Operations ---" << endl;
         benchmark_RPP_AddScalar(imgsGray, false, addVal, handle);
         benchmark_OpenCV_AddScalar(imgsGray, false, addVal);
@@ -310,10 +286,10 @@ int main(int argc, char* argv[]) {
 
         benchmark_RPP_MultiplyScalar(imgsGray, false, mulVal, handle);
         benchmark_OpenCV_MultiplyScalar(imgsGray, false, mulVal);
-        
+
         benchmark_RPP_Blend(imgsGray, false, blendAlpha, handle);
         benchmark_OpenCV_Blend(imgsGray, false, blendAlpha);
-        
+
         cout << "\n--- Bitwise Operations ---" << endl;
         benchmark_RPP_BitwiseAnd(imgsGray, false, handle);
         benchmark_OpenCV_BitwiseAnd(imgsGray, false);
@@ -391,8 +367,7 @@ int main(int argc, char* argv[]) {
 
     }
     // ==================== RGB ====================
-    if (!imgsRGB.empty())
-    {
+    if (!imgsRGB.empty()) {
         cout << "\n========== RGB IMAGES ==========" << endl;
 
         cout << "\n--- Color Augmentations ---" << endl;
@@ -643,13 +618,10 @@ int main(int argc, char* argv[]) {
 
     cout << "Exporting results to: " << excelFilename << endl;
     bool exportSuccess = writeResultsToExcel(excelFilename, grayscaleResults, rgbResults);
-    if (!exportSuccess)
-    {
+    if (!exportSuccess) {
         cerr << "\nWarning: Benchmark completed successfully, but failed to export results to Excel." << endl;
         cerr << "         Benchmark data is still available in memory but not saved to disk." << endl;
-    }
-    else
-    {
+    } else {
         cout << "Results successfully exported to: " << excelFilename << endl;
     }
 

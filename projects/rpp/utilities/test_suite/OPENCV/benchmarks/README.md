@@ -11,11 +11,15 @@ The `opencv_vs_rpp_host_benchmarking` performs side-by-side performance comparis
 - Color space conversions
 - Advanced operations (warp affine, LUT, histogram equalization)
 
-Each operation is run 100 iterations on a batch of 128 1080p images to provide statistically meaningful performance metrics.
+Each operation is run for a configurable number of iterations (default: 100) on a batch of 128 1080p images to provide statistically meaningful performance metrics.
 
-**Results are automatically exported to Excel files** with:
-- `opencv_vs_rpp_benchmark_results_parallel_threads_ON.xlsx` - When parallel threading is enabled (default)
-- `opencv_vs_rpp_benchmark_results_parallel_threads_OFF.xlsx` - When parallel threading is disabled
+**Results are automatically exported to Excel files** with a filename format:
+- `opencv_vs_rpp_benchmark_results_<N>threads.xlsx` - Where `<N>` is the number of threads used
+
+Examples:
+- `opencv_vs_rpp_benchmark_results_64threads.xlsx` - Results using 64 threads
+- `opencv_vs_rpp_benchmark_results_32threads.xlsx` - Results using 32 threads
+- `opencv_vs_rpp_benchmark_results_1threads.xlsx` - Single-threaded results
 
 Each file contains:
 - **Sheet 1:** System information (RPP version, OpenCV version, CPU, memory, OS)
@@ -167,14 +171,16 @@ The executable will be created at `build/opencv_vs_rpp_host_benchmarking`
 
 Options:
   -t, --threads <N>        Number of threads to use (default: auto-detect)
+  -n, --num-runs <N>       Number of benchmark runs (default: 100)
   -g, --gray-path <PATH>   Path to grayscale images (default: 1080p_128images_dataset/)
   -r, --rgb-path <PATH>    Path to RGB images (default: 1080p_128images_dataset/)
   -h, --help               Display help message
 
 Examples:
-  ./build/opencv_vs_rpp_host_benchmarking                    # Auto-detect threads
-  ./build/opencv_vs_rpp_host_benchmarking --threads 64       # Use 64 threads
-  ./build/opencv_vs_rpp_host_benchmarking -t 32 -g ./imgs/   # Custom threads and dataset
+  ./build/opencv_vs_rpp_host_benchmarking                           # Auto-detect threads, 100 runs (default)
+  ./build/opencv_vs_rpp_host_benchmarking --threads 64              # Use 64 threads
+  ./build/opencv_vs_rpp_host_benchmarking -t 32 -n 50               # Use 32 threads with 50 runs
+  ./build/opencv_vs_rpp_host_benchmarking -t 32 -g ./my_images/     # Use 32 threads with custom dataset
 ```
 
 **Thread Configuration:**
@@ -225,9 +231,12 @@ Each operation shows:
 
 ### Excel Output File
 
-Results are automatically saved to an Excel file with three sheets. The filename indicates whether parallel threading was enabled:
-- `opencv_vs_rpp_benchmark_results_parallel_threads_ON.xlsx` - When parallel threading is enabled (default)
-- `opencv_vs_rpp_benchmark_results_parallel_threads_OFF.xlsx` - When parallel threading is disabled
+Results are automatically saved to an Excel file with three sheets. The filename indicates the number of threads used:
+- `opencv_vs_rpp_benchmark_results_<N>threads.xlsx` - Where `<N>` is the thread count
+
+For example:
+- `opencv_vs_rpp_benchmark_results_64threads.xlsx` - Results using 64 threads
+- `opencv_vs_rpp_benchmark_results_1threads.xlsx` - Single-threaded baseline
 
 **Sheet 1: System Information**
 | Parameter | Value |
@@ -288,30 +297,44 @@ The benchmark automatically detects the maximum available threads on your system
 
 **Runtime configuration (recommended):**
 ```bash
-# Use all available threads (auto-detect)
+# Use all available threads (auto-detect) with default 100 runs
 ./build/opencv_vs_rpp_host_benchmarking
 
 # Use specific thread count
 ./build/opencv_vs_rpp_host_benchmarking --threads 64
 ./build/opencv_vs_rpp_host_benchmarking -t 32
+
+# Use specific thread count with custom number of runs
+./build/opencv_vs_rpp_host_benchmarking -t 32 -n 50
 ```
 
 **Note:** Thread count configuration only applies when built with `ENABLE_PARALLEL_THREADS=ON`. When built with `ENABLE_PARALLEL_THREADS=OFF`, the benchmark always uses 1 thread regardless of command-line arguments.
 
-### Modifying Other Test Parameters
+### Configuring Number of Benchmark Runs
 
-To change the number of benchmark iterations, edit `benchmarks_common.h`:
+You can configure the number of benchmark runs (iterations) at runtime using the `-n` or `--num-runs` option:
+
+**Runtime configuration (recommended):**
+```bash
+# Default 100 runs
+./build/opencv_vs_rpp_host_benchmarking
+
+# Custom number of runs
+./build/opencv_vs_rpp_host_benchmarking --num-runs 50
+./build/opencv_vs_rpp_host_benchmarking -n 200
+
+# Combine with thread count
+./build/opencv_vs_rpp_host_benchmarking -t 32 -n 50
+```
+
+**Alternative: Build-time configuration:**
+You can also set a default value by editing `benchmarks_common.h`:
 
 ```cpp
-#define NUM_RUNS     100    // Number of iterations per operation
+extern int NUM_RUNS;  // Default is 100, but can be overridden via command-line
 ```
 
-After changing this value, rebuild the project:
-
-```bash
-cd build
-make -j$(nproc)
-```
+The runtime command-line option will always override the default value.
 
 ### Changing RPP Installation Path
 
@@ -473,7 +496,8 @@ python3 generate_test_dataset.py
 
 - **Benchmark Iterations:**
   - Each operation runs 100 times by default for stable average timings
-  - Adjustable via `NUM_RUNS` in `benchmarks_common.h` (requires rebuild)
+  - Adjustable at runtime via `-n` or `--num-runs` command-line option (no rebuild required)
+  - Example: `./build/opencv_vs_rpp_host_benchmarking -n 200` runs each benchmark 200 times
 
 - **Performance Variability:**
   - Results vary based on CPU architecture, memory bandwidth, and system load

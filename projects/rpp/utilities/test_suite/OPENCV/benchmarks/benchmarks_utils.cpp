@@ -25,7 +25,7 @@ SOFTWARE.
 #include "benchmarks_common.h"
 
 // Global configuration variables (defined here, declared extern in header)
-int NUM_RUNS = 100;  // Default number of runs, can be overridden via command line
+int NUM_RUNS = 100;   // Default number of runs, can be overridden via command line
 int NUM_THREADS = 0;  // Will be set at runtime
 string GRAY_IMAGE_PATH = DEFAULT_GRAY_IMAGE_PATH;
 string RGB_IMAGE_PATH = DEFAULT_RGB_IMAGE_PATH;
@@ -42,23 +42,21 @@ string rgbImageDtype;
 int grayBatchSize = 0;
 int rgbBatchSize = 0;
 
-vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWidth, int& maxHeight, bool isColor)
-{
+vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWidth, int& maxHeight,
+                            bool isColor) {
     vector<Mat> images;
     DIR* dir;
     struct dirent* entry;
 
-    maxWidth  = 0;
+    maxWidth = 0;
     maxHeight = 0;
 
-    if ((dir = opendir(directory.c_str())) == NULL)
-    {
+    if ((dir = opendir(directory.c_str())) == NULL) {
         cerr << "Could not open directory: " << directory << endl;
         return images;
     }
 
-    while ((entry = readdir(dir)) != NULL)
-    {
+    while ((entry = readdir(dir)) != NULL) {
         string filename = entry->d_name;
         if (filename == "." || filename == "..") continue;
 
@@ -70,14 +68,11 @@ vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWid
         string filePath = directory + "/" + filename;
         Mat img = imread(filePath, isColor ? IMREAD_COLOR : IMREAD_GRAYSCALE);
 
-        if (!img.empty())
-        {
-            maxWidth  = max(maxWidth,  img.cols);
+        if (!img.empty()) {
+            maxWidth = max(maxWidth, img.cols);
             maxHeight = max(maxHeight, img.rows);
             images.push_back(move(img));
-        }
-        else
-        {
+        } else {
             cerr << "Warning: Could not read image " << filePath << endl;
         }
     }
@@ -88,78 +83,71 @@ vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWid
 }
 
 // Map to store benchmark times and parameters by operation name
-struct BenchmarkData
-{
+struct BenchmarkData {
     double rppTime;
     double opencvTime;
     string parameters;
     bool rppCalled;
     bool opencvCalled;
 
-    BenchmarkData() : rppTime(0), opencvTime(0), parameters(""), rppCalled(false), opencvCalled(false) {}
+    BenchmarkData()
+        : rppTime(0), opencvTime(0), parameters(""), rppCalled(false), opencvCalled(false) {}
 };
 
-static map<string, BenchmarkData> benchmarkTimes; // operationName -> data
+static map<string, BenchmarkData> benchmarkTimes;  // operationName -> data
 static string currentOperation;
 static bool currentIsColor;
 
-void printResult(const string& name, int batchSize, bool isColor, double totalMs, const string& params)
-{
+void printResult(const string& name, int batchSize, bool isColor, double totalMs,
+                 const string& params) {
     double avgTime = totalMs / NUM_RUNS;
     cout << name << " (Avg per run, " << batchSize << " images, "
          << (isColor ? "RGB" : "Grayscale");
-    if (!params.empty())
-        cout << ", " << params;
+    if (!params.empty()) cout << ", " << params;
     cout << "): " << avgTime << " ms" << endl;
 
     // Extract operation name
     string opName = name;
 
-    if (opName.find("RPP HOST ") == 0)
-    {
-        opName = opName.substr(9); // Remove "RPP HOST "
+    if (opName.find("RPP HOST ") == 0) {
+        opName = opName.substr(9);  // Remove "RPP HOST "
         currentOperation = opName;
         currentIsColor = isColor;
 
         // For operations with variations (Resize, Flip), append parameter suffix to operation name
         string displayName = opName;
-        if ((opName == "Resize" || opName == "Flip") && !params.empty())
-        {
+        if ((opName == "Resize" || opName == "Flip") && !params.empty()) {
             // Extract type= from params
             size_t typePos = params.find("type=");
-            if (typePos != string::npos)
-            {
+            if (typePos != string::npos) {
                 size_t endPos = params.find(",", typePos);
-                string typeValue = (endPos != string::npos) ?
-                    params.substr(typePos + 5, endPos - typePos - 5) :
-                    params.substr(typePos + 5);
+                string typeValue = (endPos != string::npos)
+                                       ? params.substr(typePos + 5, endPos - typePos - 5)
+                                       : params.substr(typePos + 5);
                 displayName = opName + "_" + typeValue;
             }
         }
 
         // Create unique key using operation name + color mode (for matching)
-        // For operations like Exposure/SobelFilter that have different param names, we use operation name only
+        // For operations like Exposure/SobelFilter that have different param names, we use
+        // operation name only
         string key = displayName + "|" + (isColor ? "rgb" : "gray");
         benchmarkTimes[key].rppTime = avgTime;
         benchmarkTimes[key].parameters = params;
         benchmarkTimes[key].rppCalled = true;
-    }
-    else if (opName.find("OpenCV ") == 0)
-    {
-        opName = opName.substr(7); // Remove "OpenCV "
+    } else if (opName.find("OpenCV ") == 0) {
+        opName = opName.substr(7);  // Remove "OpenCV "
 
         // For operations with variations (Resize, Flip), append parameter suffix to operation name
         string displayName = opName;
-        if ((opName == "Resize" || opName == "Flip") && !params.empty())
-        {
+        if ((opName == "Resize" || opName == "Flip") && !params.empty()) {
             // Extract type= from params
             size_t typePos = params.find("type=");
-            if (typePos != string::npos)
-            {
+            if (typePos != string::npos) {
                 size_t endPos = params.find(",", typePos);
-                string typeValue = (endPos != string::npos) ?
-                    params.substr(typePos + 5, endPos - typePos - 5) :
-                    params.substr(typePos + 5);
+                string typeValue = (endPos != string::npos)
+                                       ? params.substr(typePos + 5, endPos - typePos - 5)
+                                       : params.substr(typePos + 5);
                 displayName = opName + "_" + typeValue;
             }
         }
@@ -189,31 +177,24 @@ void printResult(const string& name, int batchSize, bool isColor, double totalMs
 }
 
 // Helper to get CPU model information
-string getCPUInfo()
-{
+string getCPUInfo() {
     ifstream cpuinfo("/proc/cpuinfo");
     string line;
-    while (getline(cpuinfo, line))
-    {
-        if (line.find("model name") != string::npos)
-        {
+    while (getline(cpuinfo, line)) {
+        if (line.find("model name") != string::npos) {
             size_t pos = line.find(":");
-            if (pos != string::npos)
-                return line.substr(pos + 2);
+            if (pos != string::npos) return line.substr(pos + 2);
         }
     }
     return "Unknown CPU";
 }
 
 // Helper to get memory information (in GB)
-string getMemoryInfo()
-{
+string getMemoryInfo() {
     ifstream meminfo("/proc/meminfo");
     string line;
-    while (getline(meminfo, line))
-    {
-        if (line.find("MemTotal") != string::npos)
-        {
+    while (getline(meminfo, line)) {
+        if (line.find("MemTotal") != string::npos) {
             istringstream iss(line);
             string label;
             long memKB;
@@ -229,8 +210,7 @@ string getMemoryInfo()
 }
 
 // Helper to get OS information
-string getOSInfo()
-{
+string getOSInfo() {
     struct utsname unameData;
     if (uname(&unameData) == 0)
     {
@@ -242,16 +222,14 @@ string getOSInfo()
 }
 
 // Helper to get RPP version
-string getRPPVersion()
-{
+string getRPPVersion() {
     ostringstream oss;
     oss << RPP_VERSION_MAJOR << "." << RPP_VERSION_MINOR << "." << RPP_VERSION_PATCH;
     return oss.str();
 }
 
 // Helper to get current date and time
-string getCurrentDateTime()
-{
+string getCurrentDateTime() {
     auto now = chrono::system_clock::now();
     time_t now_time = chrono::system_clock::to_time_t(now);
     tm local_tm = *localtime(&now_time);
@@ -262,12 +240,10 @@ string getCurrentDateTime()
 }
 
 // Helper to get data type string from OpenCV type
-string getDtypeString(int cvType)
-{
+string getDtypeString(int cvType) {
     int depth = cvType & CV_MAT_DEPTH_MASK;
 
-    switch(depth)
-    {
+    switch(depth) {
         case CV_8U:  return "U8";
         case CV_8S:  return "S8";
         case CV_16U: return "U16";
@@ -280,8 +256,7 @@ string getDtypeString(int cvType)
 }
 
 // Helper to create RPP descriptor from OpenCV Mat
-RpptDesc createRppDescriptor(const Mat& img, RpptLayout layout)
-{
+RpptDesc createRppDescriptor(const Mat& img, RpptLayout layout) {
     RpptDesc desc;
     desc.n = 1;
     desc.h = img.rows;
@@ -291,14 +266,11 @@ RpptDesc createRppDescriptor(const Mat& img, RpptLayout layout)
     desc.dataType = (img.depth() == CV_32F) ? RpptDataType::F32 : RpptDataType::U8;
     desc.offsetInBytes = 0;
     desc.strides.nStride = desc.h * desc.w * desc.c;
-    if (layout == RpptLayout::NHWC)
-    {
+    if (layout == RpptLayout::NHWC) {
         desc.strides.hStride = desc.w * desc.c;
         desc.strides.wStride = desc.c;
         desc.strides.cStride = 1;
-    }
-    else // NCHW
-    {
+    } else { // NCHW
         desc.strides.cStride = desc.h * desc.w;
         desc.strides.hStride = desc.w;
         desc.strides.wStride = 1;
@@ -307,8 +279,7 @@ RpptDesc createRppDescriptor(const Mat& img, RpptLayout layout)
 }
 
 // Helper to create full image ROI
-RpptROI createFullImageROI(const Mat& img)
-{
+RpptROI createFullImageROI(const Mat& img) {
     RpptROI roi;
     roi.xywhROI.xy.x = 0;
     roi.xywhROI.xy.y = 0;
@@ -318,8 +289,7 @@ RpptROI createFullImageROI(const Mat& img)
 }
 
 // Helper to convert RpptDesc to RpptGenericDesc
-RpptGenericDesc toGenericDesc(const RpptDesc& desc)
-{
+RpptGenericDesc toGenericDesc(const RpptDesc& desc) {
     RpptGenericDesc genericDesc;
     genericDesc.numDims = 4;
     genericDesc.offsetInBytes = desc.offsetInBytes;
@@ -327,8 +297,7 @@ RpptGenericDesc toGenericDesc(const RpptDesc& desc)
     genericDesc.layout = desc.layout;
 
     // Set dims and strides based on layout
-    if (desc.layout == RpptLayout::NHWC)
-    {
+    if (desc.layout == RpptLayout::NHWC) {
         // NHWC: dims = [N, H, W, C]
         genericDesc.dims[0] = desc.n;
         genericDesc.dims[1] = desc.h;
@@ -338,9 +307,7 @@ RpptGenericDesc toGenericDesc(const RpptDesc& desc)
         genericDesc.strides[1] = desc.strides.hStride;
         genericDesc.strides[2] = desc.strides.wStride;
         genericDesc.strides[3] = desc.strides.cStride;
-    }
-    else // NCHW
-    {
+    } else { // NCHW
         // NCHW: dims = [N, C, H, W]
         genericDesc.dims[0] = desc.n;
         genericDesc.dims[1] = desc.c;
@@ -356,8 +323,7 @@ RpptGenericDesc toGenericDesc(const RpptDesc& desc)
 }
 
 // Helper to create full image ROI3D
-RpptROI3D createFullImageROI3D(const Mat& img)
-{
+RpptROI3D createFullImageROI3D(const Mat& img) {
     RpptROI3D roi3d;
     roi3d.xyzwhdROI.xyz.x = 0;
     roi3d.xyzwhdROI.xyz.y = 0;
@@ -371,11 +337,9 @@ RpptROI3D createFullImageROI3D(const Mat& img)
 // ==================== RPP COLOR AUGMENTATIONS ====================
 bool writeResultsToExcel(const string& filename,
                         const vector<BenchmarkResult>& grayResults,
-                        const vector<BenchmarkResult>& colorResults)
-{
+                        const vector<BenchmarkResult>& colorResults) {
     lxw_workbook  *workbook  = workbook_new(filename.c_str());
-    if (!workbook)
-    {
+    if (!workbook) {
         cerr << "Error: Failed to create Excel workbook: " << filename << endl;
         cerr << "       Possible causes: insufficient permissions, invalid path, or disk full" << endl;
         return false;
@@ -452,8 +416,7 @@ bool writeResultsToExcel(const string& filename,
     worksheet_write_string(gray_sheet, row, 7, "RPP HOST (avg ms)", header_format);
     worksheet_write_string(gray_sheet, row++, 8, "Speedup", header_format);
 
-    for (const auto& result : grayResults)
-    {
+    for (const auto& result : grayResults) {
         worksheet_write_string(gray_sheet, row, 0, result.operationName.c_str(), NULL);
         worksheet_write_string(gray_sheet, row, 1, result.parameters.c_str(), NULL);
         worksheet_write_string(gray_sheet, row, 2, result.imageSize.c_str(), NULL);
@@ -487,8 +450,7 @@ bool writeResultsToExcel(const string& filename,
     worksheet_write_string(rgb_sheet, row, 7, "RPP HOST (avg ms)", header_format);
     worksheet_write_string(rgb_sheet, row++, 8, "Speedup", header_format);
 
-    for (const auto& result : colorResults)
-    {
+    for (const auto& result : colorResults) {
         worksheet_write_string(rgb_sheet, row, 0, result.operationName.c_str(), NULL);
         worksheet_write_string(rgb_sheet, row, 1, result.parameters.c_str(), NULL);
         worksheet_write_string(rgb_sheet, row, 2, result.imageSize.c_str(), NULL);
@@ -502,8 +464,7 @@ bool writeResultsToExcel(const string& filename,
     }
 
     lxw_error error = workbook_close(workbook);
-    if (error != LXW_NO_ERROR)
-    {
+    if (error != LXW_NO_ERROR) {
         cerr << "Error: Failed to close Excel workbook: " << filename << " (Error code: " << error << ")" << endl;
         cerr << "       The file may be corrupted or incomplete" << endl;
         return false;
@@ -517,8 +478,7 @@ bool writeResultsToExcel(const string& filename,
 
 
 // Helper to initialize RICAP boxes for 4-way cutmix
-void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permutationTensor, RpptROI* roiPtrInputCropRegion)
-{
+void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permutationTensor, RpptROI* roiPtrInputCropRegion) {
     // Simple RICAP: divide output into 4 quadrants
     int halfW = maxWidth / 2;
     int halfH = maxHeight / 2;
@@ -544,8 +504,7 @@ void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permut
     roiPtrInputCropRegion[3].xywhROI.roiHeight = halfH;
 
     // Permutation: which source image for each quadrant
-    for (int i = 0; i < batchSize; i++)
-    {
+    for (int i = 0; i < batchSize; i++) {
         permutationTensor[i * 4 + 0] = (i + 0) % batchSize;
         permutationTensor[i * 4 + 1] = (i + 1) % batchSize;
         permutationTensor[i * 4 + 2] = (i + 2) % batchSize;
@@ -555,12 +514,10 @@ void init_ricap_boxes(int maxWidth, int maxHeight, int batchSize, Rpp32u* permut
 
 // Helper to initialize grid dropout boxes
 void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, RpptROI* roiTensorPtrSrc,
-                             Rpp32u gridH, Rpp32u gridW, Rpp32u &maxHoleW, Rpp32u &maxHoleH, Rpp32f holeRatio, int seed)
-{
+                             Rpp32u gridH, Rpp32u gridW, Rpp32u &maxHoleW, Rpp32u &maxHoleH, Rpp32f holeRatio, int seed) {
     std::mt19937 rng(seed);
 
-    for(int i = 0; i < batchCount; i++)
-    {
+    for(int i = 0; i < batchCount; i++) {
         Rpp32u roiW = roiTensorPtrSrc[i].xywhROI.roiWidth;
         Rpp32u roiH = roiTensorPtrSrc[i].xywhROI.roiHeight;
         Rpp32s x_base = roiTensorPtrSrc[i].xywhROI.xy.x;
@@ -579,16 +536,13 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
         std::uniform_int_distribution<int> distY(0, (cellH > holeH) ? cellH - holeH : 0);
 
         int boxOffset = i * gridH * gridW;
-        for (Rpp32u row = 0; row < gridH; ++row)
-        {
-            for (Rpp32u col = 0; col < gridW; ++col)
-            {
+        for (Rpp32u row = 0; row < gridH; ++row) {
+            for (Rpp32u col = 0; col < gridW; ++col) {
                 Rpp32s cellX = x_base + col * cellW;
                 Rpp32s cellY = y_base + row * cellH;
 
                 Rpp32s offsetX = 0, offsetY = 0;
-                if (cellW > holeW && cellH > holeH)
-                {
+                if (cellW > holeW && cellH > holeH) {
                     offsetX = distX(rng);
                     offsetY = distY(rng);
                 }
@@ -609,21 +563,18 @@ void init_grid_dropout_boxes(int batchCount, RpptRoiLtrb* anchorBoxInfoTensor, R
 }
 
 // Dropout helper function for channel dropout
-void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, int channels, int seed)
-{
+void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize, int channels, int seed) {
     int numThreads = NUM_THREADS;
     omp_set_dynamic(0);
 
 #pragma omp parallel for num_threads(numThreads)
-    for (int batchCount = 0; batchCount < batchSize; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < batchSize; batchCount++) {
         std::mt19937 rng(seed + batchCount);
         std::bernoulli_distribution keepDist(1.0f - dropoutProbability[batchCount]);
         Rpp8u *maskPtrTemp = dropoutTensor + (batchCount * channels);
         bool atLeastOne = false;
 
-        for (int channel = 0; channel < channels; channel++)
-        {
+        for (int channel = 0; channel < channels; channel++) {
             maskPtrTemp[channel] = keepDist(rng);
             atLeastOne |= maskPtrTemp[channel];
         }
@@ -634,8 +585,7 @@ void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbabil
 }
 
 // Dropout helper function for cutout dropout
-void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes, RpptRoiLtrb* anchorBoxInfoTensor, RpptROIPtr roiTensorPtrSrc, int channels, int BitDepthTestMode, int seed, int dropoutType, void *colorBuffer)
-{
+void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes, RpptRoiLtrb* anchorBoxInfoTensor, RpptROIPtr roiTensorPtrSrc, int channels, int BitDepthTestMode, int seed, int dropoutType, void *colorBuffer) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> pos_ratio(0.1f, 0.9f);
     std::uniform_real_distribution<float> wh_ratio_cutout(0.4f, 0.6f);
@@ -645,11 +595,9 @@ void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes
     Rpp32f *colors32f = reinterpret_cast<Rpp32f *>(colorBuffer);
     Rpp8s *colors8s = reinterpret_cast<Rpp8s *>(colorBuffer);
 
-    for (int i = 0; i < batchSize; i++)
-    {
+    for (int i = 0; i < batchSize; i++) {
         numOfBoxes[i] = maxBoxesPerImage;
-        for (int j = 0; j < maxBoxesPerImage; j++)
-        {
+        for (int j = 0; j < maxBoxesPerImage; j++) {
             int idx = i * maxBoxesPerImage + j;
 
             // Get ROI dimensions
@@ -675,8 +623,7 @@ void init_cutout_dropout(int batchSize, int maxBoxesPerImage, Rpp32u* numOfBoxes
             anchorBoxInfoTensor[idx].rb.y = static_cast<Rpp32u>(boxY + boxHeight);
 
             // Set random color for the box
-            for (int c = 0; c < channels; c++)
-            {
+            for (int c = 0; c < channels; c++) {
                 int colorIdx = idx * channels + c;
                 if (BitDepthTestMode == 0) // U8
                     colors8u[colorIdx] = static_cast<Rpp8u>(rng() % 256);

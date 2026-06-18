@@ -25,30 +25,31 @@ SOFTWARE.
 #ifndef BENCHMARKS_COMMON_H
 #define BENCHMARKS_COMMON_H
 
+#include <dirent.h>
+#include <omp.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <dirent.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <numeric>
-#include <omp.h>
-#include <random>
-#include <sstream>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/utsname.h>
-#include <thread>
-#include <vector>
-
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <random>
+#include <sstream>
+#include <thread>
+#include <vector>
+
 #include "rpp.h"
 #include "rpp_version.h"
 #include "xlsxwriter.h"
@@ -59,7 +60,7 @@ using namespace chrono;
 
 // Test image paths - can be overridden via command line
 #define DEFAULT_GRAY_IMAGE_PATH "1080p_128images_dataset/"
-#define DEFAULT_RGB_IMAGE_PATH  "1080p_128images_dataset/"
+#define DEFAULT_RGB_IMAGE_PATH "1080p_128images_dataset/"
 
 // Global configuration variables (set at runtime)
 extern int NUM_RUNS;
@@ -68,8 +69,7 @@ extern string GRAY_IMAGE_PATH;
 extern string RGB_IMAGE_PATH;
 
 // Structure to store benchmark results
-struct BenchmarkResult
-{
+struct BenchmarkResult {
     string operationName;
     string parameters;
     string imageSize;
@@ -81,11 +81,16 @@ struct BenchmarkResult
     double speedup;
 
     BenchmarkResult(const string& name, const string& params, double cvTime, double rTime,
-                    const string& imgSize = "", const string& dataType = "",
-                    int batch = 0, int runs = 0)
-        : operationName(name), parameters(params), imageSize(imgSize), dtype(dataType),
-          batchSize(batch), numRuns(runs), opencvTime(cvTime), rppTime(rTime)
-    {
+                    const string& imgSize = "", const string& dataType = "", int batch = 0,
+                    int runs = 0)
+        : operationName(name),
+          parameters(params),
+          imageSize(imgSize),
+          dtype(dataType),
+          batchSize(batch),
+          numRuns(runs),
+          opencvTime(cvTime),
+          rppTime(rTime) {
         speedup = (rTime > 0) ? (cvTime / rTime) : 0.0;
     }
 };
@@ -103,8 +108,10 @@ extern int grayBatchSize;
 extern int rgbBatchSize;
 
 // Utility functions
-vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWidth, int& maxHeight, bool isColor);
-void printResult(const string& name, int batchSize, bool isColor, double totalMs, const string& params = "");
+vector<Mat> loadBatchImages(const string& directory, int& batchSize, int& maxWidth, int& maxHeight,
+                            bool isColor);
+void printResult(const string& name, int batchSize, bool isColor, double totalMs,
+                 const string& params = "");
 string getCPUInfo();
 string getMemoryInfo();
 string getOSInfo();

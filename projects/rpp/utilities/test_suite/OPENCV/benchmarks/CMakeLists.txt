@@ -70,7 +70,8 @@ if(rpp_FOUND)
     message("-- \t${White}rpp_LIBRARY -- ${rpp_LIBRARY}${ColourReset}")
     message("-- \t${White}rpp_BACKEND_TYPE -- ${rpp_BACKEND_TYPE}${ColourReset}")
 else()
-    message(FATAL_ERROR "-- ${Red}${PROJECT_NAME} requires RPP. Install RPP or set RPP_DIR to the RPP installation path${ColourReset}")
+    message(FATAL_ERROR
+        "-- ${Red}${PROJECT_NAME} requires RPP. Install RPP or set RPP_DIR to the RPP installation path${ColourReset}")
 endif()
 
 if(OpenCV_FOUND)
@@ -88,7 +89,8 @@ endif()
 if(XLSXWRITER_LIBRARY)
     message("-- ${Green}xlsxwriter found at ${XLSXWRITER_LIBRARY}${ColourReset}")
 else()
-    message(FATAL_ERROR "-- ${Red}${PROJECT_NAME} requires libxlsxwriter for Excel output. Install with: sudo apt-get install libxlsxwriter-dev${ColourReset}")
+    message(FATAL_ERROR
+        "-- ${Red}${PROJECT_NAME} requires libxlsxwriter for Excel output. Install with: sudo apt-get install libxlsxwriter-dev${ColourReset}")
 endif()
 
 # Create executable from separated source files
