@@ -470,7 +470,7 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
     obj_args = " ".join(f'-object "{o.as_posix()}"' for o in objects)
 
     # Keep the report focused on library/tool sources, not test or 3rd-party code.
-    ignore = '--ignore-filename-regex="(tests|examples|build|_deps|rocisa|/usr/)"'
+    ignore = '--ignore-filename-regex="([/\\\\]tests[/\\\\]|[/\\\\]examples[/\\\\]|[/\\\\]build[^/\\\\]*[/\\\\]|_deps|rocisa|/usr/)"'
 
     # 6. HTML report, lcov export for CI, and a console summary.
     html_dir = bld / "coverage-report"
