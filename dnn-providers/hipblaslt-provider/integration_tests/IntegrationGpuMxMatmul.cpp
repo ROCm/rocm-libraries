@@ -134,32 +134,32 @@ using IntegrationGpuMxGemmE5M2ToFp32
 
 TEST_P(IntegrationGpuMxGemmE4M3ToFp16, Correctness)
 {
-    runGraphTest(matmul::getTolerance<hipdnn_data_sdk::types::half>());
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::half>());
 }
 
 TEST_P(IntegrationGpuMxGemmE4M3ToBf16, Correctness)
 {
-    runGraphTest(matmul::getTolerance<hipdnn_data_sdk::types::bfloat16>());
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::bfloat16>());
 }
 
 TEST_P(IntegrationGpuMxGemmE4M3ToFp32, Correctness)
 {
-    runGraphTest(matmul::getTolerance<float>());
+    runGraphTest(matmul::getMxTolerance<float>());
 }
 
 TEST_P(IntegrationGpuMxGemmE5M2ToFp16, Correctness)
 {
-    runGraphTest(matmul::getTolerance<hipdnn_data_sdk::types::half>());
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::half>());
 }
 
 TEST_P(IntegrationGpuMxGemmE5M2ToBf16, Correctness)
 {
-    runGraphTest(matmul::getTolerance<hipdnn_data_sdk::types::bfloat16>());
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::bfloat16>());
 }
 
 TEST_P(IntegrationGpuMxGemmE5M2ToFp32, Correctness)
 {
-    runGraphTest(matmul::getTolerance<float>());
+    runGraphTest(matmul::getMxTolerance<float>());
 }
 
 INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
