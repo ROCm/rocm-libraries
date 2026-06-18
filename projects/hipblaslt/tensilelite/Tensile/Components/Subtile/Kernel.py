@@ -1331,10 +1331,6 @@ def mainLoop(writer, kernel):
                                src=2,
                                comment="enable expert scheduling mode"))
     module.add(SNop(waitState=0, comment="nop after SSetReg"))
-    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[4, 1]),
-                               src=1,
-                               comment="Disable WMMA arb stall"))
-    module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
 
