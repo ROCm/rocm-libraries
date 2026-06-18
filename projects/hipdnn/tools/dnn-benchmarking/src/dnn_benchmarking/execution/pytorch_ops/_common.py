@@ -21,6 +21,7 @@ __all__ = [
     "_store_tensor",
     "_store_channel_tensor",
     "_channel_values",
+    "_validate_bn_param_dtype",
     "_reject_peer_stats",
     "_channel_broadcast",
     "_scalar_value",
@@ -132,8 +133,14 @@ def _store_channel_tensor(
     _store_tensor(tensors, uid, shaped)
 
 
-def _channel_values(tensor: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    values = tensor.reshape(-1).to(dtype=torch.float32)
+def _channel_values(
+    tensor: torch.Tensor,
+    x: torch.Tensor,
+    dtype: Optional[torch.dtype] = torch.float32,
+) -> torch.Tensor:
+    values = tensor.reshape(-1)
+    if dtype is not None:
+        values = values.to(dtype=dtype)
     if x.ndim < 2:
         raise ValueError("Batchnorm tensors require at least 2 dimensions")
     if values.numel() != x.shape[1]:
@@ -141,6 +148,29 @@ def _channel_values(tensor: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
             f"Batchnorm channel tensor has {values.numel()} elements, expected {x.shape[1]}"
         )
     return values
+
+
+def _validate_bn_param_dtype(
+    x: torch.Tensor, operation: str, *params: torch.Tensor
+) -> None:
+    """Reject batchnorm scale/bias dtypes that native_batch_norm cannot consume.
+
+    The fused op requires scale and bias to share a single dtype, and that dtype
+    must be either float32 or the input dtype. The reference keeps the graph's
+    declared scale/bias dtype so the timed run matches the engine's precision; an
+    ineligible combination fails loudly here instead of being silently promoted.
+    """
+    ref = params[0].dtype
+    for param in params[1:]:
+        if param.dtype != ref:
+            raise ValueError(
+                f"{operation}: scale/bias dtypes must match, got {ref} and {param.dtype}"
+            )
+    if ref not in (x.dtype, torch.float32):
+        raise ValueError(
+            f"{operation}: scale/bias dtype {ref} is not eligible for input dtype "
+            f"{x.dtype}; native_batch_norm requires float32 or {x.dtype}"
+        )
 
 
 def _reject_peer_stats(node: Dict[str, Any], operation: str) -> None:

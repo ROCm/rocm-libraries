@@ -126,17 +126,20 @@ def handle_batchnorm_training(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    scale = _channel_values(_tensor(tensors, scale_uid, node), x).to(torch.float32)
-    bias = _channel_values(_tensor(tensors, bias_uid, node), x).to(torch.float32)
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x, dtype=None)
+    _validate_bn_param_dtype(x, "Batchnorm forward training", scale, bias)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
     # Fused batchnorm forward-training: a single op that dispatches to MIOpen on
-    # ROCm and returns (y, save_mean, save_invstd), so the timed PyTorch reference
-    # measures the batchnorm primitive rather than hand-rolled elementwise glue.
+    # ROCm and returns (y, save_mean, save_invstd). x/scale/bias keep their graph
+    # dtypes so the timed reference measures the same precision workload as the
+    # engine, not a promoted-fp32 kernel plus surrounding casts. save_mean and
+    # save_invstd come back as float32 from the primitive.
     y, mean, inv_variance = torch.native_batch_norm(
-        x.to(dtype=torch.float32), scale, bias, None, None, True, 0.0, epsilon
+        x, scale, bias, None, None, True, 0.0, epsilon
     )
-    _store_tensor(tensors, y_uid, y.to(dtype=x.dtype))
+    _store_tensor(tensors, y_uid, y)
 
     _store_channel_tensor(tensors, _optional_uid(node, "mean_tensor_uid"), mean, x.ndim)
     _store_channel_tensor(
@@ -197,10 +200,14 @@ def handle_batchnorm_backward(
     dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
     dbias_uid = _required_output_uid(node, "dbias_tensor_uid")
 
-    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
+    dy = _tensor(tensors, dy_uid, node)
     x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
-    scale = _channel_values(_tensor(tensors, scale_uid, node), x)
+    if dy.dtype != x.dtype:
+        raise ValueError(
+            f"Batchnorm backward: dy dtype {dy.dtype} must match x dtype {x.dtype}"
+        )
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
+    _validate_bn_param_dtype(x, "Batchnorm backward", scale)
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
     if (mean_uid is None) != (inv_uid is None):
@@ -216,19 +223,21 @@ def handle_batchnorm_backward(
 
     # Fused batchnorm backward: a single op that dispatches to MIOpen on ROCm and
     # returns (dx, dscale, dbias), replacing the hand-rolled gradient reduction.
+    # dy/x keep their graph dtype; saved mean/inv_variance are float32 as the
+    # primitive requires.
     dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
         dy,
-        x_float,
-        scale.to(torch.float32),
+        x,
+        scale,
         None,
         None,
-        mean.to(torch.float32),
-        inv_variance.to(torch.float32),
+        mean,
+        inv_variance,
         True,
         1e-5,
         [True, True, True],
     )
 
-    _store_tensor(tensors, dx_uid, dx.to(dtype=x.dtype))
-    _store_channel_tensor(tensors, dscale_uid, dscale.to(dtype=scale.dtype), x.ndim)
-    _store_channel_tensor(tensors, dbias_uid, dbias.to(dtype=scale.dtype), x.ndim)
+    _store_tensor(tensors, dx_uid, dx)
+    _store_channel_tensor(tensors, dscale_uid, dscale, x.ndim)
+    _store_channel_tensor(tensors, dbias_uid, dbias, x.ndim)

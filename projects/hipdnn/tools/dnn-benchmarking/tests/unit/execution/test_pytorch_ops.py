@@ -506,6 +506,79 @@ class TestPyTorchOpsNewHandlers:
             tensors[6].reshape(-1), beta.grad, rtol=1e-4, atol=1e-5
         )
 
+    def _bn_training_graph(self) -> dict:
+        return {
+            "nodes": [
+                {
+                    "type": "BatchnormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5},
+                }
+            ]
+        }
+
+    def test_batchnorm_training_preserves_graph_param_dtype(self) -> None:
+        # Same input conditions as the engine: bf16 activations + bf16 scale/bias
+        # must run in bf16 (not be silently promoted to fp32) so the timed
+        # reference measures the same precision workload.
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.bfloat16),
+            3: torch.randn(3, dtype=torch.bfloat16),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
+
+    def test_batchnorm_training_accepts_fp32_params_with_low_precision_input(
+        self,
+    ) -> None:
+        # fp32 scale/bias are eligible for any input dtype (MIOpen's mixed-precision
+        # contract), and the output keeps the input dtype.
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.float32),
+            3: torch.randn(3, dtype=torch.float32),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
+
+    def test_batchnorm_training_rejects_ineligible_param_dtype(self) -> None:
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.float16),
+            3: torch.randn(3, dtype=torch.float16),
+            4: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(ValueError, match="not eligible"):
+            pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+    def test_batchnorm_training_rejects_mismatched_scale_bias_dtype(self) -> None:
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.bfloat16),
+            3: torch.randn(3, dtype=torch.float32),
+            4: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(ValueError, match="must match"):
+            pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
     def test_layernorm_matches_torch_and_aux_outputs(self) -> None:
         x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
         graph_json = {
