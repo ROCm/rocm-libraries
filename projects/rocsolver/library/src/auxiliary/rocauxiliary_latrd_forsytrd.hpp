@@ -388,27 +388,29 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
     T* A2 = W + idx2D(0, cw + 1, ldw);
     int lda1 = lda;
     int lda2 = ldw;
-    T* x = A + idx2D(0, c, lda);
+    const T* __restrict__ x = A + idx2D(0, c, lda);
 
     int it = (i < mm) ? i : i - mm;
-    T* a = (i < mm) ? A1 : A2;
+    const T* __restrict__ a = (i < mm) ? A1 : A2;
     int ld = (i < mm) ? lda1 : lda2;
     T* y = (i < mm) ? y1 : y2;
 
     if(tx < n)
         a += tx;
 
-    a += it * size_t(ld);
+    a += it * int64_t(ld);
 
     T res = 0;
 
-    __shared__ T sdata[NB_X];
+    int constexpr max_warps = 32;
+    __shared__ T sdata[max_warps];
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
 
     if(i != c)
     {
+#pragma unroll 4
         for(rocblas_int j = 0; j < n_full; j += NB_X)
             res += conj(a[j]) * x[tx + j];
 
@@ -428,7 +430,9 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
         __syncthreads();
         if(tx == 0)
         {
-            for(rocblas_int k = 1; k < NB_X / warpSize; k++)
+            auto const nthreads = blockDim.x * blockDim.y * blockDim.z;
+            auto const nwarps = nthreads / warpSize;
+            for(rocblas_int k = 1; k < nwarps; k++)
                 res += sdata[k];
         }
     }
@@ -472,10 +476,10 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
     T* A2 = A + idx2D(c + 1, 0, lda);
     int lda1 = ldw;
     int lda2 = lda;
-    T* x = A + idx2D(c + 1, c, lda);
+    const T* __restrict__ const x = A + idx2D(c + 1, c, lda);
 
     int it = (i < c) ? i : i - c;
-    T* a = (i < c) ? A1 : A2;
+    const T* __restrict__ a = (i < c) ? A1 : A2;
     int ld = (i < c) ? lda1 : lda2;
     int it2 = it - c - 1;
     T* y = (i < c) ? y1 : y2;
@@ -483,17 +487,19 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
     if(tx < n)
         a += tx;
 
-    a += it * size_t(ld);
+    a += it * int64_t(ld);
 
     T res = 0;
 
-    __shared__ T sdata[NB_X];
+    int constexpr max_warps = 32;
+    __shared__ T sdata[max_warps];
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
 
     if(it != c)
     {
+#pragma unroll 4
         for(rocblas_int j = 0; j < n_full; j += NB_X)
             res += conj(a[j]) * x[tx + j];
 
@@ -513,7 +519,9 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
         __syncthreads();
         if(tx == 0)
         {
-            for(rocblas_int k = 1; k < NB_X / warpSize; k++)
+            auto const nthreads = blockDim.x * blockDim.y * blockDim.z;
+            auto const nwarps = nthreads / warpSize;
+            for(rocblas_int k = 1; k < nwarps; k++)
                 res += sdata[k];
         }
     }
