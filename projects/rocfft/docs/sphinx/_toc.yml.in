@@ -8,8 +8,10 @@ subtrees:
 
 - caption: Install 
   entries:
+  - file: install/install
+    title: Install rocFFT
   - file: install/building-installing-rocfft
-    title: Installation guide 
+    title: Build from source
 
 - caption: Conceptual 
   entries:

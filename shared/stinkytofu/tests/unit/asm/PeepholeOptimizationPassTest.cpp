@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
+#include <cstdint>
 #include <memory>
 #include <sstream>
 
@@ -1458,7 +1460,7 @@ TEST_F(PeepholeOptimizationPassTest, HexLiteralTimesFloatLiteral_MulMulFusion) {
 
     // temp = v_mul_f32(src, 7.3890562)  // Originally HexLiteral 0x40ec7326
     uint32_t hexBits = 0x40ec7326;
-    float hexFloat = *reinterpret_cast<float*>(&hexBits);
+    float hexFloat = std::bit_cast<float>(hexBits);
     EXPECT_NEAR(hexFloat, 7.3890562f, 0.0001f) << "Verify hex literal value is e^2";
 
     createVMulF32WithConst(0, hexFloat, 1);  // v0 = 7.3890562 * v1

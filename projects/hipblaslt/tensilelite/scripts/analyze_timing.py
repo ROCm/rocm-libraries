@@ -97,6 +97,7 @@ TIMING_HIERARCHY = {
                 "validate_gpu_sync": {},
                 "validate_gpu_readback": {},
                 "validate_element_comparison": {},
+                "validate_mismatch_printing": {},
             },
             "gpu_input_preparation": {},
             "gpu_input_reset": {},

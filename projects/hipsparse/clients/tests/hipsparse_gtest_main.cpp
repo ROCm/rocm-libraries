@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,81 @@
  * ************************************************************************ */
 
 #include "utility.hpp"
-#ifdef GOOGLE_TEST
 #include <gtest/gtest.h>
-#endif
+
 #include <hip/hip_runtime_api.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
+#include <string>
 
 #include "hipsparse_parse_data.hpp"
+#include "program_options.hpp"
 
-using namespace testing;
+#include <csignal>
+
+using testing::InitGoogleTest;
+using testing::TestCase;
+using testing::TestEventListener;
+using testing::TestInfo;
+using testing::TestPartResult;
+using testing::UnitTest;
+
+// Log device VRAM usage. A failed hipMemGetInfo is a strong signal that the
+// device has been lost (rather than merely out of memory).
+static bool hipsparse_log_device_memory(const char* context)
+{
+    size_t     free_mem  = 0;
+    size_t     total_mem = 0;
+    hipError_t status    = hipMemGetInfo(&free_mem, &total_mem);
+    if(status == hipSuccess)
+    {
+        fprintf(stderr,
+                "[ MEMORY   ] %s: device free/total = %zu/%zu MB\n",
+                context,
+                free_mem >> 20,
+                total_mem >> 20);
+        return true;
+    }
+
+    fprintf(stderr,
+            "[ MEMORY   ] %s: hipMemGetInfo failed: hip error %d (%s) -- device may be lost\n",
+            context,
+            status,
+            hipGetErrorString(status));
+    return false;
+}
+
+// Print the currently running test on a fatal signal so a single crashed CI run
+// is diagnosable without a rerun, then re-raise with the default handler.
+extern "C" void hipsparse_fatal_signal_handler(int sig)
+{
+    const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGABRT) ? "SIGABRT" : "signal";
+
+    const TestInfo* info = UnitTest::GetInstance()->current_test_info();
+    if(info != nullptr)
+    {
+        fprintf(stderr,
+                "\n[ FATAL    ] hipsparse-test TERMINATED BY %s during test: %s.%s\n",
+                sig_name,
+                info->test_case_name(),
+                info->name());
+    }
+    else
+    {
+        fprintf(stderr,
+                "\n[ FATAL    ] hipsparse-test TERMINATED BY %s (no test currently running)\n",
+                sig_name);
+    }
+    fflush(stderr);
+
+    // Restore the default disposition and re-raise so the process exit status
+    // still reflects the original signal.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
 
 class ConfigurableEventListener : public TestEventListener
 {
@@ -61,6 +127,7 @@ public:
     void OnTestProgramStart(const UnitTest& unit_test) override
     {
         eventListener->OnTestProgramStart(unit_test);
+        hipsparse_log_device_memory("test program start");
     }
 
     void OnTestIterationStart(const UnitTest& unit_test, int iteration) override
@@ -103,6 +170,26 @@ public:
     void OnTestPartResult(const TestPartResult& result) override
     {
         eventListener->OnTestPartResult(result);
+
+        // On the first failure, capture device memory state. This both proves
+        // the tests themselves are not the memory consumer and detects a device
+        // that has collapsed mid-run. If the device is lost, abort the whole run
+        // so the log shows one clear fault instead of a long cascade of
+        // dependent failures (and a likely SIGSEGV) on the dead device.
+        if(result.failed())
+        {
+            const bool device_alive = hipsparse_log_device_memory("on test failure");
+            if(!device_alive)
+            {
+                fprintf(stderr,
+                        "[ DEVICE   ] Device appears lost after a test failure; aborting the test "
+                        "run to avoid a cascade of dependent failures.\n");
+                fflush(stderr);
+                // _Exit avoids running static destructors that may themselves
+                // fault while the device is in a bad state.
+                std::_Exit(EXIT_FAILURE);
+            }
+        }
     }
 
     void OnTestEnd(const TestInfo& test_info) override
@@ -165,7 +252,7 @@ hipsparseStatus_t hipsparse_record_timing(double msec, double gflops, double gbs
 
 bool display_timing_info_is_stdout_disabled()
 {
-    return HIPSPARSE_STATUS_SUCCESS;
+    return false;
 }
 
 /* =====================================================================
@@ -174,63 +261,88 @@ bool display_timing_info_is_stdout_disabled()
 
 int main(int argc, char** argv)
 {
-    // Print version
-    char version[512];
-    query_version(version);
+    // Parse hipsparse-test options. Unknown options (e.g. --gtest_*) are
+    // ignored here so they can be forwarded to InitGoogleTest below. The
+    // backing storage for matrices_dir is a function-scope static so that
+    // s_hipsparse_clients_matrices_dir (a const char*) remains valid for the
+    // entire program lifetime.
+    std::string matrices_dir;
+    int         device_id = 0;
 
-    // Get device id from command line
-    int device_id = 0;
+    options_description desc("hipSPARSE test command line options");
+    // clang-format off
+    desc.add_options()
+        ("help,h", 
+            "Produces this help message and exits.")    
+        ("version,v",
+            "Prints the hipSPARSE version and exits.")
+        ("device,d",
+            value<int>(&device_id)->default_value(0),
+            "Set the default device to use for the tests.")
+        ("matrices-dir",
+            value<std::string>(&matrices_dir),
+            "Path to the directory containing the test matrix input files. "
+            "Overrides the HIPSPARSE_CLIENTS_MATRICES_DIR environment variable "
+            "when both are specified.");
+    // clang-format on
 
-    for(int i = 1; i < argc; ++i)
+    variables_map vm;
+    try
     {
-        if(strcmp(argv[i], "--device") == 0 && argc > i + 1)
-        {
-            device_id = atoi(argv[i + 1]);
-        }
-
-        if(strcmp(argv[i], "--matrices-dir") == 0)
-        {
-            if(argc > i + 1)
-            {
-                s_hipsparse_clients_matrices_dir = argv[i + 1];
-            }
-            else
-            {
-                fprintf(stderr, "missing argument from option --matrices-dir");
-                return -1;
-            }
-        }
-
-        if(strcmp(argv[i], "--version") == 0)
-        {
-            printf("hipSPARSE version: %s\n", version);
-            return 0;
-        }
-        if(strcmp(argv[i], "--help") == 0)
-        {
-            fprintf(stderr,
-                    "Usage: %s [--matrices-dir <matrix directory path>] [--device <device id>]\n",
-                    argv[0]);
-            fprintf(stderr,
-                    "To specify the directory of matrix input files the user can export the "
-                    "environment variable HIPSPARSE_CLIENTS_MATRICES_DIR or uses the command line "
-                    "option '--matrices-dir'. If the command line option '--matrices-dir' is used "
-                    "then the environment variable HIPSPARSE_CLIENTS_MATRICES_DIR is ignored.\n");
-            return 0;
-        }
+        store(parse_command_line(argc, argv, desc, /*ignoreUnknown=*/true), vm);
+        notify(vm);
+    }
+    catch(const std::exception& e)
+    {
+        fprintf(stderr, "Error parsing command line: %s\n", e.what());
+        return -1;
     }
 
-    // Device Query
+    if(vm.count("help"))
+    {
+        std::cout << "Usage: " << argv[0] << " [hipsparse-test options] [GoogleTest options]\n\n"
+                  << desc
+                  << "\nAny options not listed above (e.g. --gtest_filter, "
+                     "--gtest_list_tests) are forwarded to GoogleTest.\n"
+                     "To specify the directory of matrix input files, the user can either "
+                     "export the environment variable HIPSPARSE_CLIENTS_MATRICES_DIR or "
+                     "use the command line option '--matrices-dir'. If '--matrices-dir' "
+                     "is used then the environment variable is ignored."
+                  << std::endl;
+        return 0;
+    }
+
+    // Set matrix directory
+    if(!matrices_dir.empty())
+    {
+        s_hipsparse_clients_matrices_dir = matrices_dir.c_str();
+    }
+
+    // Validate and select the requested HIP device before any subsequent
+    // hipSPARSE / HIP API call.
     int device_count = query_device_property();
 
-    if(device_count <= device_id)
+    if(device_id < 0 || device_count <= device_id)
     {
-        fprintf(stderr, "Error: invalid device ID. There may not be such device ID. Will exit\n");
+        fprintf(stderr,
+                "Error: invalid device ID %d (detected %d device(s)). Will exit.\n",
+                device_id,
+                device_count);
         return -1;
     }
     else
     {
         set_device(device_id);
+    }
+
+    // Query the hipSPARSE version on the selected device.
+    char version[512];
+    query_version(version);
+
+    if(vm.count("version"))
+    {
+        printf("hipSPARSE version: %s\n", version);
+        return 0;
     }
 
     printf("hipSPARSE version: %s\n", version);
@@ -241,7 +353,7 @@ int main(int argc, char** argv)
     std::cout << "hipSPARSE data path: " << datapath << std::endl;
 
     // Set data file path
-    hipsparse_parse_data(argc, argv, datapath + "hipsparse_test.data");
+    hipsparse_parse_data(datapath + "hipsparse_test.data");
 
     // Initialize google test
     InitGoogleTest(&argc, argv);
@@ -267,6 +379,12 @@ int main(int argc, char** argv)
     }
 
     listeners.Append(listener);
+
+    // Install fatal-signal handlers so a crash (e.g. a dereference of an
+    // un-initialized device buffer after an allocation failure) still records
+    // the test that was running before the process dies.
+    signal(SIGSEGV, hipsparse_fatal_signal_handler);
+    signal(SIGABRT, hipsparse_fatal_signal_handler);
 
     // Run all tests
     int ret = RUN_ALL_TESTS();

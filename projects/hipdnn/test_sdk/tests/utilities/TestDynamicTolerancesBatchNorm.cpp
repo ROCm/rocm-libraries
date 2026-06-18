@@ -2043,3 +2043,867 @@ TEST(TestCalculateBnTrainTolerance, NonDefaultEpsilon)
     EXPECT_EQ(tolFp32Default, tolFp32LargeEps)
         << "Without output casting, eps_bn should not affect y tolerance";
 }
+
+// =================================================================================================
+// TestCalculateBatchnormBackwardDbiasTolerance
+// =================================================================================================
+
+struct BnBwdDbiasToleranceTestCase
+{
+    double dyMin;
+    double dyMax;
+    int64_t nElementsPerChannel;
+    double expectedTolerance;
+    bool expectThrow = false;
+
+    friend std::ostream& operator<<(std::ostream& os, const BnBwdDbiasToleranceTestCase& tc)
+    {
+        os << "dyMin: " << tc.dyMin << ", dyMax: " << tc.dyMax
+           << ", NHW: " << tc.nElementsPerChannel << ", expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
+        return os;
+    }
+};
+
+template <typename T>
+std::vector<BnBwdDbiasToleranceTestCase> getBnBwdDbiasToleranceTestCases();
+
+// dbias tolerance formula (no casting):
+//   tolerance = gamma_NHW * max|dy|
+// With input casting (InputType=double, ComputeType=float):
+//   tolerance += computeEpsilon * NHW * max|dy| (input cast for 1 tensor)
+// With output casting (OutputType=half/bf16):
+//   tolerance += NHW * max|dy| * outputEpsilon
+
+// Float / Float / Float
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<float, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, 1, gamma(1) * 1.0},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0},
+            // Large dy range (scales linearly with max|dy|)
+            {-1000.0, 1000.0, 10, gamma(10) * 1000.0},
+            // Zero dy (tolerance=0)
+            {0.0, 0.0, 10, 0.0}};
+}
+
+// Float / Double / Float (Input casting: inputEpsilon(double) < epsilon(float))
+// tolerance = gamma * max|dy| + u * NHW * max|dy|
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<float, double, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1: gamma * 1 + u * 1 * 1
+            {-1.0, 1.0, 1, gamma(1) * 1.0 + u * 1.0 * 1.0},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0 + u * 10.0 * 1.0},
+            // Zero dy
+            {0.0, 0.0, 10, 0.0}};
+}
+
+// Half / Float / Float (Output casting: outputEpsilon(half) > epsilon(float))
+// tolerance = gamma * max|dy| + NHW * max|dy| * uHalf
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<half, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, 1, gamma(1) * 1.0 + 1.0 * 1.0 * uHalf},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0 + 10.0 * 1.0 * uHalf},
+            // Zero dy
+            {0.0, 0.0, 10, 0.0}};
+}
+
+// Half / Half / Half
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<half, half, half>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, 1, gamma(1) * 1.0},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0},
+            // Zero dy
+            {0.0, 0.0, 10, 0.0}};
+}
+
+// Bfloat16 / Float / Float (Output casting: outputEpsilon(bf16) > epsilon(float))
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<bfloat16, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, 1, gamma(1) * 1.0 + 1.0 * 1.0 * uBf16},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0 + 10.0 * 1.0 * uBf16},
+            // Zero dy
+            {0.0, 0.0, 10, 0.0}};
+}
+
+// Bfloat16 / Bfloat16 / Bfloat16
+template <>
+std::vector<BnBwdDbiasToleranceTestCase>
+    getBnBwdDbiasToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    auto gamma = [&](int64_t c) { return computeGamma(static_cast<uint64_t>(c), u); };
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, 0, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, 1, gamma(1) * 1.0},
+            // NHW=10
+            {-1.0, 1.0, 10, gamma(10) * 1.0},
+            // Zero dy
+            {0.0, 0.0, 10, 0.0}};
+}
+
+template <typename Out, typename In, typename Comp>
+class TestCalculateBnBwdDbiasTolerance
+    : public ::testing::TestWithParam<BnBwdDbiasToleranceTestCase>
+{
+protected:
+    void verifyTolerance()
+    {
+        const auto& params = GetParam();
+
+        if(params.expectThrow)
+        {
+            EXPECT_THROW((calculateBatchnormBackwardDbiasTolerance<Out, In, Comp>(
+                             params.dyMin, params.dyMax, params.nElementsPerChannel)),
+                         std::invalid_argument);
+        }
+        else
+        {
+            auto tol = calculateBatchnormBackwardDbiasTolerance<Out, In, Comp>(
+                params.dyMin, params.dyMax, params.nElementsPerChannel);
+
+            auto expected = static_cast<float>(params.expectedTolerance);
+
+            EXPECT_NEAR(
+                tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
+        }
+    }
+};
+
+using TestCalcBnBwdDbiasTolFp32 = TestCalculateBnBwdDbiasTolerance<float, float, float>;
+TEST_P(TestCalcBnBwdDbiasTolFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolFp32,
+    ::testing::ValuesIn(getBnBwdDbiasToleranceTestCases<TypeTriple<float, float, float>>()));
+
+using TestCalcBnBwdDbiasTolInputDouble = TestCalculateBnBwdDbiasTolerance<float, double, float>;
+TEST_P(TestCalcBnBwdDbiasTolInputDouble, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolInputDouble,
+    ::testing::ValuesIn(getBnBwdDbiasToleranceTestCases<TypeTriple<float, double, float>>()));
+
+using TestCalcBnBwdDbiasTolComputeFloatFp16 = TestCalculateBnBwdDbiasTolerance<half, float, float>;
+TEST_P(TestCalcBnBwdDbiasTolComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolComputeFloatFp16,
+    ::testing::ValuesIn(getBnBwdDbiasToleranceTestCases<TypeTriple<half, float, float>>()));
+
+using TestCalcBnBwdDbiasTolFp16 = TestCalculateBnBwdDbiasTolerance<half, half, half>;
+TEST_P(TestCalcBnBwdDbiasTolFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolFp16,
+    ::testing::ValuesIn(getBnBwdDbiasToleranceTestCases<TypeTriple<half, half, half>>()));
+
+using TestCalcBnBwdDbiasTolComputeFloatBfp16
+    = TestCalculateBnBwdDbiasTolerance<bfloat16, float, float>;
+TEST_P(TestCalcBnBwdDbiasTolComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolComputeFloatBfp16,
+    ::testing::ValuesIn(getBnBwdDbiasToleranceTestCases<TypeTriple<bfloat16, float, float>>()));
+
+using TestCalcBnBwdDbiasTolBfp16 = TestCalculateBnBwdDbiasTolerance<bfloat16, bfloat16, bfloat16>;
+TEST_P(TestCalcBnBwdDbiasTolBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDbiasTolBfp16,
+    ::testing::ValuesIn(
+        getBnBwdDbiasToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()));
+
+// =================================================================================================
+// TestCalculateBatchnormBackwardDscaleTolerance
+// =================================================================================================
+
+struct BnBwdDscaleToleranceTestCase
+{
+    double dyMin;
+    double dyMax;
+    double xMin;
+    double xMax;
+    int64_t nElementsPerChannel;
+    double epsilonBn;
+    double expectedTolerance;
+    bool expectThrow = false;
+
+    friend std::ostream& operator<<(std::ostream& os, const BnBwdDscaleToleranceTestCase& tc)
+    {
+        os << "dyMin: " << tc.dyMin << ", dyMax: " << tc.dyMax << ", xMin: " << tc.xMin
+           << ", xMax: " << tc.xMax << ", NHW: " << tc.nElementsPerChannel
+           << ", epsBn: " << tc.epsilonBn << ", expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
+        return os;
+    }
+};
+
+template <typename T>
+std::vector<BnBwdDscaleToleranceTestCase> getBnBwdDscaleToleranceTestCases();
+
+// dscale tolerance formula (no casting, maxAbsDy > 0):
+//   varEst = max(maxAbsX^2, epsBn)
+//   invVarEst = 1/sqrt(varEst + epsBn)
+//   maxAbsXHat = maxAbsX * invVarEst
+//   tolerance = (gamma + u) * maxAbsXHat * max|dy|
+// With input casting (double->float): + 2 * u * NHW * maxAbsXHat * max|dy|
+// With output casting: + NHW * maxAbsXHat * max|dy| * outputEpsilon
+
+// Helper to compute expected dscale tolerance
+static double expectedDscaleTol(double maxAbsDy,
+                                double maxAbsX,
+                                int64_t nhw,
+                                double epsBn,
+                                double u,
+                                double outputEpsilon = 0.0,
+                                double computeEpsilon = 0.0,
+                                double inputEpsilon = 0.0)
+{
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0;
+    }
+    auto gamma = computeGamma(static_cast<uint64_t>(nhw), u);
+    const double varEst = std::max(maxAbsX * maxAbsX, epsBn);
+    const double invVarEst = 1.0 / std::sqrt(varEst + epsBn);
+    const double maxAbsXHat = maxAbsX * invVarEst;
+    const double signalBound = static_cast<double>(nhw) * maxAbsXHat * maxAbsDy;
+    double tol = (gamma + u) * maxAbsXHat * maxAbsDy;
+    // Input casting (factor=2 for two-tensor product)
+    if(inputEpsilon > 0.0 && inputEpsilon < computeEpsilon)
+    {
+        tol += 2.0 * computeEpsilon * signalBound;
+    }
+    // Output casting
+    if(outputEpsilon > computeEpsilon && computeEpsilon > 0.0)
+    {
+        tol += signalBound * outputEpsilon;
+    }
+    return tol;
+}
+
+// Float / Float / Float
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<float, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u)},
+            // Large x range
+            {-1.0, 1.0, -1000.0, 1000.0, 10, 1e-5, expectedDscaleTol(1.0, 1000.0, 10, 1e-5, u)},
+            // Zero dy (tolerance=0)
+            {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0},
+            // Zero x (xHat=0 -> tol=0 from function since dy>0 but xHat=0 means all products are 0)
+            {-1.0, 1.0, 0.0, 0.0, 10, 1e-5, expectedDscaleTol(1.0, 0.0, 10, 1e-5, u)},
+            // Invalid epsilon => throws
+            {-1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, true}};
+}
+
+// Float / Double / Float (Input casting: inputEpsilon(double) < epsilon(float))
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<float, double, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uDouble = std::numeric_limits<double>::epsilon();
+    return {
+        // NHW = 0 => throws
+        {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+        // NHW=1
+        {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u, 0.0, u, uDouble)},
+        // NHW=10
+        {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u, 0.0, u, uDouble)},
+        // Zero dy
+        {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Half / Float / Float (Output casting: outputEpsilon(half) > epsilon(float))
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<half, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u, uHalf, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u, uHalf, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Half / Half / Half
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<half, half, half>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Bfloat16 / Float / Float (Output casting)
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<bfloat16, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u, uBf16, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u, uBf16, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Bfloat16 / Bfloat16 / Bfloat16
+template <>
+std::vector<BnBwdDscaleToleranceTestCase>
+    getBnBwdDscaleToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDscaleTol(1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDscaleTol(1.0, 1.0, 10, 1e-5, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+template <typename Out, typename In, typename Comp>
+class TestCalculateBnBwdDscaleTolerance
+    : public ::testing::TestWithParam<BnBwdDscaleToleranceTestCase>
+{
+protected:
+    void verifyTolerance()
+    {
+        const auto& params = GetParam();
+
+        if(params.expectThrow)
+        {
+            EXPECT_THROW((calculateBatchnormBackwardDscaleTolerance<Out, In, Comp>(
+                             params.dyMin,
+                             params.dyMax,
+                             params.xMin,
+                             params.xMax,
+                             params.nElementsPerChannel,
+                             params.epsilonBn)),
+                         std::invalid_argument);
+        }
+        else
+        {
+            auto tol = calculateBatchnormBackwardDscaleTolerance<Out, In, Comp>(
+                params.dyMin,
+                params.dyMax,
+                params.xMin,
+                params.xMax,
+                params.nElementsPerChannel,
+                params.epsilonBn);
+
+            auto expected = static_cast<float>(params.expectedTolerance);
+
+            EXPECT_NEAR(
+                tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
+        }
+    }
+};
+
+using TestCalcBnBwdDscaleTolFp32 = TestCalculateBnBwdDscaleTolerance<float, float, float>;
+TEST_P(TestCalcBnBwdDscaleTolFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolFp32,
+    ::testing::ValuesIn(getBnBwdDscaleToleranceTestCases<TypeTriple<float, float, float>>()));
+
+using TestCalcBnBwdDscaleTolInputDouble = TestCalculateBnBwdDscaleTolerance<float, double, float>;
+TEST_P(TestCalcBnBwdDscaleTolInputDouble, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolInputDouble,
+    ::testing::ValuesIn(getBnBwdDscaleToleranceTestCases<TypeTriple<float, double, float>>()));
+
+using TestCalcBnBwdDscaleTolComputeFloatFp16
+    = TestCalculateBnBwdDscaleTolerance<half, float, float>;
+TEST_P(TestCalcBnBwdDscaleTolComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolComputeFloatFp16,
+    ::testing::ValuesIn(getBnBwdDscaleToleranceTestCases<TypeTriple<half, float, float>>()));
+
+using TestCalcBnBwdDscaleTolFp16 = TestCalculateBnBwdDscaleTolerance<half, half, half>;
+TEST_P(TestCalcBnBwdDscaleTolFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolFp16,
+    ::testing::ValuesIn(getBnBwdDscaleToleranceTestCases<TypeTriple<half, half, half>>()));
+
+using TestCalcBnBwdDscaleTolComputeFloatBfp16
+    = TestCalculateBnBwdDscaleTolerance<bfloat16, float, float>;
+TEST_P(TestCalcBnBwdDscaleTolComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolComputeFloatBfp16,
+    ::testing::ValuesIn(getBnBwdDscaleToleranceTestCases<TypeTriple<bfloat16, float, float>>()));
+
+using TestCalcBnBwdDscaleTolBfp16 = TestCalculateBnBwdDscaleTolerance<bfloat16, bfloat16, bfloat16>;
+TEST_P(TestCalcBnBwdDscaleTolBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDscaleTolBfp16,
+    ::testing::ValuesIn(
+        getBnBwdDscaleToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()));
+
+// =================================================================================================
+// TestCalculateBatchnormBackwardDxTolerance
+// =================================================================================================
+
+struct BnBwdDxToleranceTestCase
+{
+    double dyMin;
+    double dyMax;
+    double xMin;
+    double xMax;
+    double scaleMin;
+    double scaleMax;
+    int64_t nElementsPerChannel;
+    double epsilonBn;
+    double expectedTolerance;
+    bool expectThrow = false;
+
+    friend std::ostream& operator<<(std::ostream& os, const BnBwdDxToleranceTestCase& tc)
+    {
+        os << "dyMin: " << tc.dyMin << ", dyMax: " << tc.dyMax << ", xMin: " << tc.xMin
+           << ", xMax: " << tc.xMax << ", scaleMin: " << tc.scaleMin
+           << ", scaleMax: " << tc.scaleMax << ", NHW: " << tc.nElementsPerChannel
+           << ", epsBn: " << tc.epsilonBn << ", expectedTolerance: " << tc.expectedTolerance
+           << ", expectThrow: " << (tc.expectThrow ? "true" : "false");
+        return os;
+    }
+};
+
+template <typename T>
+std::vector<BnBwdDxToleranceTestCase> getBnBwdDxToleranceTestCases();
+
+// dx tolerance formula (no casting):
+//   varEst = max(maxAbsX^2, epsBn), invVarEst = 1/sqrt(varEst + epsBn)
+//   maxAbsXHat = maxAbsX * invVarEst
+//   scalarCoef = maxAbsScale * invVarEst
+//   deltaMeanDy = (gamma + u) * max|dy|
+//   deltaMeanDyXhat = (gamma + 2u) * maxAbsXHat * max|dy|
+//   maxAbsE = (2 + maxAbsXHat^2) * max|dy|
+//   tolerance = scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + 3u * maxAbsE)
+//             + 2u * scalarCoef * maxAbsE
+
+// Helper to compute expected dx tolerance
+static double expectedDxTol(double maxAbsDy,
+                            double maxAbsX,
+                            double maxAbsScale,
+                            int64_t nhw,
+                            double epsBn,
+                            double u,
+                            double outputEpsilon = 0.0,
+                            double computeEpsilon = 0.0,
+                            double inputEpsilon = 0.0)
+{
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0;
+    }
+    auto gamma = computeGamma(static_cast<uint64_t>(nhw), u);
+    const double varEst = std::max(maxAbsX * maxAbsX, epsBn);
+    const double invVarEst = 1.0 / std::sqrt(varEst + epsBn);
+    const double maxAbsXHat = maxAbsX * invVarEst;
+    const double scalarCoef = maxAbsScale * invVarEst;
+    const double deltaMeanDy = (gamma + u) * maxAbsDy;
+    const double deltaMeanDyXhat = (gamma + 2.0 * u) * maxAbsXHat * maxAbsDy;
+    const double maxAbsE = (2.0 + maxAbsXHat * maxAbsXHat) * maxAbsDy;
+    double tol = scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + 3.0 * u * maxAbsE)
+                 + 2.0 * u * scalarCoef * maxAbsE;
+    const double maxAbsDx = scalarCoef * maxAbsE;
+    // Input casting (factor=2)
+    if(inputEpsilon > 0.0 && inputEpsilon < computeEpsilon)
+    {
+        tol += 2.0 * computeEpsilon * maxAbsDx;
+    }
+    // Output casting
+    if(outputEpsilon > computeEpsilon && computeEpsilon > 0.0)
+    {
+        tol += maxAbsDx * outputEpsilon;
+    }
+    return tol;
+}
+
+// Float / Float / Float
+template <>
+std::vector<BnBwdDxToleranceTestCase>
+    getBnBwdDxToleranceTestCases<TypeTriple<float, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u)},
+            // Zero dy (tol=0)
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0},
+            // Zero scale (scalarCoef=0 -> tol=0)
+            {-1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 10, 1e-5, expectedDxTol(1.0, 1.0, 0.0, 10, 1e-5, u)},
+            // Invalid epsilon => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 0.0, 0.0, true}};
+}
+
+// Float / Double / Float (Input casting)
+template <>
+std::vector<BnBwdDxToleranceTestCase>
+    getBnBwdDxToleranceTestCases<TypeTriple<float, double, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uDouble = std::numeric_limits<double>::epsilon();
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             1,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u, 0.0, u, uDouble)},
+            // NHW=10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             10,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u, 0.0, u, uDouble)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Half / Float / Float (Output casting)
+template <>
+std::vector<BnBwdDxToleranceTestCase> getBnBwdDxToleranceTestCases<TypeTriple<half, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uHalf = static_cast<double>(std::numeric_limits<half>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             1,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u, uHalf, u)},
+            // NHW=10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             10,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u, uHalf, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Half / Half / Half
+template <>
+std::vector<BnBwdDxToleranceTestCase> getBnBwdDxToleranceTestCases<TypeTriple<half, half, half>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<half>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Bfloat16 / Float / Float (Output casting)
+template <>
+std::vector<BnBwdDxToleranceTestCase>
+    getBnBwdDxToleranceTestCases<TypeTriple<bfloat16, float, float>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<float>::epsilon());
+    auto uBf16 = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             1,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u, uBf16, u)},
+            // NHW=10
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             -1.0,
+             1.0,
+             10,
+             1e-5,
+             expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u, uBf16, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+// Bfloat16 / Bfloat16 / Bfloat16
+template <>
+std::vector<BnBwdDxToleranceTestCase>
+    getBnBwdDxToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()
+{
+    auto u = static_cast<double>(std::numeric_limits<bfloat16>::epsilon());
+    return {// NHW = 0 => throws
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 0, 1e-5, 0.0, true},
+            // NHW=1
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 1, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 1, 1e-5, u)},
+            // NHW=10
+            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, expectedDxTol(1.0, 1.0, 1.0, 10, 1e-5, u)},
+            // Zero dy
+            {0.0, 0.0, -1.0, 1.0, -1.0, 1.0, 10, 1e-5, 0.0}};
+}
+
+template <typename Out, typename In, typename Comp>
+class TestCalculateBnBwdDxTolerance : public ::testing::TestWithParam<BnBwdDxToleranceTestCase>
+{
+protected:
+    void verifyTolerance()
+    {
+        const auto& params = GetParam();
+
+        if(params.expectThrow)
+        {
+            EXPECT_THROW(
+                (calculateBatchnormBackwardDxTolerance<Out, In, Comp>(params.dyMin,
+                                                                      params.dyMax,
+                                                                      params.xMin,
+                                                                      params.xMax,
+                                                                      params.scaleMin,
+                                                                      params.scaleMax,
+                                                                      params.nElementsPerChannel,
+                                                                      params.epsilonBn)),
+                std::invalid_argument);
+        }
+        else
+        {
+            auto tol
+                = calculateBatchnormBackwardDxTolerance<Out, In, Comp>(params.dyMin,
+                                                                       params.dyMax,
+                                                                       params.xMin,
+                                                                       params.xMax,
+                                                                       params.scaleMin,
+                                                                       params.scaleMax,
+                                                                       params.nElementsPerChannel,
+                                                                       params.epsilonBn);
+
+            auto expected = static_cast<float>(params.expectedTolerance);
+
+            EXPECT_NEAR(
+                tol, expected, std::max(expected * 0.01f, std::numeric_limits<float>::min()));
+        }
+    }
+};
+
+using TestCalcBnBwdDxTolFp32 = TestCalculateBnBwdDxTolerance<float, float, float>;
+TEST_P(TestCalcBnBwdDxTolFp32, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolFp32,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<float, float, float>>()));
+
+using TestCalcBnBwdDxTolInputDouble = TestCalculateBnBwdDxTolerance<float, double, float>;
+TEST_P(TestCalcBnBwdDxTolInputDouble, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolInputDouble,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<float, double, float>>()));
+
+using TestCalcBnBwdDxTolComputeFloatFp16 = TestCalculateBnBwdDxTolerance<half, float, float>;
+TEST_P(TestCalcBnBwdDxTolComputeFloatFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolComputeFloatFp16,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<half, float, float>>()));
+
+using TestCalcBnBwdDxTolFp16 = TestCalculateBnBwdDxTolerance<half, half, half>;
+TEST_P(TestCalcBnBwdDxTolFp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolFp16,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<half, half, half>>()));
+
+using TestCalcBnBwdDxTolComputeFloatBfp16 = TestCalculateBnBwdDxTolerance<bfloat16, float, float>;
+TEST_P(TestCalcBnBwdDxTolComputeFloatBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolComputeFloatBfp16,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<bfloat16, float, float>>()));
+
+using TestCalcBnBwdDxTolBfp16 = TestCalculateBnBwdDxTolerance<bfloat16, bfloat16, bfloat16>;
+TEST_P(TestCalcBnBwdDxTolBfp16, VerifyTolerance)
+{
+    this->verifyTolerance();
+}
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    TestCalcBnBwdDxTolBfp16,
+    ::testing::ValuesIn(getBnBwdDxToleranceTestCases<TypeTriple<bfloat16, bfloat16, bfloat16>>()));
+
+// =================================================================================================
+// Standalone Tests - BN Backward
+// =================================================================================================
+
+// dbias tolerance is simpler than dscale (pure sum vs dot-product)
+TEST(TestCalculateBnBwdDbiasTolerance, DbiasToleranceSmallerThanDscale)
+{
+    auto dbiasTol = calculateBatchnormBackwardDbiasTolerance<float, float, float>(-1.0, 1.0, 100);
+    auto dscaleTol
+        = calculateBatchnormBackwardDscaleTolerance<float, float, float>(-1.0, 1.0, -1.0, 1.0, 100);
+
+    EXPECT_LT(dbiasTol, dscaleTol)
+        << "dbias (pure sum) should have smaller tolerance than dscale (dot-product)";
+}
+
+// Doubling scale approximately doubles dx tolerance
+TEST(TestCalculateBnBwdDxTolerance, DxToleranceScalesWithScale)
+{
+    auto tolScale1 = calculateBatchnormBackwardDxTolerance<float, float, float>(
+        -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, 100);
+    auto tolScale2 = calculateBatchnormBackwardDxTolerance<float, float, float>(
+        -1.0, 1.0, -1.0, 1.0, -2.0, 2.0, 100);
+
+    // scalarCoef = scale * invVar, so doubling scale should approximately double tolerance
+    auto ratio = static_cast<double>(tolScale2) / static_cast<double>(tolScale1);
+    EXPECT_GT(ratio, 1.8) << "Doubling scale should approximately double dx tolerance";
+    EXPECT_LT(ratio, 2.2) << "Ratio should be close to 2.0";
+}

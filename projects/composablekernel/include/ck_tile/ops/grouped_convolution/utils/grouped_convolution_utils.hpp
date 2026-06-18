@@ -6,10 +6,12 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/convolution_parameter.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 enum class GroupedConvDirection
@@ -18,6 +20,71 @@ enum class GroupedConvDirection
     BACKWARD_DATA,
     BACKWARD_WEIGHT
 };
+
+// Wavelet pipeline support shared by all three grouped-conv directions. The wavelet GEMM
+// pipeline launches extra load-only waves (LaunchBlockSize > BlockSize) and splits the
+// workgroup into math waves (hold accumulators, run the epilogue) and load waves (run a
+// matching barrier sequence). Non-wavelet pipelines expose neither member; these helpers
+// detect that via SFINAE so each kernel dispatches without duplicating the machinery.
+namespace impl {
+template <typename T, typename = void>
+struct has_launch_block_size : std::false_type
+{
+};
+template <typename T>
+struct has_launch_block_size<T, std::void_t<decltype(T::LaunchBlockSize)>> : std::true_type
+{
+};
+
+template <typename T, typename = void>
+struct has_is_wavelet : std::false_type
+{
+};
+template <typename T>
+struct has_is_wavelet<T, std::void_t<decltype(T::IsWavelet)>> : std::true_type
+{
+};
+} // namespace impl
+
+// Block size to launch with: wavelet pipelines need LaunchBlockSize (load + math waves);
+// all others fall back to BlockSize.
+template <typename Pipeline>
+inline constexpr index_t GroupedConvLaunchBlockSize = []() {
+    if constexpr(impl::has_launch_block_size<Pipeline>::value)
+        return Pipeline::LaunchBlockSize;
+    else
+        return Pipeline::BlockSize;
+}();
+
+// True when the pipeline uses wavelet load/math wave specialization.
+template <typename Pipeline>
+inline constexpr bool is_wavelet_pipeline = []() {
+    if constexpr(impl::has_is_wavelet<Pipeline>::value)
+        return Pipeline::IsWavelet;
+    else
+        return false;
+}();
+
+// Run the CShuffle epilogue with wavelet load/math wave dispatch. For wavelet pipelines only
+// the math waves run @p epilogue_body (which writes the C tile); load waves run a matching
+// barrier sequence (RunBarrierStub) to avoid an LDS-sync deadlock. Non-wavelet pipelines run
+// @p epilogue_body directly. The body is direction-specific (split-K dispatch, window
+// construction), so it is passed in rather than shared.
+template <typename GemmPipeline, typename EpiloguePipeline, typename EpilogueBody>
+CK_TILE_DEVICE void RunWaveletAwareEpilogue(EpilogueBody&& epilogue_body)
+{
+    if constexpr(is_wavelet_pipeline<GemmPipeline>)
+    {
+        if(GemmPipeline::IsMathWave())
+            epilogue_body();
+        else
+            EpiloguePipeline::RunBarrierStub();
+    }
+    else
+    {
+        epilogue_body();
+    }
+}
 
 /// @brief The Grouped Conv kernel host arguments.
 ///
@@ -69,12 +136,13 @@ template <index_t NDimSpatial_,
           typename WeiLayout_,
           typename DsLayout_,
           typename OutLayout_,
-          index_t VectorSizeA_      = 1,
-          index_t VectorSizeB_      = 1,
-          index_t VectorSizeC_      = 1,
-          index_t NumGroupsToMerge_ = 1,
-          bool EnableSplitImage_    = false,
-          bool ExplicitGemm_        = false>
+          index_t VectorSizeA_          = 1,
+          index_t VectorSizeB_          = 1,
+          index_t VectorSizeC_          = 1,
+          index_t NumGroupsToMerge_     = 1,
+          bool EnableSplitImage_        = false,
+          bool ExplicitGemm_            = false,
+          typename DepthwiseTraitsType_ = void>
 struct GroupedConvTraits
 {
     private:
@@ -97,13 +165,17 @@ struct GroupedConvTraits
         static constexpr bool FixedVectorSize                     = true;
         static constexpr bool UseStructuredSparsity               = false;
         static constexpr bool Persistent                          = false;
+        static constexpr bool Preshuffle                          = false;
+        static constexpr index_t LDSVectorSize                    = 16;
         using ELayout = ck_tile::tensor_layout::gemm::RowMajor;
     };
     // Compile time parameters
-    static constexpr index_t NumGroupsToMerge                     = NumGroupsToMerge_;
-    static constexpr bool EnableSplitImage                        = EnableSplitImage_;
-    static constexpr bool ExplicitGemm                            = ExplicitGemm_;
-    static constexpr index_t NDimSpatial                          = NDimSpatial_;
+    static constexpr index_t NumGroupsToMerge = NumGroupsToMerge_;
+    static constexpr bool EnableSplitImage    = EnableSplitImage_;
+    static constexpr bool ExplicitGemm        = ExplicitGemm_;
+    static constexpr bool IsDepthwise         = !std::is_void_v<DepthwiseTraitsType_>;
+    using DepthwiseTraits                     = DepthwiseTraitsType_;
+    static constexpr index_t NDimSpatial      = NDimSpatial_;
     static constexpr ConvolutionSpecialization ConvSpecialization = ConvSpecialization_;
     using InLayout                                                = InLayout_;
     using WeiLayout                                               = WeiLayout_;
@@ -179,6 +251,113 @@ struct GroupedConvTraits
     static constexpr ck_tile::index_t VectorSizeC = VectorSizeC_;
     static constexpr ck_tile::index_t NumDTensor  = DsLayout::size();
     using ImplicitGemmDsLayout                    = decltype(generate_implicit_gemm_layout());
+};
+
+template <typename InDataType_,
+          typename WeiDataType_,
+          typename AccDataType_,
+          typename OutDataType_,
+          index_t BlockSize_,
+          index_t TileH_,
+          index_t TileW_,
+          index_t FilterH_,
+          index_t FilterW_,
+          index_t StrideH_,
+          index_t StrideW_,
+          index_t DilationH_,
+          index_t DilationW_,
+          index_t PadH_,
+          index_t PadW_,
+          index_t NBatch_,
+          index_t SubTileH_,
+          index_t SubTileW_,
+          index_t InVectorSize_,
+          index_t OutVectorSize_>
+struct DepthwiseConvFwdTraits
+{
+    using InDataType  = InDataType_;
+    using WeiDataType = WeiDataType_;
+    using AccDataType = AccDataType_;
+    using OutDataType = OutDataType_;
+
+    static constexpr index_t NDimSpatial = 2;
+
+    static constexpr index_t BlockSize = BlockSize_;
+    static constexpr index_t WaveSize  = BlockSize;
+
+    static constexpr index_t TileOutH = TileH_;
+    static constexpr index_t TileOutW = TileW_;
+    static constexpr index_t TileInH  = TileOutH * StrideH_;
+    static constexpr index_t TileInW  = TileOutW * StrideW_;
+
+    static constexpr index_t FilterH = FilterH_;
+    static constexpr index_t FilterW = FilterW_;
+
+    static constexpr index_t StrideH   = StrideH_;
+    static constexpr index_t StrideW   = StrideW_;
+    static constexpr index_t DilationH = DilationH_;
+    static constexpr index_t DilationW = DilationW_;
+    static constexpr index_t PadH      = PadH_;
+    static constexpr index_t PadW      = PadW_;
+
+    static constexpr index_t LdsTileH = TileInH + 2 * PadH;
+    static constexpr index_t LdsTileW = TileInW + 2 * PadW;
+
+    static constexpr index_t NBatch = NBatch_;
+
+    static constexpr index_t SubTileH = SubTileH_;
+    static constexpr index_t SubTileW = SubTileW_;
+
+    static constexpr index_t InVectorSize  = InVectorSize_;
+    static constexpr index_t OutVectorSize = OutVectorSize_;
+    // Hardcoded to 2: enables v_dot2 (fp16x2) on FP16 and even/odd weight packing for
+    // 2-column-per-step processing in RunConvolution when StrideW=1
+    static constexpr index_t WeiVectorSize = 2;
+
+    static constexpr index_t HRepeats      = integer_divide_ceil(TileOutH, SubTileH);
+    static constexpr index_t WRepeats      = integer_divide_ceil(TileOutW, SubTileW);
+    static constexpr index_t TotalSubTiles = HRepeats * WRepeats;
+    static constexpr index_t TilePerWave   = WaveSize / TotalSubTiles;
+    static constexpr index_t ThreadPerTile = WaveSize / TilePerWave;
+
+    // LdsStride must satisfy: LdsStride - LdsTileW >= PadW (padding vector overflow guard)
+    static constexpr index_t LdsStrideBase = integer_least_multiple(LdsTileW, InVectorSize);
+    static constexpr index_t LdsStrideMin  = LdsTileW + PadW;
+    static constexpr index_t LdsStride     = (LdsStrideBase >= LdsStrideMin)
+                                                 ? LdsStrideBase
+                                                 : integer_least_multiple(LdsStrideMin, InVectorSize);
+
+    static constexpr index_t LdsTileSize  = LdsTileH * LdsStride;
+    static constexpr index_t LdsInputSize = LdsTileSize * TilePerWave * sizeof(InDataType);
+    static constexpr index_t LdsSize      = LdsInputSize;
+
+    using InVector  = ext_vector_t<InDataType, InVectorSize>;
+    using OutVector = ext_vector_t<OutDataType, OutVectorSize>;
+    using WeiVector = ext_vector_t<WeiDataType, WeiVectorSize>;
+
+    // Capped at 4 for LDS access: 4 * sizeof(fp32) = 16 bytes = ds_read_b128 max width.
+    // Conservative for FP16 (could be 8), but keeps the code uniform across data types.
+    static constexpr index_t InVectorSizeInternal  = (InVectorSize < 4) ? InVectorSize : 4;
+    static constexpr index_t OutVectorSizeInternal = (OutVectorSize < 4) ? OutVectorSize : 4;
+
+    using InVectorInternal  = ext_vector_t<InDataType, InVectorSizeInternal>;
+    using OutVectorInternal = ext_vector_t<OutDataType, OutVectorSizeInternal>;
+    using AccVectorInternal = ext_vector_t<AccDataType, OutVectorSizeInternal>;
+
+    static_assert(std::is_same_v<InDataType, fp16_t> || std::is_same_v<InDataType, bf16_t> ||
+                      std::is_same_v<InDataType, float>,
+                  "Only fp16, bf16 and float are supported currently");
+    static_assert(BlockSize == 64 || BlockSize == 128 || BlockSize == 256,
+                  "BlockSize must be 64, 128, or 256");
+    static_assert(TotalSubTiles <= WaveSize, "TotalSubTiles must not exceed WaveSize");
+    static_assert(DilationH == 1 && DilationW == 1, "Only dilation=1 is supported currently");
+    static_assert(FilterH == FilterW, "Only square filters are supported currently");
+    static_assert(FilterH % 2 == 1, "Only odd filter sizes are supported (3, 5, 7, 9)");
+    static_assert((InVectorSize & (InVectorSize - 1)) == 0 &&
+                      (OutVectorSize & (OutVectorSize - 1)) == 0,
+                  "InVectorSize and OutVectorSize must be powers of 2");
+    static_assert(SubTileH <= TileOutH && SubTileW <= TileOutW,
+                  "SubTile dimensions must not exceed Tile output dimensions");
 };
 
 /// @brief Helper struct for split-image piece information
@@ -265,4 +444,6 @@ CK_TILE_HOST SplitImagePieceInfo calculate_spatial_piece(ck_tile::index_t piece_
 
 } // namespace ck_tile
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -79,11 +79,47 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
         /*! \ingroup library_module
+         *  \brief Select the StreamK tile scheduling mode (hybrid SK3/SK4
+         *  tile scheduling for StreamK=5 kernels).
+         *
+         *  \details
+         *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
+         *  hipBLASLt-internal scheduler with no equivalent in the base
+         *  ``hipblasLt`` C API. The ``mode`` argument is one of
+         *  ``hipblasLtStreamKTileSchedulingMode_t``:
+         *
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF`` (default) — SK3 static
+         *      sub-path; when ``sm_count_target`` > 0 the library heuristic
+         *      still runs per launch to pick SK4 when appropriate.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_ON``  — always request the SK4 dynamic sub-path when the chosen kernel supports it.
+         *    - ``HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO`` — always delegate to the library heuristic per launch.
+         *
+         *  The mode is tri-state: a caller can use the SK3 static
+         *  sub-path by default (``OFF``), force the SK4 dynamic sub-path (``ON``),
+         *  or always defer to the library heuristic (``AUTO``)
+         *  for the chosen kernel.
+         *
+         *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
+         *  cuBLAS-compatible hint on the number of compute units to target.
+         *
+         *  @param[in]
+         *  mode  Tri-state mode selector.
+         */
+        HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
          */
         HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the StreamK tile scheduling mode set via
+         *  ``setStreamKTileSchedulingMode``. Defaults to
+         *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
+         */
+        HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
 
     private:
         friend GemmInstance;
@@ -558,7 +594,8 @@ namespace hipblaslt_ext
         hipblasLtHandle_t     m_handle;
         std::shared_ptr<void> m_data;
 
-        size_t m_workspace_bytes = 0;
+        size_t  m_workspace_bytes        = 0;
+        int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
     };
 
     /*! \ingroup types_module
@@ -1199,4 +1236,46 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Bdesc,
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc);
+
+    /*! \ingroup library_module
+     *  \brief Check if a solution is supported for the given heuristic result.
+     *
+     *  @param[in]
+     *  heuristicResultsArray Array of heuristic results to check.
+     *  @param[in]
+     *  handle The hipBLASLt context handle.
+     *  @param[in]
+     *  matmulDesc Handle to a previously created matrix multiplication descriptor.
+     *  @param[in]
+     *  alpha Pointer to the alpha scalar.
+     *  @param[in]
+     *  matA Handle to the matrix A layout descriptor.
+     *  @param[in]
+     *  matB Handle to the matrix B layout descriptor.
+     *  @param[in]
+     *  beta Pointer to the beta scalar.
+     *  @param[in]
+     *  matC Handle to the matrix C layout descriptor.
+     *  @param[in]
+     *  matD Handle to the matrix D layout descriptor.
+     *  @param[out]
+     *  workspaceSize Pointer to receive the required workspace size in bytes.
+     *  @param[in,out]
+     *  returnAlgoCount Pointer to the algorithm count, incremented if solution is supported.
+     *
+     *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
+     *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     */
+    HIPBLASLT_EXPORT
+    hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
+                                         hipblasLtHandle_t                  handle,
+                                         hipblasLtMatmulDesc_t              matmulDesc,
+                                         const void*                        alpha,
+                                         hipblasLtMatrixLayout_t            matA,
+                                         hipblasLtMatrixLayout_t            matB,
+                                         const void*                        beta,
+                                         hipblasLtMatrixLayout_t            matC,
+                                         hipblasLtMatrixLayout_t            matD,
+                                         size_t*                            workspaceSize,
+                                         int*                               returnAlgoCount);                      
 } // End of namespace hipblasltext

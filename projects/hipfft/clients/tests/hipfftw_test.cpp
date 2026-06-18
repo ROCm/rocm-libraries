@@ -25,6 +25,7 @@
 #include "../../shared/gpubuf.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
+#include "../../shared/reference_fft_data.h"
 #include "../../shared/test_params.h"
 
 #include <cstdint>
@@ -513,18 +514,6 @@ namespace
         return X_down;
     }
 
-    // exception for hip runtime error(s) specifically
-    struct hip_runtime_error : public std::runtime_error
-    {
-        const hipError_t hip_error;
-        hip_runtime_error(const std::string& info, hipError_t hip_status)
-            : std::runtime_error::runtime_error(info)
-            , hip_error(hip_status)
-
-        {
-            ++n_hip_failures;
-        }
-    };
     int get_current_device_id()
     {
         int        ret        = hipInvalidDeviceId;
@@ -1978,18 +1967,7 @@ namespace
                         plan_execution_output.alloc(output_data_size);
                 }
             }
-            catch(const HOSTBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const DEVICEBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
         void TearDown() override
         {
@@ -2734,25 +2712,7 @@ namespace
                     GTEST_FAIL() << "could not create a reference plan";
                 }
             }
-            catch(const hip_runtime_error& e)
-            {
-                if(skip_runtime_fails)
-                    GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
-                else
-                    GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
-            }
-            catch(const HOSTBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const DEVICEBUF_MEM_USAGE& e)
-            {
-                GTEST_SKIP() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
         void TearDown() override
         {
@@ -2993,25 +2953,7 @@ namespace
             {
                 GTEST_FAIL() << "undefined function pointers detected. Error info: " << e.what();
             }
-            catch(const hip_runtime_error& e)
-            {
-                if(skip_runtime_fails)
-                    GTEST_SKIP() << e.what() << "\nError code: " << e.hip_error << ".";
-                else
-                    GTEST_FAIL() << e.what() << "\nError code: " << e.hip_error << ".";
-            }
-            catch(const std::runtime_error& e)
-            {
-                GTEST_FAIL() << e.what();
-            }
-            catch(const std::bad_alloc&)
-            {
-                GTEST_SKIP() << "host memory allocation failure";
-            }
-            catch(...)
-            {
-                GTEST_FAIL() << "unidentified exception caught during test.";
-            }
+            ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
 
     public:

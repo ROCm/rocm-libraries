@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -753,117 +754,120 @@ static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPa
 // Main
 // ============================================================================
 int main(int argc, char* argv[])
-try
 {
-    std::cout << "hipDNN Example Plugin Sample Application\n";
-    std::cout << "=========================================\n";
+    try
+    {
+        std::cout << "hipDNN Example Plugin Sample Application\n";
+        std::cout << "=========================================\n";
 
-    // Check GPU availability
-    bool hasGpu = false;
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0)
-    {
-        hasGpu = true;
-        hipDeviceProp_t props;
-        static_cast<void>(hipGetDeviceProperties(&props, 0));
-        std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
-    }
-    else
-    {
-        std::cout << "No GPU detected. Skipping GPU execution scenarios.\n"
-                  << "Running non-GPU portions only.\n";
-    }
-
-    // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
-#ifdef _WIN32
-    const std::string pluginFilename = "example_provider_plugin.dll";
-#else
-    const std::string pluginFilename = "libexample_provider_plugin.so";
-#endif
-
-    std::string pluginPath;
-    if(argc > 1)
-    {
-        pluginPath = argv[1];
-        std::cout << "Plugin path (from argument): " << pluginPath << "\n";
-    }
-    else
-    {
-        pluginPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
-        if(!pluginPath.empty())
+        // Check GPU availability
+        bool hasGpu = false;
+        int deviceCount = 0;
+        if(hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0)
         {
-            std::cout << "Plugin path (from HIPDNN_PLUGIN_DIR): " << pluginPath << "\n";
+            hasGpu = true;
+            hipDeviceProp_t props;
+            static_cast<void>(hipGetDeviceProperties(&props, 0));
+            std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
         }
         else
         {
-            auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
-            pluginPath = std::filesystem::absolute(exeDir).string();
-            std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
+            std::cout << "No GPU detected. Skipping GPU execution scenarios.\n"
+                      << "Running non-GPU portions only.\n";
         }
-    }
 
-    // To assist in debugging issues when running this sample, determine whether
-    // the plugin exists before running the scenarios.
-    std::vector<std::string> pluginPaths;
-    auto fsPath = std::filesystem::path(pluginPath);
-    if(std::filesystem::is_regular_file(fsPath))
-    {
-        if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)
+        // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
+#ifdef _WIN32
+        const std::string pluginFilename = "example_provider_plugin.dll";
+#else
+        const std::string pluginFilename = "libexample_provider_plugin.so";
+#endif
+
+        std::string pluginPath;
+        if(argc > 1)
         {
-            pluginPaths.push_back(pluginPath);
+            pluginPath = argv[1];
+            std::cout << "Plugin path (from argument): " << pluginPath << "\n";
         }
-    }
-    else if(std::filesystem::is_directory(fsPath))
-    {
-        if(std::filesystem::exists(fsPath / pluginFilename))
+        else
         {
-            pluginPaths.push_back(pluginPath);
+            pluginPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
+            if(!pluginPath.empty())
+            {
+                std::cout << "Plugin path (from HIPDNN_PLUGIN_DIR): " << pluginPath << "\n";
+            }
+            else
+            {
+                auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+                pluginPath = std::filesystem::absolute(exeDir).string();
+                std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
+            }
         }
-    }
 
-    std::cout << "Plugin paths:\n";
-    for(size_t i = 0; i < pluginPaths.size(); ++i)
-    {
-        std::cout << "  [" << i << "] " << pluginPaths[i] << "\n";
-    }
+        // To assist in debugging issues when running this sample, determine whether
+        // the plugin exists before running the scenarios.
+        std::vector<std::string> pluginPaths;
+        auto fsPath = std::filesystem::path(pluginPath);
+        if(std::filesystem::is_regular_file(fsPath))
+        {
+            if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)
+            {
+                pluginPaths.push_back(pluginPath);
+            }
+        }
+        else if(std::filesystem::is_directory(fsPath))
+        {
+            if(std::filesystem::exists(fsPath / pluginFilename))
+            {
+                pluginPaths.push_back(pluginPath);
+            }
+        }
 
-    if(pluginPaths.empty())
-    {
-        std::cerr << "\nERROR: Example plugin library (" << pluginFilename << ") not found.\n\n";
-        std::cerr << "Path provided: " << pluginPath << "\n\n";
-        std::cerr << "Usage: " << argv[0] << " [plugin_path]\n\n"
-                  << "The plugin path can be:\n"
-                  << "  - A directory containing " << pluginFilename << "\n"
-                  << "  - The full path to the plugin file itself\n\n"
-                  << "Plugin path resolution (when no argument is provided):\n"
-                  << "  1. If HIPDNN_PLUGIN_DIR is set, that is used.\n"
-                  << "  2. Otherwise, the directory containing this executable is used.\n";
+        std::cout << "Plugin paths:\n";
+        for(size_t i = 0; i < pluginPaths.size(); ++i)
+        {
+            std::cout << "  [" << i << "] " << pluginPaths[i] << "\n";
+        }
+
+        if(pluginPaths.empty())
+        {
+            std::cerr << "\nERROR: Example plugin library (" << pluginFilename
+                      << ") not found.\n\n";
+            std::cerr << "Path provided: " << pluginPath << "\n\n";
+            std::cerr << "Usage: " << argv[0] << " [plugin_path]\n\n"
+                      << "The plugin path can be:\n"
+                      << "  - A directory containing " << pluginFilename << "\n"
+                      << "  - The full path to the plugin file itself\n\n"
+                      << "Plugin path resolution (when no argument is provided):\n"
+                      << "  1. If HIPDNN_PLUGIN_DIR is set, that is used.\n"
+                      << "  2. Otherwise, the directory containing this executable is used.\n";
+            return 1;
+        }
+
+        bool allPassed = true;
+
+        allPassed = scenario1ReluForward(pluginPaths, hasGpu) && allPassed;
+        allPassed = scenario2ConvForward(pluginPaths, hasGpu) && allPassed;
+        allPassed = scenario3PluginLoadingModes(pluginPaths, hasGpu) && allPassed;
+
+        std::cout << "\n=========================================\n";
+        if(allPassed)
+        {
+            std::cout << "All scenarios completed successfully.\n";
+            return 0;
+        }
+
+        std::cerr << "Some scenarios failed.\n";
         return 1;
     }
-
-    bool allPassed = true;
-
-    allPassed = scenario1ReluForward(pluginPaths, hasGpu) && allPassed;
-    allPassed = scenario2ConvForward(pluginPaths, hasGpu) && allPassed;
-    allPassed = scenario3PluginLoadingModes(pluginPaths, hasGpu) && allPassed;
-
-    std::cout << "\n=========================================\n";
-    if(allPassed)
+    catch(const std::exception& e)
     {
-        std::cout << "All scenarios completed successfully.\n";
-        return 0;
+        std::fprintf(stderr, "Fatal error: %s\n", e.what());
+        return 1;
     }
-
-    std::cerr << "Some scenarios failed.\n";
-    return 1;
-}
-catch(const std::exception& e)
-{
-    std::cerr << "Fatal error: " << e.what() << "\n";
-    return 1;
-}
-catch(...)
-{
-    std::cerr << "Fatal error: unknown exception\n";
-    return 1;
+    catch(...)
+    {
+        std::fprintf(stderr, "Fatal error: unknown exception\n");
+        return 1;
+    }
 }

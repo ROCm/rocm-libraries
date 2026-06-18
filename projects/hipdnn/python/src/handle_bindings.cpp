@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <hipdnn_frontend.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
@@ -27,7 +29,7 @@ private:
 public:
     HandleWrapper()
     {
-        auto error = createHipdnnHandle(_handle);
+        const auto error = createHipdnnHandle(_handle);
         if(error.is_bad())
         {
             throw std::runtime_error("Failed to create hipdnn handle: " + error.get_message());
@@ -36,7 +38,8 @@ public:
 
     explicit HandleWrapper(uintptr_t streamPtr)
     {
-        auto error = createHipdnnHandle(_handle, reinterpret_cast<hipStream_t>(streamPtr));
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        const auto error = createHipdnnHandle(_handle, reinterpret_cast<hipStream_t>(streamPtr));
         if(error.is_bad())
         {
             throw std::runtime_error("Failed to create hipdnn handle: " + error.get_message());
@@ -62,7 +65,8 @@ public:
     void setStream(uintptr_t streamPtr)
     {
         checkNotDestroyed();
-        auto error = setHipdnnHandleStream(_handle, reinterpret_cast<hipStream_t>(streamPtr));
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        const auto error = setHipdnnHandleStream(_handle, reinterpret_cast<hipStream_t>(streamPtr));
         if(error.is_bad())
         {
             throw std::runtime_error("Failed to set stream on hipdnn handle: "
@@ -74,7 +78,7 @@ public:
     {
         checkNotDestroyed();
         hipStream_t stream = nullptr;
-        auto error = getHipdnnHandleStream(_handle, &stream);
+        const auto error = getHipdnnHandleStream(_handle, &stream);
         if(error.is_bad())
         {
             throw std::runtime_error("Failed to get stream from hipdnn handle: "
@@ -84,7 +88,7 @@ public:
     }
 };
 
-void handle_bindings(nb::module_& m)
+void handleBindings(nb::module_& m)
 {
     nb::class_<HandleWrapper>(m, "Handle")
         .def(nb::init<>(), "Create a new hipdnn handle")

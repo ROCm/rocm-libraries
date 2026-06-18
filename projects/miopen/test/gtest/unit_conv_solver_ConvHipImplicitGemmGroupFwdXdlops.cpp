@@ -61,8 +61,8 @@ auto GetDeterministicConvCase()
 template <TestDataType type>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-// If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+// CK dynamic-library tests are HIP-only; runtime plugin availability is checked by the harness.
+#if MIOPEN_BACKEND_HIP
     Gpu supportedDevices;
     if constexpr(type == TestDataType::FP32)
     {

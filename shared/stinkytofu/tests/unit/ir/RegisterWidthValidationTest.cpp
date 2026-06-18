@@ -281,8 +281,8 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src1) {
 namespace {
 /// Populate \p func with a single buffer_store_b32. The caller controls
 /// register types/widths to probe the verifier.
-void buildBufferStoreB32(Function& func, StinkyRegister vdata, StinkyRegister vaddr,
-                         StinkyRegister rsrc, StinkyRegister soffset) {
+void buildBufferStoreB32(Function& func, const StinkyRegister& vdata, const StinkyRegister& vaddr,
+                         const StinkyRegister& rsrc, const StinkyRegister& soffset) {
     GfxArchID arch = getGfxArchID(12, 5, 0);
     setFunctionArch(func, arch);
     BasicBlock* bb = func.createBasicBlock("entry");
@@ -301,8 +301,8 @@ void buildBufferStoreB32(Function& func, StinkyRegister vdata, StinkyRegister va
 }
 
 /// Populate \p func with a single buffer_load_b32.
-void buildBufferLoadB32(Function& func, StinkyRegister vdst, StinkyRegister vaddr,
-                        StinkyRegister rsrc, StinkyRegister soffset) {
+void buildBufferLoadB32(Function& func, const StinkyRegister& vdst, const StinkyRegister& vaddr,
+                        const StinkyRegister& rsrc, const StinkyRegister& soffset) {
     GfxArchID arch = getGfxArchID(12, 5, 0);
     setFunctionArch(func, arch);
     BasicBlock* bb = func.createBasicBlock("entry");

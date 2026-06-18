@@ -96,13 +96,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT64x64x64_MI32x32x1OjEoJvm41fhe7fK-NsCByLifZo-8FFKY63X2uU_tJq8=
     BufferLoad: true
     BufferStore: true
@@ -148,7 +145,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x64_MI32x32x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA4_LPB4_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA1_NTB3_NTC7_NTD5_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -351,13 +347,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT96x16x64_MI16x16x10_apeJ6oItB_-Qfw4v8lJaO7_zxDtjeU94paNxonxGQ=
     BufferLoad: true
     BufferStore: true
@@ -403,7 +396,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT96x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_1_MO40_MGRIPMn1_NTn1_NTA4_NTB3_NTC0_NTD2_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1
@@ -606,13 +598,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT192x16x64_MI16x16xWEYzKPxu0Fr1fUkPqirlCaH39MebIC_XVAN_Un0uBFc=
     BufferLoad: true
     BufferStore: true
@@ -658,7 +647,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT192x16x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT3_1_MO40_MGRIPMn1_NTn1_NTA7_NTB0_NTC1_NTD3_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -861,13 +849,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT96x32x64_MI16x16x13TgFrcFT7EqUHHJrI4bsH4XiVRqzSw9Fjs9S6AcoMwM=
     BufferLoad: true
     BufferStore: true
@@ -913,7 +898,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT96x32x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_1_MO40_MGRIPMn1_NTn1_NTA5_NTB1_NTC2_NTD2_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1116,13 +1100,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT160x32x32_MI16x16x9HmvBHSUvzl8jX9S4zMAnOuAD3csAQKM_BxZOmHEUMs=
     BufferLoad: true
     BufferStore: true
@@ -1168,7 +1149,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT160x32x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_1_MO40_MGRIPMn1_NTn1_NTA4_NTB1_NTC7_NTD0_NTM0_NEPBS8_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1371,13 +1351,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT128x64x32_MI16x16xX6etzLzqedbXrEYE2y18kSl-a8TqKms6rIT-J4HJOGA=
     BufferLoad: true
     BufferStore: true
@@ -1423,7 +1400,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x64x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_4_MO40_MGRIPMn1_NTn1_NTA0_NTB3_NTC5_NTD3_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB4_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -1626,13 +1602,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT256x256x32_MI16x16p22SEdgkHKllsTjT_xoTbHlnCYlH8fbTGVDjoMCHm64=
     BufferLoad: true
     BufferStore: true
@@ -1678,7 +1651,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPMn1_NTn1_NTA3_NTB5_NTC3_NTD4_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM2_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -1883,13 +1855,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT16x512x16_MI16x16xLpuVEbjfliQUg4_dVjgDiktGvXaarioUdJCD9H6kiUc=
     BufferLoad: true
     BufferStore: true
@@ -1935,7 +1904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x512x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB256_LBSPPM0_LPA2_LPB4_LPM0_LRVW2_LWPMn1_MIAV1_MIWT1_8_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC1_NTD0_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -2137,13 +2105,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT16x512x16_MI16x16xhV7fxI_3NCA-II1aDvVULq4csQk5MJ04KkS_VYsAt_w=
     BufferLoad: true
     BufferStore: true
@@ -2189,7 +2154,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x512x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA64_LBSPPB2048_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV1_MIWT1_8_MO40_MGRIPMn1_NTn1_NTA5_NTB1_NTC1_NTD0_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -2391,13 +2355,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT48x128x64_MI16x16xEb2jbY6hVBbQoIMD7XmOYSy8-pmHumcYZDafQGezS-4=
     BufferLoad: true
     BufferStore: true
@@ -2443,7 +2404,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT48x128x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MO40_MGRIPMn1_NTn1_NTA0_NTB7_NTC0_NTD6_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -2645,13 +2605,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT48x128x32_MI16x16xyDcbD7pee5tGAvP7yOR5DvVIfND1yKSBCvYLUC3BGWM=
     BufferLoad: true
     BufferStore: true
@@ -2697,7 +2654,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT48x128x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_2_MO40_MGRIPMn1_NTn1_NTA0_NTB7_NTC0_NTD4_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -2899,13 +2855,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x224x32_MI16x16xfx7ZNk6VHPeWp17dXNQKefj_lUZkGX0G1LF7YOGWL9U=
     BufferLoad: true
     BufferStore: true
@@ -2951,7 +2904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x224x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_7_MO40_MGRIPMn1_NTn1_NTA2_NTB6_NTC0_NTD6_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3153,13 +3105,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT32x64x64_MI16x16x1y1NGdD6CVgw3HsNBwyRF5s8DmA5ZUY8lBEJ1sYQj-qQ=
     BufferLoad: true
     BufferStore: true
@@ -3205,7 +3154,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_2_MO40_MGRIPMn1_NTn1_NTA3_NTB2_NTC7_NTD6_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3407,13 +3355,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x48x64_MI16x16x1krkFTwCFyPI_IULu9gvc7WIepiVDpimonLBpnOBHcfg=
     BufferLoad: true
     BufferStore: true
@@ -3459,7 +3404,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x48x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_3_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD1_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -3661,13 +3605,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x192x32_MI16x16-aa8N9M-zMvwZ-JTCE4ToxvOiat5JKtVObIOKSzeqR4=
     BufferLoad: true
     BufferStore: true
@@ -3713,7 +3654,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_6_MO40_MGRIPMn1_NTn1_NTA0_NTB6_NTC0_NTD5_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM2_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -3915,13 +3855,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x192x16_MI16x16T7wN4_ssABcP8DYPR_Y-RBUozvGXD7hv3yBxXX03rSU=
     BufferLoad: true
     BufferStore: true
@@ -3967,7 +3904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x192x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB768_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT8_6_MO40_MGRIPMn1_NTn1_NTA2_NTB2_NTC1_NTD7_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -4169,13 +4105,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x256x32_MI16x16mvMj2IZu5QeAgOJ9LbQu6V7jBtpSixwc0VqZowpGii8=
     BufferLoad: true
     BufferStore: true
@@ -4221,7 +4154,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x256x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_16_MO40_MGRIPMn1_NTn1_NTA1_NTB6_NTC2_NTD4_NTM0_NEPBS4_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -4423,13 +4355,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x48x64_MI16x16x1mj0ryEv68K09zjqzf1nKR1uzkPcpQqnh5mZvaBZeBlU=
     BufferLoad: true
     BufferStore: true
@@ -4475,7 +4404,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x48x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_3_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC1_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -4677,13 +4605,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x64x64_MI32x32x1oE4HZ2esTgqIlCkybokC_5C4n0WZJghEd_2GV5vMFMs=
     BufferLoad: true
     BufferStore: true
@@ -4729,7 +4654,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x64_MI32x32x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA4_LPB4_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA1_NTB0_NTC2_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -4931,13 +4855,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x64x64_MI16x16x1e0rrch5twp5uIbJMmzvU_9eMqQ-KwEMhRuAy40wPu5A=
     BufferLoad: true
     BufferStore: true
@@ -4983,7 +4904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_1_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC6_NTD4_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -5185,13 +5105,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x80x64_MI16x16x1TWi1j0-lQyvS00ir_gNF3xoy9L-7Bhyhpo4RkXzNE44=
     BufferLoad: true
     BufferStore: true
@@ -5237,7 +5154,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_5_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC1_NTD1_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -5439,13 +5355,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT96x96x64_MI16x16x1giD2ENq_k_MqTji3cJnxa7LOS47IXQrfJoUcGp1ymq4=
     BufferLoad: true
     BufferStore: true
@@ -5491,7 +5404,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT96x96x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_3_MO40_MGRIPMn1_NTn1_NTA3_NTB0_NTC0_NTD7_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5693,13 +5605,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT64x160x64_MI16x16x_BiX_5J8XAtCTNPqmo6SB5FhGlqFDcmqEKk30Oum_iQ=
     BufferLoad: true
     BufferStore: true
@@ -5745,7 +5654,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x160x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_5_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC4_NTD2_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -5947,13 +5855,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT128x224x16_MI16x16rrWCfSq3UK_v16jUds9CwFGYZAv58C4sIkS_8C_wikw=
     BufferLoad: true
     BufferStore: true
@@ -5999,7 +5904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x224x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB896_LBSPPM0_LPA0_LPB16_LPM0_LRVW1_LWPMn1_MIAV0_MIWT4_7_MO40_MGRIPMn1_NTn1_NTA2_NTB3_NTC4_NTD3_NTM0_NEPBS4_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -6201,13 +6105,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT256x128x16_MI16x162tOGQmBJ4Ju4Uj558pNLUfob8ySfxb2_JXKvlCQjcaE=
     BufferLoad: true
     BufferStore: true
@@ -6253,7 +6154,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x128x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB512_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT16_2_MO40_MGRIPMn1_NTn1_NTA2_NTB1_NTC4_NTD7_NTM0_NEPBS4_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -6459,13 +6359,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT48x192x32_MI16x16xBTMMaFcVipPfsmFeSdfwrvqlpdZ_uEwfMIZBd0AffJ4=
     BufferLoad: true
     BufferStore: true
@@ -6511,7 +6408,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT48x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_3_MO40_MGRIPMn1_NTn1_NTA3_NTB0_NTC1_NTD7_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -6717,13 +6613,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT128x128x16_MI16x16qwwWR8paX06SmL3hx82Xs0NM9gFKv8JiMBG1fIDMTp0=
     BufferLoad: true
     BufferStore: true
@@ -6769,7 +6662,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x128x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT4_4_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC7_NTD6_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO4_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -6975,13 +6867,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x80x16_MI16x16x1_dqCbGDxd8UxkJLOVijEuQyOPtOislOr5ejmfNl981U=
     BufferLoad: true
     BufferStore: true
@@ -7027,7 +6916,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x80x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA64_LBSPPB320_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV1_MIWT1_5_MO40_MGRIPMn1_NTn1_NTA1_NTB7_NTC2_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -7233,13 +7121,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x112x16_MI16x16xofYeFf6pCh9H7CU9IDGyEspg_YyXfwGKHRIQadCvFxs=
     BufferLoad: true
     BufferStore: true
@@ -7285,7 +7170,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x112x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA2_LPB4_LPM0_LRVW2_LWPMn1_MIAV1_MIWT1_7_MO40_MGRIPMn1_NTn1_NTA0_NTB6_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -7491,13 +7375,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x128x16_MI16x16xGFJAxTKSoZpMbRYZIkJufA4wOZEfK4VKeuM-wcDN25Q=
     BufferLoad: true
     BufferStore: true
@@ -7543,7 +7424,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x128x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB256_LBSPPM0_LPA4_LPB4_LPM0_LRVW2_LWPMn1_MIAV0_MIWT1_8_MO40_MGRIPMn1_NTn1_NTA0_NTB7_NTC1_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -7749,13 +7629,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x384x16_MI16x16xdTRXPdSMePsRB_QwsABq2QRWybNIbAbPZOLSViAZFfo=
     BufferLoad: true
     BufferStore: true
@@ -7801,7 +7678,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x384x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA64_LBSPPB1536_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV1_MIWT1_6_MO40_MGRIPMn1_NTn1_NTA3_NTB4_NTC3_NTD5_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -8007,13 +7883,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT128x64x16_MI16x16x8OoXinKA8xGdBU-1X_Tbh62MAOrwhv3wQ27oo5T46yk=
     BufferLoad: true
     BufferStore: true
@@ -8059,7 +7932,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x64x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA0_LPB16_LPM0_LRVW1_LWPMn1_MIAV1_MIWT8_1_MO40_MGRIPMn1_NTn1_NTA1_NTB2_NTC7_NTD7_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -8265,13 +8137,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x288x16_MI16x16xw9ijPcfxtbH259VcVk-_AoAgoAX37DiqCb6D1N0Ui88=
     BufferLoad: true
     BufferStore: true
@@ -8317,7 +8186,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x288x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA64_LBSPPB1152_LBSPPM0_LPA0_LPB16_LPM0_LRVW1_LWPMn1_MIAV1_MIWT1_9_MO40_MGRIPMn1_NTn1_NTA3_NTB7_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_8_1
@@ -8523,13 +8391,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1q088cv6P7kG5WqEfLDTCAdzlLkKEsn6_8N9yNwdn-3c=
     BufferLoad: true
     BufferStore: true
@@ -8575,7 +8440,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA4_NTB5_NTC3_NTD0_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -8781,13 +8645,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x112x64_MI16x16xJzmfuIg48jVNxd8uZKzW5s8KPqPPDBHFkmJI8x2xG6c=
     BufferLoad: true
     BufferStore: true
@@ -8833,7 +8694,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x112x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_7_MO40_MGRIPMn1_NTn1_NTA3_NTB4_NTC1_NTD2_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -9040,13 +8900,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x80x64_MI16x16x1WMxz2J9GmKXXxAVgn6S3UyOdUdyQQbiAd_u9IW-6EhI=
     BufferLoad: true
     BufferStore: true
@@ -9092,7 +8949,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_5_MO40_MGRIPMn1_NTn1_NTA3_NTB7_NTC3_NTD2_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -9298,13 +9154,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x80x64_MI16x16x1XsyZGPDgIPin1gKoHAb3hyWIUaxTd6GJqv964SRui4U=
     BufferLoad: true
     BufferStore: true
@@ -9350,7 +9203,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_5_MO40_MGRIPMn1_NTn1_NTA3_NTB7_NTC3_NTD3_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -9556,13 +9408,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x288x32_MI16x16xf07NdPMauF4S0fkNvetH2wjHnwUfk9SN35TI7xUFreM=
     BufferLoad: true
     BufferStore: true
@@ -9608,7 +9457,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x288x32_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_9_MO40_MGRIPMn1_NTn1_NTA0_NTB7_NTC2_NTD2_NTM0_NEPBS2_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -9814,13 +9662,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x288x32_MI16x16xO0mIn2Ws-OFSp5sndlrgp13LKqE1LxMXbf8zIiBR6k0=
     BufferLoad: true
     BufferStore: true
@@ -9866,7 +9711,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x288x32_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_9_MO40_MGRIPMn1_NTn1_NTA3_NTB6_NTC2_NTD2_NTM0_NEPBS8_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -10072,13 +9916,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x176x32_MI16x16xHByAeUu0pxX71vtBIdceGA_eKM2a3ZOLWif_jeZ0n8k=
     BufferLoad: true
     BufferStore: true
@@ -10124,7 +9965,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x176x32_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_11_MO40_MGRIPMn1_NTn1_NTA2_NTB5_NTC0_NTD0_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -10330,13 +10170,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x352x32_MI16x16xgQe3l_pyBVZ-wt2YTvjuD9J-YE3JSMX9d_9DmJMiC3A=
     BufferLoad: true
     BufferStore: true
@@ -10382,7 +10219,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x352x32_MI16x16x1_SN_LDSB0_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_11_MO40_MGRIPMn1_NTn1_NTA0_NTB6_NTC0_NTD3_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -10588,13 +10424,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT32x16x128_MI16x16xAjCdmIGxmCa8Hprmehmxgn9KNxGrIH-X1DCi1nMro7g=
     BufferLoad: true
     BufferStore: true
@@ -10640,7 +10473,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT32x16x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA5_NTB0_NTC0_NTD4_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_2
@@ -10846,13 +10678,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x16x128_MI16x16x1xdGfuujnaZV-sBGSsKrDEuk6BNbkZJ-j8Qyc40_t6g=
     BufferLoad: true
     BufferStore: true
@@ -10898,7 +10727,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA6_NTB3_NTC2_NTD0_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2
@@ -11104,13 +10932,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT80x16x32_MI16x16x1GPxOJgTdP3fDBon7ApkPkpV3LrcWFBoB9U0T2bptIh0=
     BufferLoad: true
     BufferStore: true
@@ -11156,7 +10981,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT80x16x32_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_1_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC4_NTD0_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM2_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -11362,13 +11186,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT48x256x16_MI16x16xAR2_IXFhn3-_BqGv5XsWtTapnOHsm3IxPTDDU7Guk4E=
     BufferLoad: true
     BufferStore: true
@@ -11415,7 +11236,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT48x256x16_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA192_LBSPPB1024_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT3_4_MO40_MGRIPMn1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -11623,13 +11443,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x112x32_MI16x16oBFAgnjjUcFUh1CHbtY67n-RP6z5xA0BSipy9o0E3gU=
     BufferLoad: true
     BufferStore: true
@@ -11676,7 +11493,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x112x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_7_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -11879,13 +11695,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x224x32_MI16x16xM3SS-11AemK_H-YvtfLeOumade1oWEsmxIfhfyoKlM=
     BufferLoad: true
     BufferStore: true
@@ -11932,7 +11745,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x224x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT8_7_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -12135,13 +11947,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_Bias_HAS_SAV_UserArgs_MT16x512x8_MI16x16x1DCtNCWnrrTuaT7aGMV9I2jrYBuaXVvI2a9rR0eJUZz8=
     BufferLoad: true
     BufferStore: true
@@ -12188,7 +11997,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x512x8_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA64_LBSPPB2048_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT1_16_MO40_MGRIPMn1_NTn1_NTA4_NTB0_NTC0_NTD0_NTM0_NEPBS8_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB4_WSGRA0_WSGRB0_WS64_WG16_8_1
@@ -12401,13 +12209,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT128x224x32_MI16x16fA20NWAMGU9mB9zSxidAzbuq0lkLDsDD9lvSWxSWip8=
     BufferLoad: true
     BufferStore: true
@@ -12454,7 +12259,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x224x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_7_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -12657,13 +12461,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_SB_BiasS_HAS_SAV_UserArgs_MT256x176x32_MI16x16rQjMU3HOGjurWPzDvshMDmo5y66kO3oCcXUBhqCrFjQ=
     BufferLoad: true
     BufferStore: true
@@ -12710,7 +12511,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT256x176x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_11_MO40_MGRIPMn1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -12913,13 +12713,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x16x64_MI16x16x1Ttnm73KgE7k1WFRg0g6g3437zA8hVsHlruu5TH8VgvU=
     BufferLoad: true
     BufferStore: true
@@ -12966,7 +12763,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPMn1_NTn1_NTA7_NTB3_NTC0_NTD1_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROBn1_SIA3_SS0_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1
@@ -13174,13 +12970,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x128x16_MI16x16x7n53m4xJ-RAniksO5hKPDb4KjoZtGV57YwyeytKTVL0=
     BufferLoad: true
     BufferStore: true
@@ -13227,7 +13020,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x128x16_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLBn1_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB512_LBSPPM0_LPA0_LPB0_LPM0_LRVW1_LWPMn1_MIAV0_MIWT4_2_MO40_MGRIPMn1_NTn1_NTA3_NTB2_NTC0_NTD5_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROBn1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS0_TLDSM1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -13435,13 +13227,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x3bhLA2jiHyqWXsZhLFoHLtCf4rrbT6Y8mqjvSaZFoOlc=
     BufferLoad: true
     BufferStore: true
@@ -13488,7 +13277,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x32x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG16_8_1
@@ -13702,13 +13490,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT16x3mfS9GnLRla2-0_lq3_1I72nGoKaYZFpOhH8-82gpV4I=
     BufferLoad: true
     BufferStore: true
@@ -13755,7 +13540,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT16x32x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_1_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC0_NTD0_NTM0_NEPBS4_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG16_8_1
@@ -13969,13 +13753,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT32x8I0wCbbgRkZddad6nn6d58F204AX13WN3ffNyZmLYpss=
     BufferLoad: true
     BufferStore: true
@@ -14022,7 +13803,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT32x80x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_5_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA2_WSGRB2_WS64_WG32_4_2
@@ -14236,13 +14016,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT160xXeTOENVnCpCWnMOFXgTnyY4u09sNW42qoK91aLIhjJM=
     BufferLoad: true
     BufferStore: true
@@ -14289,7 +14066,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT160x64x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT10_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS2_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA2_WSGRB0_WS64_WG16_16_1
@@ -14503,13 +14279,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT80x6ugiwnYAb_Wo8Yj7sdxjlxluv89t9RBSELbUJemQbHSQ=
     BufferLoad: true
     BufferStore: true
@@ -14556,7 +14329,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT80x64x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT5_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS2_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA2_WSGRB2_WS64_WG16_16_1
@@ -14770,13 +14542,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT80x6zrAeiF0T-O8apUPPgnADYI7UYWVokhxLQthANZfXT4A=
     BufferLoad: true
     BufferStore: true
@@ -14823,7 +14592,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT80x64x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_1_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA2_WSGRB2_WS64_WG16_16_1
@@ -15037,13 +14805,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT80x6ZNZYPeOeAYhuKWS0KDsPEBYAgXsVde-U4tlF7HpF6ms=
     BufferLoad: true
     BufferStore: true
@@ -15090,7 +14855,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT80x64x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT5_1_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -15304,13 +15068,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT160xCwjViCHb5jOmzlkj7v_BPXXyp5A_3GgIfEFTQCC3RG8=
     BufferLoad: true
     BufferStore: true
@@ -15357,7 +15118,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT160x160x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_5_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA2_WSGRB0_WS64_WG32_8_1
@@ -15571,13 +15331,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT160xJwHrvsVFZiukoUuonRuozrUx6bCg7vURNNmq8ZA-wTI=
     BufferLoad: true
     BufferStore: true
@@ -15624,7 +15381,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT160x160x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_5_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS2_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA2_WSGRB2_WS64_WG32_8_1
@@ -15838,13 +15594,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT160xi0EsN_0G_EXjdyKaUOb-ZD9f5JWWJbxXsO_8sgb2xf4=
     BufferLoad: true
     BufferStore: true
@@ -15891,7 +15644,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT160x160x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT5_5_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -16105,13 +15857,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT192xwFnWCndg_xjmXTTnI5rCK6mMsmFfpopPg4QJds2zPgI=
     BufferLoad: true
     BufferStore: true
@@ -16158,7 +15907,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT192x288x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT6_9_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO4_SVW2_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA0_WSGRB2_WS64_WG32_8_1
@@ -16372,13 +16120,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT128x7DMFkzY7H7u_yOWJCz8DKE97fn7-x4i2R65Y0bk6Xf4=
     BufferLoad: true
     BufferStore: true
@@ -16425,7 +16170,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT128x144x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_9_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA2_WSGRB0_WS64_WG64_4_1
@@ -16639,13 +16383,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT48x3BhHpC96T6-efNTIccD7V2yvGTZNKD4lItsSEVy8hkPo=
     BufferLoad: true
     BufferStore: true
@@ -16692,7 +16433,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT48x384x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA2_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT3_6_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO4_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -16906,13 +16646,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT96x110lVgZFsjA2HHWIeDYPHeWcD4RBEggU8q7rmRmGEAtI=
     BufferLoad: true
     BufferStore: true
@@ -16959,7 +16696,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT96x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA0_LBSPPB768_LBSPPM0_LPA0_LPB16_LPM0_LRVW1_LWPMn1_MIAV1_MIWT6_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS10_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS0_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -17173,13 +16909,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x1lGFCCyucdt0d4CsHIvdYp8qGQv5QPDpLBKGG6VAtOQI=
     BufferLoad: true
     BufferStore: true
@@ -17226,7 +16959,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x128x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA1_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB512_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT4_2_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB2_WSGRA2_WSGRB0_WS64_WG16_16_1
@@ -17440,13 +17172,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x9X1ARitrB1NsGn9UoI8mCv_kpzFPHg3GnksxtOA24F4U=
     BufferLoad: true
     BufferStore: true
@@ -17493,7 +17222,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS8_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA2_WSGRB2_WS64_WG32_8_1
@@ -17707,13 +17435,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x4OEbnPUG1bwTFH9zD67rjsJLEm4hgsYru-ldXEQz1kGc=
     BufferLoad: true
     BufferStore: true
@@ -17760,7 +17485,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x48x64_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -17974,13 +17698,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x1qrFqaUpY8p3mkWfJZjqs9S2H8iTv5-gbDr8Ap9TVnyk=
     BufferLoad: true
     BufferStore: true
@@ -18027,7 +17748,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x128x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA4_VWB2_WSGRA2_WSGRB0_WS64_WG16_16_1
@@ -18241,13 +17961,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT32x2jifKy7qv2zdvkfZ12o0uzcJvZ534-6C4kubGyFNfMLg=
     BufferLoad: true
     BufferStore: true
@@ -18294,7 +18011,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT32x224x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_7_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -18508,13 +18224,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x8Cowj_NNx-bwaHJ_eWRNW9EBSc7MzVdH0C64XOpLz0zM=
     BufferLoad: true
     BufferStore: true
@@ -18561,7 +18274,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_5_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS2_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA2_WSGRB2_WS64_WG64_4_1
@@ -18775,13 +18487,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x9ydq2IKkfJkVYgfdPhpKzH6b0tO_CTwlxURDZxu4LQ4Y=
     BufferLoad: true
     BufferStore: true
@@ -18828,7 +18537,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT2_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS14_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA2_VWB1_WSGRA2_WSGRB2_WS64_WG32_8_1
@@ -19042,13 +18750,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT320x9z-GJnDdJV13WLuqVqStHlgCRkuMndFL4OzCfn6nZ9s=
     BufferLoad: true
     BufferStore: true
@@ -19095,7 +18800,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT320x192x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT20_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS2_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA4_VWB1_WSGRA2_WSGRB0_WS64_WG16_16_1
@@ -19309,13 +19013,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x4W8rv_u3XYsJ0PbVQJGbYp4Lc_yIQI3mdCSwwvXIFRzI=
     BufferLoad: true
     BufferStore: true
@@ -19362,7 +19063,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x48x32_MI16x16x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_3_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG64_4_1
@@ -19576,13 +19276,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x87jR1SSnIdX6f18_bscDwmpYkqQpZw79bxnYaZD1hjcc=
     BufferLoad: true
     BufferStore: true
@@ -19629,7 +19326,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB1_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV1_MIWT1_5_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1
@@ -19843,13 +19539,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x6L_pU8Nse16dIEpslqqrCY2SVOsH7HuREM2fuQbhHM8E=
     BufferLoad: true
     BufferStore: true
@@ -19896,7 +19589,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_2_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS2_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA2_VWB2_WSGRA2_WSGRB2_WS64_WG32_8_1
@@ -20110,13 +19802,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x6x9W6c9_aGIY6kAmPbzV7_ZJczKZQcZ2NZqsm4LCukYw=
     BufferLoad: true
     BufferStore: true
@@ -20163,7 +19852,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA4_LPB4_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW1_SK3_SKFTR0_SKXCCM8_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA1_VWB1_WSGRA2_WSGRB0_WS64_WG64_4_1
@@ -20377,13 +20065,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x8ZcbgobGwCG8uByH1ttbstEk4tDeD7kEMv7jGANPiDaU=
     BufferLoad: true
     BufferStore: true
@@ -20430,7 +20115,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x80x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA1_GRVWB2_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT1_5_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS2_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG64_4_1
@@ -20644,13 +20328,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT32x6ygQkerVA2dgGD2NTMApWd5-AIPccpjxqJmZ9LL2kqu8=
     BufferLoad: true
     BufferStore: true
@@ -20697,7 +20378,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT32x64x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -20911,13 +20591,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x69GRIcAgPWUPB4wIzazPvhHmq2SxOC-l3UiqvpUglbwc=
     BufferLoad: true
     BufferStore: true
@@ -20964,7 +20641,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x64x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM4_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1
@@ -21178,13 +20854,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT64x32JNQOOUT3ZK6abiTEaZs08QdimZg9nHZYuAwJ9SuzDo=
     BufferLoad: true
     BufferStore: true
@@ -21231,7 +20904,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB256_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT2_1_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW2_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN1_TLDS1_TLDSMn1_ULSGRO1_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
@@ -21445,13 +21117,10 @@
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
     AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
     AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
     BaseName: Cijk_Alik_Bljk_S_B_BiasS_HAS_SAV_UserArgs_MT192xHMzERa6POCxnPEMMIqTtGd-dVMtE20yWgmIjxXlORsk=
     BufferLoad: true
     BufferStore: true
@@ -21498,7 +21167,6 @@
     InterleaveAlpha: 0
     InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
       SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_S_B_Bias_HA_S_SAV_UserArgs_MT192x320x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT12_5_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS12_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW4_SK3_SKFTR0_SKXCCM0_SGRO0_TDMI0_TIN0_TLDS1_TLDSMn1_ULSGRO0_USL1_UIOFGRO0_UPLRP0_USFGRO1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1

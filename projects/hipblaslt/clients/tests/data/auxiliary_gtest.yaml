@@ -79,6 +79,21 @@ Tests:
   function:
     - aux_matmul_pref_get_attr: *hpa_half_precision
 
+- name: aux_matmul_sm_count_target
+  category: pre_checkin
+  function:
+    - aux_matmul_sm_count_target: *hpa_half_precision
+
+- name: aux_matmul_streamk_tile_scheduling_ext
+  category: pre_checkin
+  function:
+    - aux_matmul_streamk_tile_scheduling_ext: *hpa_half_precision
+
+- name: aux_matmul_pref_sm_count_target
+  category: pre_checkin
+  function:
+    - aux_matmul_pref_sm_count_target: *hpa_half_precision
+
 - name: aux_matmul_alg_init_bad_arg
   category: pre_checkin
   function:
@@ -187,4 +202,14 @@ Tests:
   category: pre_checkin
   function:
     - aux_rocblaslt_rocroller_host_func: *hpa_half_precision
+
+- name: aux_check_numerics_func
+  category: pre_checkin
+  function:
+    - aux_check_numerics_func: *hpa_half_precision
+
+- name: aux_check_numerics_gemm
+  category: pre_checkin
+  function:
+    - aux_check_numerics_gemm: *hpa_half_precision
 ...

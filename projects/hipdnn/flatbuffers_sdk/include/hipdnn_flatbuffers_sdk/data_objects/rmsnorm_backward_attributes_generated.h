@@ -28,7 +28,7 @@ struct RMSNormBackwardAttributesT : public ::flatbuffers::NativeTable {
   int64_t dy_tensor_uid = 0;
   int64_t x_tensor_uid = 0;
   int64_t scale_tensor_uid = 0;
-  ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt;
+  int64_t inv_rms_tensor_uid = 0;
   int64_t dx_tensor_uid = 0;
   int64_t dscale_tensor_uid = 0;
   ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt;
@@ -64,11 +64,11 @@ struct RMSNormBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   bool mutate_scale_tensor_uid(int64_t _scale_tensor_uid = 0) {
     return SetField<int64_t>(VT_SCALE_TENSOR_UID, _scale_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid() const {
-    return GetOptional<int64_t, int64_t>(VT_INV_RMS_TENSOR_UID);
+  int64_t inv_rms_tensor_uid() const {
+    return GetField<int64_t>(VT_INV_RMS_TENSOR_UID, 0);
   }
-  bool mutate_inv_rms_tensor_uid(int64_t _inv_rms_tensor_uid) {
-    return SetField<int64_t>(VT_INV_RMS_TENSOR_UID, _inv_rms_tensor_uid);
+  bool mutate_inv_rms_tensor_uid(int64_t _inv_rms_tensor_uid = 0) {
+    return SetField<int64_t>(VT_INV_RMS_TENSOR_UID, _inv_rms_tensor_uid, 0);
   }
   int64_t dx_tensor_uid() const {
     return GetField<int64_t>(VT_DX_TENSOR_UID, 0);
@@ -118,7 +118,7 @@ struct RMSNormBackwardAttributesBuilder {
     fbb_.AddElement<int64_t>(RMSNormBackwardAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid, 0);
   }
   void add_inv_rms_tensor_uid(int64_t inv_rms_tensor_uid) {
-    fbb_.AddElement<int64_t>(RMSNormBackwardAttributes::VT_INV_RMS_TENSOR_UID, inv_rms_tensor_uid);
+    fbb_.AddElement<int64_t>(RMSNormBackwardAttributes::VT_INV_RMS_TENSOR_UID, inv_rms_tensor_uid, 0);
   }
   void add_dx_tensor_uid(int64_t dx_tensor_uid) {
     fbb_.AddElement<int64_t>(RMSNormBackwardAttributes::VT_DX_TENSOR_UID, dx_tensor_uid, 0);
@@ -145,7 +145,7 @@ inline ::flatbuffers::Offset<RMSNormBackwardAttributes> CreateRMSNormBackwardAtt
     int64_t dy_tensor_uid = 0,
     int64_t x_tensor_uid = 0,
     int64_t scale_tensor_uid = 0,
-    ::flatbuffers::Optional<int64_t> inv_rms_tensor_uid = ::flatbuffers::nullopt,
+    int64_t inv_rms_tensor_uid = 0,
     int64_t dx_tensor_uid = 0,
     int64_t dscale_tensor_uid = 0,
     ::flatbuffers::Optional<int64_t> dbias_tensor_uid = ::flatbuffers::nullopt) {
@@ -153,7 +153,7 @@ inline ::flatbuffers::Offset<RMSNormBackwardAttributes> CreateRMSNormBackwardAtt
   if(dbias_tensor_uid) { builder_.add_dbias_tensor_uid(*dbias_tensor_uid); }
   builder_.add_dscale_tensor_uid(dscale_tensor_uid);
   builder_.add_dx_tensor_uid(dx_tensor_uid);
-  if(inv_rms_tensor_uid) { builder_.add_inv_rms_tensor_uid(*inv_rms_tensor_uid); }
+  builder_.add_inv_rms_tensor_uid(inv_rms_tensor_uid);
   builder_.add_scale_tensor_uid(scale_tensor_uid);
   builder_.add_x_tensor_uid(x_tensor_uid);
   builder_.add_dy_tensor_uid(dy_tensor_uid);

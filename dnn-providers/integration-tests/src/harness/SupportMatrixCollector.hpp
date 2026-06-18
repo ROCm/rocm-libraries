@@ -91,7 +91,7 @@ public:
             }
         }
 
-        std::lock_guard<std::mutex> lock(_mutex);
+        const std::lock_guard<std::mutex> lock(_mutex);
         _records.push_back(
             {graphName, graphDescription, testName, std::move(engineNames), note, layout});
     }
@@ -99,7 +99,7 @@ public:
     // Thread-safe: returns a copy of the records under mutex protection.
     std::vector<GraphSupportRecord> getRecords() const
     {
-        std::lock_guard<std::mutex> lock(_mutex);
+        const std::lock_guard<std::mutex> lock(_mutex);
         return _records;
     }
 
@@ -132,7 +132,7 @@ public:
         // Snapshot records under lock, then release before doing file I/O.
         std::vector<GraphSupportRecord> records;
         {
-            std::lock_guard<std::mutex> lock(_mutex);
+            const std::lock_guard<std::mutex> lock(_mutex);
             records = _records;
         }
 
@@ -149,7 +149,7 @@ public:
 
         for(const auto& record : records)
         {
-            GroupKey key{record.graphDescription, record.note};
+            const GroupKey key{record.graphDescription, record.note};
             auto& entry = grouped[key];
             if(entry.graphName.empty())
             {
@@ -185,21 +185,22 @@ public:
         {
             const auto& description = key.first;
             auto spacePos = description.find(' ');
-            std::string firstOp
+            const std::string firstOp
                 = (spacePos != std::string::npos) ? description.substr(0, spacePos) : description;
 
             // Strip attribute suffix (e.g., ":AVG", ":RELU_FWD") to group
             // operations of the same base type under one section heading.
             auto colonPos = firstOp.find(':');
-            std::string sectionKey
+            const std::string sectionKey
                 = (colonPos != std::string::npos) ? firstOp.substr(0, colonPos) : firstOp;
 
             if(sectionKey != currentSection)
             {
                 currentSection = sectionKey;
-                sections.push_back({sectionKey, {}});
+                sections.emplace_back(sectionKey,
+                                      std::vector<std::pair<GroupKey, const AggregatedEntry*>>{});
             }
-            sections.back().second.push_back({key, &entry});
+            sections.back().second.emplace_back(key, &entry);
         }
 
         auto writeTableHeader = [&]() {

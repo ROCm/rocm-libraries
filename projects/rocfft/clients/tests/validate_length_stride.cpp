@@ -20,6 +20,7 @@
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/array_validator.h"
+#include "../../shared/params_gen.h"
 #include <gtest/gtest.h>
 
 #include <random>
@@ -89,6 +90,13 @@ auto direct_validity_test(const std::vector<size_t>& length,
 
 TEST_P(valid_length_stride, direct_comparison)
 {
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     const std::vector<size_t> length = std::get<0>(GetParam());
     const std::vector<size_t> stride = std::get<1>(GetParam());
 

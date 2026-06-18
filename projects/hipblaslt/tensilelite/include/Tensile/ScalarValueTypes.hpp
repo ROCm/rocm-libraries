@@ -143,20 +143,35 @@ namespace TensileLite
         if constexpr(std::is_same<T, ConstantVariant>::value)
         {
             if(CompareValue(value, (double)1))
+            {
+
                 return ScalarValue::One;
+            }
             else if(CompareValue(value, (double)-1))
+            {
                 return ScalarValue::NegativeOne;
+            }
             else
+            {
                 return ScalarValue::Any;
+            }
         }
         else
         {
             if(value == T(1))
+            {
+
                 return ScalarValue::One;
+            }
             else if(value == T(-1))
+            {
+
                 return ScalarValue::NegativeOne;
+            }
             else
+            {
                 return ScalarValue::Any;
+            }
         }
     }
 

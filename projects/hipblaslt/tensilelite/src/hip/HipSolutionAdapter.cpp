@@ -73,6 +73,17 @@ namespace TensileLite
                                 << " error: " << hipGetErrorString(error) << std::endl;
                     }
                 );
+            // Extra rotation copies are independent hipModule_t handles loaded
+            // by loadCodeObjectFileExtraCopies(); they own their own device
+            // memory and must be unloaded too or we leak it per copy.
+            for(auto const& copyModules : m_extraModuleCopies)
+                for(auto module : copyModules)
+                    HIP_CHECK_PRINT(hipModuleUnload(module),
+                        [&](hipError_t error) {
+                            std::cerr << "hipModuleUnload failed: " << std::endl
+                                    << " error: " << hipGetErrorString(error) << std::endl;
+                        }
+                    );
             Debug::Instance().markerStop();
         }
 
@@ -108,12 +119,39 @@ namespace TensileLite
                         }
                     );
                 }
+                // Also unload the extra rotation copies; otherwise we leak
+                // their device memory and leave rotation state inconsistent
+                // after the retry below. These are NOT reloaded on retry, so
+                // warn that I-cache rotation is disabled after this recovery.
+                if(!m_extraModuleCopies.empty())
+                {
+                    std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
+                              << m_extraModuleCopies.size()
+                              << " rotation copy set(s); I-cache rotation is now disabled "
+                              << "until loadCodeObjectFileExtraCopies() is called again."
+                              << std::endl;
+                }
+                for(auto const& copyModules : m_extraModuleCopies)
+                {
+                    for(auto m_module : copyModules)
+                    {
+                        HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                            [&](hipError_t error_t) {
+                                std::cerr << "hipModuleUnload failed: " << std::endl
+                                          << " error: " << hipGetErrorString(error_t) << std::endl;
+                            }
+                        );
+                    }
+                }
                 // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
                 m_access.lock();
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
                 m_kernels.clear();
+                m_extraModuleCopies.clear();
+                m_extraKernels.clear();
+                m_currentRotationCopy.store(0);
                 m_access.unlock();
                 // Need to re-run lazy-loading for hsaco(helper kernels) module reload
                 std::string lazyArch;
@@ -290,23 +328,36 @@ namespace TensileLite
 
         hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
         {
+            int copyIdx = m_currentRotationCopy.load();
+
             std::unique_lock<std::mutex> guard(m_access);
             hipError_t                   err = hipErrorNotFound;
 
-            auto it = m_kernels.find(name);
-            if(it != m_kernels.end())
+            // Defensive: clamp to a loaded slot. The size read happens under
+            // m_access so it cannot race with loadCodeObjectFileExtraCopies'
+            // resize/push_back. In practice the benchmark client is single-
+            // threaded and all rotation copies are loaded before any launch,
+            // but the lock keeps this correct regardless.
+            if(copyIdx <= 0 || copyIdx > (int)m_extraModuleCopies.size())
+                copyIdx = 0;
+
+            auto&       cache   = copyIdx ? m_extraKernels[copyIdx - 1] : m_kernels;
+            auto const& modules = copyIdx ? m_extraModuleCopies[copyIdx - 1] : m_modules;
+
+            auto it = cache.find(name);
+            if(it != cache.end())
             {
                 rv = it->second;
                 return hipSuccess;
             }
 
-            for(auto module : m_modules)
+            for(auto module : modules)
             {
                 err = hipModuleGetFunction(&rv, module, name.c_str());
 
                 if(err == hipSuccess)
                 {
-                    m_kernels[name] = rv;
+                    cache[name] = rv;
                     return err;
                 }
                 else if(err != hipErrorNotFound)
@@ -320,6 +371,72 @@ namespace TensileLite
             }
 
             return err;
+        }
+
+        hipError_t
+            SolutionAdapter::loadCodeObjectFileExtraCopies(std::string const& path,
+                                                           int                extraCopies)
+        {
+            if(extraCopies <= 0)
+                return hipSuccess;
+
+            // Pre-grow the parallel arrays
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if((int)m_extraModuleCopies.size() < extraCopies)
+                    m_extraModuleCopies.resize(extraCopies);
+                if((int)m_extraKernels.size() < extraCopies)
+                    m_extraKernels.resize(extraCopies);
+            }
+
+            // Re-load the same .co N times. Each hipModuleLoad allocates its
+            // own device memory for the code object, so the N hipModule_t
+            // handles map to N distinct device PCs - the prerequisite for
+            // I-cache cold misses on rotation.
+            for(int i = 0; i < extraCopies; ++i)
+            {
+                hipModule_t module;
+                hipError_t  error = hipModuleLoad(&module, path.c_str());
+                if(error != hipSuccess)
+                {
+                    std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
+                              << " (rotation copy " << (i + 1) << ")"
+                              << " error: " << hipGetErrorString(error) << std::endl;
+                    return error;
+                }
+                // Print so the user can verify HIP didn't dedup: different
+                // hipModule_t handles indicate independent module objects;
+                // identical handles would silently break rotation.
+                if(m_debug)
+                    std::cout << std::endl << "[icache-rotate] loaded rotation copy " << (i + 1) << "/"
+                            << extraCopies << " of " << path << " hipModule_t="
+                            << static_cast<void*>(module) << std::endl << std::endl;
+
+                // Record the module in the i-th rotation slot, plus a debug
+                // name (printed by operator<<).
+                std::lock_guard<std::mutex> guard(m_access);
+                m_extraModuleCopies[i].push_back(module);
+                m_loadedModuleNames.push_back(
+                    concatenate("File ", path, " (rotation copy ", i + 1, ")"));
+            }
+            return hipSuccess;
+        }
+
+        void SolutionAdapter::selectRotationCopy(int idx)
+        {
+            // Atomic store; no lock needed. Read by getKernel.
+            m_currentRotationCopy.store(idx);
+        }
+
+        int SolutionAdapter::numRotationModules()
+        {
+            // Total module sets available = 1 (original m_modules) + extras.
+            // m_extraModuleCopies is normally guarded by m_access, but this read
+            // is safe without locking because the benchmark client is single-
+            // threaded and only calls this after all rotation copies have been
+            // loaded.
+            std::lock_guard<std::mutex> guard(m_access);
+            return 1 + (int)m_extraModuleCopies.size();
         }
 
         // We should update the constructor to set this to avoid
@@ -452,28 +569,80 @@ namespace TensileLite
 
             if(startEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-            HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
-                                                      kernel.numWorkItems.x,
-                                                      kernel.numWorkItems.y,
-                                                      kernel.numWorkItems.z,
-                                                      kernel.workGroupSize.x,
-                                                      kernel.workGroupSize.y,
-                                                      kernel.workGroupSize.z,
-                                                      kernel.sharedMemBytes, // sharedMem
-                                                      stream, // stream
-                                                      nullptr,
-                                                      (void**)&hipLaunchParams,
-                                                      nullptr, // event
-                                                      nullptr // event
-                                                      ),
-                [&](hipError_t error) {
-                    std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
-                            << " with workgroup size: " << kernel.workGroupSize << std::endl
-                            << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
-                            << " with numWorkItems : " << kernel.numWorkItems << std::endl
-                            << " error: " << hipGetErrorString(error) << std::endl;
+
+#ifdef HIP_HAS_CLUSTER_LAUNCH
+            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
+            if(enableCluster)
+            {
+                if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: clusterDim.x and clusterDim.y must be non-zero "
+                              << "(got " << kernel.clusterDim.x << ", " << kernel.clusterDim.y
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
                 }
-            );
+
+                HIP_LAUNCH_CONFIG config = {0};
+                // The grid dimension is not affected by cluster launch, and is still enumerated
+                // using number of blocks.
+                // The grid dimension should be a multiple of cluster size.
+                config.gridDimX = kernel.numWorkGroups.x;
+                config.gridDimY = kernel.numWorkGroups.y;
+                config.gridDimZ = kernel.numWorkGroups.z;
+                config.blockDimX = kernel.workGroupSize.x;
+                config.blockDimY = kernel.workGroupSize.y;
+                config.blockDimZ = kernel.workGroupSize.z;
+
+                hipLaunchAttribute attribute[1];
+                attribute[0].id                 = hipLaunchAttributeClusterDimension;
+                attribute[0].val.clusterDim.x = kernel.clusterDim.x;
+                attribute[0].val.clusterDim.y = kernel.clusterDim.y;
+                attribute[0].val.clusterDim.z = 1;
+                config.attrs = attribute;
+                config.numAttrs = 1;
+                config.sharedMemBytes = kernel.sharedMemBytes;
+                config.hStream = stream;
+
+                const HIP_LAUNCH_CONFIG *pConfig = &config;
+                HIP_CHECK_RETURN_WITH_LOG(hipDrvLaunchKernelEx(pConfig,
+                                                               function,
+                                                               nullptr,
+                                                               (void**)&hipLaunchParams),
+                    [&](hipError_t error) {
+                        std::cerr << "hipDrvLaunchKernelEx failed: " << kernel.kernelName << std::endl
+                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
+                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
+            }
+            else
+#endif
+            {
+                HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
+                                                          kernel.numWorkItems.x,
+                                                          kernel.numWorkItems.y,
+                                                          kernel.numWorkItems.z,
+                                                          kernel.workGroupSize.x,
+                                                          kernel.workGroupSize.y,
+                                                          kernel.workGroupSize.z,
+                                                          kernel.sharedMemBytes,
+                                                          stream,
+                                                          nullptr,
+                                                          (void**)&hipLaunchParams,
+                                                          nullptr,
+                                                          nullptr
+                                                          ),
+                    [&](hipError_t error) {
+                        std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
+                                  << " with workgroup size: " << kernel.workGroupSize << std::endl
+                                  << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
+                                  << " with numWorkItems : " << kernel.numWorkItems << std::endl
+                                  << " error: " << hipGetErrorString(error) << std::endl;
+                    }
+                );
+            }
 
             if(stopEvent != nullptr)
                 HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));

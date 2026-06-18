@@ -40,6 +40,10 @@ namespace rocsparse
                                                          const T* __restrict__ du,
                                                          T* __restrict__ B)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int bid = hipBlockIdx_x;
 
@@ -150,6 +154,11 @@ namespace rocsparse
                                                       const T* __restrict__ du,
                                                       T* __restrict__ B)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int bid = hipBlockIdx_x;
 
@@ -325,6 +334,11 @@ namespace rocsparse
                                                         const T* __restrict__ du,
                                                         T* __restrict__ B)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(PCR_SIZE > 0 && (PCR_SIZE & (PCR_SIZE - 1)) == 0,
+                      "PCR_SIZE must be a power of two.");
+        static_assert(PCR_SIZE <= BLOCKSIZE, "PCR_SIZE must be less than or equal to BLOCKSIZE.");
         const rocsparse_int tid = hipThreadIdx_x;
         const rocsparse_int bid = hipBlockIdx_x;
 

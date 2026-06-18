@@ -37,6 +37,10 @@ else()
     "Install path prefix, prepended onto install directories" )
 endif()
 
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
+endif()
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 # MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -78,6 +82,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -89,7 +94,9 @@ set(DEFAULT_GPUS
   gfx1152
   gfx1153
   gfx1200
-  gfx1201)
+  gfx1201
+  gfx1250
+)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)
@@ -176,7 +183,7 @@ message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 # Version
 set ( HIPFFT_VERSION_MAJOR "1" )
 set ( HIPFFT_VERSION_MINOR "0" )
-set ( HIPFFT_VERSION_PATCH "23" )
+set ( HIPFFT_VERSION_PATCH "24" )
 set ( VERSION_STRING "${HIPFFT_VERSION_MAJOR}.${HIPFFT_VERSION_MINOR}.${HIPFFT_VERSION_PATCH}" )
 set( hipfft_SOVERSION 0.1 )
 set( hipfftw_SOVERSION 0.1 )
@@ -221,6 +228,7 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

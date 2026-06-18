@@ -34,6 +34,8 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -156,7 +158,7 @@ TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ReluF32) {
                 std::cout << op.floatValue;
             } else if (op.type == IntrinsicOperand::HexLiteral) {
                 float floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+                uint32_t bits = std::bit_cast<uint32_t>(floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }
@@ -201,7 +203,7 @@ TEST_F(IntrinsicFlowTest, IntrinsicUsageExample_ClampF32) {
                 std::cout << op.floatValue;
             } else if (op.type == IntrinsicOperand::HexLiteral) {
                 float floatVal = static_cast<float>(op.floatValue);
-                uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+                uint32_t bits = std::bit_cast<uint32_t>(floatVal);
                 std::cout << "0x" << std::hex << bits << std::dec;
             }
         }

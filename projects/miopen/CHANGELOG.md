@@ -3,7 +3,15 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
-## MIOpen 3.6.0 for ROCm 7.13.0
+## MIOpen 3.5.2 for ROCm 7.14.0
+### Changed
+* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
+
+### Resolved Issues
+* [RNN] Fix RNN workspace tensor descriptor int overflow
+* [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
+
+## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added
 * Added `MIOPEN_LOG_BUFFER_SIZE` option: when set to non-zero, dumps recent MIOpen logs to file on error.
 * [Conv] Added `ConvDepthwiseFwd3D` solver for optimizing specific 3D depthwise convolutions.

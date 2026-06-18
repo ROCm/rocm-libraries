@@ -1,48 +1,32 @@
 .. meta::
   :description: hipFFT documentation, hipFFTW documentation, and API reference library
-  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation, build from source, installing
+  :keywords: FFT, hipFFT, hipFFTW, ROCm, API, documentation, build from source, installing
 
 .. _building-installing-hipfft-and-hipfftw:
 
-********************************************************************
-Building and installing hipFFT and hipFFTW
-********************************************************************
+************************************************
+Build and install hipFFT and hipFFTW from source
+************************************************
 
-This topic explains how to install hipFFT and hipFFTW from the prebuilt packages or build it from the source code.
-hipFTT and hipFFTW require a ROCm-enabled platform. For more information,
-see the :doc:`Linux system requirements <rocm-install-on-linux:reference/system-requirements>`.
+To build hipFFT as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
 
-Installing prebuilt packages
-=============================
-
-For information on downloading and installing ROCm, see the
-:doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`.
-
-To install hipFFT and hipFFTW, use the package manager for the Linux distribution, which
-handles all dependencies.
-This lets you run programs that use hipFFT or hipFFTW, but not compile them.
-
-On the Ubuntu distribution, run the following command:
-
-.. code-block:: shell
-
-   sudo apt update && sudo apt install hipfft
-
-.. note::
-
-   To compile programs, you must install the development package, which
-   contains the header files and CMake infrastructure.
-   This package is named ``hipfft-dev`` on Ubuntu/Debian systems and
-   ``hipfft-devel`` on RHEL and related variants.
+Alternatively, you can build hipFFT standalone using the following
+instructions.
 
 Building hipFFT and hipFFTW from source
 =======================================
+
+hipFFT and hipFFTW require a ROCm-enabled platform. For more information,
+see the :doc:`ROCm compatibility matrix <rocm:compatibility/compatibility-matrix>`.
 
 To build hipFFT and hipFFTW from source, follow these steps:
 
 #. Install the library build dependencies:
 
-   On AMD platforms, install :doc:`rocFFT <rocfft:index>`. To build from source,
+   On AMD platforms, install :doc:`rocFFT <rocfft:index>`. To build hipFFT and hipFFTW from source,
    rocFFT must be installed with the development headers.
    These headers can be added by installing the ``rocfft-dev`` or ``rocfft-devel`` package. If rocFFT was built from
    source, then these headers are already included.

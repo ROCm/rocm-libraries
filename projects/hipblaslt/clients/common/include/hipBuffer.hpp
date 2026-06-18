@@ -251,6 +251,12 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
     case HIP_R_64F:
         copy_buf<double>(src, dst);
         break;
+    case HIP_C_32F:
+        copy_buf<std::complex<float>>(src, dst);
+        break;
+    case HIP_C_64F:
+        copy_buf<std::complex<double>>(src, dst);
+        break;
     case HIP_R_16F:
         copy_buf<hipblasLtHalf>(src, dst);
         break;
@@ -276,7 +282,7 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
         copy_buf<hipblasLtInt8>(src, dst);
         break;
     default:
-        hipblaslt_cerr << "Error type in copy_buf" << std::endl;
+        hipblaslt_cerr << "Error type in copy_buf "<< std::endl;
         break;
     }
 }
@@ -284,6 +290,7 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
 template <typename T1, typename Tc>
 inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
 {
+    constexpr bool requires_real_extraction = !is_std_complex_v<Tc> && is_std_complex_v<T1>;
     if constexpr(std::is_same<Tc, float>::value
                  || !(std::is_same<T1, hipblaslt_bf8_fnuz>::value
                       || std::is_same<T1, hipblaslt_f8_fnuz>::value))
@@ -291,10 +298,24 @@ inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
         if constexpr(std::is_same<Tc, float>::value
                      || !(std::is_same<T1, hipblaslt_bf8>::value
                           || std::is_same<T1, hipblaslt_f8>::value))
+        {
             std::transform(static_cast<T1*>(src.buf()),
                            static_cast<T1*>(src.end()),
                            static_cast<Tc*>(dst.buf()),
-                           [](T1 c) -> Tc { return static_cast<Tc>(c); });
+
+                           [](T1 c) -> Tc {
+                               if constexpr(requires_real_extraction)
+                               {
+                                   // If T1 is complex and Tc is real, cast the real part
+                                   return static_cast<Tc>(c.real()); 
+                               }
+                               else
+                               {
+                                   // Standard cast (complex->complex, real->real, or custom)
+                                   return static_cast<Tc>(c);
+                               }
+                           });
+        }
     }
 }
 
@@ -308,6 +329,12 @@ inline void _transform_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType t
         break;
     case HIP_R_64F:
         transform_buf<T1, double>(src, dst);
+        break;
+    case HIP_C_32F:
+        transform_buf<T1, std::complex<float>>(src, dst);
+        break;
+    case HIP_C_64F:
+        transform_buf<T1, std::complex<double>>(src, dst);
         break;
     case HIP_R_16F:
         transform_buf<T1, hipblasLtHalf>(src, dst);
@@ -331,6 +358,12 @@ inline void
         break;
     case HIP_R_64F:
         _transform_buf<double>(src, dst, typeTc);
+        break;
+    case HIP_C_32F:
+        _transform_buf<std::complex<float>>(src, dst, typeTc);
+        break;
+    case HIP_C_64F:
+        _transform_buf<std::complex<double>>(src, dst, typeTc);
         break;
     case HIP_R_16F:
         _transform_buf<hipblasLtHalf>(src, dst, typeTc);

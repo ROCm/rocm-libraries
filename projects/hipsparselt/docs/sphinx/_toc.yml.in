@@ -11,10 +11,10 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/quick-start-install
-    title: Quick start installation guide
-  - file: install/install-hipsparselt
-    title: Detailed installation guide
+  - file: install/install
+    title: Install hipSPARSELt
+  - file: install/build
+    title: Build from source
 
 - caption: Conceptual
   entries:

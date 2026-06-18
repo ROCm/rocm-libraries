@@ -31,6 +31,7 @@
 
 #include "rocblaslt.h"
 //#include "rocblaslt_ostream.hpp"
+#include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -81,7 +82,7 @@ struct _rocblaslt_handle
     // constructor
     _rocblaslt_handle();
     // destructor
-    ~_rocblaslt_handle() = default;
+    ~_rocblaslt_handle();
 
     // device id
     int device;
@@ -96,10 +97,35 @@ struct _rocblaslt_handle
     // pointer mode ; default mode is host
     rocblaslt_pointer_mode pointer_mode = rocblaslt_pointer_mode_host;
 
+    // Handle-level SM-count-target override. Set via hipblasLtSetSmCountTarget
+    // (the analogue of cublasSetSmCountTarget). 0 (default) means "no
+    // override; use all CUs the device exposes". Negative values are rejected
+    // by the setter. A per-matmul descriptor or preference attribute, when
+    // non-zero, takes precedence over this handle-level value.
+    int32_t sm_count_target = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
 #endif
+
+    // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
+    // See check_numerics_matrix.hpp for the scanner protocol.
+    hipblaslt_check_numerics_mode check_numerics = hipblaslt_check_numerics_mode_no_check;
+
+    // 4-byte device slot; scanner does atomicCAS(0, call_id) so the slot
+    // holds the FIRST matmul's call_id whose D contained a NaN.
+    uint32_t*             check_numerics_flag       = nullptr;
+    // Host-mapped alias of the flag under STOP_ON_FIRST (null otherwise).
+    uint32_t*             check_numerics_flag_host  = nullptr;
+    // Per-matmul counter; 1-indexed so 0 stays the "no NaN" sentinel.
+    std::atomic<uint32_t> check_numerics_call_id{0};
+    uint32_t              check_numerics_scan_every = 1u;
+    uint32_t              check_numerics_scan_from  = 1u;
+    uint32_t              check_numerics_scan_until = ~uint32_t(0);
+    bool                  check_numerics_stop_on_first = false;
+    // Sticky bypass for scan_D once any caller observes a NaN.
+    std::atomic<bool>     check_numerics_short_circuit{false};
 };
 
 /********************************************************************************
@@ -181,35 +207,53 @@ struct _rocblaslt_matmul_desc
     float act0 = 0.f;
     float act1 = 0.f;
 
+    // User-supplied target compute-unit count for kernel selection /
+    // persistent-grid sizing. 0 (default) means "no constraint; use all
+    // CUs the device exposes". Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
+
+    // StreamK tile scheduling mode (hybrid SK3/SK4 tile scheduling for SK5).
+    // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
+    // Tri-state: 0 = OFF (default; static SK3 unless sm_count_target > 0),
+    // 1 = ON (force SK4 dynamic), 2 = AUTO (heuristic picks per launch).
+    int32_t streamk_tile_scheduling_ext = 0;
+
+    // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
+    // Default value is 0 which means same bias vector will be used across all batches (broadcast).
+    int32_t bias_stride = 0;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                  = src.op_A;
-        this->op_B                  = src.op_B;
-        this->epilogue              = src.epilogue;
-        this->bias                  = src.bias;
-        this->scaleA                = src.scaleA;
-        this->scaleB                = src.scaleB;
-        this->scaleC                = src.scaleC;
-        this->scaleD                = src.scaleD;
-        this->scaleE                = src.scaleE;
-        this->scaleAType            = src.scaleAType;
-        this->scaleBType            = src.scaleBType;
-        this->pointermode           = src.pointermode;
-        this->amaxD                 = src.amaxD;
-        this->bias_type             = src.bias_type;
-        this->e                     = src.e;
-        this->aux_type              = src.aux_type;
-        this->lde                   = src.lde;
-        this->stride_e              = src.stride_e;
-        this->compute_type          = src.compute_type;
-        this->compute_type_original = src.compute_type_original;
-        this->compute_input_typeA   = src.compute_input_typeA;
-        this->compute_input_typeB   = src.compute_input_typeB;
-        this->scale_type            = src.scale_type;
-        this->act0                  = src.act0;
-        this->act1                  = src.act1;
+        this->op_A                    = src.op_A;
+        this->op_B                    = src.op_B;
+        this->epilogue                = src.epilogue;
+        this->bias                    = src.bias;
+        this->scaleA                  = src.scaleA;
+        this->scaleB                  = src.scaleB;
+        this->scaleC                  = src.scaleC;
+        this->scaleD                  = src.scaleD;
+        this->scaleE                  = src.scaleE;
+        this->scaleAType              = src.scaleAType;
+        this->scaleBType              = src.scaleBType;
+        this->pointermode             = src.pointermode;
+        this->amaxD                   = src.amaxD;
+        this->bias_type               = src.bias_type;
+        this->e                       = src.e;
+        this->aux_type                = src.aux_type;
+        this->lde                     = src.lde;
+        this->stride_e                = src.stride_e;
+        this->compute_type            = src.compute_type;
+        this->compute_type_original   = src.compute_type_original;
+        this->compute_input_typeA     = src.compute_input_typeA;
+        this->compute_input_typeB     = src.compute_input_typeB;
+        this->scale_type              = src.scale_type;
+        this->act0                    = src.act0;
+        this->act1                    = src.act1;
+        this->sm_count_target         = src.sm_count_target;
+        this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
+        this->bias_stride             = src.bias_stride;
     }
 };
 
@@ -229,9 +273,31 @@ struct _rocblaslt_matmul_preference
     uint32_t search_mode         = 0;
     uint64_t max_workspace_bytes = 0;
 
+    // User-supplied target compute-unit count used as a heuristic-selection
+    // hint. 0 (default) means "no constraint; use all CUs the device exposes".
+    // Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
+
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;
     int64_t search_iterations = 0;
 };
+
+// Resolve the effective sm_count_target hint for a matmul launch using
+// the documented precedence (per-matmul preference > per-matmul desc >
+// handle). Returns 0 when nothing has been set, meaning "use all CUs
+// the device exposes".
+inline int32_t effective_sm_count_target(const _rocblaslt_handle*            handle,
+                                         const _rocblaslt_matmul_desc*       desc,
+                                         const _rocblaslt_matmul_preference* pref)
+{
+    if(pref && pref->sm_count_target > 0)
+        return pref->sm_count_target;
+    if(desc && desc->sm_count_target > 0)
+        return desc->sm_count_target;
+    if(handle)
+        return handle->sm_count_target;
+    return 0;
+}
 
 #endif // HANDLE_H

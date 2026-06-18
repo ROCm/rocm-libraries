@@ -216,6 +216,10 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spic0_descr_destroy`            |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0_descr_create`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0_descr_destroy`         |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spilu0_descr_create`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spilu0_descr_destroy`           |
@@ -234,6 +238,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spic0_set_input`                |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0_set_input`             |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_sptrsv_get_output`              |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sptrsm_get_output`              |
@@ -241,6 +247,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_spilu0_get_output`              |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spic0_get_output`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0_get_output`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_get`                        |
 +-----------------------------------------------------+
@@ -607,6 +615,10 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_spic0_buffer_size()`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spic0()`                        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0_buffer_size()`         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spildlt0()`                     |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgemm()`                       |
 +-----------------------------------------------------+

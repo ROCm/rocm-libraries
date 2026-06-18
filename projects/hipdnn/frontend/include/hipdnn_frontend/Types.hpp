@@ -26,17 +26,21 @@
 #pragma once
 
 #include <HipdnnAttentionImplementation.h>
+#include <HipdnnBackendBehaviorNote.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
 #include <HipdnnNormFwdPhase.h>
+#include <HipdnnPaddingMode.h>
 #include <HipdnnPointwiseMode.h>
 #include <HipdnnReduceTensorOp.h>
+#include <HipdnnResampleMode.h>
 #include <hipdnn_data_sdk/types.hpp>
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -47,7 +51,9 @@ namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e5m2_fnuz;
 using hipdnn_data_sdk::types::half;
 
 /**
@@ -149,6 +155,31 @@ enum class ReductionMode
 typedef ReductionMode ReductionMode_t; ///< @brief Type alias for ReductionMode
 
 /**
+ * @enum ResampleMode
+ * @brief Specifies the resample operation mode
+ */
+enum class ResampleMode
+{
+    NOT_SET = 0, ///< Resample mode not specified
+    MAXPOOL = 1, ///< Maximum pooling
+    AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
+    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
+};
+typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
+
+/**
+ * @enum PaddingMode
+ * @brief Specifies the padding mode for resample operations
+ */
+enum class PaddingMode
+{
+    NOT_SET = 0, ///< Padding mode not specified
+    NEG_INF_PAD = 1, ///< Pad with negative infinity
+    ZERO_PAD = 2 ///< Pad with zeros
+};
+typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
+
+/**
  * @enum DataType
  * @brief Specifies the data type for tensor elements
  *
@@ -174,6 +205,8 @@ enum class DataType
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
     INT64 = 15, ///< 64-bit signed integer
     BOOLEAN = 16, ///< 8-bit boolean
+    FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
+    FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -228,6 +261,20 @@ enum class HeuristicMode
     FALLBACK, ///< Use fallback heuristics for engine selection
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
+
+/**
+ * @enum BehaviorNote
+ * @brief Advisory behavior metadata reported by an engine
+ */
+enum class BehaviorNote : int32_t
+{
+    RUNTIME_COMPILATION = 0, ///< Engine may compile kernels or other code at runtime.
+    REQUIRES_LAYOUT_TRANSFORM = 1, ///< Engine may require internal tensor layout transforms.
+    SUPPORTS_GRAPH_CAPTURE = 2, ///< Engine supports execution during stream graph capture.
+    EXTERNAL_LIBRARY_DEPENDENCY = 3, ///< Engine depends on a library outside core hipDNN.
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4 ///< Engine supports execution plan serialization.
+};
+typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 
 /**
  * @enum BuildPlanPolicy
@@ -324,9 +371,17 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::FP8_E4M3;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3_fnuz>)
+    {
+        return DataType::FP8_E4M3_FNUZ;
+    }
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e5m2_fnuz>)
+    {
+        return DataType::FP8_E5M2_FNUZ;
     }
     else if constexpr(std::is_same_v<T, bool>)
     {
@@ -683,6 +738,10 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_INT64;
     case DataType::BOOLEAN:
         return HIPDNN_DATA_BOOLEAN;
+    case DataType::FP8_E4M3_FNUZ:
+        return HIPDNN_DATA_FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return HIPDNN_DATA_FP8_E5M2_FNUZ;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -733,6 +792,10 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::INT64, {}};
     case HIPDNN_DATA_BOOLEAN:
         return {DataType::BOOLEAN, {}};
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return {DataType::FP8_E4M3_FNUZ, {}};
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return {DataType::FP8_E5M2_FNUZ, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -857,6 +920,72 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     }
 }
 
+/// @brief Convert backend behavior note to frontend behavior note.
+/// @return A frontend behavior note. Unknown values are preserved numerically.
+inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return BehaviorNote::RUNTIME_COMPILATION;
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return BehaviorNote::REQUIRES_LAYOUT_TRANSFORM;
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY;
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+    default:
+        return static_cast<BehaviorNote>(note);
+    }
+}
+
+/// @brief Return true if a behavior note is known to this frontend version.
+inline bool isKnownBehaviorNote(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// @brief Convert BehaviorNote to a human-readable string
+/// @param note The behavior note to convert
+/// @return A C-string representation of the behavior note
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+        return "RUNTIME_COMPILATION";
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+        return "REQUIRES_LAYOUT_TRANSFORM";
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+        return "SUPPORTS_GRAPH_CAPTURE";
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+        return "EXTERNAL_LIBRARY_DEPENDENCY";
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return "SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const BehaviorNote& note)
+{
+    os << to_string(note);
+    return os;
+}
+
 /**
  * @brief Convert ConvolutionMode to a human-readable string
  * @param mode The convolution mode to convert
@@ -922,6 +1051,10 @@ inline const char* to_string(const DataType& type)
         return "int64";
     case DataType::BOOLEAN:
         return "boolean";
+    case DataType::FP8_E4M3_FNUZ:
+        return "fp8_e4m3_fnuz";
+    case DataType::FP8_E5M2_FNUZ:
+        return "fp8_e5m2_fnuz";
     default:
         return "unknown";
     }
@@ -1340,6 +1473,78 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
     return mode == PointwiseMode::BINARY_SELECT;
+}
+
+/**
+ * @brief Convert frontend ResampleMode to backend hipdnnResampleMode_t
+ */
+inline std::optional<hipdnnResampleMode_t> toBackendResampleMode(const ResampleMode& type)
+{
+    switch(type)
+    {
+    case ResampleMode::MAXPOOL:
+        return HIPDNN_RESAMPLE_MAXPOOL;
+    case ResampleMode::AVGPOOL_EXCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
+    case ResampleMode::AVGPOOL_INCLUDE_PADDING:
+        return HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnResampleMode_t to frontend ResampleMode
+ */
+inline std::pair<ResampleMode, Error> fromHipdnnResampleMode(hipdnnResampleMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_RESAMPLE_MAXPOOL:
+        return {ResampleMode::MAXPOOL, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_EXCLUDE_PADDING, {}};
+    case HIPDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING:
+        return {ResampleMode::AVGPOOL_INCLUDE_PADDING, {}};
+    default:
+        return {ResampleMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnResampleMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
+/**
+ * @brief Convert frontend PaddingMode to backend hipdnnPaddingMode_t
+ */
+inline std::optional<hipdnnPaddingMode_t> toBackendPaddingMode(const PaddingMode& type)
+{
+    switch(type)
+    {
+    case PaddingMode::NEG_INF_PAD:
+        return HIPDNN_PADDING_NEG_INF_PAD;
+    case PaddingMode::ZERO_PAD:
+        return HIPDNN_PADDING_ZERO_PAD;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert backend hipdnnPaddingMode_t to frontend PaddingMode
+ */
+inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_PADDING_NEG_INF_PAD:
+        return {PaddingMode::NEG_INF_PAD, {}};
+    case HIPDNN_PADDING_ZERO_PAD:
+        return {PaddingMode::ZERO_PAD, {}};
+    default:
+        return {PaddingMode::NOT_SET,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnPaddingMode_t value: " + std::to_string(static_cast<int>(mode))}};
+    }
 }
 
 } // namespace hipdnn_frontend

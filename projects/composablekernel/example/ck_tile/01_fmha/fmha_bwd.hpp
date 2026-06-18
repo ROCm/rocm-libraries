@@ -11,11 +11,23 @@
 #include "mask.hpp"
 #include "bias.hpp"
 
+#include <functional>
+#include <iostream>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <iostream>
-#include <functional>
+
+// Function pointer type for workspace packing (no captures, points to code segment)
+using PrepareWorkspaceHostFunc = size_t (*)(void*,                   // host_ws
+                                            ck_tile::index_t,        // batch
+                                            ck_tile::index_t,        // hdim_q
+                                            ck_tile::index_t,        // nhead_q
+                                            ck_tile::index_t,        // seqlen_q
+                                            ck_tile::index_t,        // seqlen_k
+                                            const ck_tile::index_t*, // seqstart_q
+                                            const ck_tile::index_t*  // seqstart_k
+);
 
 struct FmhaBwdFp32
 {
@@ -115,7 +127,7 @@ struct fmha_bwd_args
     void* dk_ptr;
     void* dv_ptr;
     void* dbias_ptr;
-    void* dq_acc_ptr;
+    void* workspace_ptr;
     const void*
         sink_ptr; // sink scores [batch, nhead] in log-space (LSEDataType); nullptr disables sink
     void* d_sink_ptr; // sink gradient output [nhead] (LSEDataType); nullptr disables sink gradient
@@ -128,13 +140,13 @@ struct fmha_bwd_args
     // With padding:
     //   Group mode:
     //     - seqstart_q_ptr, seqstart_k_ptr: Record cumulative physical (including padding) sequence
-    //     lengths. [array size: batch + 1]
+    //       lengths. [array size: batch + 1]
     //     - seqlen_q_ptr/seqlen_k_ptr: Records logical (excluding padding) length for each
-    //     sequence. [array size: batch]
+    //       sequence. [array size: batch]
     //     - cu_seqlen_q_ptr/cu_seqlen_k_ptr: Records cumulative logical (excluding padding)
-    //     sequence lengths. [array size: batch + 1]
+    //       sequence lengths. [array size: batch + 1]
     //     - seqlen_q_ptr (per-sequence) and cu_seqlen_q_ptr (cumulative logical) are mutually
-    //     exclusive. Use one set, not both.
+    //       exclusive. Use one set, not both.
     //
     //   Batch mode:
     //     - cu_seqlen_q_ptr/cu_seqlen_k_ptr: Records cumulative logical (excluding padding)
@@ -181,7 +193,6 @@ struct fmha_bwd_args
     ck_tile::index_t stride_o;
     ck_tile::index_t stride_randval;
     ck_tile::index_t stride_do;
-    ck_tile::index_t stride_dq_acc;
     ck_tile::index_t stride_dq;
     ck_tile::index_t stride_dk;
     ck_tile::index_t stride_dv;
@@ -194,7 +205,6 @@ struct fmha_bwd_args
     ck_tile::index_t nhead_stride_randval;
     ck_tile::index_t nhead_stride_do;
     ck_tile::index_t nhead_stride_lsed;
-    ck_tile::long_index_t nhead_stride_dq_acc;
     ck_tile::index_t nhead_stride_dq;
     ck_tile::index_t nhead_stride_dk;
     ck_tile::index_t nhead_stride_dv;
@@ -207,12 +217,10 @@ struct fmha_bwd_args
     ck_tile::index_t batch_stride_randval;
     ck_tile::index_t batch_stride_do;
     ck_tile::index_t batch_stride_lsed;
-    ck_tile::long_index_t batch_stride_dq_acc;
     ck_tile::index_t batch_stride_dq;
     ck_tile::index_t batch_stride_dk;
     ck_tile::index_t batch_stride_dv;
     ck_tile::index_t batch_stride_dbias;
-    ck_tile::index_t split_stride_dq_acc;
     ck_tile::index_t window_size_left;
     ck_tile::index_t window_size_right;
     ck_tile::index_t mask_type;
@@ -227,12 +235,6 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
     auto kargs = [&] {
-        constexpr bool dq_uss_acc  = FmhaBwdDQDKDVKernel::kMaxSeqLenQ == 0;
-        const auto dq_ptr          = dq_uss_acc ? args.dq_acc_ptr : args.dq_ptr;
-        const auto stride_dq       = dq_uss_acc ? args.stride_dq_acc : args.stride_dq;
-        const auto nhead_stride_dq = dq_uss_acc ? args.nhead_stride_dq_acc : args.nhead_stride_dq;
-        const auto batch_stride_dq = dq_uss_acc ? args.batch_stride_dq_acc : args.batch_stride_dq;
-
         // create group mode kernel arguments
         if constexpr(FmhaBwdDQDKDVKernel::kIsGroupMode)
         {
@@ -244,10 +246,11 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.do_ptr,
                                                       args.d_ptr,
                                                       args.rand_val_ptr,
+                                                      args.dq_ptr,
                                                       args.dk_ptr,
                                                       args.dv_ptr,
                                                       args.dbias_ptr,
-                                                      dq_ptr,
+                                                      args.workspace_ptr,
                                                       args.seqstart_q_ptr,
                                                       args.seqstart_k_ptr,
                                                       args.seqlen_q_ptr,
@@ -266,7 +269,7 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.stride_bias,
                                                       args.stride_randval,
                                                       args.stride_do,
-                                                      stride_dq,
+                                                      args.stride_dq,
                                                       args.stride_dk,
                                                       args.stride_dv,
                                                       args.stride_dbias,
@@ -277,11 +280,10 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.nhead_stride_randval,
                                                       args.nhead_stride_do,
                                                       args.nhead_stride_lsed,
-                                                      nhead_stride_dq,
+                                                      args.nhead_stride_dq,
                                                       args.nhead_stride_dk,
                                                       args.nhead_stride_dv,
                                                       args.nhead_stride_dbias,
-                                                      args.split_stride_dq_acc,
                                                       args.window_size_left,
                                                       args.window_size_right,
                                                       args.mask_type,
@@ -298,10 +300,11 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.do_ptr,
                                                       args.d_ptr,
                                                       args.rand_val_ptr,
+                                                      args.dq_ptr,
                                                       args.dk_ptr,
                                                       args.dv_ptr,
                                                       args.dbias_ptr,
-                                                      dq_ptr,
+                                                      args.workspace_ptr,
                                                       args.seqlen_q,
                                                       args.seqlen_k,
                                                       args.batch,
@@ -316,7 +319,7 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.stride_bias,
                                                       args.stride_randval,
                                                       args.stride_do,
-                                                      stride_dq,
+                                                      args.stride_dq,
                                                       args.stride_dk,
                                                       args.stride_dv,
                                                       args.stride_dbias,
@@ -327,7 +330,7 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.nhead_stride_randval,
                                                       args.nhead_stride_do,
                                                       args.nhead_stride_lsed,
-                                                      nhead_stride_dq,
+                                                      args.nhead_stride_dq,
                                                       args.nhead_stride_dk,
                                                       args.nhead_stride_dv,
                                                       args.nhead_stride_dbias,
@@ -338,11 +341,10 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
                                                       args.batch_stride_randval,
                                                       args.batch_stride_do,
                                                       args.batch_stride_lsed,
-                                                      batch_stride_dq,
+                                                      args.batch_stride_dq,
                                                       args.batch_stride_dk,
                                                       args.batch_stride_dv,
                                                       args.batch_stride_dbias,
-                                                      args.split_stride_dq_acc,
                                                       args.window_size_left,
                                                       args.window_size_right,
                                                       args.mask_type,
@@ -414,8 +416,10 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
         // create group mode kernel arguments
         if constexpr(FmhaBwdConvertQGradKernel::kIsGroupMode)
         {
-            return FmhaBwdConvertQGradKernel::MakeKargs(args.dq_acc_ptr,
+            return FmhaBwdConvertQGradKernel::MakeKargs(args.workspace_ptr,
                                                         args.dq_ptr,
+                                                        args.batch,
+                                                        args.nhead_q,
                                                         args.seqstart_q_ptr,
                                                         args.seqstart_k_ptr,
                                                         args.seqlen_q_ptr,
@@ -424,27 +428,20 @@ auto fmha_bwd_convert_dq_create_kargs_and_grids(fmha_bwd_args args)
                                                         args.cu_seqlen_k_ptr,
                                                         args.hdim_q,
                                                         args.stride_dq,
-                                                        args.stride_dq_acc,
-                                                        args.nhead_stride_dq,
-                                                        args.nhead_stride_dq_acc,
-                                                        args.split_stride_dq_acc);
+                                                        args.nhead_stride_dq);
         }
         else
         { // create batch mode kernel arguments
-            return FmhaBwdConvertQGradKernel::MakeKargs(args.dq_acc_ptr,
+            return FmhaBwdConvertQGradKernel::MakeKargs(args.workspace_ptr,
                                                         args.dq_ptr,
+                                                        args.batch,
+                                                        args.nhead_q,
                                                         args.seqlen_q,
                                                         args.seqlen_k,
                                                         args.hdim_q,
                                                         args.stride_dq,
-                                                        args.stride_dq_acc,
                                                         args.nhead_stride_dq,
-                                                        args.nhead_stride_dq_acc,
-                                                        args.batch_stride_dq,
-                                                        args.batch_stride_dq_acc,
-                                                        args.split_stride_dq_acc,
-                                                        args.batch,
-                                                        args.nhead_q);
+                                                        args.batch_stride_dq);
         }
     }();
 
@@ -482,7 +479,25 @@ template <typename Traits_, typename Arch = void>
 int fmha_bwd_dq_dk_dv_maxq_();
 struct fmha_bwd_traits;
 template <typename Traits_, typename Arch = void>
-int fmha_bwd_dq_dk_dv_dq_acc_splits_(const fmha_bwd_traits& t);
+size_t fmha_bwd_dq_dk_dv_dq_ws_host_size_(int batch_size);
+// `total_seqlen_q_padded` is total q tokens across all batches (incl. per-batch padding):
+//   - batch mode: max_batch * seqlen_q
+//   - group mode: seqstart_q[batch] (== varlen q tensor's first dim)
+template <typename Traits_, typename Arch = void>
+size_t fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_(ck_tile::index_t max_batch,
+                                                   ck_tile::index_t hdim_q,
+                                                   ck_tile::index_t nhead_q,
+                                                   ck_tile::index_t total_seqlen_q_padded,
+                                                   ck_tile::index_t max_seqlen_k);
+template <typename Traits_, typename Arch = void>
+size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_(void* cpu_ws,
+                                             ck_tile::index_t batch_size,
+                                             ck_tile::index_t hdim_q,
+                                             ck_tile::index_t nhead_q,
+                                             ck_tile::index_t seqlen_q,
+                                             ck_tile::index_t seqlen_k,
+                                             const ck_tile::index_t* seqstart_qs,
+                                             const ck_tile::index_t* seqstart_ks);
 template <typename Traits_, typename Arch = void>
 bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_();
 
@@ -510,8 +525,7 @@ template <ck_tile::index_t HDim_,
           bool kIsGroupMode_,
           bool kPadS_,
           bool kPadD_,
-          bool kIsDeterministic_,
-          ck_tile::index_t kN0>
+          bool kIsDeterministic_>
 struct fmha_bwd_convert_dq_traits_
 {
 };
@@ -585,12 +599,275 @@ float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_conf
 
 struct fmha_bwd_launcher
 {
-    std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{};
-    ck_tile::index_t dq_acc_splits{0};
-    bool needs_zero_dq_acc{true};
+    // POD closure for graph capture (trivially destructible, no heap allocation)
+    struct GraphClosure
+    {
+        PrepareWorkspaceHostFunc func_ptr;
+        void* pin_w_ptr;
+        const ck_tile::index_t* seqstart_q_ptr;
+        const ck_tile::index_t* seqstart_k_ptr;
+        ck_tile::index_t batch;
+        ck_tile::index_t hdim_q;
+        ck_tile::index_t nhead_q;
+        ck_tile::index_t seqlen_q;
+        ck_tile::index_t seqlen_k;
+
+        static void invoke(void* ud)
+        {
+            auto* closure = static_cast<GraphClosure*>(ud);
+            if(closure->func_ptr)
+            {
+                // Callback runs on the HIP driver helper thread across a C ABI boundary;
+                // any exception escaping it would call std::terminate.
+                try
+                {
+                    closure->func_ptr(closure->pin_w_ptr,
+                                      closure->batch,
+                                      closure->hdim_q,
+                                      closure->nhead_q,
+                                      closure->seqlen_q,
+                                      closure->seqlen_k,
+                                      closure->seqstart_q_ptr,
+                                      closure->seqstart_k_ptr);
+                }
+                catch(const std::exception& e)
+                {
+                    // The H2D queued after this callback will copy indeterminate
+                    // metadata to device and the kernel will produce wrong results;
+                    // unlikely in practice since pack_workspace_host only throws on
+                    // precondition violations.
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
+                              << '\n';
+                }
+                catch(...)
+                {
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
+                }
+            }
+        }
+    };
+    static_assert(std::is_trivially_destructible_v<GraphClosure>,
+                  "GraphClosure must be trivially destructible for placement-new without dtor");
+
+    std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
+        [](fmha_bwd_args, const ck_tile::stream_config&) {
+            std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
+            return -1.0f;
+        }};
+    // Layout: [host_ws_size_ bytes (host-prepared metadata)][dq_acc region]
+    size_t workspace_size = 0;
 
     fmha_bwd_launcher(const fmha_bwd_traits&);
+    fmha_bwd_launcher(fmha_bwd_launcher&&)            = delete;
+    fmha_bwd_launcher& operator=(fmha_bwd_launcher&&) = delete;
 
+    ~fmha_bwd_launcher() noexcept { schedule_pin_staging_release(); }
+
+    // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
+    //
+    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer.
+    //
+    // **Deleter behavior differs by mode**:
+    // - Normal mode: deleter is invoked on the stream tail after H2D completes.
+    // - Graph capture mode: deleter is NOT invoked; caller must keep buffer alive
+    //   until hipGraphDestroy (see precondition #2 below).
+    //
+    // REQUIRED PRECONDITIONS for `pinned_host_alloc`:
+    //
+    // 1. **Capture-safe allocation**: The allocator must NOT call synchronizing APIs
+    //    (e.g., bare hipHostMalloc) during active stream capture, as these invalidate
+    //    the capture and cause hipStreamEndCapture to fail. Use a caching allocator
+    //    that serves from cache during capture (e.g., PyTorch CachingHostAllocator).
+    //
+    // 2. **Buffer lifetime in graph mode**: In graph capture mode (detected via
+    //    hipStreamIsCapturing), the returned buffer is NOT freed automatically after
+    //    the H2D completes. The caller MUST keep the buffer alive for the graph's
+    //    entire lifetime (until hipGraphDestroy), otherwise graph replay will read
+    //    from freed memory. In normal (non-graph) mode, the buffer is automatically
+    //    freed on the stream tail after the H2D.
+    //
+    void prepare_workspace_async( //
+        void* device_ws_ptr,
+        const int* seqstart_q_dev,
+        const int* seqstart_k_dev,
+        const ck_tile::stream_config& s,
+        const std::function<std::shared_ptr<void>(size_t)>& pinned_host_alloc)
+    {
+        hipStream_t stream = s.stream_id_;
+
+        // Fast path: no host-side metadata to stage; just zero dq_acc if needed.
+        if(host_ws_size_ == 0)
+        {
+            if(needs_zero_dq_acc_ && workspace_size > 0)
+                HIP_CHECK_ERROR(hipMemsetAsync(device_ws_ptr, 0, workspace_size, stream));
+            return;
+        }
+
+        if(!pinned_host_alloc)
+            throw std::runtime_error(
+                "fmha_bwd_launcher::prepare_workspace_async: pinned_host_alloc is required");
+
+        // Allocate pinned host staging first: if it throws we haven't issued any
+        // stream work yet, leaving the workspace cleanly un-prepared.
+        // 16-align each section: pin_w stores alignas(16) FmhaBwdGroupPersistentCuState
+        // written via x86 SIMD; misaligned destinations fault.
+        const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
+        const size_t seqstart_stride =
+            ck_tile::integer_least_multiple(seqstart_bytes, static_cast<size_t>(16));
+        const size_t pin_w_offset = 2 * seqstart_stride;
+        const size_t data_size    = pin_w_offset + host_ws_size_;
+
+        // Check if we're in graph capture mode
+        hipStreamCaptureStatus capture_status;
+        HIP_CHECK_ERROR(hipStreamIsCapturing(stream, &capture_status));
+        const bool is_graph_capture = (capture_status == hipStreamCaptureStatusActive);
+
+        // Allocate pinned buffer with extra aligned space for closure
+        // Both modes use placement new for closure (POD, trivially destructible)
+        constexpr size_t closure_align = alignof(GraphClosure);
+        constexpr size_t closure_size  = sizeof(GraphClosure);
+        const size_t aligned_data      = (data_size + closure_align - 1) & ~(closure_align - 1);
+        const size_t total_bytes       = aligned_data + closure_size;
+        auto pin_base                  = pinned_host_alloc(total_bytes);
+
+        if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
+            HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
+                                           0,
+                                           workspace_size - host_ws_size_,
+                                           stream));
+
+        char* base  = static_cast<char*>(pin_base.get());
+        int* pin_q  = reinterpret_cast<int*>(base);
+        int* pin_k  = reinterpret_cast<int*>(base + seqstart_stride);
+        void* pin_w = base + pin_w_offset;
+        const ck_tile::index_t* seqstart_q_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_q) : nullptr;
+        const ck_tile::index_t* seqstart_k_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_k) : nullptr;
+
+        if(traits_.is_group_mode)
+        {
+            if(!seqstart_q_dev || !seqstart_k_dev)
+                throw std::runtime_error("fmha_bwd_launcher::prepare_workspace_async: "
+                                         "seqstart_q_dev and seqstart_k_dev are required in "
+                                         "group mode");
+            HIP_CHECK_ERROR(hipMemcpyAsync(
+                pin_q, seqstart_q_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
+            HIP_CHECK_ERROR(hipMemcpyAsync(
+                pin_k, seqstart_k_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
+        }
+
+        // === UNIFIED PATH: Both modes use placement new for POD closure ===
+        // Construct closure in aligned location within pinned buffer (all POD, trivially
+        // destructible)
+        void* closure_addr = base + aligned_data;
+        auto* closure      = new(closure_addr) GraphClosure{
+            prepare_ws_func_, // Function pointer (points to code segment, always valid)
+            pin_w,
+            seqstart_q_pinned,
+            seqstart_k_pinned,
+            batch_, // Copy captured data (independent of launcher lifetime)
+            hdim_q_,
+            nhead_q_,
+            seqlen_q_,
+            seqlen_k_};
+
+        HIP_CHECK_ERROR(hipLaunchHostFunc(stream, GraphClosure::invoke, closure));
+
+        HIP_CHECK_ERROR(
+            hipMemcpyAsync(device_ws_ptr, pin_w, host_ws_size_, hipMemcpyHostToDevice, stream));
+
+        if(!is_graph_capture)
+        {
+            // Normal mode: transfer ownership of pinned buffer and schedule release.
+            // The H2D memcpy above copies host-prepared metadata to device workspace.
+            // Pinned buffer must stay alive until H2D completes, so we schedule its
+            // release on the stream tail (via hipLaunchHostFunc callback).
+            schedule_pin_staging_release(); // Release any previous in-flight buffer first
+            pin_staging_    = std::move(pin_base);
+            release_stream_ = stream;
+        }
+        // Graph mode: pin_base stays owned by caller (via shared_ptr ref-count).
+        // Caller must keep it alive for the graph's lifetime. Closure and data pointers
+        // within pin_base remain valid as long as caller holds pin_base.
+    }
+
+    private:
+    fmha_bwd_traits traits_{};
+    size_t host_ws_size_    = 0;
+    bool needs_zero_dq_acc_ = false;
+
+    // Function pointer (points to code segment, survives launcher destruction)
+    PrepareWorkspaceHostFunc prepare_ws_func_ = nullptr;
+
+    // Captured data (copied to closure in graph mode)
+    ck_tile::index_t batch_    = 0;
+    ck_tile::index_t hdim_q_   = 0;
+    ck_tile::index_t nhead_q_  = 0;
+    ck_tile::index_t seqlen_q_ = 0;
+    ck_tile::index_t seqlen_k_ = 0;
+
+    std::shared_ptr<void> pin_staging_;
+    hipStream_t release_stream_ = nullptr;
+
+    // The pin_staging_ deleter MUST NOT call any HIP API: it fires from the
+    // hipLaunchHostFunc callback on the driver helper thread, which holds
+    // runtime locks (would deadlock against main-thread hipFree). PyTorch's
+    // CachingHostAllocator is safe; bare hipHostMalloc users should defer
+    // hipHostFree via ck_tile::pinned_host_releaser.
+    void schedule_pin_staging_release() noexcept
+    {
+        if(!pin_staging_)
+            return;
+        auto* heap_ref       = new std::shared_ptr<void>(std::move(pin_staging_));
+        const hipError_t err = hipLaunchHostFunc(
+            release_stream_,
+            [](void* ud) { delete static_cast<std::shared_ptr<void>*>(ud); },
+            heap_ref);
+        if(err != hipSuccess)
+        {
+            std::cerr << "fmha_bwd_launcher: hipLaunchHostFunc failed: " << hipGetErrorString(err)
+                      << "; releasing eagerly\n";
+            delete heap_ref;
+        }
+    }
+
+    template <typename T0 /*dot_do_o_trait*/,
+              typename T1 /*dq_dk_dv_trait*/,
+              typename T2 /*convert_dq_trait*/,
+              typename Arch>
+    void init(const fmha_bwd_traits& t)
+    {
+        traits_ = t;
+        run     = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
+            return fmha_bwd_<T0, T1, T2, Arch>(s, a);
+        };
+        host_ws_size_         = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);
+        size_t device_ws_size = 0;
+        if(host_ws_size_ > 0)
+        {
+            // In group mode t.seqlen_q is already the padded total (== seqstart_q[batch]);
+            // in batch mode it's per-batch and the total is batch * seqlen_q.
+            const ck_tile::index_t total_seqlen_q_padded =
+                t.is_group_mode ? t.seqlen_q : t.batch * t.seqlen_q;
+            device_ws_size = fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<T1, Arch>(
+                t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
+
+            // Store function pointer (directly assign template-instantiated function)
+            prepare_ws_func_ = &fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>;
+
+            // Store captured data as member variables
+            batch_    = t.batch;
+            hdim_q_   = t.hdim_q;
+            nhead_q_  = t.nhead_q;
+            seqlen_q_ = t.seqlen_q;
+            seqlen_k_ = t.seqlen_k;
+        }
+        workspace_size     = host_ws_size_ + device_ws_size;
+        needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
+    }
+
+    public:
     template <typename... Args>
     float operator()(Args&&... args) const
     {

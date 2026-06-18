@@ -337,7 +337,7 @@ void testing_spgemm_csr(Arguments argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     J                    m        = argus.M;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseIndexBase_t idxBaseA = argus.baseA;
     hipsparseIndexBase_t idxBaseB = argus.baseB;
     hipsparseIndexBase_t idxBaseC = argus.baseC;

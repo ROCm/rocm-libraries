@@ -24,6 +24,7 @@
 #include "../../../shared/environment.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_wrapper.h"
 #include <algorithm>
 #include <array>
 #include <cstdint> // std::int64_t
@@ -443,25 +444,8 @@ namespace
                                bool> = true>
     struct hipfftw_plan_internal
     {
-        hipfftw_plan_internal() = default;
-        ~hipfftw_plan_internal()
-        {
-            if(internal_rocfft_info)
-            {
-                rocfft_execution_info_destroy(internal_rocfft_info);
-                internal_rocfft_info = nullptr;
-            }
-            if(internal_rocfft_desc)
-            {
-                rocfft_plan_description_destroy(internal_rocfft_desc);
-                internal_rocfft_desc = nullptr;
-            }
-            if(internal_rocfft_plan)
-            {
-                rocfft_plan_destroy(internal_rocfft_plan);
-                internal_rocfft_plan = nullptr;
-            }
-        }
+        hipfftw_plan_internal()  = default;
+        ~hipfftw_plan_internal() = default;
 
         // disallow copies and moves
         hipfftw_plan_internal(const hipfftw_plan_internal&) = delete;
@@ -469,11 +453,11 @@ namespace
         hipfftw_plan_internal(hipfftw_plan_internal&&)                 = delete;
         hipfftw_plan_internal& operator=(hipfftw_plan_internal&&) = delete;
 
-        rocfft_plan             internal_rocfft_plan = nullptr;
-        rocfft_plan_description internal_rocfft_desc = nullptr;
-        rocfft_execution_info   internal_rocfft_info = nullptr;
-        rocfft_result_placement plan_placement;
-        rocfft_transform_type   plan_dft_type;
+        rocfft_plan_wrapper_t             internal_rocfft_plan;
+        rocfft_plan_description_wrapper_t internal_rocfft_desc;
+        rocfft_execution_info_wrapper_t   internal_rocfft_info;
+        rocfft_result_placement           plan_placement;
+        rocfft_transform_type             plan_dft_type;
         // Sizes of the buffers so we know how much to copy
         size_t in_bytes         = 0;
         size_t out_bytes        = 0;
@@ -637,7 +621,7 @@ namespace
             const auto ostrides_cm = reverse(data_layout.ostrides);
 
             // Create plan description
-            if(rocfft_plan_description_create(&internal_rocfft_desc) != rocfft_status_success)
+            if(internal_rocfft_desc.alloc_with_err() != rocfft_status_success)
             {
                 throw rocfft_failure(
                     "an error was received from rocfft when creating the plan description.");
@@ -660,21 +644,20 @@ namespace
                     "an error was received from rocfft when setting the data layout.");
             }
 
-            if(rocfft_plan_create(&internal_rocfft_plan,
-                                  plan_placement,
-                                  dft_type,
-                                  prec,
-                                  rank,
-                                  lengths_cm.data(),
-                                  data_layout.batches[0],
-                                  internal_rocfft_desc)
+            if(internal_rocfft_plan.alloc_with_err(plan_placement,
+                                                   dft_type,
+                                                   prec,
+                                                   rank,
+                                                   lengths_cm.data(),
+                                                   data_layout.batches[0],
+                                                   internal_rocfft_desc)
                != rocfft_status_success)
             {
                 throw rocfft_failure(
                     "an error was received from rocfft when creating the internal rocfft plan.");
             }
 
-            if(rocfft_execution_info_create(&internal_rocfft_info) != rocfft_status_success)
+            if(internal_rocfft_info.alloc_with_err() != rocfft_status_success)
             {
                 throw rocfft_failure("an error was received from rocfft when creating the "
                                      "execution info structure.");

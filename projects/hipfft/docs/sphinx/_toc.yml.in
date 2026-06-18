@@ -5,8 +5,10 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/install
+    title: Install hipFFT and hipFFTW
   - file: install/building-installing-hipfft-and-hipfftw
-    title: Installation guide
+    title: Build from source
 
 - caption: Conceptual
   entries:

@@ -253,6 +253,52 @@ TEST_F(TestUserDefinedLiterals, Fp8E4M3LiteralPowerOfTwo)
 }
 
 // ============================================================================
+// fp8_e4m3_fnuz literal (_e4m3_fnuz) tests
+// ============================================================================
+
+TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralPositive)
+{
+    auto a = 1.0_e4m3_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralNegative)
+{
+    auto a = -2.0_e4m3_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), -2.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralZero)
+{
+    auto a = 0.0_e4m3_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e4m3_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), 0.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralFractional)
+{
+    auto a = 0.5_e4m3_fnuz;
+    EXPECT_EQ(static_cast<float>(a), 0.5f);
+
+    auto b = 1.5_e4m3_fnuz;
+    EXPECT_EQ(static_cast<float>(b), 1.5f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E4M3FnuzLiteralPowerOfTwo)
+{
+    auto a = 2.0_e4m3_fnuz;
+    EXPECT_EQ(static_cast<float>(a), 2.0f);
+
+    auto b = 4.0_e4m3_fnuz;
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+
+    auto c = 8.0_e4m3_fnuz;
+    EXPECT_EQ(static_cast<float>(c), 8.0f);
+}
+
+// ============================================================================
 // fp8_e5m2 literal (_e5m2) tests
 // ============================================================================
 
@@ -295,6 +341,52 @@ TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralPowerOfTwo)
     EXPECT_EQ(static_cast<float>(b), 4.0f);
 
     auto c = 8.0_e5m2;
+    EXPECT_EQ(static_cast<float>(c), 8.0f);
+}
+
+// ============================================================================
+// fp8_e5m2_fnuz literal (_e5m2_fnuz) tests
+// ============================================================================
+
+TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralPositive)
+{
+    auto a = 1.0_e5m2_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralNegative)
+{
+    auto a = -2.0_e5m2_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), -2.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralZero)
+{
+    auto a = 0.0_e5m2_fnuz;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e5m2_fnuz>));
+    EXPECT_EQ(static_cast<float>(a), 0.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralFractional)
+{
+    auto a = 0.5_e5m2_fnuz;
+    EXPECT_EQ(static_cast<float>(a), 0.5f);
+
+    auto b = 1.5_e5m2_fnuz;
+    EXPECT_EQ(static_cast<float>(b), 1.5f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E5M2FnuzLiteralPowerOfTwo)
+{
+    auto a = 2.0_e5m2_fnuz;
+    EXPECT_EQ(static_cast<float>(a), 2.0f);
+
+    auto b = 4.0_e5m2_fnuz;
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+
+    auto c = 8.0_e5m2_fnuz;
     EXPECT_EQ(static_cast<float>(c), 8.0f);
 }
 
@@ -375,7 +467,9 @@ TEST_F(TestUserDefinedLiterals, LiteralAssignment)
     const fp6_e2m3 e2m3 = 1.5_e2m3;
     const fp6_e3m2 e3m2 = 2.0_e3m2;
     const fp8_e4m3 e4m3 = 3.0_e4m3;
+    const fp8_e4m3_fnuz e4m3Fnuz = 3.0_e4m3_fnuz;
     const fp8_e5m2 e5m2 = 4.0_e5m2;
+    const fp8_e5m2_fnuz e5m2Fnuz = 4.0_e5m2_fnuz;
     const fp8_e8m0 e8m0 = 4.0_e8m0;
 
     EXPECT_EQ(static_cast<float>(bf), 1.5f);
@@ -384,7 +478,9 @@ TEST_F(TestUserDefinedLiterals, LiteralAssignment)
     EXPECT_EQ(static_cast<float>(e2m3), 1.5f);
     EXPECT_EQ(static_cast<float>(e3m2), 2.0f);
     EXPECT_EQ(static_cast<float>(e4m3), 3.0f);
+    EXPECT_EQ(static_cast<float>(e4m3Fnuz), 3.0f);
     EXPECT_EQ(static_cast<float>(e5m2), 4.0f);
+    EXPECT_EQ(static_cast<float>(e5m2Fnuz), 4.0f);
     EXPECT_EQ(static_cast<float>(e8m0), 4.0f);
 }
 
@@ -436,7 +532,9 @@ TEST_F(TestUserDefinedLiterals, AutoTypeDeduction)
     auto e2m3 = 1.0_e2m3;
     auto e3m2 = 1.0_e3m2;
     auto e4m3 = 1.0_e4m3;
+    auto e4m3Fnuz = 1.0_e4m3_fnuz;
     auto e5m2 = 1.0_e5m2;
+    auto e5m2Fnuz = 1.0_e5m2_fnuz;
     auto e8m0 = 1.0_e8m0;
 
     static_assert(std::is_same_v<decltype(bf), bfloat16>);
@@ -445,7 +543,9 @@ TEST_F(TestUserDefinedLiterals, AutoTypeDeduction)
     static_assert(std::is_same_v<decltype(e2m3), fp6_e2m3>);
     static_assert(std::is_same_v<decltype(e3m2), fp6_e3m2>);
     static_assert(std::is_same_v<decltype(e4m3), fp8_e4m3>);
+    static_assert(std::is_same_v<decltype(e4m3Fnuz), fp8_e4m3_fnuz>);
     static_assert(std::is_same_v<decltype(e5m2), fp8_e5m2>);
+    static_assert(std::is_same_v<decltype(e5m2Fnuz), fp8_e5m2_fnuz>);
     static_assert(std::is_same_v<decltype(e8m0), fp8_e8m0>);
 }
 

@@ -716,8 +716,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input, upstreamGrad);
+        // ReLU backward expects dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -864,8 +865,9 @@ protected:
         const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input, upstreamGrad, lowerClip, upperClip, lowerSlope);
+        // ReLU backward expects dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, upstreamGrad, input, lowerClip, upperClip, lowerSlope);
 
         // Create expected tensor: dx = dy * local_gradient
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -1011,8 +1013,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::SIGMOID_BWD, output, input, upstreamGrad);
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::SIGMOID_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * sigmoid(x) * (1 - sigmoid(x))
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -1113,8 +1116,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::TANH_BWD, output, input, upstreamGrad);
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::TANH_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (1 - tanh²(x))
         // The functor computes in double (default ComputeType), so we must match that

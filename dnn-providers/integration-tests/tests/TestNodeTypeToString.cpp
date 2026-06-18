@@ -3,19 +3,21 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <sstream>
 
 #include "harness/NodeTypeNames.hpp"
 
 using hipdnn_frontend::graph::NodeType;
 using hipdnn_integration_tests::to_string;
-using hipdnn_integration_tests::operator<<;
+using hipdnn_integration_tests::
+    operator<<; // NOLINT(misc-unused-using-decls) -- needed by stream insertion below; ADL cannot find it
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
 TEST(TestNodeTypeToString, AllNodeTypesHaveNonNullString)
 {
-    const NodeType allTypes[] = {
+    const std::array allTypes = {
         NodeType::UNKNOWN,
         NodeType::CONVOLUTION_FPROP,
         NodeType::CONVOLUTION_DGRAD,
@@ -57,7 +59,7 @@ TEST(TestNodeTypeToString, SpecificMappings)
 
 TEST(TestNodeTypeToString, StreamInsertionMatchesToString)
 {
-    const NodeType testTypes[] = {
+    const std::array testTypes = {
         NodeType::CONVOLUTION_FPROP,
         NodeType::POINTWISE,
         NodeType::BATCHNORM,

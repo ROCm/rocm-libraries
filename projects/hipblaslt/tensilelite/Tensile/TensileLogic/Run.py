@@ -41,6 +41,7 @@ from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
 from .KnownBugs import KnownBugKey, is_known_bug, load_known_bugs
+from .ValidChipId import _validateChipId
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
@@ -58,7 +59,7 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
-) -> Tuple[int, int, int]:
+) -> Tuple[int, int, int, int]:
     """
     Run checks on the given logic files.
 
@@ -69,23 +70,43 @@ def _runChecks(
         files: List of logic files to check.
 
     Returns:
-        Tuple of (keep, total, known_bug_skips) where keep is the number of
-        unrejected solutions, total is the total number of solutions parsed, and
-        known_bug_skips counts solutions accepted via the known-bugs list only.
+        Tuple of (keep, total, known_bug_skips, chip_id_failures) where keep is
+        the number of unrejected solutions, total is the total number of
+        solutions parsed, known_bug_skips counts solutions accepted via the
+        known-bugs list only, and chip_id_failures is the number of files that
+        failed chip-ID validation (independent of per-solution accounting).
     """
-    keep, total, known_bug_skips = 0, 0, 0
+    keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
     for file in files:
         if "Experimental" in file.parts:
             continue
 
+        rel = file.relative_to(logicPath)
+
+        # --- File level validation ---
+        # Chip-ID validation is a property of the logic file's location and
+        # YAML header, not of any individual solution.
+        chip_id_path = file if rel == Path(".") else rel
+        chip_id_valid = _validateChipId(
+            file,
+            logic_relative_path=chip_id_path,
+            report_path=chip_id_path,
+        )
+        if not chip_id_valid:
+            chip_id_failures += 1
+            # The whole file is invalid; skip per-solution validators and let
+            # the file-level failure stand.
+            continue
+
+        # --- Solution level validation ---
         solutions = []
         data = readYAML(file)
         problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
-            print2(f">> {file.relative_to(logicPath)}")
+            print2(f">> {rel}")
             solutions = data[5]  # Solutions are the 5th index
         elif check.All:
-            print2(f">> {file.relative_to(logicPath)}")
+            print2(f">> {rel}")
             solutions = data[5]  # Solutions are the 5th index
 
         for list_idx, s in enumerate(solutions):
@@ -94,7 +115,6 @@ def _runChecks(
                 continue
 
             s["ProblemType"] = problemType
-            rel = file.relative_to(logicPath)
             sol_index = int(s.get("SolutionIndex", list_idx))
 
             if known_bugs and is_known_bug(known_bugs, rel, sol_index):
@@ -113,7 +133,7 @@ def _runChecks(
                 keep += 1
             total += 1
 
-    return keep, total, known_bug_skips
+    return keep, total, known_bug_skips, chip_id_failures
 
 
 def _setup():
@@ -191,6 +211,7 @@ def main():
     fn = functools.partial(_runChecks, logicPath, isaInfoMap, check, known_bugs)
     keep, total = 0, 0
     known_bug_skips = 0
+    chip_id_failures = 0
 
     # Show periodic progress when in quiet mode (no per-file output)
     progress_stop = threading.Event()
@@ -204,10 +225,11 @@ def main():
     try:
         results = ParallelMap2(fn, batches, multiArg=False, procs=jobs, return_as="list")
 
-        for _keep, _total, _kb in results:
+        for _keep, _total, _kb, _cid in results:
             keep += _keep
             total += _total
             known_bug_skips += _kb
+            chip_id_failures += _cid
     finally:
         progress_stop.set()
         if progress_thread is not None:
@@ -219,6 +241,8 @@ def main():
     print(f"Reject {rejects} solutions")
     if known_bug_skips > 0:
         print(f"Known-bugs skip  {known_bug_skips} solutions (see --known-bugs YAML)")
+    if chip_id_failures > 0:
+        print(f"Chip-ID failures  {chip_id_failures} files")
 
-    if rejects > 0:
+    if rejects > 0 or chip_id_failures > 0:
         exit(1)

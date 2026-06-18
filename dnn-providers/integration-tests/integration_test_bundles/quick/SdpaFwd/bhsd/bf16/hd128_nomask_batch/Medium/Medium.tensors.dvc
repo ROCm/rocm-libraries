@@ -1,0 +1,17 @@
+outs:
+- path: Medium.tensor0.bin
+  md5: ee90d59a6dd62519f135136a7f48e33a
+  size: 1048576
+  hash: md5
+- path: Medium.tensor1.bin
+  md5: bddf3c62a61c6d1d3e422b0b98365c5c
+  size: 1048576
+  hash: md5
+- path: Medium.tensor2.bin
+  md5: 0121aba659fd1959bcafa1a8889e748f
+  size: 1048576
+  hash: md5
+- path: Medium.tensor3.bin
+  md5: 0cc88cdfb130086190b8a414e0e44218
+  size: 1048576
+  hash: md5

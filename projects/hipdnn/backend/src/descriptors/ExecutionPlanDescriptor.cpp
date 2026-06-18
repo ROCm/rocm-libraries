@@ -3,6 +3,7 @@
 
 #include "ExecutionPlanDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
 #include "GraphDescriptor.hpp"
@@ -69,12 +70,10 @@ void ExecutionPlanDescriptor::finalize()
     auto handle = graph->getHandle();
     auto pluginResourceManager = handle->getPluginResourceManager();
     auto engineConfigPluginData = _engineConfig->getSerializedEngineConfig();
-    _serializedEngineConfig.assign(static_cast<const uint8_t*>(engineConfigPluginData.ptr),
-                                   static_cast<const uint8_t*>(engineConfigPluginData.ptr)
-                                       + engineConfigPluginData.size);
     _pluginResourceManager = pluginResourceManager;
     _engineId = engineId;
     _tensorUids = collectTensorUids(*graph);
+    _isOverrideShapeEnabled = graph->isOverrideShapeEnabled();
 
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContext(
         pluginResourceManager, engineId, &engineConfigPluginData, graph.get());
@@ -110,6 +109,15 @@ void ExecutionPlanDescriptor::getAttribute(hipdnnBackendAttributeName_t attribut
         break;
     case HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT:
         getTensorUids(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT:
+        getScalar(getEngineId(),
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ExecutionPlanDescriptor failed to get engine global index");
         break;
     case HIPDNN_ATTR_EXECUTION_PLAN_HANDLE:
     case HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS:
@@ -176,6 +184,7 @@ void ExecutionPlanDescriptor::setAttribute(hipdnnBackendAttributeName_t attribut
     case HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE:
     case HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP:
     case HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT:
+    case HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT:
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -335,6 +344,15 @@ const std::vector<int64_t>& ExecutionPlanDescriptor::getTensorUids() const
     return _tensorUids;
 }
 
+bool ExecutionPlanDescriptor::isOverrideShapeEnabled() const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_INTERNAL_ERROR,
+                   "ExecutionPlanDescriptor::isOverrideShapeEnabled() failed: Not finalized.");
+
+    return _isOverrideShapeEnabled;
+}
+
 hipdnnEnginePluginExecutionContext_t ExecutionPlanDescriptor::getExecutionContext() const
 {
     THROW_IF_FALSE(isFinalized(),
@@ -358,37 +376,40 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: resource manager is "
                   "null.");
-    THROW_IF_TRUE(_serializedEngineConfig.empty(),
-                  HIPDNN_STATUS_INTERNAL_ERROR,
-                  "ExecutionPlanDescriptor::serializeBackendPlan() failed: engine config is "
-                  "empty.");
 
-    std::vector<uint8_t> pluginPayload;
-    _pluginResourceManager->serializeExecutionContext(
-        _engineId, _executionContext->get(), pluginPayload);
+    // Build and cache the serialized plan once; reuse it for all later
+    // size/fill calls (mirrors GraphDescriptor's _graphSerializedBuffer cache).
+    if(_serializedPlanCache.empty())
+    {
+        std::vector<uint8_t> pluginPayload;
+        _pluginResourceManager->serializeExecutionContext(
+            _engineId, _executionContext->get(), pluginPayload);
 
-    flatbuffers::FlatBufferBuilder builder;
-    auto serializedEngineConfig = builder.CreateVector(_serializedEngineConfig);
-    auto serializedPluginPayload = builder.CreateVector(pluginPayload);
-    auto serializedTensorUids = builder.CreateVector(_tensorUids);
-    auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-        builder,
-        PLAN_SERIALIZATION_VERSION,
-        _engineId,
-        _workspaceSize,
-        serializedTensorUids,
-        serializedEngineConfig,
-        serializedPluginPayload);
-    builder.Finish(executionPlan);
+        flatbuffers::FlatBufferBuilder builder;
+        auto serializedPluginPayload = builder.CreateVector(pluginPayload);
+        auto serializedTensorUids = builder.CreateVector(_tensorUids);
+        auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
+            builder,
+            PLAN_SERIALIZATION_VERSION,
+            _engineId,
+            _workspaceSize,
+            serializedTensorUids,
+            serializedPluginPayload,
+            _isOverrideShapeEnabled);
+        builder.Finish(executionPlan);
 
-    *planByteSize = builder.GetSize();
+        _serializedPlanCache.assign(builder.GetBufferPointer(),
+                                    builder.GetBufferPointer() + builder.GetSize());
+    }
+
+    *planByteSize = _serializedPlanCache.size();
     if(serializedPlan != nullptr)
     {
         THROW_IF_LT(requestedByteSize,
-                    builder.GetSize(),
+                    _serializedPlanCache.size(),
                     HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
                     "Requested buffer size is smaller than the serialized execution plan size.");
-        std::memcpy(serializedPlan, builder.GetBufferPointer(), builder.GetSize());
+        std::memcpy(serializedPlan, _serializedPlanCache.data(), _serializedPlanCache.size());
     }
 }
 
@@ -425,13 +446,9 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                 HIPDNN_STATUS_NOT_SUPPORTED,
                 "Serialized execution plan version is not supported.");
 
-    auto serializedEngineConfig = executionPlan->engine_config();
     auto serializedPluginPayload = executionPlan->plugin_payload();
     auto serializedTensorUids = executionPlan->tensor_uids();
 
-    THROW_IF_TRUE(serializedEngineConfig == nullptr || serializedEngineConfig->empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "Serialized execution plan contains an empty engine config.");
     THROW_IF_TRUE(serializedPluginPayload == nullptr || serializedPluginPayload->empty(),
                   HIPDNN_STATUS_BAD_PARAM,
                   "Serialized execution plan contains an empty plugin payload.");
@@ -440,23 +457,21 @@ void ExecutionPlanDescriptor::deserializeBackendPlan(
                   "Serialized execution plan contains no tensor UIDs.");
     _engineId = executionPlan->engine_id();
     _workspaceSize = executionPlan->workspace_size();
+    _isOverrideShapeEnabled = executionPlan->is_override_shape_enabled();
     THROW_IF_LT(_workspaceSize,
                 0,
                 HIPDNN_STATUS_BAD_PARAM,
                 "Serialized execution plan contains an invalid workspace size.");
 
-    _serializedEngineConfig.assign(serializedEngineConfig->begin(), serializedEngineConfig->end());
     _tensorUids.assign(serializedTensorUids->begin(), serializedTensorUids->end());
     std::vector<uint8_t> pluginPayload(serializedPluginPayload->begin(),
                                        serializedPluginPayload->end());
 
-    const hipdnnPluginConstData_t engineConfigData{_serializedEngineConfig.data(),
-                                                   _serializedEngineConfig.size()};
     const hipdnnPluginConstData_t pluginPayloadData{pluginPayload.data(), pluginPayload.size()};
 
     _pluginResourceManager = pluginResourceManager;
     _executionContext = plugin::EnginePluginResourceManager::createExecutionContextFromSerialized(
-        _pluginResourceManager, _engineId, &engineConfigData, &pluginPayloadData);
+        _pluginResourceManager, _engineId, &pluginPayloadData);
 
     HipdnnBackendDescriptorImpl<ExecutionPlanDescriptor>::finalize();
 }
@@ -473,7 +488,7 @@ std::string ExecutionPlanDescriptor::toString() const
     str += _engineConfig ? ", engineConfig="
                                + fmt::format("{:p}", static_cast<const void*>(_engineConfig.get()))
                          : ", engineConfig=null";
-    str += "}";
+    str += '}';
     return str;
 }
 

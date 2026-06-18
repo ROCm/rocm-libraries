@@ -92,6 +92,32 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
+#ifdef TENSILE_USE_FP8_BF8
+    template <>
+    struct TypeTraits<TensileLite::Float8>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Float8;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::BFloat8>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::Float8_fnuz>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Float8_fnuz;
+    };
+
+    template <>
+    struct TypeTraits<TensileLite::BFloat8_fnuz>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
+    };
+#endif
+
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
     // Calculates, for each element (i, j):
@@ -104,6 +130,35 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
+    // Quantize a value through `Narrow`, then return as float. This mirrors
+    // what the GPU MFMA path does when storage is wider than the MAC input
+    // type (e.g. Half stored, F8 used in MFMA).
+    template <typename Narrow>
+    inline float quantizeThroughNarrow(float v)
+    {
+        return static_cast<float>(static_cast<Narrow>(v));
+    }
+
+    using QuantizeFn = float (*)(float);
+
+    inline QuantizeFn quantizerFor(rocisa::DataType t)
+    {
+        switch(t)
+        {
+        case rocisa::DataType::Float:    return [](float v) { return v; };
+        case rocisa::DataType::Half:     return &quantizeThroughNarrow<TensileLite::Half>;
+        case rocisa::DataType::BFloat16: return &quantizeThroughNarrow<TensileLite::BFloat16>;
+#ifdef TENSILE_USE_FP8_BF8
+        case rocisa::DataType::Float8:        return &quantizeThroughNarrow<TensileLite::Float8>;
+        case rocisa::DataType::BFloat8:       return &quantizeThroughNarrow<TensileLite::BFloat8>;
+        case rocisa::DataType::Float8_fnuz:   return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
+        case rocisa::DataType::BFloat8_fnuz:  return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
+#endif
+        default:
+            throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
+        }
+    }
+
     void columnMajorGemm(const float*   a,
                          const float*   b,
                          const float*   c,
@@ -115,12 +170,14 @@ namespace
                          bool           transB,
                          float          alpha,
                          float          beta,
-                         const float*   biasVec       = nullptr,
-                         const float*   scaleAlphaVec = nullptr,
-                         ActivationType activation    = ActivationType::None,
-                         const float*   scaleAVec     = nullptr,
-                         const float*   scaleBVec     = nullptr,
-                         int            factorDim     = 0)
+                         const float*   biasVec        = nullptr,
+                         const float*   scaleAlphaVec  = nullptr,
+                         ActivationType activation     = ActivationType::None,
+                         const float*   scaleAVec      = nullptr,
+                         const float*   scaleBVec      = nullptr,
+                         int            factorDim      = 0,
+                         QuantizeFn     quantizeA      = nullptr,
+                         QuantizeFn     quantizeB      = nullptr)
     {
 
         switch(activation)
@@ -147,6 +204,8 @@ namespace
                 {
                     float aVal = a[i * strideAM + l * strideAK];
                     float bVal = b[l * strideBK + j * strideBN];
+                    if(quantizeA) aVal = quantizeA(aVal);
+                    if(quantizeB) bVal = quantizeB(bVal);
                     sum += aVal * bVal;
                 }
                 float effectiveAlpha = alpha;
@@ -178,7 +237,7 @@ namespace
  * InputT: The C++ type used for storage of A and B matrices (e.g. float, half).
  * AccumulateT: The type used for accumulation (currently restricted to float).
  */
-template <typename InputT, typename AccumulateT = float>
+template <typename InputAT, typename InputBT = InputAT, typename AccumulateT = float>
 int runGemm(size_t         m,
             size_t         n,
             size_t         k,
@@ -192,9 +251,14 @@ int runGemm(size_t         m,
             ActivationType activation,
             bool               useScaleAlphaVec,
             const std::string& useScaleAB,
-            int                factorDim)
+            int                factorDim,
+            rocisa::DataType   computeInputA = rocisa::DataType::None,
+            rocisa::DataType   computeInputB = rocisa::DataType::None)
 {
-    constexpr rocisa::DataType dtypeEnum = TypeTraits<InputT>::value;
+    constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
+    constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
+    if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
+    if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
     static_assert(std::is_same<AccumulateT, float>::value,
                   "Currently only float accumulation is supported");
 
@@ -208,8 +272,8 @@ int runGemm(size_t         m,
     ContractionProblemGemm contraction
         = ContractionProblemGemm::GEMM_Strides(transA,
                                                transB,
-                                               dtypeEnum,
-                                               dtypeEnum,
+                                               dtypeEnumA,
+                                               dtypeEnumB,
                                                rocisa::DataType::Float,
                                                rocisa::DataType::Float, // A, B, C, D types
                                                m,
@@ -226,26 +290,55 @@ int runGemm(size_t         m,
                                                -1,
                                                static_cast<double>(beta));
 
-    contraction.setComputeInputTypeA(dtypeEnum);
-    contraction.setComputeInputTypeB(dtypeEnum);
+    contraction.setComputeInputTypeA(computeInputA);
+    contraction.setComputeInputTypeB(computeInputB);
     contraction.setAlphaType(rocisa::DataType::Float);
     contraction.setBetaType(rocisa::DataType::Float);
 
     // Allocate host memory for inputs and outputs
-    std::vector<InputT> a(m * k);
-    std::vector<InputT> b(k * n);
-    std::vector<float>  c(m * n);
-    std::vector<float>  d(m * n);
+    std::vector<InputAT> a(m * k);
+    std::vector<InputBT> b(k * n);
+    std::vector<float>   c(m * n);
+    std::vector<float>   d(m * n);
 
-    // Initialize inputs with random values in {-1.0, 1.0}
-    size_t                          seed = 42;
-    std::mt19937                    gen(seed);
-    std::uniform_int_distribution<> binary_distribution(0, 1);
+    // Initialize inputs with random values. We use ±1 (binary) for A and B by
+    // default because it is exactly representable in every supported storage
+    // type (including FP8), so storage-side quantization is a no-op and the
+    // comparison stays tight.
+    //
+    // For mixed-precision MAC validation (storage type wider than compute-input
+    // type, e.g. Half storage + F8 compute), the test driver needs values that
+    // are NOT on the F8 grid - otherwise the quantization step has nothing to
+    // do and the bug being tested for can't be reproduced. We give an operand
+    // such values when its storage type is wider than its computeInput type.
+    size_t                                seed = 42;
+    std::mt19937                          gen(seed);
+    std::uniform_int_distribution<>       binary_distribution(0, 1);
+    std::uniform_real_distribution<float> realDist(-1.0f, 1.0f);
 
     auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
 
-    std::generate(a.begin(), a.end(), [&]() { return static_cast<InputT>(randomGen()); });
-    std::generate(b.begin(), b.end(), [&]() { return static_cast<InputT>(randomGen()); });
+    auto initOperand = [&](auto& vec, bool quantizes) {
+        using T = typename std::decay_t<decltype(vec)>::value_type;
+        if(quantizes)
+        {
+            // Values representable in storage but not on the compute-input grid -
+            // for storage=Half/compute=F8N, values like 0.7 that Half holds
+            // exactly but F8N rounds to 0.625 or 0.75.
+            std::generate(vec.begin(), vec.end(),
+                          [&]() { return static_cast<T>(realDist(gen)); });
+        }
+        else
+        {
+            std::generate(vec.begin(), vec.end(),
+                          [&]() { return static_cast<T>(randomGen()); });
+        }
+    };
+
+    bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
+    bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
+    initOperand(a, quantizesA);
+    initOperand(b, quantizesB);
     std::generate(c.begin(), c.end(), [&]() { return static_cast<float>(randomGen()); });
 
     // Optional feature buffers
@@ -345,6 +438,12 @@ int runGemm(size_t         m,
         std::vector<float> cF32(c.begin(), c.end());
         std::vector<float> dRef(d.size());
 
+        // If the storage type is wider than the compute-input type, the GPU
+        // (and slow-path validator) quantize the operand down before the MAC.
+        // Mirror that here so the golden GEMM reflects the same model.
+        QuantizeFn quantA = (computeInputA != dtypeEnumA) ? quantizerFor(computeInputA) : nullptr;
+        QuantizeFn quantB = (computeInputB != dtypeEnumB) ? quantizerFor(computeInputB) : nullptr;
+
         // Run the golden reference
         columnMajorGemm(aF32.data(),
                         bF32.data(),
@@ -362,7 +461,9 @@ int runGemm(size_t         m,
                         activation,
                         (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
                         (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                        factorDim);
+                        factorDim,
+                        quantA,
+                        quantB);
 
         // Compare results
         bool  allClose = true;
@@ -412,7 +513,11 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz)")(
+        "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
+        "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
+        "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
+        "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
@@ -447,6 +552,37 @@ int main(int argc, char* argv[])
     float       alpha            = vm["alpha"].as<float>();
     float       beta             = vm["beta"].as<float>();
     std::string typeStr          = vm["type"].as<std::string>();
+    std::string typeAStr         = vm["typeA"].as<std::string>();
+    std::string typeBStr         = vm["typeB"].as<std::string>();
+    if(typeAStr.empty()) typeAStr = typeStr;
+    if(typeBStr.empty()) typeBStr = typeStr;
+    std::string computeInputAStr = vm["computeInputA"].as<std::string>();
+    std::string computeInputBStr = vm["computeInputB"].as<std::string>();
+    if(computeInputAStr.empty()) computeInputAStr = typeAStr;
+    if(computeInputBStr.empty()) computeInputBStr = typeBStr;
+
+    auto strToDataType = [](const std::string& s, rocisa::DataType& out) -> bool {
+        if(s == "f32")            { out = rocisa::DataType::Float;        return true; }
+        if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
+        if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
+#ifdef TENSILE_USE_FP8_BF8
+        if(s == "f8")             { out = rocisa::DataType::Float8;       return true; }
+        if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
+        if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
+        if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
+#endif
+        return false;
+    };
+
+    rocisa::DataType computeInputA, computeInputB;
+    if(!strToDataType(computeInputAStr, computeInputA)) {
+        std::cerr << "Unknown computeInputA: " << computeInputAStr << std::endl;
+        return 1;
+    }
+    if(!strToDataType(computeInputBStr, computeInputB)) {
+        std::cerr << "Unknown computeInputB: " << computeInputBStr << std::endl;
+        return 1;
+    }
     bool        validate         = vm["validate"].as<bool>();
     bool        tryFastPath      = vm["tryFastPath"].as<bool>();
     bool        useBias          = vm["bias"].as<bool>();
@@ -476,34 +612,49 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " Type=" << typeStr
+    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
+              << " TypeA=" << typeAStr << " TypeB=" << typeBStr
+              << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
               << " FastPath=" << tryFastPath << std::endl;
+
+    // Dispatcher: pick A storage type, then B storage type. Each leaf calls
+    // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
+    // bugs in the fast-path validator (e.g. F8N x Half).
+    auto dispatchB = [&](auto aTag) -> int {
+        using AT = decltype(aTag);
+        auto callB = [&](auto bTag) -> int {
+            using BT = decltype(bTag);
+            return runGemm<AT, BT>(
+                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
+                computeInputA, computeInputB);
+        };
+        if(typeBStr == "f32")        return callB(float{});
+        if(typeBStr == "f16")        return callB(Half{});
+        if(typeBStr == "bf16")       return callB(BFloat16{});
+#ifdef TENSILE_USE_FP8_BF8
+        if(typeBStr == "f8")         return callB(Float8{});
+        if(typeBStr == "bf8")        return callB(BFloat8{});
+        if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
+        if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
+#endif
+        std::cerr << "Unknown typeB: " << typeBStr << std::endl;
+        return 1;
+    };
 
     try
     {
-        if(typeStr == "f32")
-        {
-            return runGemm<float>(
-                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
-        }
-        else if(typeStr == "bf16")
-        {
-            return runGemm<BFloat16>(
-                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
-        }
-        else if(typeStr == "f16")
-        {
-            return runGemm<Half>(
-                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim);
-        }
-        else
-        {
-            std::cerr << "Unknown type: " << typeStr << std::endl;
-            return 1;
-        }
+        if(typeAStr == "f32")        return dispatchB(float{});
+        if(typeAStr == "f16")        return dispatchB(Half{});
+        if(typeAStr == "bf16")       return dispatchB(BFloat16{});
+#ifdef TENSILE_USE_FP8_BF8
+        if(typeAStr == "f8")         return dispatchB(Float8{});
+        if(typeAStr == "bf8")        return dispatchB(BFloat8{});
+        if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
+        if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
+#endif
+        std::cerr << "Unknown typeA: " << typeAStr << std::endl;
+        return 1;
     }
     catch(const std::exception& e)
     {

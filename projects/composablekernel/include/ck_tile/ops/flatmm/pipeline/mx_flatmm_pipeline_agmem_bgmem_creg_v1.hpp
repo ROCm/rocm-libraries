@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/flatmm/pipeline/flatmm_pipeline_agmem_bgmem_creg_v1.hpp"
@@ -36,15 +37,13 @@ struct MXFlatmmPipelineProblem : FlatmmPipelineProblem<ADataType_,
 {
     using BlockGemmShape = BlockGemmShape_;
 
-    // using QuantType = BDataType_;
-
-    static constexpr int ScaleGranularityK = 32;
+    static constexpr int BlockScaleSize = 32;
 
     static constexpr int ContinuousKPerThread = 32; // it's fixed for mx
     static constexpr int MXdlPack             = 2;  // it's fixed for mx
     static constexpr int NXdlPack             = 2;  // it's fixed for mx
-    static constexpr int KXdlPack             = 2;
-    // static constexpr index_t flatKPerWarp = BlockGemmShape::flatKPerWarp * KXdlPack;
+    static constexpr int KXdlPack             = get_warp_size() == 64 ? 2 : 1;
+
     static constexpr index_t flatKPerWarp = get_warp_size() * ContinuousKPerThread;
 };
 
@@ -75,9 +74,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         BlockFlatmm::BlockPolicy::template GetWarpGemmMWarpNWarp<Problem>();
 
     using WG = remove_cvref_t<decltype(config.template at<0>())>;
-
-    static constexpr index_t DsWritePreIssue = 3; // default 2, ds write at MIter - 2
-    static constexpr index_t DsReadPreload   = 4; // default 4 for MXFP4 (MXdlPack * KXdlPack)
 
     static constexpr index_t BlockSize = Problem::kBlockSize;
     static constexpr index_t WaveSize  = get_warp_size();
@@ -128,10 +124,23 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     // static constexpr index_t WG_AKPacks = WG::kK / APackedSize;
     // static constexpr index_t WG_BKPacks = WG::kK / BPackedSize;
 
-    static constexpr index_t MXdlPack          = Problem::MXdlPack;
-    static constexpr index_t NXdlPack          = Problem::NXdlPack;
-    static constexpr index_t KXdlPack          = Problem::KXdlPack;
-    static constexpr index_t ScaleGranularityK = Problem::ScaleGranularityK;
+    static constexpr index_t MXdlPack = Problem::MXdlPack;
+    static constexpr index_t NXdlPack = Problem::NXdlPack;
+    static constexpr index_t KXdlPack = Problem::KXdlPack;
+
+    static constexpr index_t BlockScaleSize = Problem::BlockScaleSize;
+
+    // When each thread in a warp reads 4 scale values as packed int32_t, this is the number of  XDL
+    // tensors (kMxkK or kNxkK) that can be scaled with that data.
+    // gfx950: 4
+    // gfx1250, scale32: 2
+    // gfx1250, scale16: 1
+    static constexpr index_t XdlPerScalePack = (WaveSize == 64) ? 4 : 2;
+    static constexpr index_t ScalePack       = 4; // 4 scale values per packed int32_t
+    static constexpr index_t ScalesPerXdl    = WG::kK / BlockScaleSize;
+
+    static constexpr index_t DsWritePreIssue = 3; // default 2, ds write at MIter - 2
+    static constexpr index_t DsReadPreload   = MXdlPack * KXdlPack; // 4 for gfx950, 2 for gfx125
 
     static constexpr index_t AK1 = std::is_same_v<ADataType, pk_fp6x16_t>
                                        ? 16
@@ -161,9 +170,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t Bload_num      = Bload_num_perK * KIterPerWarp;
     static constexpr index_t ScaleBload_num =
-        kNPerBlock * kKPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
+        kNPerBlock * kKPerBlock / NWarp / BlockScaleSize / NXdlPack / KXdlPack / WaveSize;
     static constexpr index_t ScaleAload_num =
-        kMPerBlock * kKPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
+        kMPerBlock * kKPerBlock / MWarp / BlockScaleSize / MXdlPack / KXdlPack / WaveSize;
 
     // static constexpr index_t KPerScaleLoad = KIterPerWarp / ScaleBload_num;
     static constexpr index_t HalfMIter = (MIterPerWarp + 1) / 2;
@@ -173,8 +182,108 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     static constexpr index_t dswrite_mIter  = (DsWritePreIssue - 1) % MIterPerWarp;
     static constexpr index_t dswrite_kIter  = (DsWritePreIssue - 1) / MIterPerWarp;
 
-    // For the basic gemm pipelien DoubleSmemBuffer set to be false naturally.
-    static constexpr bool DoubleSmemBuffer = false;
+    static constexpr bool DoubleSmemBuffer = true;
+
+    template <typename KernelArgs>
+    CK_TILE_DEVICE static auto MakeScaleABlockWindow(const KernelArgs& kargs,
+                                                     const index_t block_idx_m)
+    {
+#ifdef __gfx125__
+        const auto&& scale_packs_m = integer_divide_ceil(kargs.M, MXdlPack * WG::kM);
+        const auto&& scale_packs_k = kargs.K / BlockScaleSize / ScalePack;
+
+        const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_m, scale_packs_k, MXdlPack, WG::kM));
+        const auto scale_a_desc = transform_tensor_descriptor(
+            scale_a_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_m, MXdlPack, WG::kM)),
+                       make_pass_through_transform(scale_packs_k)),
+            make_tuple(sequence<0, 2, 3>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+
+        const auto& scale_a_tensor_view = make_tensor_view<address_space_enum::global>(
+            reinterpret_cast<const int32_t*>(kargs.scale_m_ptr.ptr), scale_a_desc);
+
+        return make_tile_window(
+            scale_a_tensor_view,
+            make_tuple(number<kMPerBlock>{}, number<kKPerBlock / BlockScaleSize / ScalePack>{}),
+            {block_idx_m, 0});
+#else
+        const auto&& scale_packs_m = integer_divide_ceil(kargs.M, (MXdlPack * WG::kM));
+        const auto&& scale_packs_k = kargs.K / BlockScaleSize / (KXdlPack * ScalesPerXdl);
+
+        // Step 1: Create tensor view
+        const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_m, scale_packs_k, ScalesPerXdl, WG::kM));
+        const auto scale_a_desc = transform_tensor_descriptor(
+            scale_a_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_m, WG::kM)),
+                       make_merge_transform(make_tuple(scale_packs_k, ScalesPerXdl))),
+            make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+
+        const auto& scale_a_tensor_view = make_tensor_view<address_space_enum::global>(
+            reinterpret_cast<const int32_t*>(kargs.scale_m_ptr.ptr), scale_a_desc);
+
+        // Step 2: Create tile window
+        return make_tile_window(scale_a_tensor_view,
+                                make_tuple(number<kMPerBlock / MXdlPack>{},
+                                           number<kKPerBlock / (BlockScaleSize * KXdlPack)>{}),
+                                {block_idx_m / MXdlPack, 0});
+#endif
+    }
+
+    template <typename KernelArgs>
+    CK_TILE_DEVICE static auto MakeScaleBBlockWindow(const KernelArgs& kargs,
+                                                     const index_t block_idx_n)
+    {
+#ifdef __gfx125__
+        const auto&& scale_packs_n = integer_divide_ceil(kargs.N, NXdlPack * WG::kN);
+        const auto&& scale_packs_k = kargs.K / BlockScaleSize / ScalePack;
+
+        const auto scale_b_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_n, scale_packs_k, NXdlPack, WG::kN));
+        const auto scale_b_desc = transform_tensor_descriptor(
+            scale_b_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_n, NXdlPack, WG::kN)),
+                       make_pass_through_transform(scale_packs_k)),
+            make_tuple(sequence<0, 2, 3>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        const auto& scale_b_tensor_view = make_tensor_view<address_space_enum::global>(
+            reinterpret_cast<const int32_t*>(kargs.scale_n_ptr.ptr), scale_b_desc);
+
+        return make_tile_window(
+            scale_b_tensor_view,
+            make_tuple(number<kNPerBlock>{}, number<kKPerBlock / BlockScaleSize / ScalePack>{}),
+            {block_idx_n, 0});
+#else
+        static_assert(ScalePack == NXdlPack * KXdlPack, "ScalePack must be NXdlPack*KXdlPack");
+
+        const auto&& scale_packs_n = integer_divide_ceil(kargs.N, (NXdlPack * WG::kN));
+        const auto&& scale_packs_k = kargs.K / BlockScaleSize / (KXdlPack * ScalesPerXdl);
+
+        // Step 1: Create tensor view
+        // NOTE: Here we omit NXdlPack and KXdlPack in the tensor descriptor because
+        // we take advantage of the assumption that ScalePack == NXdlPack * KXdlPack
+        const auto scale_b_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_n, scale_packs_k, ScalesPerXdl, WG::kN));
+        const auto scale_b_desc = transform_tensor_descriptor(
+            scale_b_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_n, WG::kN)),
+                       make_merge_transform(make_tuple(scale_packs_k, ScalesPerXdl))),
+            make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+
+        const auto& scale_b_tensor_view = make_tensor_view<address_space_enum::global>(
+            reinterpret_cast<const int32_t*>(kargs.scale_n_ptr.ptr), scale_b_desc);
+
+        // Step 2: Create tile window
+        return make_tile_window(scale_b_tensor_view,
+                                make_tuple(number<kNPerBlock / NXdlPack>{},
+                                           number<kKPerBlock / (BlockScaleSize * KXdlPack)>{}),
+                                {block_idx_n / NXdlPack, 0});
+#endif
+    }
 
     CK_TILE_HOST_DEVICE static constexpr auto
     SchedulerPerM(index_t dsread_perM, index_t dswrite_perM, index_t load_perM)
@@ -471,10 +580,31 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // __builtin_amdgcn_sched_barrier(0);
     }
 
-    template <typename... Args>
-    CK_TILE_DEVICE auto operator()(Args&&... args) const
+    // Compile-time-templated entry point: caller picks (HasHotLoop, TailNum)
+    // explicitly; defaults fall back to the class-static members.
+    // AElementFunction is retained only for signature parity with the non-MX
+    // pipelines; it is unused here because MX does not transform A pre-bit_cast.
+    template <bool HasHotLoop_             = HasHotLoop,
+              ck_tile::TailNumber TailNum_ = TailNum,
+              typename ADramBlockWindowTmp,
+              typename AElementFunction,
+              typename BFlatBlockWindowTmp,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const AElementFunction& /*a_element_func*/,
+                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                   const ScaleADramBlockWindowTmp& scale_a_block_window_tmp,
+                                   const ScaleBDramBlockWindowTmp& scale_b_block_window_tmp,
+                                   index_t num_loop,
+                                   void* p_smem) const
     {
-        auto c_warp_tensors = Run_(std::forward<Args>(args)...);
+        auto c_warp_tensors = Run_<HasHotLoop_, TailNum_>(a_dram_block_window_tmp,
+                                                          b_flat_dram_block_window_tmp,
+                                                          scale_a_block_window_tmp,
+                                                          scale_b_block_window_tmp,
+                                                          num_loop,
+                                                          p_smem);
 
         // Block GEMM Acc register tile
         using CWarpDstr = typename WG::CWarpDstr;
@@ -493,7 +623,41 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         return c_block_tile;
     }
 
+    // Runtime-dispatching entry point: computes (has_hot_loop, tail_num) from
+    // num_loop and dispatches into the compile-time-templated operator() above
+    // via TailHandler. All 4 (HasHotLoop, TailNum) variants are compiled in and
+    // the right one is selected per tile.
     template <typename ADramBlockWindowTmp,
+              typename BFlatBlockWindowTmp,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                   const ScaleADramBlockWindowTmp& scale_a_block_window_tmp,
+                                   const ScaleBDramBlockWindowTmp& scale_b_block_window_tmp,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        const bool has_hot_loop            = Underlying::BlockHasHotloop(num_loop);
+        const ck_tile::TailNumber tail_num = Underlying::GetBlockLoopTailNum(num_loop);
+
+        const auto RunPipeline = [&](auto hot_loop_, auto tail_num_) {
+            return operator()<hot_loop_.value, tail_num_.value>(
+                a_dram_block_window_tmp,
+                [](const ADataType& a) { return a; },
+                b_flat_dram_block_window_tmp,
+                scale_a_block_window_tmp,
+                scale_b_block_window_tmp,
+                num_loop,
+                p_smem);
+        };
+
+        return Underlying::template TailHandler<true>(RunPipeline, has_hot_loop, tail_num);
+    }
+
+    template <bool HasHotLoop_             = HasHotLoop,
+              ck_tile::TailNumber TailNum_ = TailNum,
+              typename ADramBlockWindowTmp,
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>
@@ -502,11 +666,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                              const ScaleADramBlockWindowTmp& scale_a_window,
                              const ScaleBDramBlockWindowTmp& scale_b_window,
                              index_t num_loop,
-                             void* __restrict__ p_smem_ping,
-                             void* __restrict__ p_smem_pong) const
+                             void* __restrict__ p_smem) const
     {
-#ifndef __gfx950__
-        static_assert(false, "Only gfx950 is supported for MXFP4 flatmm pipeline now.");
+
+#if !defined(__gfx950__) && !defined(__gfx125__)
+        static_assert(false,
+                      "Only gfx950 and gfx1250 are supported for microscaling flatmm pipeline.");
 #endif
         static_assert(
             std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
@@ -528,13 +693,17 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         __builtin_amdgcn_sched_barrier(0);
 
         // A tile in LDS
+        uint8_t* p_smem_ping = static_cast<uint8_t*>(p_smem);
+        uint8_t* p_smem_pong = static_cast<uint8_t*>(static_cast<void*>(
+            static_cast<char*>(p_smem) + PipelinePolicy::template GetSmemSize<Problem>()));
+
         constexpr auto a_lds_block_desc =
             PipelinePolicy::template MakeMX_ALdsBytesBlockDescriptor<Problem>();
 
-        auto a_lds_block_ping = make_tensor_view<address_space_enum::lds>(
-            static_cast<uint8_t*>(p_smem_ping), a_lds_block_desc);
-        auto a_lds_block_pong = make_tensor_view<address_space_enum::lds>(
-            static_cast<uint8_t*>(p_smem_pong), a_lds_block_desc);
+        auto a_lds_block_ping =
+            make_tensor_view<address_space_enum::lds>(p_smem_ping, a_lds_block_desc);
+        auto a_lds_block_pong =
+            make_tensor_view<address_space_enum::lds>(p_smem_pong, a_lds_block_desc);
 
         auto a_store_lds_window_ping = make_tile_window( //
             a_lds_block_ping,
@@ -580,26 +749,54 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             NIterPerWarp>
             b_warp_tensor_ping, b_warp_tensor_pong;
 
-        // pingpong buffer for Scale A and Scale B
+// pingpong buffer for Scale A and Scale B
+#ifdef __gfx125__
         auto scale_a_dram_window = make_tile_window(
             scale_a_window.get_bottom_tensor_view(),
-            make_tuple(number<MWarp * WG::kM>{}, number<64 / WG::kM>{}),
+            make_tuple(number<MIterPerWarp * WG::kM>{},
+                       number<kKPerBlock / BlockScaleSize / ScalePack>{}),
+            scale_a_window.get_window_origin(),
+            PipelinePolicy::template Make_Wave32_MX_ScaleA_DramTileDistribution<Problem>());
+        const auto scale_a_dram_step_m =
+            amd_wave_read_first_lane(scale_a_dram_window.get_load_offset(
+                tuple<number<MXdlPack * MWarp * WG::kM>, number<0>>{}));
+        const auto scale_a_dram_step_k = amd_wave_read_first_lane(
+            scale_a_dram_window.get_load_offset(tuple<number<0>, number<KXdlPack>>{}));
+#else
+        auto scale_a_dram_window = make_tile_window(
+            scale_a_window.get_bottom_tensor_view(),
+            make_tuple(number<MWarp * WG::kM>{}, number<XdlPerScalePack>{}),
             scale_a_window.get_window_origin(),
             PipelinePolicy::template MakeMX_ScaleA_FlatDramTileDistribution<Problem>());
         const auto scale_a_dram_step_m = amd_wave_read_first_lane(
             scale_a_dram_window.get_load_offset(tuple<number<MWarp * WG::kM>, number<0>>{}));
         const auto scale_a_dram_step_k = amd_wave_read_first_lane(
-            scale_a_dram_window.get_load_offset(tuple<number<0>, number<64 / WG::kM>>{}));
+            scale_a_dram_window.get_load_offset(tuple<number<0>, number<XdlPerScalePack>>{}));
+#endif
 
+#ifdef __gfx125__
         auto scale_b_dram_window = make_tile_window(
             scale_b_window.get_bottom_tensor_view(),
-            make_tuple(number<NWarp * WG::kN>{}, number<64 / WG::kN>{}),
+            make_tuple(number<NIterPerWarp * WG::kN>{},
+                       number<kKPerBlock / BlockScaleSize / ScalePack>{}),
+            scale_b_window.get_window_origin(),
+            PipelinePolicy::template Make_Wave32_MX_ScaleB_DramTileDistribution<Problem>());
+        const auto scale_b_dram_step_n =
+            amd_wave_read_first_lane(scale_b_dram_window.get_load_offset(
+                tuple<number<NXdlPack * NWarp * WG::kN>, number<0>>{}));
+        const auto scale_b_dram_step_k = amd_wave_read_first_lane(
+            scale_b_dram_window.get_load_offset(tuple<number<0>, number<KXdlPack>>{}));
+#else
+        auto scale_b_dram_window = make_tile_window(
+            scale_b_window.get_bottom_tensor_view(),
+            make_tuple(number<NWarp * WG::kN>{}, number<XdlPerScalePack>{}),
             scale_b_window.get_window_origin(),
             PipelinePolicy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
         const auto scale_b_dram_step_n = amd_wave_read_first_lane(
             scale_b_dram_window.get_load_offset(tuple<number<NWarp * WG::kN>, number<0>>{}));
         const auto scale_b_dram_step_k = amd_wave_read_first_lane(
-            scale_b_dram_window.get_load_offset(tuple<number<0>, number<64 / WG::kN>>{}));
+            scale_b_dram_window.get_load_offset(tuple<number<0>, number<XdlPerScalePack>>{}));
+#endif
 
         constexpr index_t MPackIterPerWarp = MIterPerWarp / MXdlPack;
         constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
@@ -647,8 +844,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
                                       impack * scale_a_dram_step_m + ikpack * scale_a_dram_step_k);
         });
+
         // move Scale A window to next K
-        move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+#ifdef __gfx125__
+        move_tile_window(scale_a_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+        move_tile_window(scale_a_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
 
         // prefetch Scale B
         static_ford<sequence<NPackIterPerWarp, KPackIterPerWarp>>{}([&](auto ii) {
@@ -657,12 +859,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             scale_b_tile_tensor_ping(inpack)(ikpack) = load_tile_with_offset(
                 scale_b_dram_window, inpack * scale_b_dram_step_n + ikpack * scale_b_dram_step_k);
         });
+
         // move Scale B window to next K
-        move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+#ifdef __gfx125__
+        move_tile_window(scale_b_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+        move_tile_window(scale_b_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
+
         __builtin_amdgcn_sched_barrier(0);
 
         // Prefetch A1
-        if constexpr(HasHotLoop || TailNum == TailNumber::Even)
+        if constexpr(HasHotLoop_ || TailNum_ == TailNumber::Even)
         {
             async_load_tile_(a_store_lds_window_pong, a_dram_window);
             move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
@@ -677,8 +885,17 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
         statically_indexed_array<decltype(load_tile(a_warp_window_pong)), m_preload> a_warp_tensor;
 
-        // preload A00,A10... from lds
+        // preload A00,A10... from lds: wait for async global->LDS A loads to land.
+        // On gfx950 these async loads share vmcnt with B/scale regular loads, and
+        // the threshold (B + ScaleA + ScaleB) lets B/scales stay pending while
+        // draining async A. On gfx1250 async loads use a separate asynccnt
+        // counter, so we wait on it directly.
+#ifdef __gfx125__
+        block_sync_lds_direct_load<0>();
+#else
         s_waitcnt_barrier</*vmcnt*/ Bload_num + ScaleAload_num + ScaleBload_num>();
+#endif
+
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MXdlPack;
             constexpr auto kIter = loadIter / MXdlPack;
@@ -688,6 +905,42 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 tuple<number<mIter * WG::kM>,
                       number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
         });
+
+        auto preload_next_A =
+            [&](auto& a_warp_window, auto APackIter, auto k_iter, auto m_iter, auto n_iter) {
+
+#ifdef __gfx125__
+                constexpr auto addr = k_iter * MIterPerWarp + m_iter + m_preload;
+                if constexpr(addr < (KIterPerWarp * MIterPerWarp) && (n_iter == NIterPerWarp - 1))
+                {
+                    constexpr auto AmIter    = addr % MIterPerWarp;
+                    constexpr auto AkIter    = addr / MIterPerWarp;
+                    a_warp_tensor(APackIter) = load_tile_with_offset(
+                        a_warp_window,
+                        tuple<number<AmIter * WG::kM>,
+                              number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                }
+
+#elif defined(__gfx950__)
+                constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
+                if constexpr(addr < (KIterPerWarp * MIterPerWarp) && (n_iter == NIterPerWarp - 1))
+                {
+                    constexpr auto AmIter    = addr % 2 + addr / 4 * 2;
+                    constexpr auto AkIter    = addr / 2 % 2;
+                    a_warp_tensor(APackIter) = load_tile_with_offset( //
+                        a_warp_window,
+                        tuple<number<AmIter * WG::kM>,
+                              number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                }
+#else
+                ignore = a_warp_window;
+                ignore = APackIter;
+                ignore = n_iter;
+                ignore = k_iter;
+                ignore = m_iter;
+#endif
+            };
+
         __builtin_amdgcn_sched_barrier(0);
 
         // MAIN LOOP
@@ -736,38 +989,48 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
                     constexpr auto APackIter = ikxdl * MXdlPack + imxdl; // idx inside a xdl pack
                     //  warp GEMM
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    WG{}.template operator()<OpSelA<APackIter>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
                         bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
                         bit_cast<typename WG::BWarpTensor>(
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]);
+
                     // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
+                    preload_next_A(a_warp_window_ping,
+                                   number<APackIter>{},
+                                   number<k_iter>{},
+                                   number<m_iter>{},
+                                   number<n_iter>{});
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
+#ifdef __gfx125__
+            // async global->LDS uses asynccnt, not loadcnt, on gfx1250
+            s_wait_asynccnt<0>();
+#else
             s_waitcnt< // vmcnt
                 Bload_num + ScaleAload_num + ScaleBload_num>();
+#endif
             block_sync_lds();
 
             // Prefetch A(2i+2)
             async_load_tile_(a_store_lds_window_ping, a_dram_window);
             move_tile_window(a_dram_window, {0, kKPerBlock * sizeof(ADataType) / APackedSize});
 
-            // move B window to next flat K
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+            // move Scale A window to next K
+#ifdef __gfx125__
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
+
+            // move Scale B window to next K
+#ifdef __gfx125__
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
 
             // preload A(2i+1)
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
@@ -826,37 +1089,46 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
                     constexpr auto APackIter = ikxdl * MXdlPack + imxdl; // idx inside a xdl pack
                     // warp GEMM
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    WG{}.template operator()<OpSelA<APackIter>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
                         bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
                         bit_cast<typename WG::BWarpTensor>(
                             b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]); // scale B
+
                     // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
-                            a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
+                    preload_next_A(a_warp_window_pong,
+                                   number<APackIter>{},
+                                   number<k_iter>{},
+                                   number<m_iter>{},
+                                   number<n_iter>{});
                 });
             // barrier as ds_load A(2i + 1) and buffer_load_lds A(2i + 2) finished
+#ifdef __gfx125__
+            s_wait_asynccnt<0>();
+#else
             s_waitcnt< // vmcnt
                 Bload_num + ScaleAload_num + ScaleBload_num>();
+#endif
             block_sync_lds();
 
             // Prefetch A(2i+3)
             async_load_tile_(a_store_lds_window_pong, a_dram_window);
             move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
-            // move B window to next flat K
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+
+            // move Scale A window to next K
+#ifdef __gfx125__
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
+            // move Scale B window to next K
+#ifdef __gfx125__
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / BlockScaleSize / ScalePack});
+#else
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (BlockScaleSize * KXdlPack)});
+#endif
 
             // preload A(2i+2)
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
@@ -870,7 +1142,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             HotLoopScheduler();
         };
 
-        if constexpr(HasHotLoop)
+        if constexpr(HasHotLoop_)
         {
             index_t iCounter = (num_loop - 1) / 2;
             do
@@ -880,7 +1152,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             } while(iCounter > 0);
         }
         // TAIL
-        if constexpr(TailNum == TailNumber::Even)
+        if constexpr(TailNum_ == TailNumber::Even)
         {
             // prefetch B(loopK)
             static_ford<sequence<KIterPerWarp, NIterPerWarp>>{}([&](auto kn) {
@@ -919,30 +1191,30 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     constexpr auto n_iter    = inpack * NXdlPack + inxdl;
                     constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
                     constexpr auto APackIter = ikxdl * MXdlPack + imxdl; // idx inside a xdl pack
+
                     // warp GEMM
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    WG{}.template operator()<OpSelA<APackIter>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
                         bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
                         bit_cast<typename WG::BWarpTensor>(
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]); // scale B
+
                     // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset( //
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
+                    preload_next_A(a_warp_window_ping,
+                                   number<APackIter>{},
+                                   number<k_iter>{},
+                                   number<m_iter>{},
+                                   number<n_iter>{});
                 });
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
+#ifdef __gfx125__
+            s_wait_asynccnt<0>();
+#else
             s_waitcnt< // vmcnt
                 Bload_num + ScaleAload_num + ScaleBload_num>();
+#endif
             block_sync_lds();
 
             // preload A(2i+1)
@@ -970,29 +1242,24 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
                     constexpr auto APackIter = ikxdl * MXdlPack + imxdl; // idx inside a xdl pack
                     // warp GEMM
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    WG{}.template operator()<OpSelA<APackIter>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
                         bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
                         bit_cast<typename WG::BWarpTensor>(
                             b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]); // scale B
+
                     // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
+                    preload_next_A(a_warp_window_pong,
+                                   number<APackIter>{},
+                                   number<k_iter>{},
+                                   number<m_iter>{},
+                                   number<n_iter>{});
                 });
             LastHotLoopScheduler();
         }
-        else if constexpr(TailNum == TailNumber::Odd)
+        else if constexpr(TailNum_ == TailNumber::Odd)
         {
             // GEMM loopK
             static_for_product<number<KPackIterPerWarp>,
@@ -1007,25 +1274,20 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
                     constexpr auto APackIter = ikxdl * MXdlPack + imxdl; // idx inside a xdl pack
                     // warp GEMM
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    WG{}.template operator()<OpSelA<APackIter>, OpSelB<ikxdl * NXdlPack + inxdl>>(
                         c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
                         bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
                         bit_cast<typename WG::BWarpTensor>(
                             b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
                         scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],  // scale A
                         scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]); // scale B
+
                     // preload next A from lds
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
+                    preload_next_A(a_warp_window_ping,
+                                   number<APackIter>{},
+                                   number<k_iter>{},
+                                   number<m_iter>{},
+                                   number<n_iter>{});
                 });
             LastHotLoopScheduler();
         }

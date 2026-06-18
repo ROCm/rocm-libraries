@@ -9,7 +9,7 @@ namespace hipblaslt_plugin::hipblaslt_utils
 EpilogueParams mapPointwiseModeToHipblasLtEpilogue(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* attrs, bool withBias)
 {
-    if(!attrs)
+    if(attrs == nullptr)
     {
         return EpilogueParams{
             withBias ? HIPBLASLT_EPILOGUE_BIAS : HIPBLASLT_EPILOGUE_DEFAULT, 0.0, 0.0};

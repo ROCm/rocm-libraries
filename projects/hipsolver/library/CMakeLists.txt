@@ -22,7 +22,7 @@
 
 
 # This is incremented when the ABI to the library changes
-set(hipsolver_SOVERSION 1.1)
+set(hipsolver_SOVERSION 1.2)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip ${HIP_PATH}/cmake)
 

@@ -26,6 +26,7 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "testing_aux_check_numerics_gemm.hpp"
 #include "testing_auxiliary.hpp"
 #include <cctype>
 #include <cstring>
@@ -74,6 +75,12 @@ namespace
                 testing_aux_matmul_pref_get_attr_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_get_attr"))
                 testing_aux_matmul_pref_get_attr(arg);
+            else if(!strcmp(arg.function, "aux_matmul_sm_count_target"))
+                testing_aux_matmul_sm_count_target(arg);
+            else if(!strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext"))
+                testing_aux_matmul_streamk_tile_scheduling_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
+                testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
                 testing_aux_matmul_alg_init_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init"))
@@ -113,7 +120,11 @@ namespace
                 testing_aux_tuple_helper_equal_func(arg);
             else if(!strcmp(arg.function, "aux_rocblaslt_rocroller_host_func"))
                 testing_aux_rocblaslt_rocroller_host_func(arg);
+            else if(!strcmp(arg.function, "aux_check_numerics_func"))
+                testing_aux_check_numerics_func(arg);
 #endif
+            else if(!strcmp(arg.function, "aux_check_numerics_gemm"))
+                testing_aux_check_numerics_gemm(arg);
             else if(!strcmp(arg.function, "aux_mat_copy"))
                 testing_aux_mat_copy(arg);
             else
@@ -158,6 +169,9 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_bad_ws_size")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
+                   || !strcmp(arg.function, "aux_matmul_sm_count_target")
+                   || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
+                   || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")
                    || !strcmp(arg.function, "aux_float8_func")
@@ -168,7 +182,9 @@ namespace
                    || !strcmp(arg.function, "aux_tensile_host_func")
                    || !strcmp(arg.function, "aux_tuple_helper_equal_func")
                    || !strcmp(arg.function, "aux_rocblaslt_rocroller_host_func")
+                   || !strcmp(arg.function, "aux_check_numerics_func")
 #endif
+                   || !strcmp(arg.function, "aux_check_numerics_gemm")
                    || !strcmp(arg.function, "aux_mat_copy");
         }
 
@@ -185,6 +201,7 @@ namespace
 
     TEST_P(aux_test, conversion)
     {
+        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         RUN_TEST_ON_THREADS_STREAMS(aux_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(aux_test);

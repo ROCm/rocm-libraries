@@ -62,7 +62,7 @@ void StinkyInstruction::dump(std::ostream& out) const {
 //----------------------------------------------------------------------
 StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t alignment) {
     static const HwInstDesc labelMCID{
-        GFX::LABEL, GFX::LABEL, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     StinkyInstruction* labelInst = create(&labelMCID);
     labelInst->addModifier<LabelData>(LabelData{label, alignment});
@@ -70,8 +70,8 @@ StinkyInstruction* AsmIRBuilder::createLabel(const std::string& label, uint16_t 
 }
 
 StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt) {
-    static const HwInstDesc phiMCID{GFX::PHI, GFX::PHI, 0,
-                                    0,        "PHI",    makeFlagSet({InstFlag::IF_HasSideEffect})};
+    static const HwInstDesc phiMCID{
+        GFX::PHI, GFX::PHI, 0, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
     const size_t numPreds = bb->getPredecessors().size();
 
@@ -162,7 +162,7 @@ uint32_t getBytesPerGlobalLoad(const StinkyInstruction& inst) {
             return 16;
 
         default:
-            assert("Calling getBytesPerGlobalLoad but input is not GlobalRead");
+            assert(false && "Calling getBytesPerGlobalLoad but input is not GlobalRead");
             return 0;
     }
 }

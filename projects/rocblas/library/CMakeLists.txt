@@ -158,7 +158,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 # This is incremented when the ABI to the library changes
-set( rocblas_SOVERSION 5.4 )
+set( rocblas_SOVERSION 5.5 )
 
 list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 

@@ -4,6 +4,7 @@
 #include "NodeFactory.hpp"
 #include "BatchnormOperationDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "RMSNormBackwardOperationDescriptor.hpp"
 
 namespace hipdnn_backend
 {
@@ -46,10 +47,14 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return ReductionOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::RMSNormAttributes:
         return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::RMSNormBackwardAttributes:
+        return RMSNormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaAttributes:
         return SdpaFwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaBackwardAttributes:
         return SdpaBwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::ResampleFwdAttributes:
+        return ResampleFwdOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,

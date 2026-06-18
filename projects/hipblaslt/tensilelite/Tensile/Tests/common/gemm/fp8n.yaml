@@ -18,7 +18,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
   DataInitTypeScaleAlphaVec: 21
-  NumElementsToValidate: -1
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -32,8 +31,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -105,8 +104,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -167,8 +166,8 @@ BenchmarkProblems:
       DataType: F8N
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True

@@ -1,4 +1,4 @@
-// Copyright (C) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {256, 256},
     {256, 1},
     {1, 256},
+    {256, 225},
+    {256, 256, 225},
     {256, 256, 256},
     {256, 256, 1},
     {256, 1, 256},
@@ -101,25 +103,22 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
 
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
-    std::vector<fft_params> params_single;
-
-    for(auto run_callbacks : {false, true})
-    {
-        auto params = param_generator_base(test_prob,
-                                           trans_type_range_full,
-                                           multi_gpu_sizes,
-                                           precision_range_sp_dp,
-                                           multi_gpu_batch_range,
-                                           generate_types,
-                                           stride_generator(stride_range),
-                                           stride_generator(stride_range),
-                                           ioffset_range_zero,
-                                           ooffset_range_zero,
-                                           place_range,
-                                           false,
-                                           run_callbacks);
-        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-    }
+    std::vector<fft_params> params_single
+        = param_generator_base(test_prob,
+                               trans_type_range_full,
+                               multi_gpu_sizes,
+                               precision_range_sp_dp,
+                               multi_gpu_batch_range,
+                               generate_types,
+                               stride_generator(stride_range),
+                               stride_generator(stride_range),
+                               ioffset_range_zero,
+                               ooffset_range_zero,
+                               place_range,
+                               false,
+                               // function pointer callbacks need -fgpu-rdc, but that causes build
+                               // nondeterminism in kpack
+                               {fft_callback_type_none, /*fft_callback_type_funcptr,*/});
 
     std::vector<fft_params> all_params;
 
@@ -185,8 +184,6 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                 // unbatched 1D cases are irrelevant at the moment
                 if(p.length.size() < 2 && p.nbatch <= 1)
                     continue;
-                if(p.nbatch == 1 && p.placement != fft_placement_inplace)
-                    continue; // only in-place is relevant for unbatched cases
                 if(p.nbatch > 1)
                 {
                     // only the batch dimension is split
@@ -216,7 +213,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type, const in
                     continue; // FIXME, fails even with only 2 ranks
                 if(p.placement == fft_placement_inplace)
                     continue; // only out-of-place
-                if(p.run_callbacks)
+                if(p.run_callbacks != fft_callback_type_none)
                     continue; // known issue to fix w/ callbacks
                 start_global_dev_id_input  = dev_rng(gen);
                 start_global_dev_id_output = dev_rng(gen);
@@ -318,6 +315,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
 
 TEST(multi_gpu_validate, catch_validation_errors)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     const auto all_split_types
         = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
 

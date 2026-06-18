@@ -62,6 +62,11 @@ TEST(TestConfigUninitialized, SkipGraphValidationThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().skipGraphValidation(), std::runtime_error);
 }
 
+TEST(TestConfigUninitialized, GetReferenceExecutorTypeThrowsWhenUninitialized)
+{
+    EXPECT_THROW(TestConfig::get().getReferenceExecutorType(), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
@@ -116,6 +121,12 @@ TEST_F(TestConfigInitialized, GetEngineIdReturnsConsistentHash)
 {
     const auto expected = hipdnn_data_sdk::utilities::engineNameToId(TEST_ENGINE_NAME);
     EXPECT_EQ(TestConfig::get().getEngineId(), expected);
+}
+
+TEST_F(TestConfigInitialized, GetReferenceExecutorTypeDefaultsToCpu)
+{
+    EXPECT_EQ(TestConfig::get().getReferenceExecutorType(),
+              hipdnn_integration_tests::ReferenceExecutorType::CPU);
 }
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)

@@ -256,7 +256,8 @@ int main(int argc, char* argv[])
     bool totalPass = true;
     bool testPass  = false;
 
-    hiptensorLoggerOpenFile("test.log");
+    const char* logFile = "test.log";
+    hiptensorLoggerOpenFile(logFile);
     hiptensorLoggerSetLevel(HIPTENSOR_LOG_LEVEL_API_TRACE);
 
     testPass = loggerSingletonTest();
@@ -280,7 +281,7 @@ int main(int argc, char* argv[])
     printBool(testPass);
 
     //As the above function call sets to a temporary file, need to call OpenFile again.
-    hiptensorLoggerOpenFile("test.log");
+    hiptensorLoggerOpenFile(logFile);
 
     testPass = hiptensorLoggerSetLevelTest();
     totalPass &= testPass;
@@ -297,6 +298,13 @@ int main(int argc, char* argv[])
     totalPass &= testPass;
     std::cout << "hiptensorLoggerForceDisableTest: ";
     printBool(testPass);
+
+    // Redirect the logger away from test.log before deleting it.
+    // On Windows, a file cannot be removed while it is open.
+    // hiptensorLoggerSetFile calls fclose() on the current stream (mOwnsStream=true),
+    // which releases the file handle regardless of whether the logger is force-disabled.
+    hiptensorLoggerSetFile(stdout);
+    std::remove(logFile);
 
     if(!totalPass)
         return -1;

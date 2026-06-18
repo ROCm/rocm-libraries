@@ -28,8 +28,9 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
   .. grid-item-card:: Install
 
-    * :doc:`Linux installation guide <./install/install>`
-    * :doc:`Windows installation guide <./install/install-windows>`
+    * :doc:`Install hipSPARSE <./install/install>`
+    * :doc:`Build from source on Linux <./install/build-linux>`
+    * :doc:`Build from source on Windows <./install/build-windows>`
 
   .. grid-item-card:: How to
 

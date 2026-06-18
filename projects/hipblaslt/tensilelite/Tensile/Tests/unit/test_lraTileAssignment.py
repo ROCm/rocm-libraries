@@ -15,60 +15,14 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
-    create_writer,
-    init_rocisa,
-    assemble_and_run,
-    generate_kernel_asm,
-    generate_load_params,
-    generate_export_epilogue,
+    generate_lra_asm,
+    export_register,
     print_offset_grid,
 )
-from Tensile.Components.SubtileBasedKernel import lraTileAssignment
-
-EXPORT_LOAD_PARAMS = (
-    (4, 2, 0x00, "output_ptr"),
-    ("StrideA0I", 1, 0x08, "strideA"),
-    ("StrideB1J", 1, 0x0c, "strideB"),
-)
-
-EXPORT_ARGS = (
-    ("output_ptr", 8, "global_buffer", "u32"),
-    ("strideA",    4, "by_value",      "u32"),
-    ("strideB",    4, "by_value",      "u32"),
-)
-
-
-def generate_lra_asm(cfg):
-    """Run lraTileAssignment and return (lra_asm, writer, tileInfoA, tileInfoB, kernel)."""
-    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg)
-    init_rocisa()
-
-    # Reserve s0-s11 for hardware regs + kernarg loads
-    writer.sgprPool.checkOut(12)
-    writer.sgprs["StrideA0I"] = 10
-    writer.sgprs["StrideB1J"] = 11
-    tileInfoA.allocOffsetRegisters(writer, kernel)
-    tileInfoB.allocOffsetRegisters(writer, kernel)
-
-    prologue = generate_load_params(EXPORT_LOAD_PARAMS)
-    module = lraTileAssignment(writer, kernel)
-    lra_asm = f"{prologue}\n{module}"
-    return lra_asm, writer, tileInfoA, tileInfoB, kernel
-
-
-def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label):
-    """Generate export kernel, assemble, run, return per-thread u32 results."""
-    epilogue, allocated = generate_export_epilogue(writer, export_reg, is_sgpr)
-    kernel_asm = generate_kernel_asm(f"{test_asm}\n{epilogue}", writer, EXPORT_ARGS)
-    for v in allocated:
-        writer.vgprPool.checkIn(v)
-
-    raw = assemble_and_run(kernel_asm, tmp_path, label, NUM_THREADS * 4,
-                           scalars=(cfg.stride_a, cfg.stride_b))
-    return struct.unpack(f"{NUM_THREADS}I", raw)
 
 
 # ---- Reference implementations ----
@@ -186,49 +140,7 @@ TILE_CONFIGS = [
 
 # ---- Pytest tests ----
 
-class TestLraTileAssignmentUnit:
-    """Non-GPU unit tests for lraTileAssignment."""
-
-    @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
-    def lra_env(self, request):
-        """Generate lraTileAssignment output once per tile config."""
-        cfg = request.param
-        lra_asm, writer, tileInfoA, tileInfoB, kernel = generate_lra_asm(cfg)
-        return SimpleNamespace(
-            cfg=cfg,
-            lra_asm=lra_asm,
-            writer=writer,
-            tileInfoA=tileInfoA,
-            tileInfoB=tileInfoB,
-            kernel=kernel,
-        )
-
-    def test_returns_valid_module(self, lra_env):
-        """Verify lraTileAssignment returns a non-empty assembly string."""
-        assert lra_env.lra_asm is not None
-        assert len(lra_env.lra_asm) > 0
-
-    def test_lr_offset_registers_allocated(self, lra_env):
-        """Verify LR offset registers are allocated for both A and B."""
-        for tileInfo in [lra_env.tileInfoA, lra_env.tileInfoB]:
-            assert hasattr(tileInfo, 'sharedVgprLROffset'), \
-                f"tileInfo{tileInfo.tc} missing sharedVgprLROffset"
-            assert len(tileInfo.sharedVgprLROffset) == tileInfo.numLRPerSubtile, \
-                f"tileInfo{tileInfo.tc}: expected {tileInfo.numLRPerSubtile} LR offset regs, " \
-                f"got {len(tileInfo.sharedVgprLROffset)}"
-
-    def test_tile_info_lr_consistency(self, lra_env):
-        """Verify LR-related TileInfo fields are consistent."""
-        for tileInfo in [lra_env.tileInfoA, lra_env.tileInfoB]:
-            assert tileInfo.numLRPerSubtile >= 1, \
-                f"tileInfo{tileInfo.tc}: numLRPerSubtile should be >= 1"
-            assert tileInfo.numLRTotal >= 1, \
-                f"tileInfo{tileInfo.tc}: numLRTotal should be >= 1"
-            assert tileInfo.loadRatioLR > 0, \
-                f"tileInfo{tileInfo.tc}: loadRatioLR should be > 0"
-
-
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestLraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)
@@ -312,49 +224,46 @@ if __name__ == "__main__":
                   f"loadRatioLR={tileInfoB.loadRatioLR}, "
                   f"sharedVgprLROffset={tileInfoB.sharedVgprLROffset}")
 
-            if HAS_HIP:
-                # Test all sharedVgprLROffset vgprs for both matrices
-                for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
-                    for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
-                        results = export_register(writer, lra_asm, reg, False, cfg, tmp_path,
-                                                  f"lr_offset{tc}_v{reg}_{cfg.label}")
+            # Test all sharedVgprLROffset vgprs for both matrices
+            for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
+                for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
+                    results = export_register(writer, lra_asm, reg, False, cfg, tmp_path,
+                                              f"lr_offset{tc}_v{reg}_{cfg.label}")
 
-                        if args.grid:
-                            print_offset_grid(f"Matrix {tc} LR GPU offset[{idx}] v{reg} ({cfg.label})",
-                                              results, WAVESIZE, NUM_WAVES)
+                    if args.grid:
+                        print_offset_grid(f"Matrix {tc} LR GPU offset[{idx}] v{reg} ({cfg.label})",
+                                          results, WAVESIZE, NUM_WAVES)
 
-                            if args.debug:
-                                expected = [compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
-                                            for tid in range(NUM_THREADS)]
-                                print_offset_grid(f"Matrix {tc} LR EXPECTED offset[{idx}] ({cfg.label})",
-                                                  expected, WAVESIZE, NUM_WAVES)
+                        if args.debug:
+                            expected = [compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
+                                        for tid in range(NUM_THREADS)]
+                            print_offset_grid(f"Matrix {tc} LR EXPECTED offset[{idx}] ({cfg.label})",
+                                              expected, WAVESIZE, NUM_WAVES)
 
-                                mismatches = sum(1 for t in range(NUM_THREADS)
-                                                 if results[t] != expected[t])
-                                if mismatches:
-                                    print(f"\n--- Matrix {tc} LR offset[{idx}] DIFF ({mismatches} mismatches) ---")
-                                    for w in range(NUM_WAVES):
-                                        print(f"  w{w}: ", end="")
-                                        for lane in range(WAVESIZE):
-                                            tid = w * WAVESIZE + lane
-                                            if results[tid] != expected[tid]:
-                                                print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
-                                        print()
-                                else:
-                                    print(f"\n  Matrix {tc} LR offset[{idx}]: all match.")
+                            mismatches = sum(1 for t in range(NUM_THREADS)
+                                             if results[t] != expected[t])
+                            if mismatches:
+                                print(f"\n--- Matrix {tc} LR offset[{idx}] DIFF ({mismatches} mismatches) ---")
+                                for w in range(NUM_WAVES):
+                                    print(f"  w{w}: ", end="")
+                                    for lane in range(WAVESIZE):
+                                        tid = w * WAVESIZE + lane
+                                        if results[tid] != expected[tid]:
+                                            print(f" t{tid}:{results[tid]}!={expected[tid]}", end="")
+                                    print()
+                            else:
+                                print(f"\n  Matrix {tc} LR offset[{idx}]: all match.")
 
-                        errors = 0
-                        for tid in range(NUM_THREADS):
-                            exp = compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
-                            if results[tid] != exp:
-                                errors += 1
-                                if not args.grid:
-                                    print(f"  FAIL {tc} LR offset[{idx}] v{reg} tid={tid}: "
-                                          f"got {results[tid]}, expected {exp}")
-                            elif not args.grid and tid < 64:
-                                print(f"  OK   {tc} LR offset[{idx}] v{reg} tid={tid}: {results[tid]}")
+                    errors = 0
+                    for tid in range(NUM_THREADS):
+                        exp = compute_expected_lr_offset(tid, cfg, tileInfo, writer.ldsStartOffsetB)[idx]
+                        if results[tid] != exp:
+                            errors += 1
+                            if not args.grid:
+                                print(f"  FAIL {tc} LR offset[{idx}] v{reg} tid={tid}: "
+                                      f"got {results[tid]}, expected {exp}")
+                        elif not args.grid and tid < 64:
+                            print(f"  OK   {tc} LR offset[{idx}] v{reg} tid={tid}: {results[tid]}")
 
-                        print(f"  Matrix {tc} LR offset[{idx}] v{reg}: "
-                              f"{NUM_THREADS} threads, {errors} errors")
-            else:
-                print("HIP not available - assembly generated but not executed")
+                    print(f"  Matrix {tc} LR offset[{idx}] v{reg}: "
+                          f"{NUM_THREADS} threads, {errors} errors")

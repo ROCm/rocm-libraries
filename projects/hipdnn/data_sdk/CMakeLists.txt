@@ -21,6 +21,7 @@ target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
+target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS})
 
 export(TARGETS hipdnn_data_sdk
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"
@@ -58,6 +59,8 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk
     PATH_VARS HIPDNN_PLUGIN_ENGINE_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR
               HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
+              HIPDNN_PLUGIN_HEURISTIC_SUBDIR HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR
+              HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR
 )
 
 # Generate package version file for find_package version checking

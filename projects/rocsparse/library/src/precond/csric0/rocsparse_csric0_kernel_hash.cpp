@@ -46,6 +46,10 @@ namespace rocsparse
                                                  double               tol,
                                                  rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASH > 0 && (HASH & (HASH - 1)) == 0, "HASH must be a power of two.");
         const auto lid = hipThreadIdx_x & (WFSIZE - 1);
         const auto wid = hipThreadIdx_x / WFSIZE;
 
@@ -357,7 +361,7 @@ namespace rocsparse
         {
             return rocsparse::csric0_kernel_hash_launch<BLOCKSIZE, WF_SIZE, HASH, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -382,7 +386,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, HASH, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

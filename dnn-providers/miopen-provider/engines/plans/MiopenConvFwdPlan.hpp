@@ -41,6 +41,7 @@ public:
     const MiopenTensor& y() const;
     const MiopenConvDescriptor& conv() const;
 
+    size_t spatialDimCount() const;
     bool validTensors() const;
 
 private:

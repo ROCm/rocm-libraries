@@ -18,10 +18,14 @@ struct GpuConvolutionFwdSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType{
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes};
-    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType wDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType wDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
 
     GpuConvolutionFwdSignatureKey() = default;
     constexpr GpuConvolutionFwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType x,

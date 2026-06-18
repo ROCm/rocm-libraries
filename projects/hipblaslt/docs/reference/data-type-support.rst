@@ -85,6 +85,16 @@ The hipBLASLt input and output types are listed in the following table.
       - ``hipblasLtFloat``
       - 32-bit real single precision floating-point
 
+    *
+      - ``HIP_C_32F``
+      - ``hipblaslt_complex_float``
+      - 32-bit complex single precision floating-point
+
+    *
+      - ``HIP_C_64F``
+      - ``hipblaslt_complex_double``
+      - 64-bit real complex precision floating-point
+
 .. note::
 
    The ``hipblaslt_f8_fnuz`` and ``hipblaslt_bf8_fnuz`` data types are only

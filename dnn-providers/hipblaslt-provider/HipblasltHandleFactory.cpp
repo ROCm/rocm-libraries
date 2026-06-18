@@ -21,7 +21,7 @@ void HipblasltHandleFactory::createHipblasltHandle(hipdnnEnginePluginHandle_t* h
 
     *handle = new HipdnnEnginePluginHandle();
 
-    hipblasStatus_t status = hipblasLtCreate(&(*handle)->hipblasltHandle);
+    hipblasStatus_t const status = hipblasLtCreate(&(*handle)->hipblasltHandle);
 
     if(status != HIPBLAS_STATUS_SUCCESS)
     {
@@ -39,7 +39,7 @@ void HipblasltHandleFactory::destroyHipblasltHandle(hipdnnEnginePluginHandle_t h
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, "handle is null");
     }
 
-    hipblasStatus_t status = hipblasLtDestroy(handle->hipblasltHandle);
+    hipblasStatus_t const status = hipblasLtDestroy(handle->hipblasltHandle);
 
     if(status != HIPBLAS_STATUS_SUCCESS)
     {

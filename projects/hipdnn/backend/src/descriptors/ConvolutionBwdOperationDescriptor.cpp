@@ -175,7 +175,7 @@ std::string ConvolutionBwdOperationDescriptor::toString() const
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameConvMode(_data.conv_mode);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

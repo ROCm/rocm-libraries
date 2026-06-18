@@ -116,7 +116,8 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnMiopenHandle& handle,
     , _executionSettings(executionSettings)
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(

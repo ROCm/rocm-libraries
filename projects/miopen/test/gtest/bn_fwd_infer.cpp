@@ -60,11 +60,11 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    if(xDesc.GetLayout_t() != yDesc.GetLayout_t())
+    if(xDesc.GetLayoutEnum() != yDesc.GetLayoutEnum())
     {
         throw std::runtime_error("Input and output tensor layout must be the same");
     }
-    bool isLayoutNHWC       = (xDesc.GetLayout_t() == miopenTensorNHWC);
+    const bool isLayoutNHWC = (xDesc.GetLayoutEnum() == miopenTensorNHWC);
     unsigned int in_cstride = h * w;
     size_t max_localsize    = 256;
     size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;

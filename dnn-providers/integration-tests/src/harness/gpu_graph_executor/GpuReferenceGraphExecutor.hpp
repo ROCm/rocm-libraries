@@ -7,21 +7,23 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "detail/GpuPlanBuilderRegistry.hpp"
+#include "harness/IReferenceGraphExecutor.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor
 {
 
-class GpuReferenceGraphExecutor
+class GpuReferenceGraphExecutor : public IReferenceGraphExecutor
 {
 public:
     GpuReferenceGraphExecutor() = default;
 
     void execute(void* graphBuffer,
                  size_t size,
-                 const std::unordered_map<int64_t, void*>& variantPack)
+                 const std::unordered_map<int64_t, void*>& variantPack) override
     {
         auto graphWrap
-            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
 
         std::vector<std::unique_ptr<detail::IGpuGraphNodePlanExecutor>> planExecutors;
 
@@ -40,6 +42,11 @@ public:
         {
             executor->execute(variantPackWithVirtualTensors);
         }
+    }
+
+    bool requiresDeviceMemory() const override
+    {
+        return true;
     }
 
 private:

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -62,7 +62,7 @@ extern "C" {
 *
 *  \note
 *  The sparse matrix formats currently supported are: \p rocsparse_format_coo, \p rocsparse_format_csr,
-*  \p rocsparse_format_csc, and \p rocsparse_format_ell.
+*  \p rocsparse_format_csc, \p rocsparse_format_ell, and \p rocsparse_format_bsr.
 *
 *  \note check_spmat requires two stages to complete. The first stage
 *  \ref rocsparse_check_spmat_stage_buffer_size will return the size of the temporary storage buffer

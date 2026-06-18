@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -37,7 +37,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_spmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$ matrix \f$op(A)\f$,
-*  defined in CSR, COO, BSR or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
+*  defined in CSR, CSC, COO, BSR, or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
 *  and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that is multiplied by the scalar
 *  \f$\beta\f$, such that
 *  \f[
@@ -100,8 +100,8 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bell</td>  <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
 *  <table>
@@ -111,13 +111,13 @@ extern "C" {
 *  </table>
 *
 *  It is also possible to pass \ref rocsparse_spmm_alg_default, which will automatically select from the algorithms listed above
-*  based on the sparse matrix format. In the case of CSR matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_csr. In
+*  based on the sparse matrix format. In the case of CSR or CSC matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_csr. In
 *  the case of blocked ELL matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_bell. In the case of BSR matrices, this
 *  will set the algorithm to be \ref rocsparse_spmm_alg_bsr, and for COO matrices, it will set the algorithm to be
 *  \ref rocsparse_spmm_alg_coo_atomic.
 *
 *  When A is transposed, \p rocsparse_spmm will revert to using \ref rocsparse_spmm_alg_csr
-*  for CSR format and \ref rocsparse_spmm_alg_coo_atomic for COO format, regardless of algorithm selected.
+*  for CSR and CSC formats and \ref rocsparse_spmm_alg_coo_atomic for COO format, regardless of algorithm selected.
 *
 *  \p rocsparse_spmm supports multiple combinations of data types and compute types. The tables below indicate the currently
 *  supported different data types that can be used for for the sparse matrix \f$op(A)\f$ and the dense matrices \f$op(B)\f$ and
@@ -216,7 +216,7 @@ extern "C" {
 *  support execution in a hipGraph context. The \ref rocsparse_spmm_stage_preprocess stage does not support hipGraph.
 *
 *  \note
-*  Currently, only CSR, COO, BSR, and blocked ELL sparse formats are supported.
+*  Currently, only CSR, CSC, COO, BSR, and blocked ELL sparse formats are supported.
 *
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.

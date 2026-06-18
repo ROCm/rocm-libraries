@@ -23,7 +23,9 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
@@ -92,7 +94,7 @@ intrinsic TestHexLiteral {
     float expectedFloat = 7.3890562f;
     uint32_t expectedBits = 0x40ec7326;
     float actualFloat = static_cast<float>(inst1.operands[1].floatValue);
-    uint32_t actualBits = *reinterpret_cast<uint32_t*>(&actualFloat);
+    uint32_t actualBits = std::bit_cast<uint32_t>(actualFloat);
 
     EXPECT_EQ(actualBits, expectedBits) << "Hex literal bits should match exactly";
     EXPECT_NEAR(actualFloat, expectedFloat, 0.0001f) << "Float value should be approximately 7.389";
@@ -147,7 +149,7 @@ intrinsic RoundTripTest {
 
     // Verify bits are preserved
     float floatVal = static_cast<float>(backInst.operands[1].floatValue);
-    uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+    uint32_t bits = std::bit_cast<uint32_t>(floatVal);
     EXPECT_EQ(bits, 0x40ec7326) << "Hex literal bits should be preserved";
 }
 
@@ -210,7 +212,7 @@ intrinsic SerializeTest {
 
     // Verify bits: 0x3f800000 = 1.0f
     float floatVal = static_cast<float>(deserInst.operands[1].floatValue);
-    uint32_t bits = *reinterpret_cast<uint32_t*>(&floatVal);
+    uint32_t bits = std::bit_cast<uint32_t>(floatVal);
     EXPECT_EQ(bits, 0x3f800000) << "Hex literal bits should be 0x3f800000";
     EXPECT_FLOAT_EQ(floatVal, 1.0f) << "Float value should be 1.0";
 }
@@ -264,7 +266,7 @@ intrinsic MixedTest {
 
     // 0x40490fdb = pi (3.14159274...)
     float piFloat = static_cast<float>(inst2.operands[1].floatValue);
-    uint32_t piBits = *reinterpret_cast<uint32_t*>(&piFloat);
+    uint32_t piBits = std::bit_cast<uint32_t>(piFloat);
     EXPECT_EQ(piBits, 0x40490fdb);
 }
 
