@@ -97,8 +97,8 @@ int main(int argc, char** argv) noexcept
             .help("Enable golden reference bundle test registration. "
                   "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
         parser.add_argument("--golden-data-dir")
-            .help("Path to golden reference data directory. "
-                  "Defaults to <exe>/../lib/golden_reference_data/. "
+            .help("Path to the integration test bundle data directory. "
+                  "Defaults to <exe>/../lib/integration_test_bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
 
         std::vector<std::string> remainingArgs;

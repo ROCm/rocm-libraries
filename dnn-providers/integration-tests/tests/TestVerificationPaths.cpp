@@ -24,7 +24,7 @@ namespace
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "golden_reference_data";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()
@@ -205,33 +205,6 @@ TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough
     }
 
     EXPECT_EQ(bundles.front().suiteName, "BatchnormInference_nchw_fp32_Small");
-}
-
-// ---------------------------------------------------------------------------
-// Path 3 (continued) — Engine runner suffix is appended per bundle
-//
-// Proves that registerBundles appends the "_Engine" suffix to the discovered
-// suite name.  Bundles are registered only for the Engine runner (CpuRef /
-// GpuRef were removed — the standalone pipeline tests above cover those
-// executors directly).
-// ---------------------------------------------------------------------------
-TEST(TestVerificationRouting, EngineRunnerSuffixIsAppended)
-{
-    auto path = std::filesystem::temp_directory_path() / "golden_suffix_test";
-    std::filesystem::remove_all(path);
-    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
-
-    writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
-                                "Small");
-
-    const auto bundles = discoverBundles(tempDir.path());
-    ASSERT_FALSE(bundles.empty());
-
-    const auto& bundle = bundles.front();
-
-    const auto engineSuite = bundle.suiteName + "_Engine";
-    EXPECT_NE(engineSuite.find("Engine"), std::string::npos);
-    EXPECT_EQ(engineSuite, "BatchnormInference_nchw_fp32_Small_Engine");
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -123,8 +123,10 @@ inline IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc makeEngin
 // each test's factory just hands its shared bundle to the harness.
 //
 // Engine is the only runner (CpuRef / GpuRef were removed — those executors are
-// covered by the standalone pipeline tests), so the executor, the "_Engine"
-// suite suffix, and the requires-device flag are fixed here rather than passed in.
+// covered by the standalone pipeline tests), so the executor and the
+// requires-device flag are fixed here rather than passed in. The suite name is
+// the discovered name as-is: with a single runner there is no second runner to
+// disambiguate against, so no runner suffix is appended.
 inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 {
     const auto executor = makeEngineExecutor();
@@ -155,7 +157,9 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 
 // Resolves the bundle data root: an explicit CLI/env override from the shared
 // TestConfig singleton if one was provided, otherwise the conventional install
-// location next to the test binary (../lib/golden_reference_data).
+// location next to the test binary (../lib/integration_test_bundles). This must
+// match where the top-level integration-tests/CMakeLists.txt copies and installs
+// the bundles (lib/integration_test_bundles).
 inline std::filesystem::path resolveDataDir()
 {
     auto& config = TestConfig::get();
@@ -164,7 +168,7 @@ inline std::filesystem::path resolveDataDir()
         return config.getGoldenDataDir();
     }
     return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-           / "../lib/golden_reference_data";
+           / "../lib/integration_test_bundles";
 }
 
 inline void registerBundleTests()

@@ -102,19 +102,28 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
     return leaves;
 }
 
+// Companion file "kinds" — the suffixes that mark a .json as a companion of a
+// graph rather than a graph itself. A companion is either "{Name}.{kind}.json"
+// (e.g. Small.meta.json) or the bare "{kind}.json" (e.g. meta.json). When a new
+// companion type is added (e.g. per-graph claims, RFC 0015), add its kind here —
+// this one list is the single place discovery learns about it.
+inline const std::set<std::string>& companionKinds()
+{
+    static const std::set<std::string> s_kinds = {"meta"};
+    return s_kinds;
+}
+
 // Discovery predicate (ALLOWLIST): true only for a bundle GRAPH .json — the file
-// that should become a test. It is the inverse of "is a companion": every .json
-// that is NOT a graph (metadata today, claims tomorrow) is skipped by discovery.
+// that should become a test. A .json is a COMPANION (not a graph) when its name
+// is "{kind}.json" or "{Name}.{kind}.json" for a known kind in companionKinds();
+// everything else is a graph.
 //
-// A graph is identified positively and generically, so new companion kinds need
-// no change here:
-//   * companions use the form {Name}.{kind}.json (e.g. Small.meta.json -> stem
-//     "Small.meta"); a graph's stem therefore has NO embedded '.'. This single
-//     rule excludes ANY {Name}.{kind} companion — meta, a future claims, etc. —
-//     without enumerating the kind.
-//   * reserved BARE companion names (e.g. "meta.json", which has no {Name} prefix
-//     and so slips past the dotted-stem rule). This is the only thing that must
-//     grow, and only for a new *bare* companion (none planned beyond meta).
+// We match the trailing dotted segment against the known-kind list rather than
+// rejecting "any dotted stem". That distinction matters: a legitimate graph may
+// embed dots in its name (e.g. model.fp16.json, resnet50.v2.json), and the
+// "drop a folder, it runs" contract for ad-hoc customer bundles means such a
+// file must still be discovered as a graph — not silently dropped as if it were
+// a companion. Only recognized companion kinds are excluded.
 inline bool isGraphFile(const std::filesystem::path& jsonPath)
 {
     if(jsonPath.extension() != ".json")
@@ -122,11 +131,18 @@ inline bool isGraphFile(const std::filesystem::path& jsonPath)
         return false;
     }
     const auto stem = jsonPath.stem().string();
-    if(stem.find('.') != std::string::npos)
+
+    // Bare companion: "meta.json" (stem == "meta").
+    if(companionKinds().count(stem) != 0)
     {
-        return false; // {Name}.{kind}.json companion (meta, claims, ...)
+        return false;
     }
-    return stem != "meta"; // reserved bare companion name
+
+    // Suffixed companion: "{Name}.{kind}.json" — check the segment after the
+    // last '.'. A graph whose name merely contains dots (kind not recognized)
+    // falls through and is treated as a graph.
+    const auto dot = stem.rfind('.');
+    return dot == std::string::npos || companionKinds().count(stem.substr(dot + 1)) == 0;
 }
 
 // Maps any non-[alnum_] char to '_' so a path segment is a legal GTest name

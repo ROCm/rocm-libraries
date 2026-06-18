@@ -131,9 +131,9 @@ TEST_F(TestBundleDiscoveryFixture, FlatCustomerBundleDrop)
 
 TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
 {
-    // Case 1: the structured golden_reference_data tier layout. Every directory
-    // segment below the root joins into the suite with '_', the file stem is the
-    // test.
+    // Case 1: the structured integration_test_bundles tier layout. Every
+    // directory segment below the root joins into the suite with '_', the file
+    // stem is the test.
     createMinimalBundle(_tempDir / "quick" / "BatchnormFwdInference" / "ncdhw" / "fp32" / "Small",
                         "Small");
 
@@ -247,13 +247,18 @@ TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)
     EXPECT_TRUE(isGraphFile("dir/resnet50.json"));
     EXPECT_TRUE(isGraphFile("Small.json"));
 
-    // Dotted-stem companions are NOT graphs — this rule is generic over the
-    // companion kind, so a future {Name}.claims.json is excluded with no change.
+    // Known companion kinds are excluded: "{Name}.meta.json" and bare "meta.json".
     EXPECT_FALSE(isGraphFile("dir/resnet50.meta.json"));
-    EXPECT_FALSE(isGraphFile("dir/resnet50.claims.json"));
-
-    // Reserved bare companion names are excluded.
     EXPECT_FALSE(isGraphFile("dir/meta.json"));
+
+    // A graph name that merely embeds dots is NOT a companion — only recognized
+    // companion kinds are excluded. These must still be discovered as graphs so
+    // ad-hoc "drop a folder, it runs" bundles are never silently dropped.
+    EXPECT_TRUE(isGraphFile("dir/model.fp16.json"));
+    EXPECT_TRUE(isGraphFile("dir/resnet50.v2.json"));
+    // "claims" is not a companion kind yet, so {Name}.claims.json is a graph
+    // today; it becomes a companion only once "claims" is added to companionKinds().
+    EXPECT_TRUE(isGraphFile("dir/resnet50.claims.json"));
 
     // Non-.json files are never graphs.
     EXPECT_FALSE(isGraphFile("dir/resnet50.bin"));
