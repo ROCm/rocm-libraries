@@ -92,7 +92,7 @@ def _render_instruction_schedule_output(make_cfg, kernel, fp4):
             for k, em_list in enumerate(partition_emitted):
                 if not any(em.opType == 'mfma' for em in em_list):
                     continue
-                scheduled = instructionSchedule(em_list, multiDU=multiDU)
+                scheduled = instructionSchedule(em_list)
                 out.append(f"P{pi} subIterK={k}:")
                 mfma = 0
                 for inst in scheduled.flatitems():

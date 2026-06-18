@@ -378,7 +378,7 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
     return mfmaIdx, regularPaths, preMfmaPaths
 
 
-def instructionSchedule(emittedModules, multiDU: bool = False):
+def instructionSchedule(emittedModules):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):

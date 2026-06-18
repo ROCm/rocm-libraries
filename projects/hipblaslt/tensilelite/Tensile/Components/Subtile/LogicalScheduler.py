@@ -3347,7 +3347,7 @@ class LogicalScheduler:
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
-                    scheduled = instructionSchedule(em_list, multiDU=self._is_multi_du())
+                    scheduled = instructionSchedule(em_list)
                     module.add(scheduled)
                 else:
                     for em in em_list:
