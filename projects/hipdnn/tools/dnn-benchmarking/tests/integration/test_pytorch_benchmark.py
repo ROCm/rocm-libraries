@@ -241,10 +241,22 @@ class TestPyTorchCudaExecutor:
     @pytest.mark.parametrize(
         "graph_name",
         [
+            "sample_conv_dgrad.json",
+            "sample_conv_wgrad.json",
             "sample_matmul_batched.json",
             "sample_matmul_broadcast.json",
+            "sample_batchnorm_training.json",
+            "sample_batchnorm_inference.json",
+            "sample_batchnorm_inference_variance.json",
+            "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
+            "sample_sdpa_backward.json",
+            "sample_layernorm.json",
+            "sample_rmsnorm.json",
+            "sample_rmsnorm_backward.json",
+            "sample_reduction.json",
+            "sample_resample_fwd.json",
         ],
     )
     def test_full_benchmark_new_reference_graphs(self, graph_name):

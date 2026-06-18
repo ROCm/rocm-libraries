@@ -381,6 +381,9 @@ class Reporter:
                 "e2e_median_ms",
             ]
         )
+        include_warnings = any(pe.warnings for pe in graph_result.results)
+        if include_warnings:
+            headers.append("warnings")
         rows: List[List[str]] = []
         for pe in graph_result.results:
             row = [pe.provider, self._pe_status(pe)]
@@ -394,6 +397,8 @@ class Reporter:
                     self._fmt_stat(pe.e2e_stats, "median_ms"),
                 ]
             )
+            if include_warnings:
+                row.append(self._fmt_warnings(pe.warnings))
             rows.append(row)
 
         widths = [
@@ -418,6 +423,14 @@ class Reporter:
         if pe.correctness is not None and pe.correctness.tolerance_match is False:
             return "failed"
         return "passed"
+
+    @staticmethod
+    def _fmt_warnings(warnings: Optional[List[str]]) -> str:
+        if not warnings:
+            return ""
+        if len(warnings) == 1:
+            return warnings[0]
+        return f"{warnings[0]} [{len(warnings) - 1} more, see JSON]"
 
     @staticmethod
     def _fmt_stat(stats: Optional[BenchmarkStats], name: str) -> str:
@@ -462,6 +475,7 @@ class Reporter:
                 # --metrics-tier off, and the user should still see where
                 # their artefacts landed plus any tool-failure detail.
                 self._print_profiling_block(pe)
+                self._print_pe_warnings(pe)
                 if pe.role == "reference":
                     self._print(
                         "Reference: timing baseline (no correctness comparison)"
@@ -492,6 +506,14 @@ class Reporter:
         elif pe.e2e_stats is not None:
             self._print("Kernel Timing: Not available")
             self._print("")
+
+    def _print_pe_warnings(self, pe: ProviderEngineResult) -> None:
+        if not pe.warnings:
+            return
+        self._print("Warnings:")
+        for warning in pe.warnings:
+            self._print(f"  WARNING: {warning}")
+        self._print("")
 
     @staticmethod
     def _fmt_mib(mib: float) -> str:
@@ -544,11 +566,16 @@ class Reporter:
         if pe.analytical_flops is not None:
             partial = " (partial)" if pe.analytical_flops_partial else ""
             self._print(f"  Analytical FLOPs:     {pe.analytical_flops:,}{partial}")
-        if pe.derived_tflops_per_s is not None:
-            self._print(
-                f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
-                f"{derivation_suffix}"
-            )
+            if pe.derived_tflops_per_s is not None:
+                self._print(
+                    f"  Throughput:           {pe.derived_tflops_per_s:.3f} TFLOP/s"
+                    f"{derivation_suffix}"
+                )
+        elif pe.analytical_flops_partial:
+            # No node could be modelled analytically — show N/A rather than a
+            # misleading 0 so users know throughput is unavailable, not zero.
+            self._print("  Analytical FLOPs:     N/A (no analytical model)")
+            self._print("  Throughput:           N/A (no analytical model)")
         if pe.analytical_io_bytes is not None:
             self._print(
                 f"  Analytical I/O:       {self._fmt_mib(pe.analytical_io_bytes / 1024 / 1024)}"

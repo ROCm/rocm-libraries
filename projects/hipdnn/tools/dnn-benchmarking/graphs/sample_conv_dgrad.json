@@ -1,0 +1,95 @@
+{
+    "name": "sample_conv_dgrad_2x2x5x5_k3x3",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "grad_output_dy",
+            "dims": [
+                2,
+                3,
+                5,
+                5
+            ],
+            "strides": [
+                75,
+                25,
+                5,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "weight",
+            "dims": [
+                3,
+                2,
+                3,
+                3
+            ],
+            "strides": [
+                18,
+                9,
+                3,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 0,
+            "name": "grad_input_dx",
+            "dims": [
+                2,
+                2,
+                5,
+                5
+            ],
+            "strides": [
+                50,
+                25,
+                5,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "conv_dgrad_node",
+            "type": "ConvolutionBwdAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "dy_tensor_uid": 1,
+                "w_tensor_uid": 2
+            },
+            "outputs": {
+                "dx_tensor_uid": 0
+            },
+            "parameters": {
+                "conv_mode": "CROSS_CORRELATION",
+                "pre_padding": [
+                    1,
+                    1
+                ],
+                "post_padding": [
+                    1,
+                    1
+                ],
+                "stride": [
+                    1,
+                    1
+                ],
+                "dilation": [
+                    1,
+                    1
+                ]
+            }
+        }
+    ]
+}
