@@ -197,6 +197,65 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SMulHIU32(self);
         });
 
+    nb::class_<rocisa::SMulF32, rocisa::CommonInstruction>(m_common, "SMulF32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SMulF32& self, const nb::dict&) {
+            return new rocisa::SMulF32(self);
+        });
+
+    nb::class_<rocisa::SAddF32, rocisa::CommonInstruction>(m_common, "SAddF32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SAddF32& self, const nb::dict&) {
+            return new rocisa::SAddF32(self);
+        });
+
+    nb::class_<rocisa::SCvtF32U32, rocisa::CommonInstruction>(m_common, "SCvtF32U32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SCvtF32U32& self, const nb::dict&) {
+            return new rocisa::SCvtF32U32(self);
+        });
+
+    nb::class_<rocisa::SCvtU32F32, rocisa::CommonInstruction>(m_common, "SCvtU32F32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SCvtU32F32& self, const nb::dict&) {
+            return new rocisa::SCvtU32F32(self);
+        });
+
+    nb::class_<rocisa::VSRcpF32, rocisa::CommonInstruction>(m_common, "VSRcpF32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VSRcpF32& self, const nb::dict&) {
+            return new rocisa::VSRcpF32(self);
+        });
+
     nb::class_<rocisa::SSubI32, rocisa::CommonInstruction>(m_common, "SSubI32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,

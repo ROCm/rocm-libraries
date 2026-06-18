@@ -407,6 +407,143 @@ namespace rocisa
         }
     };
 
+    struct SMulF32 : public CommonInstruction
+    {
+        SMulF32(const std::shared_ptr<RegisterContainer>& dst,
+                const InstructionInput&                   src0,
+                const InstructionInput&                   src1,
+                const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_mul_f32");
+        }
+
+        SMulF32(const SMulF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SMulF32>(*this);
+        }
+    };
+
+    struct SAddF32 : public CommonInstruction
+    {
+        SAddF32(const std::shared_ptr<RegisterContainer>& dst,
+                const InstructionInput&                   src0,
+                const InstructionInput&                   src1,
+                const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_add_f32");
+        }
+
+        SAddF32(const SAddF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddF32>(*this);
+        }
+    };
+
+    struct SCvtF32U32 : public CommonInstruction
+    {
+        SCvtF32U32(const std::shared_ptr<RegisterContainer>& dst,
+                   const InstructionInput&                   src,
+                   const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_cvt_f32_u32");
+        }
+
+        SCvtF32U32(const SCvtF32U32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SCvtF32U32>(*this);
+        }
+    };
+
+    struct SCvtU32F32 : public CommonInstruction
+    {
+        SCvtU32F32(const std::shared_ptr<RegisterContainer>& dst,
+                   const InstructionInput&                   src,
+                   const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_cvt_u32_f32");
+        }
+
+        SCvtU32F32(const SCvtU32F32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SCvtU32F32>(*this);
+        }
+    };
+
+    struct VSRcpF32 : public CommonInstruction
+    {
+        VSRcpF32(const std::shared_ptr<RegisterContainer>& dst,
+                 const InstructionInput&                   src,
+                 const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_s_rcp_f32");
+        }
+
+        VSRcpF32(const VSRcpF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSRcpF32>(*this);
+        }
+    };
+
     struct SSubI32 : public CommonInstruction
     {
         SSubI32(const std::shared_ptr<RegisterContainer>& dst,
