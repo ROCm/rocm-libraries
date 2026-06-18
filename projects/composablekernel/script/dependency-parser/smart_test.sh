@@ -49,10 +49,15 @@ if [ ! -f build_mode.env ]; then
     exit 1
 fi
 
-# build_mode.env contains SMART_BUILD_MODE=selective|full|none.
-# shellcheck disable=SC1091
-source build_mode.env
-MODE="${SMART_BUILD_MODE:-unknown}"
+# build_mode.env contains SMART_BUILD_MODE=selective|full|none. Parse the value
+# directly instead of sourcing the file: sourcing would execute arbitrary shell
+# if the file were ever corrupted or tampered with. Take the last assignment so a
+# repeated key resolves deterministically, and require it to be present.
+MODE=$(sed -n 's/^SMART_BUILD_MODE=//p' build_mode.env | tail -n 1)
+if [ -z "${MODE}" ]; then
+    echo "Error: SMART_BUILD_MODE not set in build_mode.env"
+    exit 1
+fi
 echo "SMART_BUILD_MODE: ${MODE}"
 
 case "${MODE}" in
@@ -75,6 +80,14 @@ case "${MODE}" in
         fi
         echo ""
         echo "Selective mode - running affected tests..."
+        # Require regex_chunks to be a non-empty array. A missing/empty/wrong-type
+        # value would make NUM_CHUNKS=0, so the loop would run zero tests and still
+        # exit 0 - silently skipping the test phase in the mode that is supposed to
+        # run tests. Fail loudly instead.
+        if ! jq -e '.regex_chunks | type == "array" and length > 0' tests_to_run.json >/dev/null 2>&1; then
+            echo "Error: regex_chunks missing, empty, or not an array in tests_to_run.json (selective mode)"
+            exit 1
+        fi
         NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
         echo "Running ${NUM_CHUNKS} test chunk(s)"
 

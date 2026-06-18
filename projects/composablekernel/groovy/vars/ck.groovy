@@ -902,27 +902,37 @@ def cmake_build(Map conf=[:]){
                     // Env is scoped to each script invocation (inline assignment), not
                     // exported into the stage shell.
                     stage("Smart Build (${arch_name})") {
-                        sh """
-                            WORKSPACE_ROOT=${env.WORKSPACE} \\
-                            PARALLEL=32 \\
-                            NINJA_JOBS=${nt} \\
-                            ARCH_NAME=${arch_name} \\
-                            PROCESS_NINJA_TRACE=false \\
-                            NINJA_FTIME_TRACE=false \\
-                            bash ../script/dependency-parser/smart_build.sh
-                        """
-                        archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smart_build.log", allowEmptyArchive: true
+                        // try/finally so the selection artifacts + log are archived
+                        // even when the build fails - that is exactly when they are
+                        // most useful for debugging.
+                        try {
+                            sh """
+                                WORKSPACE_ROOT=${env.WORKSPACE} \\
+                                PARALLEL=32 \\
+                                NINJA_JOBS=${nt} \\
+                                ARCH_NAME=${arch_name} \\
+                                PROCESS_NINJA_TRACE=false \\
+                                NINJA_FTIME_TRACE=false \\
+                                bash ../script/dependency-parser/smart_build.sh
+                            """
+                        } finally {
+                            archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smart_build.log", allowEmptyArchive: true
+                        }
                     }
                     stage("Smart Test (${arch_name})") {
                         // BUILD_DIR is the cross-node seam: it defaults to the build
                         // dir we are in (same node); on a separate test node set it to
                         // the carried-over build/. CTEST_PARALLEL is exposed as a tunable.
-                        sh """
-                            BUILD_DIR=\$(pwd) \\
-                            CTEST_PARALLEL=4 \\
-                            bash ../script/dependency-parser/smart_test.sh
-                        """
-                        archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
+                        // try/finally so smart_test.log is archived on test failures too.
+                        try {
+                            sh """
+                                BUILD_DIR=\$(pwd) \\
+                                CTEST_PARALLEL=4 \\
+                                bash ../script/dependency-parser/smart_test.sh
+                            """
+                        } finally {
+                            archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
+                        }
                     }
                 }
                 else{ //run all tests

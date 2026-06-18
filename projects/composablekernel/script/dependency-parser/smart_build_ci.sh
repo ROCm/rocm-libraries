@@ -93,12 +93,15 @@ if [ ! -f "tests_to_run.json" ]; then
 fi
 
 # Step 4: Check if any tests were selected.
-# Validate the selection file first: a parse error, a non-object, or a missing
-# tests_to_run key must NOT be masked as "0 tests" - that would skip testing
-# entirely (the downstream stage trusts build_mode.env=none as authoritative).
-# Any selector uncertainty falls back to a full build, never a silent skip.
-if ! jq -e 'has("tests_to_run")' tests_to_run.json >/dev/null 2>&1; then
-    echo "Error: tests_to_run.json is malformed or missing tests_to_run - forcing full build"
+# Validate the selection file first: a parse error, a non-object, or a
+# tests_to_run that is missing or not an array must NOT be masked as "0 tests" -
+# that would skip testing entirely (the downstream stage trusts
+# build_mode.env=none as authoritative). Checking the type (not just key
+# presence) rejects "tests_to_run": null and other unexpected shapes, since
+# `jq '... | length'` would silently report 0 for those. Any selector
+# uncertainty falls back to a full build, never a silent skip.
+if ! jq -e '.tests_to_run | type == "array"' tests_to_run.json >/dev/null 2>&1; then
+    echo "Error: tests_to_run.json is malformed or tests_to_run is not an array - forcing full build"
     echo "full" > build_targets.txt
     exit 1
 fi

@@ -32,6 +32,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SCRIPT_DIR is .../script/dependency-parser; its parent is the script/ dir that
+# holds the ninja-trace helpers. Resolve them from here rather than via ".."
+# relative to BUILD_DIR, so trace processing keeps working if BUILD_DIR is
+# overridden or the build-dir layout changes.
+SCRIPT_PARENT_DIR="$(dirname "${SCRIPT_DIR}")"
 BUILD_DIR="${BUILD_DIR:-$(pwd)}"
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd "${BUILD_DIR}/.." && pwd)}"
 PARALLEL="${PARALLEL:-32}"
@@ -72,8 +77,8 @@ process_ninja_trace() {
     [ "$PROCESS_NINJA_TRACE" = "true" ] || return 0
     echo ""
     echo "Processing ninja build trace..."
-    python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${ARCH_NAME}.json
-    python3 ../script/parse_ninja_trace.py ck_build_trace_${ARCH_NAME}.json
+    python3 "${SCRIPT_PARENT_DIR}/ninja_json_converter.py" .ninja_log --legacy-format --output ck_build_trace_${ARCH_NAME}.json
+    python3 "${SCRIPT_PARENT_DIR}/parse_ninja_trace.py" ck_build_trace_${ARCH_NAME}.json
     if [ "$NINJA_FTIME_TRACE" = "true" ]; then
         echo "Running ClangBuildAnalyzer..."
         /ClangBuildAnalyzer/build/ClangBuildAnalyzer --all . clang_build.log
