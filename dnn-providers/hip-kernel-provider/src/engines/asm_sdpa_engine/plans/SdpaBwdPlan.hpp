@@ -6,7 +6,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "SdpaBwdParams.hpp"
-#include "SdpaKernelUtils.hpp"
+#include "SdpaModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 

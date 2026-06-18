@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "SdpaKernelUtils.hpp"
+#include "SdpaModuleCache.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"

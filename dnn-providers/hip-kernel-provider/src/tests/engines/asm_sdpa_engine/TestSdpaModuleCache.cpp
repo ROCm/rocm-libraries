@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaModuleCache.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -25,6 +25,12 @@ TEST(TestSdpaModuleCache, EmptyOnConstruction)
 {
     SdpaModuleCache cache;
     EXPECT_EQ(cache.size(), 0u);
+}
+
+TEST(TestSdpaModuleCache, MakeKeyFormatsCorrectly)
+{
+    auto key = SdpaModuleCache::makeKey("/path/to/kernel.co", "myFunc");
+    EXPECT_EQ(key, "/path/to/kernel.co::myFunc");
 }
 
 TEST(TestSdpaModuleCache, NullReturnedForInvalidPath)

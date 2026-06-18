@@ -8,11 +8,8 @@
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace asm_sdpa_engine
@@ -251,68 +248,5 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
 
     return guard; // moved out
 }
-
-// =============================================================================
-// Cached kernel module loader
-// =============================================================================
-//
-// Process-level cache for loaded kernel modules.  hipModuleLoad() is expensive
-// (~97% of SDPA execution time in profiling), but the set of distinct .co files
-// is small (bounded by CSV config count).  Each SdpaModuleCache instance maps
-// (coPath, funcName) pairs to shared_ptr<HipModuleGuard>: on the first call
-// the module is loaded and cached; subsequent calls return the cached
-// shared_ptr.  Modules are never unloaded until the cache is destroyed.
-
-using CachedModule = std::shared_ptr<HipModuleGuard>;
-
-class SdpaModuleCache
-{
-public:
-    SdpaModuleCache() = default;
-    ~SdpaModuleCache() = default;
-
-    SdpaModuleCache(const SdpaModuleCache&) = delete;
-    SdpaModuleCache& operator=(const SdpaModuleCache&) = delete;
-    SdpaModuleCache(SdpaModuleCache&&) = delete;
-    SdpaModuleCache& operator=(SdpaModuleCache&&) = delete;
-
-    CachedModule getOrLoad(const std::string& coPath, const char* funcName)
-    {
-        const std::string key = coPath + "::" + funcName;
-
-        const std::lock_guard<std::mutex> lock(_mutex);
-        auto it = _entries.find(key);
-        if(it != _entries.end())
-        {
-            return it->second;
-        }
-
-        auto loaded = loadKernelModule(coPath, funcName);
-        if(!loaded)
-        {
-            return nullptr;
-        }
-        auto cached = std::make_shared<HipModuleGuard>(std::move(*loaded));
-        _entries.emplace(key, cached);
-        return cached;
-    }
-
-    bool contains(const std::string& coPath, const char* funcName) const
-    {
-        const std::string key = coPath + "::" + funcName;
-        const std::lock_guard<std::mutex> lock(_mutex);
-        return _entries.find(key) != _entries.end();
-    }
-
-    size_t size() const
-    {
-        const std::lock_guard<std::mutex> lock(_mutex);
-        return _entries.size();
-    }
-
-private:
-    mutable std::mutex _mutex;
-    std::unordered_map<std::string, CachedModule> _entries;
-};
 
 } // namespace asm_sdpa_engine
