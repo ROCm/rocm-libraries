@@ -650,6 +650,33 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFront)
     EXPECT_EQ(sorted[2], CUSTOM_ENGINE_ID);
 }
 
+TEST_F(TestConfigBuiltIn, FinalizeLegacyRuleWithoutTensorIdsUsesPositionalFallback)
+{
+    constexpr const char* JSON = R"({
+      "engine_overrides": [
+        {
+          "op": "conv_fprop",
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "tensors": [
+            { "dim": [1, 3, 4, 4] },
+            { "dim": [2, 3, 1, 1] }
+          ]
+        }
+      ]
+    })";
+    const TempJsonOverrideFile json(JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES));
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+}
+
 TEST_F(TestConfigBuiltIn, FinalizeTriesLaterSamePriorityNodeAfterFirstMiss)
 {
     constexpr const char* JSON = R"({

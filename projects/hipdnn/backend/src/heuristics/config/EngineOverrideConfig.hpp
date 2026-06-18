@@ -112,39 +112,22 @@ struct OperationRule
 private:
     bool matchesTensors(const std::vector<TensorView>& inputs) const
     {
-        bool hasLogicalTensorIds = false;
-        for(const auto& tensor : tensors)
-        {
-            if(tensor.tensorId.has_value())
-            {
-                hasLogicalTensorIds = true;
-                break;
-            }
-        }
-
-        if(!hasLogicalTensorIds)
+        // Config entries are either legacy positional (no tensor_id fields) or
+        // logical-name based (tensor_id on every tensor). The writer never
+        // emits mixed entries, and mixed hand-authored entries are not safe to
+        // interpret, so the first tensor selects the matching mode.
+        if(tensors.empty() || !tensors.front().tensorId.has_value())
         {
             return matchesLegacyPositional(inputs);
         }
 
         std::vector<uint8_t> used(inputs.size(), 0);
-        for(size_t i = 0; i < tensors.size(); ++i)
+        for(const auto& pattern : tensors)
         {
-            const auto& pattern = tensors[i];
-            if(pattern.tensorId.has_value())
-            {
-                if(!matchesNamed(pattern, inputs, used))
-                {
-                    return false;
-                }
-                continue;
-            }
-
-            if(used[i] != 0 || !pattern.matches(inputs[i]))
+            if(!pattern.tensorId.has_value() || !matchesNamed(pattern, inputs, used))
             {
                 return false;
             }
-            used[i] = 1;
         }
         return true;
     }
