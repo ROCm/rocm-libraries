@@ -447,13 +447,11 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
+    # unit_tests links stinkytofu_static, so its executable already embeds all
+    # stinkytofu coverage mappings. Passing stinkytofu.dll alongside it would
+    # produce the same function hashes from two different binaries → mass
+    # "mismatched data" warnings and an empty report. Only list executables.
     obj_names = (
-        "libstinkytofu.so",
-        "stinkytofu.dll",
-        # unit_tests links stinkytofu_static in shared builds so coverage data
-        # is recorded against the static archive, not the shared lib.
-        "libstinkytofu_static.a",
-        "stinkytofu_static.lib",
         "unit_tests",
         "api_tests",
         "stinkytofu-opt",
@@ -465,7 +463,7 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         objects += [
             p
             for p in bld.rglob(f"{name}*")
-            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", ".a", ".lib")
+            if p.is_file() and p.suffix.lower() in (".exe", "")
         ]
     if not objects:
         raise SystemExit("ERROR: no instrumented binaries found to report on.")
