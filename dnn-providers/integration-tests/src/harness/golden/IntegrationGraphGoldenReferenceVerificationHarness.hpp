@@ -195,11 +195,13 @@ private:
 
         const auto golden = extractGolden(tensorMap);
 
-        // Build the variant pack from the tensor map.
+        // Build the variant pack from the tensor map. Device tests use GPU
+        // pointers (rawDeviceData); CPU-only unit tests use host pointers so
+        // they can run on CI without a GPU.
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [uid, tensor] : tensorMap)
         {
-            variantPack[uid] = tensor->rawDeviceData();
+            variantPack[uid] = _requiresDevice ? tensor->rawDeviceData() : tensor->rawHostData();
         }
 
         // executeGraphThroughEngine signals "unsupported graph" by throwing;
@@ -226,7 +228,14 @@ private:
 
         for(auto uid : _bundle->outputTensorUids)
         {
-            tensorMap.at(uid)->markDeviceModified();
+            if(_requiresDevice)
+            {
+                tensorMap.at(uid)->markDeviceModified();
+            }
+            else
+            {
+                tensorMap.at(uid)->markHostModified();
+            }
         }
 
         auto wrapper = _bundle->graphWrapper();
