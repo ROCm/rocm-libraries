@@ -212,7 +212,7 @@ public:
   // allow move assignment for a sane implementation of allocator propagation
   THRUST_HOST_DEVICE contiguous_storage& operator=(contiguous_storage&& other);
 
-  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(contiguous_storage, const_iterator);
+  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(contiguous_storage, const_iterator)
 
 private:
   // XXX we could inherit from this to take advantage of empty base class optimization
