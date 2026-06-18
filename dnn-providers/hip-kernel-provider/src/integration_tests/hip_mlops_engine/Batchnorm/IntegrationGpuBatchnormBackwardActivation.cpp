@@ -134,35 +134,144 @@ protected:
     }
 };
 
-using IntegrationGpuBatchnormBackwardActivation2dFp32 = BatchnormBackwardActivation<float>;
-using IntegrationGpuBatchnormBackwardActivation2dFp16 = BatchnormBackwardActivation<half>;
-using IntegrationGpuBatchnormBackwardActivation2dBfp16 = BatchnormBackwardActivation<bfloat16>;
+// NCHW 2D
+using IntegrationGpuBatchnormBackwardActivationNchwFp32 = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNchwFp16 = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNchwBfp16 = BatchnormBackwardActivation<bfloat16>;
+
+// NHWC 2D
+using IntegrationGpuBatchnormBackwardActivationNhwcFp32 = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNhwcFp16 = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNhwcBfp16 = BatchnormBackwardActivation<bfloat16>;
+
+// NCDHW 3D
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp32 = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNcdhwFp16 = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNcdhwBfp16 = BatchnormBackwardActivation<bfloat16>;
+
+// NDHWC 3D
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp32 = BatchnormBackwardActivation<float>;
+using IntegrationGpuBatchnormBackwardActivationNdhwcFp16 = BatchnormBackwardActivation<half>;
+using IntegrationGpuBatchnormBackwardActivationNdhwcBfp16 = BatchnormBackwardActivation<bfloat16>;
 
 } // namespace
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation2dFp32);
-TEST_P(IntegrationGpuBatchnormBackwardActivation2dFp32, Correctness)
+// ============================================================================
+// NCHW 2D Tests
+// ============================================================================
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNchwFp32);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp32, Correctness)
 {
     runGraphTest(TensorLayout::NCHW);
 }
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormBackwardActivation2dFp32,
+                         IntegrationGpuBatchnormBackwardActivationNchwFp32,
                          testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation2dFp16);
-TEST_P(IntegrationGpuBatchnormBackwardActivation2dFp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNchwFp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
     runGraphTest(TensorLayout::NCHW);
 }
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormBackwardActivation2dFp16,
+                         IntegrationGpuBatchnormBackwardActivationNchwFp16,
                          testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivation2dBfp16);
-TEST_P(IntegrationGpuBatchnormBackwardActivation2dBfp16, Correctness)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNchwBfp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
     runGraphTest(TensorLayout::NCHW);
 }
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormBackwardActivation2dBfp16,
+                         IntegrationGpuBatchnormBackwardActivationNchwBfp16,
                          testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
+
+// ============================================================================
+// NHWC 2D Tests
+// ============================================================================
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNhwcFp32);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
+{
+    runGraphTest(TensorLayout::NHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNhwcFp32,
+                         testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNhwcFp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNhwcFp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNhwcBfp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke2dTestCases()));
+
+// ============================================================================
+// NCDHW 3D Tests
+// ============================================================================
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNcdhwFp32);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNcdhwFp32,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNcdhwFp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNcdhwFp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNcdhwBfp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
+
+// ============================================================================
+// NDHWC 3D Tests
+// ============================================================================
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNdhwcFp32);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
+{
+    runGraphTest(TensorLayout::NDHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNdhwcFp32,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNdhwcFp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NDHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNdhwcFp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16);
+TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NDHWC);
+}
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuBatchnormBackwardActivationNdhwcBfp16,
+                         testing::ValuesIn(getBnFwdTrainingSmoke3dTestCases()));
