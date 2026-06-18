@@ -10,7 +10,6 @@
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/autotune/TimedRunLoop.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -26,23 +25,6 @@ using namespace hipdnn_frontend::autotune;
 TEST(TestAutotune, BenchmarkingKnobNameIsGlobalBenchmarking)
 {
     EXPECT_EQ(BENCHMARKING_KNOB_NAME, "global.benchmarking");
-}
-
-// ============================================================================
-// get_estimated_max_workspace_size Logic Tests
-// ============================================================================
-
-TEST(TestAutotune, MaxWorkspaceEmptyPlanSpecs)
-{
-    const std::vector<PlanSpec> specs;
-
-    int64_t maxSize = 0;
-    for(const auto& spec : specs)
-    {
-        maxSize = std::max(maxSize, spec.workspaceSize);
-    }
-
-    EXPECT_EQ(maxSize, 0);
 }
 
 // ============================================================================
@@ -156,51 +138,6 @@ TEST(TestAutotune, AutotuneResultDefaultState)
     EXPECT_FALSE(result.ranExhaustive);
     EXPECT_TRUE(result.errorMessage.empty());
     EXPECT_EQ(result.strategyUsed, AutotuneStrategy::RUN_UNTIL_STABLE);
-}
-
-// ============================================================================
-// Ranking Logic Tests (Default)
-//
-// The default-ranking and failed-engines-at-end cases that previously
-// re-implemented the production sort live in TestGraph.cpp now, where they
-// drive the real Graph::rankAndSelectWinner via GraphTestUtils.
-// ============================================================================
-
-// ============================================================================
-// Custom Ranking Function Tests
-// ============================================================================
-
-TEST(TestAutotune, CustomRankingByAvgTime)
-{
-    std::vector<AutotuneResult> results;
-
-    AutotuneResult r1;
-    r1.engineId = 1;
-    r1.succeeded = true;
-    r1.minTimeMs = 1.0f;
-    r1.avgTimeMs = 5.0f; // High average despite low min
-    results.push_back(r1);
-
-    AutotuneResult r2;
-    r2.engineId = 2;
-    r2.succeeded = true;
-    r2.minTimeMs = 2.0f;
-    r2.avgTimeMs = 2.5f; // Low average
-    results.push_back(r2);
-
-    // Custom ranking by avgTimeMs
-    const AutotuneRankingFn customRank = [](std::vector<AutotuneResult>& res) {
-        std::stable_sort(
-            res.begin(), res.end(), [](const AutotuneResult& a, const AutotuneResult& b) {
-                return a.avgTimeMs < b.avgTimeMs;
-            });
-    };
-
-    customRank(results);
-
-    // By avgTimeMs, engine 2 should be first
-    EXPECT_EQ(results[0].engineId, 2);
-    EXPECT_EQ(results[1].engineId, 1);
 }
 
 // ============================================================================
@@ -400,16 +337,6 @@ TEST(TestAutotune, MaxIterationsLessThanWindowSizeIsDetectable)
     auto err = g.autotune(nullptr, variantPack, nullptr, int64_t{0}, config);
     EXPECT_TRUE(err.is_bad());
     EXPECT_NE(err.get_message().find("maxIterations"), std::string::npos);
-}
-
-TEST(TestAutotune, MaxIterationsEqualToWindowSizeIsValid)
-{
-    AutotuneConfig config;
-    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
-    config.maxIterations = 5;
-    config.windowSize = 5;
-
-    EXPECT_GE(config.maxIterations, config.windowSize);
 }
 
 TEST(TestAutotune, MaxIterationsCheckOnlyForRunUntilStable)

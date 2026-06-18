@@ -8,6 +8,8 @@
 #include "HipdnnException.hpp"
 #include "handle/Handle.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 namespace hipdnn_backend
 {
 
@@ -15,56 +17,32 @@ namespace hipdnn_backend
 // Lifecycle
 // ============================================================================
 
-ProfilingControlDescriptor::~ProfilingControlDescriptor()
-{
-    destroyEvents();
-}
+ProfilingControlDescriptor::~ProfilingControlDescriptor() = default;
 
 void ProfilingControlDescriptor::createEvents()
 {
-    if(_eventsCreated)
+    if(_startEvent != nullptr)
     {
         return;
     }
 
-    auto status = hipEventCreate(&_startEvent);
+    hipEvent_t startEvent = nullptr;
+    auto status = hipEventCreate(&startEvent);
     THROW_IF_NE(status,
                 hipSuccess,
                 HIPDNN_STATUS_INTERNAL_ERROR,
                 "ProfilingControlDescriptor: hipEventCreate(start) failed.");
+    HipEventGuard startGuard(startEvent);
 
-    status = hipEventCreate(&_stopEvent);
-    if(status != hipSuccess)
-    {
-        // Clean up the start event before throwing
-        static_cast<void>(hipEventDestroy(_startEvent));
-        _startEvent = nullptr;
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "ProfilingControlDescriptor: hipEventCreate(stop) failed.");
-    }
+    hipEvent_t stopEvent = nullptr;
+    status = hipEventCreate(&stopEvent);
+    THROW_IF_NE(status,
+                hipSuccess,
+                HIPDNN_STATUS_INTERNAL_ERROR,
+                "ProfilingControlDescriptor: hipEventCreate(stop) failed.");
 
-    _eventsCreated = true;
-}
-
-void ProfilingControlDescriptor::destroyEvents()
-{
-    if(!_eventsCreated)
-    {
-        return;
-    }
-
-    if(_stopEvent != nullptr)
-    {
-        static_cast<void>(hipEventDestroy(_stopEvent));
-        _stopEvent = nullptr;
-    }
-    if(_startEvent != nullptr)
-    {
-        static_cast<void>(hipEventDestroy(_startEvent));
-        _startEvent = nullptr;
-    }
-
-    _eventsCreated = false;
+    _startEvent = std::move(startGuard);
+    _stopEvent = HipEventGuard(stopEvent);
 }
 
 // ============================================================================
@@ -77,7 +55,7 @@ void ProfilingControlDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "ProfilingControlDescriptor::finalize() failed: Already finalized.");
 
-    THROW_IF_FALSE(_eventsCreated,
+    THROW_IF_FALSE(_startEvent != nullptr,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ProfilingControlDescriptor::finalize() failed: "
                    "Handle not set (events not created).");
@@ -92,14 +70,14 @@ void ProfilingControlDescriptor::finalize()
                    "ProfilingControlDescriptor::finalize() failed: "
                    "Stop event was not recorded.");
 
-    auto status = hipEventSynchronize(_stopEvent);
+    auto status = hipEventSynchronize(_stopEvent.get());
     THROW_IF_NE(status,
                 hipSuccess,
                 HIPDNN_STATUS_INTERNAL_ERROR,
                 "ProfilingControlDescriptor::finalize() failed: "
                 "hipEventSynchronize(stop) failed.");
 
-    status = hipEventElapsedTime(&_elapsedMs, _startEvent, _stopEvent);
+    status = hipEventElapsedTime(&_elapsedMs, _startEvent.get(), _stopEvent.get());
     THROW_IF_NE(status,
                 hipSuccess,
                 HIPDNN_STATUS_INTERNAL_ERROR,
@@ -155,7 +133,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                     static_cast<int64_t>(1),
                     HIPDNN_STATUS_BAD_PARAM,
                     "ProfilingControlDescriptor::setAttribute(START): elementCount must be 1.");
-        THROW_IF_FALSE(_eventsCreated,
+        THROW_IF_FALSE(_startEvent != nullptr,
                        HIPDNN_STATUS_BAD_PARAM,
                        "ProfilingControlDescriptor::setAttribute(START): "
                        "Handle must be set before recording events.");
@@ -164,7 +142,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                       "ProfilingControlDescriptor::setAttribute(START): "
                       "Start has already been recorded.");
 
-        auto status = hipEventRecord(_startEvent, _stream);
+        auto status = hipEventRecord(_startEvent.get(), _stream);
         THROW_IF_NE(status,
                     hipSuccess,
                     HIPDNN_STATUS_INTERNAL_ERROR,
@@ -183,7 +161,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                     static_cast<int64_t>(1),
                     HIPDNN_STATUS_BAD_PARAM,
                     "ProfilingControlDescriptor::setAttribute(STOP): elementCount must be 1.");
-        THROW_IF_FALSE(_eventsCreated,
+        THROW_IF_FALSE(_startEvent != nullptr,
                        HIPDNN_STATUS_BAD_PARAM,
                        "ProfilingControlDescriptor::setAttribute(STOP): "
                        "Handle must be set before recording events.");
@@ -196,7 +174,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                       "ProfilingControlDescriptor::setAttribute(STOP): "
                       "Stop has already been recorded.");
 
-        auto status = hipEventRecord(_stopEvent, _stream);
+        auto status = hipEventRecord(_stopEvent.get(), _stream);
         THROW_IF_NE(status,
                     hipSuccess,
                     HIPDNN_STATUS_INTERNAL_ERROR,
@@ -286,11 +264,13 @@ hipdnnBackendDescriptorType_t ProfilingControlDescriptor::getStaticType()
 
 std::string ProfilingControlDescriptor::toString() const
 {
-    std::string str = "ProfilingControlDescriptor: {";
-    str += "eventsCreated=" + std::string(_eventsCreated ? "true" : "false");
-    str += ", startRecorded=" + std::string(_startRecorded ? "true" : "false");
-    str += ", stopRecorded=" + std::string(_stopRecorded ? "true" : "false");
-    str += ", finalized=" + std::string(isFinalized() ? "true" : "false");
+    std::string str
+        = fmt::format("ProfilingControlDescriptor: {{eventsCreated={}, startRecorded={}, "
+                      "stopRecorded={}, finalized={}",
+                      (_startEvent != nullptr) ? "true" : "false",
+                      _startRecorded ? "true" : "false",
+                      _stopRecorded ? "true" : "false",
+                      isFinalized() ? "true" : "false");
     if(isFinalized())
     {
         str += ", elapsedMs=" + std::to_string(_elapsedMs);

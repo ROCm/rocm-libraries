@@ -18,6 +18,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -25,6 +26,7 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -37,36 +39,6 @@ namespace hipdnn_frontend
 {
 namespace autotune
 {
-
-/// Serialize a KnobSetting to a JSON object.
-inline nlohmann::json knobSettingToJson(const KnobSetting& setting)
-{
-    nlohmann::json knob;
-    knob["knob_id"] = setting.knobId();
-
-    std::visit(
-        [&knob](const auto& value) {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr(std::is_same_v<T, int64_t>)
-            {
-                knob["type"] = "int";
-                knob["value"] = value;
-            }
-            else if constexpr(std::is_same_v<T, double>)
-            {
-                knob["type"] = "double";
-                knob["value"] = value;
-            }
-            else if constexpr(std::is_same_v<T, std::string>)
-            {
-                knob["type"] = "string";
-                knob["value"] = value;
-            }
-        },
-        setting.value());
-
-    return knob;
-}
 
 /// Get the lowercase string representation of an AutotuneStrategy (for config file output)
 inline std::string strategyToLowerString(AutotuneStrategy strategy)
@@ -166,7 +138,8 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
         nlohmann::json knobs = nlohmann::json::array();
         for(const auto& setting : result.knobSettings)
         {
-            knobs.push_back(knobSettingToJson(setting));
+            // KnobSetting -> JSON via the ADL-found to_json
+            knobs.push_back(setting);
         }
         metadata["knobs"] = std::move(knobs);
     }
@@ -211,118 +184,141 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                   const std::vector<std::vector<int64_t>>& tensorDims,
                                   const std::vector<std::vector<int64_t>>& tensorStrides)
 {
-    nlohmann::json root;
-
-    // Load existing file content unless we're deleting it all
-    if(!deleteAllExisting && std::filesystem::exists(filePath))
+    try
     {
-        try
+        nlohmann::json root;
+
+        // Load existing file content unless we're overwriting it all
+        if(!deleteAllExisting && std::filesystem::exists(filePath))
         {
-            std::ifstream existingFile(filePath);
-            if(existingFile.is_open())
+            try
             {
-                root = nlohmann::json::parse(existingFile);
+                std::ifstream existingFile(filePath);
+                if(existingFile.is_open())
+                {
+                    root = nlohmann::json::parse(existingFile);
+                }
+            }
+            catch(const nlohmann::json::exception& e)
+            {
+                HIPDNN_FE_LOG_ERROR("autotune: existing config file "
+                                    << filePath
+                                    << " contains invalid JSON and could not be read: " << e.what()
+                                    << ". Existing content will be replaced with new results.");
+                root = nlohmann::json::object();
             }
         }
-        catch(const nlohmann::json::exception& e)
+
+        // A valid-but-non-object config file (array, scalar, ...) would make the
+        // object-style accesses below throw; reset it to an empty object first.
+        if(!root.is_object())
         {
-            HIPDNN_FE_LOG_ERROR("autotune: existing config file "
-                                << filePath
-                                << " contains invalid JSON and could not be read: " << e.what()
-                                << ". Existing content will be replaced with new results.");
             root = nlohmann::json::object();
         }
-    }
 
-    if(!root.contains("engine_overrides") || !root["engine_overrides"].is_array())
-    {
-        root["engine_overrides"] = nlohmann::json::array();
-    }
-
-    // Build the single new entry from the rank-0 winner (the first succeeded
-    // result). Only one entry per (op, tensor shape) is ever produced.
-    std::optional<nlohmann::json> newEntry;
-    for(const auto& result : results)
-    {
-        if(!result.succeeded)
+        if(!root.contains("engine_overrides") || !root["engine_overrides"].is_array())
         {
-            continue;
+            root["engine_overrides"] = nlohmann::json::array();
         }
 
-        newEntry = buildOverrideEntry(result, opName, tensorDims, tensorStrides);
-        break; // Only write the rank-0 winner
-    }
-
-    if(!newEntry.has_value())
-    {
-        HIPDNN_FE_LOG_WARN("autotune: no successful results to write");
-        return {ErrorCode::OK, ""};
-    }
-
-    // Remove the pre-existing entry that matches the new entry's (op, tensors)
-    // signature, then append the new entry. The knob configuration is
-    // unconditionally replaced.
-    // Replace-match is exact (operation, tensor shape) only. It does NOT match the
-    // reader's -1 wildcard patterns (TensorPattern::matches).
-    auto& overrides = root["engine_overrides"];
-
-    if(!overrides.empty())
-    {
-        overrides.erase(std::remove_if(overrides.begin(),
-                                       overrides.end(),
-                                       [&](const nlohmann::json& existing) {
-                                           return existing.contains("op")
-                                                  && existing["op"] == (*newEntry)["op"]
-                                                  && existing.contains("tensors")
-                                                  && existing["tensors"] == (*newEntry)["tensors"];
-                                       }),
-                        overrides.end());
-    }
-
-    overrides.push_back(*newEntry);
-
-    // Atomic write: write to temp file, then rename.
-    // If the process crashes or power is lost between creating the temp file
-    // and completing the rename, the temp file (filePath + ".tmp") is left
-    // on disk. This is understood and accepted: the alternative (deleting
-    // the temp file on failure) risks silently losing the only copy of the
-    // data if the rename target was already removed.
-    std::filesystem::path tempPath = filePath;
-    tempPath += ".tmp";
-    {
-        std::ofstream outFile(tempPath);
-        if(!outFile.is_open())
+        // Build the single new entry from the rank-0 winner (the first succeeded
+        // result). Only one entry per (op, tensor shape) is ever produced.
+        std::optional<nlohmann::json> newEntry;
+        for(const auto& result : results)
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "AutotuneFileWriter: cannot open temp file for writing: " + tempPath.string()};
-        }
-        outFile << root.dump(2) << '\n';
-        outFile.flush();
-        if(!outFile.good())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "AutotuneFileWriter: write to temp file failed: " + tempPath.string()};
-        }
-    }
+            if(!result.succeeded)
+            {
+                continue;
+            }
 
-    // Rename temp file to target (atomic on POSIX, best-effort on Windows)
-    std::error_code ec;
-    std::filesystem::rename(tempPath, filePath, ec);
-    if(ec.value() != 0)
-    {
-        // Fallback: try remove + rename
-        std::filesystem::remove(filePath, ec);
+            newEntry = buildOverrideEntry(result, opName, tensorDims, tensorStrides);
+            break; // Only write the rank-0 winner
+        }
+
+        if(!newEntry.has_value())
+        {
+            HIPDNN_FE_LOG_WARN("autotune: no successful results to write");
+            return {ErrorCode::OK, ""};
+        }
+
+        // Remove the pre-existing entry that matches the new entry's (op, tensors)
+        // signature, then append the new entry. The knob configuration is
+        // unconditionally replaced.
+        // Replace-match is exact (operation, tensor shape) only. It does NOT match the
+        // reader's -1 wildcard patterns (TensorPattern::matches).
+        auto& overrides = root["engine_overrides"];
+
+        if(!overrides.empty())
+        {
+            overrides.erase(std::remove_if(overrides.begin(),
+                                           overrides.end(),
+                                           [&](const nlohmann::json& existing) {
+                                               return existing.contains("op")
+                                                      && existing["op"] == (*newEntry)["op"]
+                                                      && existing.contains("tensors")
+                                                      && existing["tensors"]
+                                                             == (*newEntry)["tensors"];
+                                           }),
+                            overrides.end());
+        }
+
+        overrides.push_back(*newEntry);
+
+        // Atomic write: write to temp file, then rename.
+        // If the process crashes or power is lost between creating the temp file
+        // and completing the rename, the temp file (filePath + ".tmp") is left
+        // on disk. This is understood and accepted: the alternative (deleting
+        // the temp file on failure) risks silently losing the only copy of the
+        // data if the rename target was already removed.
+        std::filesystem::path tempPath = filePath;
+        tempPath += ".tmp";
+        {
+            std::ofstream outFile(tempPath);
+            if(!outFile.is_open())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: cannot open temp file for writing: "
+                            + tempPath.string()};
+            }
+            outFile << root.dump(2) << '\n';
+            outFile.flush();
+            if(!outFile.good())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: write to temp file failed: " + tempPath.string()};
+            }
+        }
+
+        // Rename temp file to target (atomic on POSIX, best-effort on Windows)
+        std::error_code ec;
         std::filesystem::rename(tempPath, filePath, ec);
         if(ec.value() != 0)
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "AutotuneFileWriter: failed to rename temp file to " + filePath.string() + ": "
-                        + ec.message()};
+            // Fallback: remove the existing target, then retry the rename. If the
+            // remove itself fails there is no point retrying — report it.
+            std::filesystem::remove(filePath, ec);
+            if(ec.value() != 0)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: failed to remove existing file " + filePath.string()
+                            + " before rename: " + ec.message()};
+            }
+            std::filesystem::rename(tempPath, filePath, ec);
+            if(ec.value() != 0)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: failed to rename temp file to " + filePath.string()
+                            + ": " + ec.message()};
+            }
         }
-    }
 
-    HIPDNN_FE_LOG_INFO("autotune: wrote 1 entry to " << filePath);
-    return {ErrorCode::OK, ""};
+        HIPDNN_FE_LOG_INFO("autotune: wrote 1 entry to " << filePath);
+        return {ErrorCode::OK, ""};
+    }
+    catch(const std::exception& e)
+    {
+        return {ErrorCode::INVALID_VALUE, e.what()};
+    }
 }
 
 } // namespace autotune

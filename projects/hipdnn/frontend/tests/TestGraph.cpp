@@ -9054,12 +9054,14 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
 
 namespace
 {
-AutotuneResult makeSucceededResult(int64_t engineId, float minTimeMs, int compiledPlanIndex)
+AutotuneResult
+    makeSucceededResult(int64_t engineId, float minTimeMs, int compiledPlanIndex, float avgTimeMs)
 {
     AutotuneResult r;
     r.engineId = engineId;
     r.succeeded = true;
     r.minTimeMs = minTimeMs;
+    r.avgTimeMs = avgTimeMs;
     r.compiledPlanIndex = compiledPlanIndex;
     return r;
 }
@@ -9077,9 +9079,9 @@ TEST_F(TestGraph, RankAndSelectWinnerDefaultRankingByMinTime)
 {
     // minTimeMs {30,10,20} for engines {0,1,2} → winner index 1, order {1,2,0}.
     std::vector<AutotuneResult> results;
-    results.push_back(makeSucceededResult(0, 30.0f, 0));
-    results.push_back(makeSucceededResult(1, 10.0f, 1));
-    results.push_back(makeSucceededResult(2, 20.0f, 2));
+    results.push_back(makeSucceededResult(0, 30.0f, 0, 30.0f));
+    results.push_back(makeSucceededResult(1, 10.0f, 1, 10.0f));
+    results.push_back(makeSucceededResult(2, 20.0f, 2, 20.0f));
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
@@ -9100,9 +9102,9 @@ TEST_F(TestGraph, RankAndSelectWinnerDefaultRankingByMinTime)
 TEST_F(TestGraph, RankAndSelectWinnerFailedEnginesRankAfterSucceeded)
 {
     std::vector<AutotuneResult> results;
-    results.push_back(makeSucceededResult(1, 5.0f, 0));
+    results.push_back(makeSucceededResult(1, 5.0f, 0, 5.0f));
     results.push_back(makeFailedResult(2));
-    results.push_back(makeSucceededResult(3, 1.0f, 1));
+    results.push_back(makeSucceededResult(3, 1.0f, 1, 1.0f));
 
     size_t activePlanIndex = 99;
     const AutotuneConfig config;
@@ -9124,9 +9126,9 @@ TEST_F(TestGraph, RankAndSelectWinnerThrowingRankingFnFallsBackToMinTime)
     // F12: a ranking function that throws must NOT propagate; rankAndSelectWinner
     // falls back to default minTimeMs ranking and still selects a winner.
     std::vector<AutotuneResult> results;
-    results.push_back(makeSucceededResult(0, 30.0f, 0));
-    results.push_back(makeSucceededResult(1, 10.0f, 1));
-    results.push_back(makeSucceededResult(2, 20.0f, 2));
+    results.push_back(makeSucceededResult(0, 30.0f, 0, 30.0f));
+    results.push_back(makeSucceededResult(1, 10.0f, 1, 10.0f));
+    results.push_back(makeSucceededResult(2, 20.0f, 2, 20.0f));
 
     AutotuneConfig config;
     config.rankingFn
@@ -9141,6 +9143,61 @@ TEST_F(TestGraph, RankAndSelectWinnerThrowingRankingFnFallsBackToMinTime)
     EXPECT_EQ(activePlanIndex, 1u);
     ASSERT_EQ(results.size(), 3u);
     EXPECT_EQ(results[0].engineId, 1);
+}
+
+TEST_F(TestGraph, RankAndSelectWinnerCustomRankingFnChangesWinnerThroughProductionCode)
+{
+    //   engine 0: minTime 10 (min-time winner), avgTime 30
+    //   engine 1: minTime 20,                   avgTime 10 (avg-time winner)
+    //   engine 2: minTime 30,                   avgTime 20
+    //   engine 9: failed (no timings)
+    //
+    // Default min-time order: {0, 1, 2}, winner engine 0.
+    // Avg-time order:         {1, 2, 0}, winner engine 1.
+    std::vector<AutotuneResult> results;
+    results.push_back(makeSucceededResult(0, 10.0f, 0, 30.0f));
+    results.push_back(makeSucceededResult(1, 20.0f, 1, 10.0f));
+    results.push_back(makeSucceededResult(2, 30.0f, 2, 20.0f));
+    results.push_back(makeFailedResult(9));
+
+    AutotuneConfig config;
+    config.rankingFn = [](std::vector<AutotuneResult>& res) {
+        std::stable_sort(
+            res.begin(), res.end(), [](const AutotuneResult& a, const AutotuneResult& b) {
+                return a.avgTimeMs < b.avgTimeMs;
+            });
+    };
+
+    size_t activePlanIndex = 99;
+    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+        results, config, activePlanIndex);
+
+    ASSERT_TRUE(err.is_good()) << err.err_msg;
+    ASSERT_EQ(results.size(), 4u);
+
+    // (i) Succeeded results reordered by avgTime (10, 20, 30), not minTime.
+    EXPECT_EQ(results[0].engineId, 1);
+    EXPECT_EQ(results[1].engineId, 2);
+    EXPECT_EQ(results[2].engineId, 0);
+    EXPECT_FLOAT_EQ(results[0].avgTimeMs, 10.0f);
+    EXPECT_FLOAT_EQ(results[1].avgTimeMs, 20.0f);
+    EXPECT_FLOAT_EQ(results[2].avgTimeMs, 30.0f);
+
+    // (ii) Winner is the avg-time winner (engine 1, compiledPlanIndex 1), NOT the
+    // default min-time winner (engine 0, compiledPlanIndex 0).
+    EXPECT_EQ(activePlanIndex, 1u);
+    EXPECT_EQ(results[0].engineId, 1);
+
+    // (iii) Succeeded ranks are 0..n-1 in avg-time order.
+    EXPECT_EQ(results[0].rank, 0);
+    EXPECT_EQ(results[1].rank, 1);
+    EXPECT_EQ(results[2].rank, 2);
+
+    // Failed result stays last with rank -1; production passes only succeeded
+    // results to the custom ranking fn, so it cannot reorder the failed entry.
+    EXPECT_FALSE(results[3].succeeded);
+    EXPECT_EQ(results[3].engineId, 9);
+    EXPECT_EQ(results[3].rank, -1);
 }
 
 // ============================================================================

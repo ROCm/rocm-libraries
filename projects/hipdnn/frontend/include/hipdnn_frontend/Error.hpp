@@ -42,23 +42,16 @@ namespace hipdnn_frontend
 enum class ErrorCode
 {
     OK, ///< Operation completed successfully
-    // "No usable plan" taxonomy (kept distinct on purpose):
-    //   INVALID_VALUE        — user over-constrained selection (all plans deselected, or
-    //                          none fit the requested workspace). Caller relaxes the constraint.
-    //   HIPDNN_BACKEND_ERROR — a backend step failed: compile/finalize, OR plans were
-    //                          benchmarked but every engine failed at runtime (no winner).
     INVALID_VALUE, ///< An invalid value was provided
     HIPDNN_BACKEND_ERROR, ///< An error occurred in the hipDNN backend
     ATTRIBUTE_NOT_SET, ///< A required attribute was not set
-    /**
-     * @brief No engine accepted this graph
-     *
-     * No engine has an applicable solution on the current device, likely
-     * because the requested dtype/shape/operation pattern is not supported by
-     * any engine. Distinct from validation errors -- the graph is well-formed,
-     * just not runnable by the available engines.
-     */
-    GRAPH_NOT_SUPPORTED ///< No engine accepted this graph (graph well-formed but unrunnable on available engines)
+
+    /// @brief No engine accepted this graph
+    /// No engine has an applicable solution on the current device, likely
+    /// because the requested dtype/shape/operation pattern is not supported by
+    /// any engine. Distinct from validation errors -- the graph is well-formed,
+    /// just not runnable by the available engines.
+    GRAPH_NOT_SUPPORTED
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)

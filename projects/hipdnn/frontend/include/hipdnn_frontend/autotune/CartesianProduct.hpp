@@ -65,19 +65,16 @@ inline Error computeCartesianProduct(const std::vector<KnobSweepAxis>& axes,
         return {ErrorCode::OK, ""};
     }
 
-    // Any axis with no values produces an empty product
-    for(const auto& axis : axes)
-    {
-        if(axis.values.empty())
-        {
-            return {ErrorCode::OK, ""};
-        }
-    }
-
     // Compute total number of combinations
     size_t totalCombinations = 1;
     for(const auto& axis : axes)
     {
+        // An axis with no values produces an empty product. Checked first so the
+        // overflow guard below never divides by a zero axis size.
+        if(axis.values.empty())
+        {
+            return {ErrorCode::OK, ""};
+        }
         // Guard against overflow before multiplying
         if(totalCombinations > CARTESIAN_PRODUCT_LIMIT_ERROR / axis.values.size())
         {
@@ -86,14 +83,6 @@ inline Error computeCartesianProduct(const std::vector<KnobSweepAxis>& axes,
                         + std::to_string(CARTESIAN_PRODUCT_LIMIT_ERROR) + " combinations"};
         }
         totalCombinations *= axis.values.size();
-    }
-
-    if(totalCombinations > CARTESIAN_PRODUCT_LIMIT_ERROR)
-    {
-        return {ErrorCode::INVALID_VALUE,
-                "Cartesian product of " + std::to_string(totalCombinations)
-                    + " combinations exceeds limit of "
-                    + std::to_string(CARTESIAN_PRODUCT_LIMIT_ERROR)};
     }
 
     if(totalCombinations > CARTESIAN_PRODUCT_LIMIT_WARNING)

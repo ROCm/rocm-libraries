@@ -9,7 +9,6 @@
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -466,29 +465,6 @@ TEST(TestAutotuneTypes, AutotuneStorageConfigCustomValues)
 
     EXPECT_EQ(config.filePath.string(), "/tmp/autotune_results.json");
     EXPECT_TRUE(config.deleteAllExistingFileContent);
-}
-
-// ============================================================================
-// AutotuneRankingFn Tests
-// ============================================================================
-
-TEST(TestAutotuneTypes, AutotuneRankingFnIsCallable)
-{
-    auto sortByAvgTime = [](std::vector<AutotuneResult>& results) {
-        std::sort(
-            results.begin(), results.end(), [](const AutotuneResult& a, const AutotuneResult& b) {
-                return a.avgTimeMs < b.avgTimeMs;
-            });
-    };
-    const AutotuneRankingFn fn = sortByAvgTime;
-    EXPECT_NE(fn, nullptr);
-
-    std::vector<AutotuneResult> results(2);
-    results[0].avgTimeMs = 2.0f;
-    results[1].avgTimeMs = 1.0f;
-
-    fn(results);
-    EXPECT_LT(results[0].avgTimeMs, results[1].avgTimeMs);
 }
 
 // ============================================================================

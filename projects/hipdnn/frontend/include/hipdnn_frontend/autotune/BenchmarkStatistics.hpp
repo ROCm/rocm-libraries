@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace hipdnn_frontend
@@ -30,7 +31,7 @@ namespace autotune
  * @return The arithmetic mean
  * @throws std::invalid_argument if values is empty
  */
-template <typename T>
+template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeMean(const std::vector<T>& values)
 {
     if(values.empty())
@@ -52,7 +53,7 @@ T computeMean(const std::vector<T>& values)
  * samples represent the complete set of measurements, not a sample drawn
  * from a larger population.
  */
-template <typename T>
+template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeStddev(const std::vector<T>& values)
 {
     if(values.empty())
@@ -81,7 +82,7 @@ T computeStddev(const std::vector<T>& values)
  * of the mean. A CoV below the stabilityThreshold indicates convergence
  * in the RUN_UNTIL_STABLE strategy.
  */
-template <typename T>
+template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeCoefficientOfVariation(const std::vector<T>& values)
 {
     if(values.empty())

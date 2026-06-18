@@ -186,4 +186,39 @@ TEST_F(IntegrationAutotuneStrategySmoke, SingleShot)
     runStrategySmoke(AutotuneStrategy::SINGLE_SHOT);
 }
 
+// Covers the maxIterations == windowSize accepted boundary for RUN_UNTIL_STABLE
+// end-to-end through production code: the validation gate (maxIterations >=
+// windowSize) must ACCEPT the equal case, and autotune must run to completion
+// and return OK with results. runStrategySmoke hard-codes a different
+// maxIterations, so this drives the same real path with the equal boundary.
+TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
+{
+    ConvGraphBundle bundle;
+    createBuiltConvGraph("autotune_max_equals_window_conv", bundle);
+
+    auto result = bundle.graph->add_all_engines();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    int64_t maxWs = 0;
+    result = bundle.graph->get_estimated_max_workspace_size(maxWs);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const Workspace workspace(static_cast<size_t>(maxWs));
+
+    AutotuneConfig config;
+    config.mode = TuneMode::AUTO;
+    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+    config.warmupIterations = 1;
+    config.windowSize = 3;
+    config.maxIterations = 3; // equal boundary: maxIterations == windowSize
+    config.timedIterations = 5;
+
+    std::vector<AutotuneResult> results;
+    result = bundle.graph->autotune(
+        _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    assertAnySucceeded(results);
+}
+
 } // namespace

@@ -79,12 +79,12 @@ AutotuneResult makeResult(int64_t engineId,
 
 } // namespace
 
-// ── knobSettingToJson Tests ─────────────────────────────────────────────────
+// ── KnobSetting to_json Tests ───────────────────────────────────────────────
 
 TEST(TestAutotuneFileWriter, KnobSettingToJsonInt)
 {
     const KnobSetting setting("TILE_SIZE", int64_t{128});
-    auto json = knobSettingToJson(setting);
+    const nlohmann::json json(setting);
 
     EXPECT_EQ(json["knob_id"], "TILE_SIZE");
     EXPECT_EQ(json["type"], "int");
@@ -94,7 +94,7 @@ TEST(TestAutotuneFileWriter, KnobSettingToJsonInt)
 TEST(TestAutotuneFileWriter, KnobSettingToJsonDouble)
 {
     const KnobSetting setting("LEARNING_RATE", 0.001);
-    auto json = knobSettingToJson(setting);
+    const nlohmann::json json(setting);
 
     EXPECT_EQ(json["knob_id"], "LEARNING_RATE");
     EXPECT_EQ(json["type"], "double");
@@ -104,11 +104,23 @@ TEST(TestAutotuneFileWriter, KnobSettingToJsonDouble)
 TEST(TestAutotuneFileWriter, KnobSettingToJsonString)
 {
     const KnobSetting setting("ALGORITHM", std::string("gemm_v2"));
-    auto json = knobSettingToJson(setting);
+    const nlohmann::json json(setting);
 
     EXPECT_EQ(json["knob_id"], "ALGORITHM");
     EXPECT_EQ(json["type"], "string");
     EXPECT_EQ(json["value"], "gemm_v2");
+}
+
+TEST(TestAutotuneFileWriter, KnobSettingToJsonYieldsExactKeys)
+{
+    const KnobSetting setting("SPLIT_K", int64_t{4});
+    const nlohmann::json json(setting);
+
+    ASSERT_TRUE(json.is_object());
+    EXPECT_EQ(json.size(), 3u);
+    EXPECT_TRUE(json.contains("knob_id"));
+    EXPECT_TRUE(json.contains("type"));
+    EXPECT_TRUE(json.contains("value"));
 }
 
 // ── buildOverrideEntry Tests ────────────────────────────────────────────────
@@ -574,6 +586,111 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
     // Verify valid JSON was written
     std::ifstream file(tmpFile.path);
     auto json = nlohmann::json::parse(file);
+    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+}
+
+// ── Non-object existing-file hardening tests ──────────────────────────
+
+TEST(TestAutotuneFileWriter, HandleExistingTopLevelArray)
+{
+    const TempFile tmpFile;
+
+    // A valid JSON file whose root is an array, not an object.
+    {
+        std::ofstream outFile(tmpFile.path);
+        outFile << "[]";
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
+
+    Error err;
+    ASSERT_NO_THROW(err
+                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_TRUE(json.is_object());
+    ASSERT_TRUE(json["engine_overrides"].is_array());
+    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+}
+
+TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
+{
+    const TempFile tmpFile;
+
+    // A valid JSON file whose root is a bare scalar, not an object.
+    {
+        std::ofstream outFile(tmpFile.path);
+        outFile << "42";
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
+
+    Error err;
+    ASSERT_NO_THROW(err
+                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_TRUE(json.is_object());
+    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+}
+
+TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
+{
+    const TempFile tmpFile;
+
+    // Unparseable content.
+    {
+        std::ofstream outFile(tmpFile.path);
+        outFile << "}{ not json at all";
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
+
+    Error err;
+    ASSERT_NO_THROW(err
+                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_TRUE(json.is_object());
+    EXPECT_EQ(json["engine_overrides"].size(), 1u);
+}
+
+TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
+{
+    const TempFile tmpFile;
+
+    // A well-formed object with no engine_overrides and an unrelated key.
+    {
+        std::ofstream outFile(tmpFile.path);
+        outFile << R"({"unrelated":true})";
+    }
+
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(1, "MIOPEN_ENGINE"));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};
+
+    Error err;
+    ASSERT_NO_THROW(err
+                    = writeAutotuneResults(tmpFile.path, "conv_fprop", results, false, dims, {}));
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    auto json = nlohmann::json::parse(file);
+    ASSERT_TRUE(json.is_object());
+    EXPECT_TRUE(json["unrelated"].get<bool>());
+    ASSERT_TRUE(json["engine_overrides"].is_array());
     EXPECT_EQ(json["engine_overrides"].size(), 1u);
 }
 

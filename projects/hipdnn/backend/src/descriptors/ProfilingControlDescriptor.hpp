@@ -6,10 +6,29 @@
 #include "BackendDescriptor.hpp"
 #include <hip/hip_runtime.h>
 
+#include <memory>
+#include <type_traits>
+
 struct hipdnnHandle;
 
 namespace hipdnn_backend
 {
+
+/**
+ * @brief Deleter that destroys a HIP event, enabling RAII ownership via unique_ptr.
+ */
+struct HipEventDeleter
+{
+    void operator()(hipEvent_t event) const
+    {
+        if(event != nullptr)
+        {
+            static_cast<void>(hipEventDestroy(event));
+        }
+    }
+};
+
+using HipEventGuard = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEventDeleter>;
 
 /**
  * @brief Backend descriptor for GPU timing via HIP events
@@ -55,15 +74,13 @@ public:
 private:
     hipdnnHandle* _handle = nullptr;
     hipStream_t _stream = nullptr;
-    hipEvent_t _startEvent = nullptr;
-    hipEvent_t _stopEvent = nullptr;
+    HipEventGuard _startEvent;
+    HipEventGuard _stopEvent;
     float _elapsedMs = 0.0F;
-    bool _eventsCreated = false;
     bool _startRecorded = false;
     bool _stopRecorded = false;
 
     void createEvents();
-    void destroyEvents();
 };
 
 } // namespace hipdnn_backend

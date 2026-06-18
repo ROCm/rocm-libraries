@@ -381,6 +381,88 @@ protected:
         return {ErrorCode::OK, ""};
     }
 
+    /// Convert a tensor-attribute keyed lookup into a UID-keyed variant pack.
+    /// Each entry's tensor must be non-null and carry a valid uid.
+    /// @param tensorLookup Map from tensor attributes to device memory pointers
+    /// @param[out] variantPack Map from tensor UID to device memory pointers
+    /// @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if any tensor
+    ///         is null or lacks a valid uid (variantPack is left partially filled)
+    static Error tensorLookupToVariantPack(
+        const std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
+        std::unordered_map<int64_t, void*>& variantPack)
+    {
+        for(const auto& [tensor, ptr] : tensorLookup)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                variantPack[tensor->get_uid()] = ptr;
+            }
+            else
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "Tensor in tensor lookup is null or does not have a valid uid."};
+            }
+        }
+        return {ErrorCode::OK, ""};
+    }
+
+    /// Run the mechanical execution-plan finalize sequence on a compiled plan:
+    /// set the engine config attribute, finalize the execution plan descriptor,
+    /// then query and cache its workspace size. On failure the
+    /// workspace size is not updated; on success @c plan.workspaceSize holds the
+    /// queried value.
+    /// @param plan The compiled plan to finalize (engine config + execution plan
+    ///        descriptors must already be valid)
+    /// @return {ErrorCode::OK, ""} on success, or a populated backend Error
+    ///         identifying the step that failed
+    static Error finalizePlanDescriptor(CompiledPlan& plan)
+    {
+        auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
+            plan.executionPlanDesc->get(),
+            HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+            1,
+            static_cast<const void*>(&plan.engineConfigDesc->get()));
+        if(setStatus != HIPDNN_STATUS_SUCCESS)
+        {
+            std::array<char, 1024> backendErrMsg{};
+            detail::hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    std::string("Failed to set the engine config on execution plan.")
+                        + " Backend error: " + backendErrMsg.data()};
+        }
+
+        auto finStatus = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
+        if(finStatus != HIPDNN_STATUS_SUCCESS)
+        {
+            std::array<char, 1024> backendErrMsg{};
+            detail::hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    std::string("Failed to finalize execution plan descriptor")
+                        + " Backend error: " + backendErrMsg.data()};
+        }
+
+        int64_t wsSize = 0;
+        auto wsStatus = detail::hipdnnBackend()->backendGetAttribute(
+            plan.executionPlanDesc->get(),
+            HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+            HIPDNN_TYPE_INT64,
+            1,
+            nullptr,
+            &wsSize);
+        if(wsStatus != HIPDNN_STATUS_SUCCESS)
+        {
+            std::array<char, 1024> backendErrMsg{};
+            detail::hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    std::string("Failed to query execution plan workspace size")
+                        + " Backend error: " + backendErrMsg.data()};
+        }
+        plan.workspaceSize = wsSize;
+
+        return {ErrorCode::OK, ""};
+    }
+
 private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
@@ -2422,47 +2504,24 @@ public:
                     continue;
                 }
 
-                // Set the engine config on the execution plan descriptor
-                auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
-                    plan.executionPlanDesc->get(),
-                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                    1,
-                    static_cast<const void*>(&plan.engineConfigDesc->get()));
-                if(setStatus != HIPDNN_STATUS_SUCCESS)
-                {
-                    HIPDNN_FE_LOG_WARN("Failed to set engine config on plan index "
-                                       << i << " (engine " << plan.engineId << "), skipping");
-                    continue;
-                }
-
-                // Finalize the execution plan
-                auto finStatus
-                    = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
-                if(finStatus != HIPDNN_STATUS_SUCCESS)
+                // Set the engine config, finalize the plan, and cache its
+                // workspace size. On failure log and skip to the next plan.
+                auto finalizeErr = finalizePlanDescriptor(plan);
+                if(finalizeErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("Failed to finalize plan index "
-                                       << i << " (engine " << plan.engineId << "), skipping");
+                                       << i << " (engine " << plan.engineId
+                                       << "): " << finalizeErr.get_message() << "; skipping");
                     continue;
                 }
 
-                // Query and cache workspace size
-                int64_t wsSize = 0;
-                detail::hipdnnBackend()->backendGetAttribute(
-                    plan.executionPlanDesc->get(),
-                    HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
-                    HIPDNN_TYPE_INT64,
-                    1,
-                    nullptr,
-                    &wsSize);
-                plan.workspaceSize = wsSize;
-
-                if(_maxWorkspaceAllowed >= 0 && wsSize > _maxWorkspaceAllowed)
+                if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
                 {
                     plan.barred = true;
                     HIPDNN_FE_LOG_INFO("Plan index " << i << " (engine " << plan.engineId
-                                                     << ") marked barred: workspace " << wsSize
-                                                     << " exceeds limit " << _maxWorkspaceAllowed);
+                                                     << ") marked barred: workspace "
+                                                     << plan.workspaceSize << " exceeds limit "
+                                                     << _maxWorkspaceAllowed);
                     continue;
                 }
 
@@ -2507,33 +2566,20 @@ public:
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
         }
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                             activeExecPlanPtr->get(),
-                                             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                             1,
-                                             static_cast<const void*>(&activeEngineCfgPtr->get())),
-                                         "Failed to set the engine config on execution plan.");
+        // Set the engine config, finalize the plan, and cache its workspace size.
+        // On failure return a backend error (the original heuristics behavior).
+        auto finalizeErr = finalizePlanDescriptor(activePlan);
+        if(finalizeErr.is_bad())
+        {
+            return finalizeErr;
+        }
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendFinalize(activeExecPlanPtr->get()),
-            "Failed to finalize execution plan descriptor");
-
-        int64_t wsSize = 0;
-        detail::hipdnnBackend()->backendGetAttribute(activeExecPlanPtr->get(),
-                                                     HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
-                                                     HIPDNN_TYPE_INT64,
-                                                     1,
-                                                     nullptr,
-                                                     &wsSize);
-        activePlan.workspaceSize = wsSize;
-
-        if(_maxWorkspaceAllowed >= 0 && wsSize > _maxWorkspaceAllowed)
+        if(_maxWorkspaceAllowed >= 0 && activePlan.workspaceSize > _maxWorkspaceAllowed)
         {
             activePlan.barred = true;
             return {ErrorCode::INVALID_VALUE,
-                    "Active plan workspace " + std::to_string(wsSize) + " exceeds deselect limit "
-                        + std::to_string(_maxWorkspaceAllowed) + "."};
+                    "Active plan workspace " + std::to_string(activePlan.workspaceSize)
+                        + " exceeds deselect limit " + std::to_string(_maxWorkspaceAllowed) + "."};
         }
 
         setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::FINALIZED);
@@ -3092,47 +3138,33 @@ private:
     ///
     /// Uses a one-shot ProfilingControlDescriptor to call hipDeviceSynchronize()
     /// via the backend, keeping HIP calls out of the frontend header. Ensures the
-    /// GPU is idle from previous work before the next phase starts. Non-fatal:
-    /// any failure is logged as a warning and synchronization is skipped.
-    static void syncDevice(hipdnnHandle_t handle)
+    /// GPU is idle from previous work before the next phase starts. Returns a
+    /// fatal error on any synchronization failure so the caller can mark the
+    /// affected plan's timing as unreliable.
+    static Error syncDevice()
     {
         // NOLINTNEXTLINE(misc-const-correctness)
         detail::ScopedHipdnnBackendDescriptor syncDesc(HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
         if(!syncDesc.valid())
         {
-            HIPDNN_FE_LOG_WARN("autotune: failed to create sync descriptor, "
-                               "skipping device synchronization");
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "autotune: failed to create sync descriptor for device synchronization"};
         }
-        else
+        bool syncVal = true;
+        auto syncStatus
+            = detail::hipdnnBackend()->backendSetAttribute(syncDesc.get(),
+                                                           HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           1,
+                                                           &syncVal);
+        if(syncStatus != HIPDNN_STATUS_SUCCESS)
         {
-            auto handleStatus
-                = detail::hipdnnBackend()->backendSetAttribute(syncDesc.get(),
-                                                               HIPDNN_ATTR_PROFILING_HANDLE_EXT,
-                                                               HIPDNN_TYPE_HANDLE,
-                                                               1,
-                                                               static_cast<const void*>(&handle));
-            if(handleStatus != HIPDNN_STATUS_SUCCESS)
-            {
-                HIPDNN_FE_LOG_WARN("autotune: failed to set handle on sync descriptor");
-            }
-            else
-            {
-                bool syncVal = true;
-                auto syncStatus = detail::hipdnnBackend()->backendSetAttribute(
-                    syncDesc.get(),
-                    HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT,
-                    HIPDNN_TYPE_BOOLEAN,
-                    1,
-                    &syncVal);
-                if(syncStatus != HIPDNN_STATUS_SUCCESS)
-                {
-                    HIPDNN_FE_LOG_WARN("autotune: device sync setAttribute failed");
-                }
-            }
-            // No backendFinalize() needed: sync is triggered immediately by
-            // setAttribute(DEVICE_SYNC). finalize() would throw for sync-only
-            // descriptors (no start/stop events recorded).
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "autotune: device sync setAttribute failed"};
         }
+        // No backendFinalize() needed: sync is triggered immediately by
+        // setAttribute(DEVICE_SYNC). finalize() would throw for sync-only
+        // descriptors (no start/stop events recorded).
+        return {ErrorCode::OK, ""};
     }
 
 protected:
@@ -3171,8 +3203,8 @@ protected:
             }
             catch(const std::exception& e)
             {
-                HIPDNN_FE_LOG_WARN("autotune: custom ranking function threw an exception: "
-                                   << e.what() << ". Falling back to default ranking.");
+                HIPDNN_FE_LOG_ERROR("autotune: custom ranking function threw an exception: "
+                                    << e.what() << ". Falling back to default ranking.");
                 std::stable_sort(succeededResults.begin(),
                                  succeededResults.end(),
                                  [](const AutotuneResult& a, const AutotuneResult& b) {
@@ -4091,12 +4123,6 @@ private:
                 }
             }
 
-            // ── Device sync before warmup ──────────────────────────────────
-            // Ensure GPU is idle from previous plan's work before starting
-            // warmup for this plan. Without this, warmup iterations may
-            // overlap with the previous plan's timed/warmup GPU work.
-            syncDevice(handle);
-
             // ── Warmup iterations ───────────────────────────────────────
             bool warmupFailed = false;
             for(int w = 0; w < config.warmupIterations; ++w)
@@ -4118,7 +4144,24 @@ private:
             }
 
             // ── Device sync before timed iterations ─────────────────────
-            syncDevice(handle);
+            auto syncErr = syncDevice();
+            if(syncErr.is_bad())
+            {
+                HIPDNN_FE_LOG_WARN(
+                    "autotune: engine "
+                    << result.engineName << ": device synchronization before timing failed — "
+                    << syncErr.get_message() << "; skipping plan to avoid unreliable timing");
+                result.succeeded = false;
+                if(!result.errorMessage.empty())
+                {
+                    result.errorMessage += "; ";
+                }
+                result.errorMessage += "Device synchronization before timed benchmark failed "
+                                       "(timing unreliable): "
+                                       + syncErr.get_message();
+                allResults.push_back(std::move(result));
+                continue;
+            }
 
             // ── Timed iterations ────────────────────────────────────────
             std::vector<float> timings;
@@ -4341,23 +4384,12 @@ public:
      * @return ErrorCode::OK on success
      *
      * @code{.cpp}
-     * // Workflow 1: Plan-spec path (add_engine_*() -> autotune)
-     * graph.build_operation_graph(handle);
-     * graph.add_all_engines();
-     * int64_t maxWs;
-     * graph.get_estimated_max_workspace_size(maxWs);
-     * void* workspace;
-     * hipMalloc(&workspace, maxWs);
-     *
-     * AutotuneConfig config;
-     * config.mode = TuneMode::EXHAUSTIVE;
-     * std::vector<AutotuneResult> results;
-     * graph.autotune(handle, variantPack, workspace, config, {}, &results);
-     *
      * // Workflow 2: Compiled-plan path (cuDNN drop-in)
      * graph.build_operation_graph(handle);
      * graph.create_execution_plans({hipdnn::HeurMode::A});
      * graph.build_plans(BuildPlanPolicy::ALL);
+     * AutotuneConfig config;
+     * std::vector<AutotuneResult> results;
      * graph.autotune(handle, variantPack, workspace, config, {}, &results);
      * @endcode
      */
@@ -4399,18 +4431,7 @@ public:
                     "Use the autotune() overload that accepts a workspaceSize parameter."};
         }
         std::unordered_map<int64_t, void*> variantPack;
-        for(const auto& [tensor, ptr] : tensorLookup)
-        {
-            if(tensor && tensor->has_uid())
-            {
-                variantPack[tensor->get_uid()] = ptr;
-            }
-            else
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "Tensor in tensor lookup is null or does not have a valid uid."};
-            }
-        }
+        HIPDNN_CHECK_ERROR(tensorLookupToVariantPack(tensorLookup, variantPack));
         return autotune(handle, variantPack, workspace, config, storageConfig, results);
     }
 
@@ -4442,6 +4463,21 @@ public:
      * @param storageConfig File output parameters
      * @param[out] results Per-engine benchmarking results (optional)
      * @return ErrorCode::OK on success
+     *
+     * @code{.cpp}
+     * // Workflow 1: Plan-spec path (add_engine_*() -> autotune)
+     * graph.build_operation_graph(handle);
+     * graph.add_all_engines();
+     * int64_t maxWs;
+     * graph.get_estimated_max_workspace_size(maxWs);
+     * void* workspace;
+     * hipMalloc(&workspace, maxWs);
+     *
+     * AutotuneConfig config;
+     * config.mode = TuneMode::EXHAUSTIVE;
+     * std::vector<AutotuneResult> results;
+     * graph.autotune(handle, variantPack, workspace, maxWs, config, {}, &results);
+     * @endcode
      */
     Error autotune(hipdnnHandle_t handle,
                    const std::unordered_map<int64_t, void*>& variantPack,
@@ -4482,18 +4518,7 @@ public:
                     "Use the overload without workspaceSize for unlimited workspace."};
         }
         std::unordered_map<int64_t, void*> variantPack;
-        for(const auto& [tensor, ptr] : tensorLookup)
-        {
-            if(tensor && tensor->has_uid())
-            {
-                variantPack[tensor->get_uid()] = ptr;
-            }
-            else
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "Tensor in tensor lookup is null or does not have a valid uid."};
-            }
-        }
+        HIPDNN_CHECK_ERROR(tensorLookupToVariantPack(tensorLookup, variantPack));
         return autotune(
             handle, variantPack, workspace, workspaceSize, config, storageConfig, results);
     }
@@ -4755,36 +4780,11 @@ public:
         // Compile it using the same pattern as build_plans(ALL).
         if(plan.workspaceSize == -1)
         {
-            auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
-                plan.executionPlanDesc->get(),
-                HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                1,
-                static_cast<const void*>(&plan.engineConfigDesc->get()));
-            if(setStatus != HIPDNN_STATUS_SUCCESS)
+            auto finalizeErr = finalizePlanDescriptor(plan);
+            if(finalizeErr.is_bad())
             {
-                return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                        "Failed to set engine config on plan at index " + std::to_string(index)
-                            + "."};
+                return finalizeErr;
             }
-
-            auto finStatus
-                = detail::hipdnnBackend()->backendFinalize(plan.executionPlanDesc->get());
-            if(finStatus != HIPDNN_STATUS_SUCCESS)
-            {
-                return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                        "Failed to finalize plan at index " + std::to_string(index) + "."};
-            }
-
-            // Cache workspace size
-            int64_t wsSize = 0;
-            detail::hipdnnBackend()->backendGetAttribute(plan.executionPlanDesc->get(),
-                                                         HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
-                                                         HIPDNN_TYPE_INT64,
-                                                         1,
-                                                         nullptr,
-                                                         &wsSize);
-            plan.workspaceSize = wsSize;
         }
 
         if(_maxWorkspaceAllowed >= 0 && plan.workspaceSize > _maxWorkspaceAllowed)
@@ -4978,18 +4978,7 @@ public:
                   void* workspace) const
     {
         std::unordered_map<int64_t, void*> variantPack;
-        for(const auto& [tensor, ptr] : tensorLookup)
-        {
-            if(tensor && tensor->has_uid())
-            {
-                variantPack[tensor->get_uid()] = ptr;
-            }
-            else
-            {
-                return {ErrorCode::INVALID_VALUE,
-                        "Tensor in tensor lookup is null or does not have a valid uid."};
-            }
-        }
+        HIPDNN_CHECK_ERROR(tensorLookupToVariantPack(tensorLookup, variantPack));
 
         return execute(handle, variantPack, workspace);
     }
