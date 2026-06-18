@@ -541,6 +541,9 @@ void testing_cholqr(Arguments& argus)
                                                    (S*)nullptr, (I*)nullptr, bc),
                                   rocblas_status_not_implemented);
 
+        if(argus.timing)
+            rocsolver_bench_inform(inform_not_implemented);
+
         return;
     }
 #endif
