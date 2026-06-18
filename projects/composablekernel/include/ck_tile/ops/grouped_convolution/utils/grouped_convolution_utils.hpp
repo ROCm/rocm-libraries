@@ -96,35 +96,6 @@ CK_TILE_DEVICE void RunWaveletAwareEpilogue(EpilogueBody&& epilogue_body)
     }
 }
 
-/// @brief The Grouped Conv kernel host arguments.
-///
-/// @par Overview
-///      This structure is passed to Grouped Convolution Kernels when creating kernel
-///      arguments object. It contain all necessary information required to
-///      build proper kernel argument and launch kernel on GPU.
-template <typename InPtr, typename WeiPtr, typename OutPtr, typename CDElementwise>
-struct GroupedConvHostArgs : public conv::ConvParam
-{
-    CK_TILE_HOST GroupedConvHostArgs() = delete;
-    CK_TILE_HOST GroupedConvHostArgs(ConvParam conv_param,
-                                     InPtr in_ptr_,
-                                     WeiPtr wei_ptr_,
-                                     const std::vector<const void*> ds_ptr_,
-                                     OutPtr out_ptr_,
-                                     index_t k_batch_,
-                                     CDElementwise elfunc_ = CDElementwise{})
-        : conv::ConvParam(conv_param),
-          in_ptr(in_ptr_),
-          wei_ptr(wei_ptr_),
-          ds_ptr(ds_ptr_),
-          out_ptr(out_ptr_),
-          k_batch(k_batch_),
-          elfunc(elfunc_)
-    {
-        CK_TILE_INFO(std::forward<Args>(args)...);
-    }
-}
-
 template <index_t NDimSpatial_,
           ConvolutionSpecialization ConvSpecialization_,
           typename InLayout_,
