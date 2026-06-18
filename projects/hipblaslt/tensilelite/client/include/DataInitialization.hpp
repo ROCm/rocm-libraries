@@ -27,6 +27,7 @@
 #pragma once
 
 #include "ProgramOptions.hpp"
+#include "RingPolicy.hpp"
 #include "RingSlotController.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
@@ -35,6 +36,7 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <random>
@@ -243,14 +245,16 @@ namespace TensileLite
             // A temporarily wrapper
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem)
             {
-                if(m_ring.hasAvailableSlot())
+                if(m_ringPolicy.allowed && m_ring.hasAvailableSlot())
                 {
                     // The ring is only ever filled under ringEligible() (enforced in
-                    // beginAsyncReset), i.e. BoundsCheck::Disable and !problemDependent.
-                    // Under those conditions the typed overloads' GuardPage flip and
-                    // conditional CPU-init are both no-ops, so bypassing the dynamic_cast
-                    // dispatch is exact, not approximate.  Caller must waitCopyDone()
-                    // before use (main.cpp before benchmark_runs).
+                    // beginAsyncReset), i.e. the explicit policy bit plus the physical
+                    // state guards below.  Under those conditions the typed overloads'
+                    // GuardPage flip and conditional CPU-init are both no-ops, so
+                    // bypassing the dynamic_cast dispatch is exact, not approximate,
+                    // for GEMM and grouped GEMM alike.  The grouped representative
+                    // invariant is asserted when the slot is prepared.  Caller must
+                    // waitCopyDone() before use (main.cpp before benchmark_runs).
                     assert(ringEligible());
                     advanceBuffer();
                     return m_cachedGPUInputs;
@@ -330,14 +334,18 @@ namespace TensileLite
                     return; // all non-active slots already have pending DMA
                 size_t const targetSlot = *targetIdx;
 
-                // Warm path: this slot was filled by fillSlot (via
-                // initializeAltBufferSets) and no kernel has ever written to
-                // it — the benchmark loop only dispatches to the active slot,
-                // never to alt slots.  A/B/C/D therefore hold exactly what
-                // fillSlot put there.  D's initialized value is irrelevant
-                // (the next kernel fully overwrites it), but the skip is safe
-                // because the slot is kernel-write-free.  Record a no-op
-                // event as a sync marker.
+                // Warm path: this target slot's input tensors have already
+                // been prepared for the current problem, either by the
+                // initial active-slot preparation or by
+                // initializeAltBufferSets/fillSlot for alternate slots.
+                // Skipping output reset is safe only when the run does not need
+                // initialized D/output sentinels for validation; in that case
+                // the next GEMM dispatch is expected to define every D element
+                // that will be observed.
+                // Do not treat D overwrite as a universal invariant:
+                // validation-sensitive reuse must reset output tensors before
+                // recording copy completion. Record a no-op event as a sync
+                // marker.
                 if(m_altSlotsFilled)
                 {
                     HIP_CHECK_EXC(
@@ -356,23 +364,7 @@ namespace TensileLite
                             = dynamic_cast<ContractionProblemGroupedGemm const*>(
                                 problem))
                     {
-                        // gemms[0] is representative for element byte sizes: the
-                        // m_vdata model allocates one buffer per (tensor, DataType)
-                        // shared across all gemms, so mixed-type groups cannot be
-                        // constructed.  Assert the invariant in debug builds.
-                        assert(std::all_of(
-                            groupedProblem->gemms.begin(),
-                            groupedProblem->gemms.end(),
-                            [&](ContractionProblemGemm const& g) {
-                                return g.a().dataType()
-                                           == groupedProblem->gemms[0].a().dataType()
-                                       && g.b().dataType()
-                                              == groupedProblem->gemms[0].b().dataType()
-                                       && g.c().dataType()
-                                              == groupedProblem->gemms[0].c().dataType()
-                                       && g.d().dataType()
-                                              == groupedProblem->gemms[0].d().dataType();
-                            }));
+                        assertGroupedRingFastPathInvariant(*groupedProblem);
                         fillSlot(
                             targetSlot, groupedProblem->gemms[0], m_copyStream);
                     }
@@ -398,8 +390,9 @@ namespace TensileLite
                         initializeCPUInputs(problem);
                 }
 
-                // gemms[0] is representative for element byte sizes (see
-                // beginAsyncReset fast path for the invariant and assert).
+                // gemms[0] is representative for element byte sizes; the grouped
+                // ring path asserts that invariant before reusing a prepared slot.
+                assertGroupedRingFastPathInvariant(problem);
                 return prepareGPUInputsInternal(problem.gemms[0], nullptr);
             }
 
@@ -1157,6 +1150,33 @@ namespace TensileLite
 
             void initializeAltBufferSets(ContractionProblemGemm const& problem);
 
+#ifndef NDEBUG
+            void assertGroupedRingFastPathInvariant(
+                ContractionProblemGroupedGemm const& problem) const
+            {
+                assert(!problem.gemms.empty());
+
+                auto const& representative = problem.gemms[0];
+                assert(std::all_of(problem.gemms.begin(),
+                                   problem.gemms.end(),
+                                   [&](ContractionProblemGemm const& g) {
+                                       return g.a().dataType()
+                                                  == representative.a().dataType()
+                                           && g.b().dataType()
+                                                  == representative.b().dataType()
+                                           && g.c().dataType()
+                                                  == representative.c().dataType()
+                                           && g.d().dataType()
+                                                  == representative.d().dataType();
+                                   }));
+            }
+#else
+            void assertGroupedRingFastPathInvariant(
+                ContractionProblemGroupedGemm const&) const
+            {
+            }
+#endif
+
             // True when the ring may serve pre-filled slots in place of re-running the
             // typed prepareGPUInputs dispatch.  This is the SINGLE source of truth for
             // "ring is usable"; every site that fills, advances, or consumes a slot must
@@ -1166,13 +1186,14 @@ namespace TensileLite
             // dispatch" when this predicate holds.  Gating beginAsyncReset on
             // ringEligible() makes that implication provable: the only writer that
             // increments the controller's available-slot count has already verified
-            // all three conditions below.
+            // the explicit policy bit and the physical/state guards below.
             //
             // NOTE: swizzle/MX are handled by fillSlot degrading to its slow path;
             // they do not disqualify the ring, they only force a full re-fill.
             bool ringEligible() const
             {
-                return m_hasAltBuffers
+                return m_ringPolicy.allowed
+                    && m_hasAltBuffers
                     && m_copyStream
                     && m_gpuInit
                     && m_curBoundsCheck == BoundsCheckMode::Disable
@@ -1218,8 +1239,9 @@ namespace TensileLite
             bool                          m_gpuInit          = false;
             ContractionProblemGemm const* m_batchInitProblem = nullptr;
 
-            // Multi-buffer ring control
+            // Multi-buffer ring policy/control
             bool                  m_hasAltBuffers = false;
+            RingPolicy            m_ringPolicy;
             RingSlotController    m_ring;
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;

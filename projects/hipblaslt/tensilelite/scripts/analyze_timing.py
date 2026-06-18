@@ -101,6 +101,7 @@ TIMING_HIERARCHY = {
             },
             "gpu_input_preparation": {},
             "gpu_input_reset": {},
+            "gpu_batch_pointer_init": {},
             "cancel_async_reset": {},
             "async_reset_submit": {
                 "async_reset_prepare": {
@@ -111,7 +112,6 @@ TIMING_HIERARCHY = {
                         "async_reset_swizzle": {},
                     },
                     "async_reset_copyinputs": {},
-                    "async_reset_batchedinit": {},
                 },
             },
             "rotating_buffer_preparation": {},
@@ -163,6 +163,7 @@ CPP_PHASE_GROUPS = {
         "pre_problem",
         "gpu_input_preparation",
         "gpu_input_reset",
+        "gpu_batch_pointer_init",
         "cancel_async_reset",
         "async_reset_submit",
         "sync_copy_stream",

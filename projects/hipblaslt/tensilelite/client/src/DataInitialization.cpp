@@ -44,6 +44,31 @@
 #include <map>
 #include <tuple>
 
+namespace
+{
+    using TensileLite::Client::RingPolicyInputs;
+
+    RingPolicyInputs makeRingPolicyInputs(TensileLite::Client::po::variables_map const& args)
+    {
+        // Mirror ReferenceValidator::m_printAny; print-valids alone does not enable the
+        // validation driver.
+        bool const printAny = args["print-tensor-a"].as<bool>() || args["print-tensor-b"].as<bool>()
+                              || args["print-tensor-c"].as<bool>()
+                              || args["print-tensor-d"].as<bool>()
+                              || args["print-tensor-ref"].as<bool>()
+                              || args["print-tensor-bias"].as<bool>()
+                              || args["print-tensor-amaxd"].as<bool>();
+
+        return {args["num-benchmarks"].as<int>(),
+                args["num-enqueues-per-sync"].as<int>(),
+                args["max-enqueues-per-sync"].as<int>(),
+                args["num-syncs-per-benchmark"].as<int>(),
+                args["min-flops-per-sync"].as<size_t>(),
+                args["num-elements-to-validate"].as<int>(),
+                printAny};
+    }
+} // namespace
+
 namespace TensileLite
 {
     namespace Client
@@ -983,14 +1008,10 @@ namespace TensileLite
                 HIP_CHECK_EXC(
                     hipEventCreateWithFlags(&m_copyDoneEvents[i], hipEventDisableTiming));
 
-            // Determine whether to use triple-buffering (no benchmark runs)
+            // Determine ring policy from benchmark/validation settings.
             {
-                int numBenchmarks    = args["num-benchmarks"].as<int>();
-                int numEnqPerSync    = args["num-enqueues-per-sync"].as<int>();
-                int numSyncsPerBench = args["num-syncs-per-benchmark"].as<int>();
-                bool noBenchmarkRuns = (numBenchmarks == 0 || numEnqPerSync == 0
-                                        || numSyncsPerBench == 0);
-                m_ring = RingSlotController(noBenchmarkRuns ? 3 : 2);
+                m_ringPolicy = chooseRingPolicy(makeRingPolicyInputs(args));
+                m_ring       = RingSlotController(m_ringPolicy.activeBufferCount);
             }
 
             m_rotatingBuffer
@@ -1526,7 +1547,7 @@ namespace TensileLite
 
         void DataInitialization::allocNewGPUInputs()
         {
-            m_hasAltBuffers = true;
+            m_hasAltBuffers = m_ringPolicy.allocatesAltBuffers();
 
             // Allocate reusable pinned staging buffer for batch pointer setup
             if(!m_pinnedBatchStaging && m_maxBatch > 0)
@@ -1596,8 +1617,7 @@ namespace TensileLite
                         pUnit.gpuInput.batchBufs[0] = batch_ptr;
 
                         // Allocate alternate buffers for multi-buffering
-                        for(size_t slot = 1;
-                            m_hasAltBuffers && slot < MAX_BUFFER_SETS;
+                        for(size_t slot = 1; m_hasAltBuffers && slot < m_ring.activeBufferCount();
                             slot++)
                         {
                             if(!pUnit.gpuInput.buffers[slot])
@@ -2665,7 +2685,8 @@ namespace TensileLite
                                 {
                                     HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.current.get(),
                                                                  p.gpuInput.valid.get(),
-                                                                 desc.elementBytes() * p.maxElements,
+                                                                 multiplyElementSize(p.maxElements,
+                                                                                     desc.elementBytes()),
                                                                  kind,
                                                                  copyStream));
                                     ptr = p.gpuInput.current.get();
@@ -3496,7 +3517,7 @@ namespace TensileLite
 
             if(m_batchInitProblem != &problem)
             {
-                ScopedTimer t("async_reset_batchedinit");
+                ScopedTimer t("gpu_batch_pointer_init");
                 initializeGPUBatchedInputs(problem, targetStream);
                 m_batchInitProblem = &problem;
             }

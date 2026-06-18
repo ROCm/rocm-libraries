@@ -27,6 +27,7 @@ from analyze_timing import (
     TimingRecord,
     ProblemTiming,
     ALL_KNOWN_CATEGORIES,
+    CPP_PHASE_GROUPS,
     SOLUTION_GENERATION_PHASES,
     SOLUTION_GENERATION_PARENT,
     BENCH_POSTPROCESS_PHASES,
@@ -257,6 +258,12 @@ TIMING:python_benchmark_problems:5000.0
 
 class TestAllKnownCategories:
     """Tests that ALL_KNOWN_CATEGORIES includes the new sub-timing phases."""
+
+    def test_gpu_batch_pointer_init_in_known(self):
+        assert "gpu_batch_pointer_init" in ALL_KNOWN_CATEGORIES
+
+    def test_gpu_batch_pointer_init_in_data_preparation_group(self):
+        assert "gpu_batch_pointer_init" in CPP_PHASE_GROUPS["Data Preparation"]
 
     def test_solution_generation_phases_in_known(self):
         for phase in SOLUTION_GENERATION_PHASES:

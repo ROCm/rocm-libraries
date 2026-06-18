@@ -1516,8 +1516,11 @@ int main(int argc, const char* argv[])
                                 // DMA on m_copyStream overlaps with the next
                                 // iteration's prepareGPUInputs, kernel_solving,
                                 // and warmup — synced before the next benchmark_runs.
-                                // With triple-buffering, fill two slots ahead so
-                                // each DMA gets a full extra solution of overlap.
+                                // Submit enough resets to prime every non-active ring
+                                // slot. The second call is the extra slot in a
+                                // triple-buffer setup and is otherwise harmless;
+                                // ring-disabled or ineligible configurations return
+                                // early inside beginAsyncReset().
                                 {
                                     ScopedTimer timer("async_reset_submit");
                                     dataInit->beginAsyncReset(problem);

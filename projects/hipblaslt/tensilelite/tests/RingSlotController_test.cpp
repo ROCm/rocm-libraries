@@ -104,6 +104,30 @@ TEST(RingSlotController, AdvanceMarksCopyBarrierRequired)
     EXPECT_TRUE(controller.needsCopyBarrier());
 }
 
+TEST(RingSlotController, SingleSlotNeverPrimesOrAdvances)
+{
+    RingSlotController controller(1);
+
+    EXPECT_EQ(controller.activeBufferCount(), 1u);
+    EXPECT_EQ(controller.activeSlot(), 0u);
+    EXPECT_EQ(controller.availableSlots(), 0u);
+    EXPECT_FALSE(controller.hasAvailableSlot());
+    EXPECT_FALSE(controller.needsCopyBarrier());
+    EXPECT_FALSE(controller.hasPendingWork());
+    EXPECT_EQ(controller.nextPrimeSlot(), std::nullopt);
+
+    controller.markSlotPrimed();
+    EXPECT_EQ(controller.availableSlots(), 0u);
+    EXPECT_EQ(controller.nextPrimeSlot(), std::nullopt);
+    EXPECT_FALSE(controller.hasAvailableSlot());
+
+    EXPECT_EQ(controller.advance(), std::nullopt);
+    EXPECT_EQ(controller.activeSlot(), 0u);
+    EXPECT_EQ(controller.availableSlots(), 0u);
+    EXPECT_FALSE(controller.needsCopyBarrier());
+    EXPECT_FALSE(controller.hasPendingWork());
+}
+
 TEST(RingSlotController, MarkBarrierWaitedClearsBarrier)
 {
     RingSlotController controller(3);

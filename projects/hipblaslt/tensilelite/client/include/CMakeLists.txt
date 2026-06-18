@@ -9,6 +9,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RingSlotController.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RingPolicy.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"
