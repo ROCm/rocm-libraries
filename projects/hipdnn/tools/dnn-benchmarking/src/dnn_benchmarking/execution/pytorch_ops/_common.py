@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import torch
 
+from ...common.exceptions import UnsupportedGraphError
+
 __all__ = [
     "_as_tuple",
     "_node_section",
@@ -24,6 +26,7 @@ __all__ = [
     "_effective_compute_type",
     "_is_float32_compute",
     "_reject_peer_stats",
+    "_require_fp32_stat",
     "_channel_broadcast",
     "_scalar_value",
     "_numel",
@@ -163,6 +166,20 @@ def _is_float32_compute(node: Dict[str, Any], graph_json: Dict[str, Any]) -> boo
     """True only for hipDNN's canonical float32 token: DataType::FLOAT serializes
     to exactly the lowercase string "float" (no "fp32"/"float32" JSON alias)."""
     return _effective_compute_type(node, graph_json) == "float"
+
+
+def _require_fp32_stat(values: torch.Tensor, name: str) -> torch.Tensor:
+    """Several hipDNN providers hard-require float32 for a saved-statistic tensor
+    (batchnorm mean/variance/inv_variance, RMSNorm inv_rms, SDPA log-sum-exp);
+    a non-fp32 stat tensor is GRAPH_NOT_SUPPORTED on the engine and cannot be
+    faithfully matched, so the reference declares such a graph inapplicable rather
+    than silently promoting the stat to float32."""
+    if values.dtype != torch.float32:
+        raise UnsupportedGraphError(
+            f"Reference requires a float32 {name} stat tensor; graph declares "
+            f"{values.dtype}, which the engine reports as unsupported"
+        )
+    return values
 
 
 def _reject_peer_stats(node: Dict[str, Any], operation: str) -> None:

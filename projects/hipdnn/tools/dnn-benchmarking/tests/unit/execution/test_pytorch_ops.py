@@ -936,6 +936,35 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[6], scale.grad)
         torch.testing.assert_close(tensors[7], dy.sum(dim=(0, 1)))
 
+    def test_rmsnorm_backward_rejects_non_fp32_inv_rms(self) -> None:
+        # hip-kernel-provider hard-requires fp32 inv_rms; a bf16 saved stat is
+        # inapplicable rather than silently promoted.
+        x = torch.randn(2, 3, 4)
+        scale = torch.randn(4)
+        dy = torch.randn(2, 3, 4)
+        inv = torch.rsqrt(x.square().mean(dim=2, keepdim=True) + 1e-5).to(
+            torch.bfloat16
+        )
+        graph_json = {
+            "tensors": [{"uid": 5, "dims": [2, 3, 4]}, {"uid": 6, "dims": [4]}],
+            "nodes": [
+                {
+                    "type": "RMSNormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "inv_rms_tensor_uid": 4,
+                    },
+                    "outputs": {"dx_tensor_uid": 5, "dscale_tensor_uid": 6},
+                }
+            ],
+        }
+        tensors = {1: dy, 2: x, 3: scale, 4: inv}
+
+        with pytest.raises(UnsupportedGraphError, match="inv_rms"):
+            pytorch_ops.execute_graph(graph_json, tensors)
+
     def test_batchnorm_variance_ext_uses_builtin_batch_norm(self) -> None:
         x = torch.randn(2, 3, 4, 4)
         mean = torch.randn(3)
@@ -1393,6 +1422,15 @@ class TestPyTorchOpsNewHandlers:
         stats = torch.zeros(1, 4, 4, 1)
         with pytest.raises(UnsupportedGraphError, match="V head count"):
             self._run_sdpa_backward(q, q, v, q, q, stats, {"attn_scale_value": scale})
+
+    def test_sdpa_backward_rejects_non_fp32_stats(self) -> None:
+        # hip-kernel-provider hard-requires fp32 log-sum-exp stats; a bf16 stats
+        # tensor is inapplicable rather than silently promoted.
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(1, 2, 4, 8)
+        stats = torch.zeros(1, 2, 4, 1, dtype=torch.bfloat16)
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            self._run_sdpa_backward(q, q, q, q, q, stats, {"attn_scale_value": scale})
 
     def test_sdpa_forward_independent_kv_heads(self) -> None:
         # Hk != Hv (2 and 1, both divide Hq=4): explicit independent repeat.

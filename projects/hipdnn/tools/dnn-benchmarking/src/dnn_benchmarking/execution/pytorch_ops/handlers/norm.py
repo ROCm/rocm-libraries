@@ -295,7 +295,9 @@ def handle_rmsnorm_backward(
     x = _tensor(tensors, x_uid, node)
     x_float = x.to(dtype=torch.float32)
     scale = _tensor(tensors, scale_uid, node)
-    inv_rms = _tensor(tensors, inv_uid, node).to(dtype=torch.float32, device=x.device)
+    inv_rms = _require_fp32_stat(
+        _tensor(tensors, inv_uid, node), "RMSNorm inv_rms"
+    ).to(device=x.device)
 
     _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(x, scale)
     scale_b = _reshape_affine_for_broadcast(scale, broadcast_shape, x, "RMSNorm scale")

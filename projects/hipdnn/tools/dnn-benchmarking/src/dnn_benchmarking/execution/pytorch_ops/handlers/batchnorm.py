@@ -10,7 +10,6 @@ import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
 from .._registry import register_handler
-from ....common.exceptions import UnsupportedGraphError
 
 
 def _bn_reduce_dims(x: torch.Tensor) -> Tuple[int, ...]:
@@ -41,20 +40,6 @@ def _bn_affine(
     mean_b = _channel_broadcast(mean, x_float)
     inv_b = _channel_broadcast(inv_variance, x_float)
     return (scale_b * ((x_float - mean_b) * inv_b) + bias_b).to(dtype=x.dtype)
-
-
-def _require_fp32_stat(values: torch.Tensor, name: str) -> torch.Tensor:
-    """hipDNN's MIOpen batchnorm provider supports only float32 mean/variance stat
-    tensors; a non-fp32 stat tensor is GRAPH_NOT_SUPPORTED on the engine and cannot
-    be faithfully matched (native_batch_norm_backward also rejects non-fp32 saved
-    stats), so the reference treats such a graph as inapplicable rather than
-    silently promoting it to float32."""
-    if values.dtype != torch.float32:
-        raise UnsupportedGraphError(
-            f"Batchnorm reference requires a float32 {name} stat tensor; graph "
-            f"declares {values.dtype}, which the engine reports as unsupported"
-        )
-    return values
 
 
 @register_handler("BatchnormInferenceAttributes")
