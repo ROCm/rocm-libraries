@@ -40,6 +40,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <limits>
 #include <list>
 #include <map>
 #include <tuple>
@@ -762,6 +763,7 @@ namespace TensileLite
                                  TensorDescriptor const&    tensor,
                                  const std::vector<size_t>& batchIdx,
                                  uint8_t**                  pinnedStaging,
+                                 size_t                     pinnedStagingCapacity,
                                  hipStream_t                stream = nullptr)
         {
             std::vector<size_t> batchSizes;
@@ -774,6 +776,9 @@ namespace TensileLite
             std::vector<size_t> coord(batchSizes.size(), 0);
 
             auto count = CoordCount(batchSizes.begin(), batchSizes.end());
+            if(count > pinnedStagingCapacity)
+                throw std::runtime_error("Batch pointer staging capacity is too small.");
+
             for(size_t idx = 0; idx < count; idx++)
             {
                 CoordNumbered(
@@ -1549,10 +1554,34 @@ namespace TensileLite
         {
             m_hasAltBuffers = m_ringPolicy.allocatesAltBuffers();
 
+            m_pinnedBatchStagingBufferSlots = std::max<size_t>(1, m_ring.activeBufferCount());
+            m_pinnedBatchStagingTensorSlots = m_vdata.size();
+
+            auto checkedMultiply = [](size_t lhs, size_t rhs, char const* message) {
+                if(lhs != 0 && rhs > (std::numeric_limits<size_t>::max() / lhs))
+                    throw std::runtime_error(message);
+                return lhs * rhs;
+            };
+
             // Allocate reusable pinned staging buffer for batch pointer setup
             if(!m_pinnedBatchStaging && m_maxBatch > 0)
+            {
+                size_t totalPointers = checkedMultiply(
+                    m_pinnedBatchStagingBufferSlots,
+                    m_pinnedBatchStagingTensorSlots,
+                    "[DataInitialization] pinned batch staging allocation overflow");
+                totalPointers = checkedMultiply(
+                    totalPointers,
+                    m_maxBatch,
+                    "[DataInitialization] pinned batch staging allocation overflow");
+                size_t const bytes = checkedMultiply(
+                    totalPointers,
+                    sizeof(*m_pinnedBatchStaging),
+                    "[DataInitialization] pinned batch staging allocation overflow");
+
                 HIP_CHECK_EXC(
-                    hipHostMalloc(&m_pinnedBatchStaging, m_maxBatch * sizeof(void*), 0));
+                    hipHostMalloc(&m_pinnedBatchStaging, bytes, 0));
+            }
 
             std::vector<std::shared_ptr<void>> guardPage;
             void*                              guardPagePtr;
@@ -1691,7 +1720,8 @@ namespace TensileLite
         }
 
         void DataInitialization::initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
-                                                            hipStream_t                   targetStream)
+                                                            hipStream_t                   targetStream,
+                                                            size_t                        stagingBufferSlot)
         {
             auto batchIdxs = problem.batchIndices();
             // FIXME: batch not supported for bias
@@ -1749,7 +1779,8 @@ namespace TensileLite
                                     pUnit.gpuInput.batch.get(),
                                     problem.tensors()[i],
                                     batchIdx,
-                                    m_pinnedBatchStaging,
+                                    pinnedBatchStagingSlice(stagingBufferSlot, i),
+                                    m_maxBatch,
                                     targetStream);
 
                 if(problem.useBias() && problem.biasSrc() == i)
@@ -1779,7 +1810,10 @@ namespace TensileLite
                                         pUnitBias.gpuInput.batch.get(),
                                         problem.tensors()[ContractionProblemGemm::TENSOR::BIAS],
                                         batchIdx,
-                                        m_pinnedBatchStaging,
+                                        pinnedBatchStagingSlice(
+                                            stagingBufferSlot,
+                                            ContractionProblemGemm::TENSOR::BIAS),
+                                        m_maxBatch,
                                         targetStream);
                 }
 
@@ -1813,7 +1847,10 @@ namespace TensileLite
                                         pUnitM.gpuInput.batch.get(),
                                         problem.tensors()[ContractionProblemGemm::TENSOR::METADATA],
                                         batchIdx,
-                                        m_pinnedBatchStaging,
+                                        pinnedBatchStagingSlice(
+                                            stagingBufferSlot,
+                                            ContractionProblemGemm::TENSOR::METADATA),
+                                        m_maxBatch,
                                         targetStream);
 
                     auto& pUnitCp = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
@@ -1828,7 +1865,9 @@ namespace TensileLite
                         pUnitCp.gpuInput.batch.get(),
                         problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED],
                         batchIdx,
-                        m_pinnedBatchStaging,
+                        pinnedBatchStagingSlice(stagingBufferSlot,
+                                                ContractionProblemGemm::TENSOR::COMPRESSED),
+                        m_maxBatch,
                         targetStream);
                 }
             }
@@ -3518,7 +3557,7 @@ namespace TensileLite
             if(m_batchInitProblem != &problem)
             {
                 ScopedTimer t("gpu_batch_pointer_init");
-                initializeGPUBatchedInputs(problem, targetStream);
+                initializeGPUBatchedInputs(problem, targetStream, /*stagingBufferSlot=*/0);
                 m_batchInitProblem = &problem;
             }
 
@@ -3649,7 +3688,7 @@ namespace TensileLite
                        problem,
                        kind,
                        targetStream);
-            initializeGPUBatchedInputs(problem, targetStream);
+            initializeGPUBatchedInputs(problem, targetStream, slotIdx);
 
             m_cachedInputsRing[slotIdx] = buildGPUProblemInputs(
                 m_gpuPtrsRing[slotIdx],

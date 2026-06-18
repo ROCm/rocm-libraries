@@ -39,7 +39,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <limits>
 #include <random>
+#include <stdexcept>
 
 #include "RunListener.hpp"
 #include "TimingInstrumentation.hpp"
@@ -1091,7 +1093,8 @@ namespace TensileLite
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem);
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
-                                            hipStream_t                   targetStream = nullptr);
+                                            hipStream_t                   targetStream = nullptr,
+                                            size_t                        stagingBufferSlot = 0);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1200,6 +1203,36 @@ namespace TensileLite
                     && !m_problemDependentData;
             }
 
+            uint8_t** pinnedBatchStagingSlice(size_t bufferSlot, size_t tensorIdx) const
+            {
+                if(m_pinnedBatchStaging == nullptr)
+                    throw std::runtime_error("Pinned batch staging is not allocated.");
+
+                if(bufferSlot >= m_pinnedBatchStagingBufferSlots
+                   || tensorIdx >= m_pinnedBatchStagingTensorSlots)
+                {
+                    throw std::runtime_error("Pinned batch staging slice out of range.");
+                }
+
+                if(bufferSlot
+                   > (std::numeric_limits<size_t>::max() - tensorIdx)
+                         / m_pinnedBatchStagingTensorSlots)
+                {
+                    throw std::runtime_error("Pinned batch staging slice overflow.");
+                }
+
+                size_t const stripe
+                    = bufferSlot * m_pinnedBatchStagingTensorSlots + tensorIdx;
+                if(m_maxBatch > 0
+                   && stripe > (std::numeric_limits<size_t>::max() / m_maxBatch))
+                {
+                    throw std::runtime_error("Pinned batch staging slice overflow.");
+                }
+
+                size_t const slotOffset = stripe * m_maxBatch;
+                return m_pinnedBatchStaging + slotOffset;
+            }
+
             void activateRingSlot(size_t slot)
             {
                 for(auto& vd : m_vdata)
@@ -1256,6 +1289,8 @@ namespace TensileLite
 
             size_t    m_maxBatch;
             uint8_t** m_pinnedBatchStaging = nullptr;
+            size_t    m_pinnedBatchStagingBufferSlots = 0;
+            size_t    m_pinnedBatchStagingTensorSlots = 0;
 
             size_t m_workspaceSize;
 
