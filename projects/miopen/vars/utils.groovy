@@ -26,6 +26,7 @@
 
 import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker
 import org.jenkinsci.plugins.workflow.actions.ErrorAction
+import org.jenkinsci.plugins.workflow.actions.WarningAction
 import org.jenkinsci.plugins.workflow.actions.LabelAction
 import org.jenkinsci.plugins.workflow.actions.ThreadNameAction
 import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode
@@ -944,10 +945,31 @@ def sendTeamsFailureNotification(Map conf=[:]) {
 // because wfapi only exposes top-level stages, not parallel sub-stages.
 // Returns empty set on first run, full success, or any error (fail-open).
 
-// Detects failure via ErrorAction, getOutcome(), or ResultAction reflection.
+// True if a node carries a FAILURE/ABORTED marker. catchError(stageResult:
+// 'FAILURE') records a WarningAction (not an ErrorAction) on the inner step,
+// so checking WarningAction is what catches swallowed failures.
+@NonCPS
+private def isNodeFailed(def node) {
+    if (node.getAction(ErrorAction)) return true
+
+    try {
+        def warning = node.getAction(WarningAction)
+        if (warning != null) {
+            def result = warning.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    return false
+}
+
+// Detects failure via node markers, getOutcome(), or ResultAction reflection.
 @NonCPS
 private def isStageMarkedFailed(def endNode) {
-    if (endNode.getAction(ErrorAction)) return true
+    if (isNodeFailed(endNode)) return true
 
     try {
         def outcome = endNode.getOutcome()
@@ -985,16 +1007,23 @@ def getPassedStagesFromBuild(def rawBuild) {
     def execution = rawBuild?.execution
     if (!execution) return passed
 
-    def startNodes = [:]
-    def endNodes   = [:]
-    def errorIds   = [] as Set
+    def startNodes    = [:]
+    def endNodes      = [:]
+    // Ids of stage StepStartNodes that enclose a failed node. A catchError
+    // failure marks an inner step, not the stage end node, so propagate the
+    // failure up to every enclosing block.
+    def failedStageIds = [] as Set
 
     def walker = new FlowGraphWalker(execution)
     def walkerIter = walker.iterator()
     while (walkerIter.hasNext()) {
         def flowNode = walkerIter.next()
-        if (flowNode.getAction(ErrorAction)) {
-            errorIds << flowNode.id
+        if (isNodeFailed(flowNode)) {
+            failedStageIds << flowNode.id
+            try {
+                failedStageIds.addAll(flowNode.getAllEnclosingIds())
+            } catch (Exception e) {
+            }
         }
         if (flowNode instanceof StepStartNode) {
             def label  = flowNode.getAction(LabelAction)
@@ -1012,6 +1041,7 @@ def getPassedStagesFromBuild(def rawBuild) {
         def stageName = entry.value
         def endNode   = endNodes[startId]
         if (!endNode) continue
+        if (failedStageIds.contains(startId)) continue
         if (isStageMarkedFailed(endNode)) continue
 
         passed << stageName
