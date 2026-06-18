@@ -921,15 +921,16 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        # Subtile has no GSU reduction path, so it can only run data-parallel
-        # (GSU=1). GSU is also a runtime parameter, so disable the user GSU
-        # override too (mirrors Stream-K / PrefetchGL2) instead of only
-        # rejecting the build-time value.
         if state["GlobalSplitU"] != 1:
           reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
         state["InternalSupportParams"]["SupportUserGSU"] = False
-      if state["StreamK"] not in (0, 3, 4):
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4}")
+      # Lazy import: Components/StreamK.py pulls ..Component which
+      # back-imports the Components package and would deadlock at
+      # module-load time if pulled from Solution.py's top-level
+      # imports.
+      from Tensile.Components.StreamK import streamKVariantClass
+      if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
       if state["PrefetchAcrossPersistent"]:
@@ -949,7 +950,11 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
-      state["Multicast"] = True
+      # Subtile supports the cluster barrier/signal handshake but not the
+      # multicast TDM data path, so keep Multicast off there while still
+      # enabling the cluster barrier.
+      if not state["UseSubtileImpl"]:
+        state["Multicast"] = True
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
@@ -1582,6 +1587,8 @@ class Solution(collections.abc.Mapping):
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
+        if state["StreamK"] == 5:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with hybrid mode (StreamK=5)")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:
@@ -2354,6 +2361,11 @@ class Solution(collections.abc.Mapping):
     if state["TDMInst"]:
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
+        return
+
+    if state["CompactLoopStore"]:
+      if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
+        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
         return
 
     # MX scale layout + transport derivation and validation. See

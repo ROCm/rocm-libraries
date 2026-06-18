@@ -10,7 +10,7 @@ outputs:
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
   linux-runner:
     description: "GitHub Actions runner label for Linux jobs"
-    value: "azure-linux-scale-rocm"
+    value: "aws-linux-scale-rocm-prod"
   windows-runner:
     description: "GitHub Actions runner label for Windows jobs"
     value: "azure-windows-scale-rocm"

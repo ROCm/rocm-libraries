@@ -467,13 +467,13 @@ Every step of this is an **existing frontend capability** — no spike is requir
 ```bash
 # Mode C — one engine of one plugin
 ./hipdnn_integration_tests \
-    --golden-data-dir dnn-providers/integration-tests/golden_reference_data \
+    --golden-data-dir dnn-providers/integration-tests/integration_test_bundles \
     --test-article <plugin-lib> --test-engine MIOPEN_ENGINE \
     --write-support-claims
 
 # Mode B — every engine the plugin exposes, run sequentially
 ./hipdnn_integration_tests \
-    --golden-data-dir dnn-providers/integration-tests/golden_reference_data \
+    --golden-data-dir dnn-providers/integration-tests/integration_test_bundles \
     --test-article <plugin-lib> \
     --write-support-claims
 ```

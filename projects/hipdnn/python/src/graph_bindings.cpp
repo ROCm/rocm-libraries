@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -44,6 +45,30 @@ void graphBindings(nb::module_& m)
              &graph::Graph::create_execution_plans,
              nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
              "Create execution plans with specified heuristic modes")
+        .def(
+            "create_execution_plan_ext",
+            [](graph::Graph& g, int64_t engineId) {
+                return g.create_execution_plan_ext(engineId, {});
+            },
+            nb::arg("engine_id"),
+            "Hard-select an engine: create/select the execution plan descriptor for "
+            "this exact engine id (call build_plans() to finalize). Returns an Error "
+            "whose is_bad() is set if the engine is not valid/applicable (no "
+            "heuristic fallback).")
+        .def(
+            "get_execution_plan_engine_id",
+            [](const graph::Graph& g) {
+                int64_t engineId = 0;
+                const auto err = g.get_execution_plan_engine_id(engineId);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get execution plan engine id: "
+                                             + err.get_message());
+                }
+                return engineId;
+            },
+            "Engine id actually backing the built execution plan (ground truth; "
+            "detects a silent soft-preference fallback).")
         .def(
             "get_ranked_engine_ids",
             [](graph::Graph& g, const std::vector<HeuristicMode>& modes) {

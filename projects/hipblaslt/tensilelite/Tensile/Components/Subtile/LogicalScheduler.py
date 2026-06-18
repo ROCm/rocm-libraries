@@ -2475,6 +2475,10 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
+        if kernel.get("ClusterBarrier"):
+            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
+            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
+                module.add(inst)
         use_pap_preloop_skip = (
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
