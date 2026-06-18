@@ -4,20 +4,17 @@
     Windows setup for the dnn-benchmark tool (PowerShell analogue of setup.sh).
 
 .DESCRIPTION
-    Installs dnn-benchmark into an existing Python env (the active venv or
-    -PythonExe; on Windows this should be the ROCm-wheel env). Optionally builds
-    hipDNN + the Python bindings and the MIOpen provider from source (-ForceBuild),
-    wires the bindings onto the env via a .pth, installs the tool (editable) and
-    PyTorch per -TorchMode, then verifies the result.
+    Installs dnn-benchmark into the ROCm wheel env named by the ROCM_WHEEL_VENV env
+    var (published by wheel_build_setup.ps1); if it's unset, wheel_build_setup.ps1 is
+    run to create the venv and set it. Optionally builds hipDNN + the Python bindings
+    and the MIOpen provider from source (-ForceBuild), wires the bindings onto the env
+    via a .pth, installs the tool (editable) and PyTorch per -TorchMode, then verifies
+    the result.
 
     Parameters mirror setup.sh where they apply on Windows. setup.sh's venv
     management (--reuse-venv / --workspace) is omitted: this script installs into
-    an env you select rather than creating one. --torch-mode's cuda value is
-    omitted too (no CUDA on a ROCm Windows box).
-
-.PARAMETER PythonExe
-    Python interpreter to install into. Default: the active venv, else 'python' on
-    PATH. Recommended: the ROCm wheel env's python (rocm_sdk + _rocm_sdk_devel).
+    the active venv or the ROCm wheel env rather than creating an arbitrary one.
+    --torch-mode's cuda value is omitted too (no CUDA on a ROCm Windows box).
 
 .PARAMETER TorchMode
     How torch is provided (setup.sh --torch-mode, Windows subset). Default: rocm.
@@ -51,10 +48,10 @@
     Clean reconfigure: wipe build dirs before -ForceBuild, and rewrite the .pth.
 
 .EXAMPLE
-    pwsh ./setup.ps1 -PythonExe C:/develop/latest_wheels/Scripts/python.exe
+    pwsh ./setup.ps1
 
 .EXAMPLE
-    pwsh ./setup.ps1 -PythonExe C:/develop/latest_wheels/Scripts/python.exe -ForceBuild
+    pwsh ./setup.ps1 -ForceBuild
 
 .EXAMPLE
     pwsh ./setup.ps1 -TorchMode existing
@@ -64,7 +61,6 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$PythonExe,
     [ValidateSet('rocm', 'cpu', 'existing', 'none')]
     [string]$TorchMode = 'rocm',
     [string]$TorchIndexUrl,
@@ -90,12 +86,10 @@ $BuildType   = 'Release'
 $WinSdkRoot  = 'C:\Program Files (x86)\Windows Kits\10'
 if (-not $InstallDir) { $InstallDir = Join-Path $HipdnnRoot 'install' }
 
-# wheel_build_setup.ps1 bootstraps a ROCm-wheel venv when the selected env has no
-# ROCm runtime. We pass $WheelVenvPath as its -VenvPath (overriding the script's
-# D:\ default, which assumes a drive that isn't always present) and reuse the same
-# path to locate the python it creates.
+# wheel_build_setup.ps1 owns the wheel-venv location and publishes it as the
+# ROCM_WHEEL_VENV env var. Step 1 reads that (or runs the script to bootstrap a venv
+# and set it) -- so the venv path is never hardcoded here.
 $WheelSetupScript = Join-Path $HipdnnRoot 'scripts\windows\wheel_build_setup.ps1'
-$WheelVenvPath    = 'C:\develop\latest_wheels'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Warn($msg) { Write-Host "WARNING: $msg" -ForegroundColor Yellow }
@@ -209,67 +203,29 @@ function Test-RocmRuntime {
     return $false
 }
 
-# --- 1. Resolve the Python environment -------------------------------------
-# Selection order: explicit -PythonExe, then an active venv, then the ROCm wheel
-# venv at $WheelVenvPath (the env this tool targets), and only then a bare system
-# python. Preferring the wheel venv keeps the install out of system python even
-# when the system python happens to see a ROCm runtime via HIP_PATH/ROCM_PATH.
-if ($PythonExe) { $Python = $PythonExe }
-elseif ($env:VIRTUAL_ENV) { $Python = Join-Path $env:VIRTUAL_ENV 'Scripts\python.exe' }
-elseif (Test-Path (Join-Path $WheelVenvPath 'Scripts\python.exe')) {
-    $Python = Join-Path $WheelVenvPath 'Scripts\python.exe'
+# --- 1. Resolve the ROCm wheel env -----------------------------------------
+# wheel_build_setup.ps1 publishes the wheel venv root as ROCM_WHEEL_VENV. If it's
+# already set, use it; otherwise run the script once to create the venv and set it
+# (it persists to this process), then continue.
+if (-not $env:ROCM_WHEEL_VENV) {
+    Write-Step "ROCM_WHEEL_VENV not set; bootstrapping a wheel env via wheel_build_setup.ps1"
+    & $WheelSetupScript -GpuTarget $GpuArch
+    if ($LASTEXITCODE -ne 0) { throw "wheel_build_setup.ps1 failed (exit $LASTEXITCODE)." }
 }
-else { $Python = 'python' }
 
-$resolved = (Get-Command $Python -ErrorAction SilentlyContinue)
-if ($resolved) { $Python = $resolved.Source } else { throw "Python interpreter not found: $Python" }
+$WheelVenvPath = $env:ROCM_WHEEL_VENV
+$wheelPython = Join-Path $WheelVenvPath 'Scripts\python.exe'
+$Python = (Get-Command $wheelPython -ErrorAction SilentlyContinue).Source
+if (-not $Python) { throw "ROCm wheel python not found at $wheelPython (ROCM_WHEEL_VENV=$($env:ROCM_WHEEL_VENV))." }
 
 $pyVersion = (& $Python -c "import sys; print('%d.%d.%d' % sys.version_info[:3])")
-Write-Step "Using Python $pyVersion at $Python"
+Write-Step "Using ROCm wheel Python $pyVersion at $Python"
 $pyOk = (& $Python -c "import sys; print(1 if sys.version_info[:2] >= (3, 12) else 0)")
 if ($pyOk.Trim() -ne '1') { Write-Warn "dnn-benchmark requires Python >= 3.12; found $pyVersion." }
 
 # --- 2. Check the ROCm runtime is reachable --------------------------------
-$rocmOk = Test-RocmRuntime
-
-# No ROCm runtime in the selected env: fall back to the wheel venv at
-# $WheelVenvPath. Prefer one that already exists; only build a fresh one with
-# wheel_build_setup.ps1 (creates the venv + installs rocm[libraries,devel] and
-# sets ROCM_PATH for the session) when it's absent. In either case switch $Python
-# to that venv. Skipped when -PythonExe was given — that's a deliberate env choice.
-if (-not $rocmOk -and -not $PythonExe) {
-    $wheelPython = Join-Path $WheelVenvPath 'Scripts\python.exe'
-
-    # Reuse an existing wheel env before building a new one.
-    if (Test-Path $wheelPython) {
-        $Python    = (Get-Command $wheelPython).Source
-        $pyVersion = (& $Python -c "import sys; print('%d.%d.%d' % sys.version_info[:3])")
-        Write-Step "Found wheel env at $WheelVenvPath; using Python $pyVersion"
-        $rocmOk = Test-RocmRuntime
-    }
-
-    # Still no runtime: bootstrap one.
-    if (-not $rocmOk) {
-        if (Test-Path $WheelSetupScript) {
-            Write-Step "Bootstrapping a wheel env via wheel_build_setup.ps1"
-            & $WheelSetupScript -VenvPath $WheelVenvPath -GpuTarget $GpuArch
-            if ($LASTEXITCODE -ne 0) { throw "wheel_build_setup.ps1 failed (exit $LASTEXITCODE)." }
-            if (-not (Test-Path $wheelPython)) {
-                throw "wheel_build_setup.ps1 did not produce a python at $wheelPython."
-            }
-            $Python    = (Get-Command $wheelPython).Source
-            $pyVersion = (& $Python -c "import sys; print('%d.%d.%d' % sys.version_info[:3])")
-            Write-Step "Using bootstrapped Python $pyVersion at $Python"
-            $rocmOk = Test-RocmRuntime
-        }
-        else {
-            Write-Warn "wheel_build_setup.ps1 not found at $WheelSetupScript; cannot bootstrap a ROCm env."
-        }
-    }
-}
-
-if (-not $rocmOk) {
-    Write-Warn ("No ROCm runtime found (no rocm_sdk wheel, no ROCM_PATH/HIP_PATH/ROCM_HOME). " +
+if (-not (Test-RocmRuntime)) {
+    Write-Warn ("No ROCm runtime in the wheel env (no rocm_sdk wheel, no ROCM_PATH/HIP_PATH/ROCM_HOME). " +
                 "hipdnn_frontend will fail to import until one is provided.")
 }
 
@@ -288,9 +244,9 @@ if ($ForceBuild) {
         $Wheel = $Wheel.Trim()
     }
 
-    $CMakeExe = (Get-Command cmake -ErrorAction SilentlyContinue)?.Source
+    $CMakeExe = (Get-Command cmake -ErrorAction SilentlyContinue).Source
     if (-not $CMakeExe) { throw "cmake not found on PATH." }
-    $NinjaExe = (Get-Command ninja -ErrorAction SilentlyContinue)?.Source
+    $NinjaExe = (Get-Command ninja -ErrorAction SilentlyContinue).Source
     if (-not $NinjaExe) { throw "ninja not found on PATH." }
 
     # vcvars64: prefer vswhere, fall back to the BuildTools install location.
@@ -316,7 +272,7 @@ if ($ForceBuild) {
     Write-Host  "           vcvars=$VcVars  winsdk=$WinSdkVersion"
     Write-Host  "           rocm=$Wheel  gpu=$GpuArch  install=$InstallDir"
 
-    $ProviderDir   = (Resolve-Path $ProviderDir -ErrorAction SilentlyContinue)?.Path
+    $ProviderDir   = (Resolve-Path $ProviderDir -ErrorAction SilentlyContinue).Path
     $ProviderBuild = if ($ProviderDir) { Join-Path $ProviderDir 'build' } else { $null }
 
     if ($Force) {

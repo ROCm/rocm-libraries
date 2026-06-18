@@ -217,5 +217,6 @@ if (-not $HasRocmBinInCurrentPath) {
     $env:PATH = "$RocmBin;$env:PATH"
 }
 
-# Keep ROCM_PATH available in this terminal session after deactivation.
-$env:ROCM_PATH = $RocmDevel
+# Publish the wheel venv path for tools that install into it (e.g. dnn-benchmark's
+# setup.ps1), persisting after deactivation.
+$env:ROCM_WHEEL_VENV = $VenvPath
