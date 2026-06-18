@@ -76,12 +76,14 @@ function(generate_embed_source EMBED_NAME EMBED_DIR BASE_DIRECTORY)
             set(START_SYMBOL "_binary_${SYMBOL}_start")
             set(LENGTH_SYMBOL "_binary_${SYMBOL}_length")
             if(EMBED_USE STREQUAL "LD")
+		# Use unsigned char to avoid -Wnarrowing errors when byte values >= 0x80 are read.
                 string(APPEND EXTERNS "
 extern const unsigned char ${START_SYMBOL}[];
 extern const size_t _binary_${SYMBOL}_size;
 const auto ${LENGTH_SYMBOL} = reinterpret_cast<size_t>(&_binary_${SYMBOL}_size);
 ")
             else()
+		# Use unsigned char to avoid -Wnarrowing errors when byte values >= 0x80 are read.
                 string(APPEND EXTERNS "
 extern const unsigned char ${START_SYMBOL}[];
 extern const size_t ${LENGTH_SYMBOL};
@@ -166,6 +168,7 @@ function(embed_file FILE BASE_DIRECTORY)
         string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1, " ARRAY_VALUES ${HEX_STRING})
         # removes trailing comma
         string(REGEX REPLACE ", $" "" ARRAY_VALUES ${ARRAY_VALUES})
+	# Use unsigned char to avoid -Wnarrowing errors when byte values >= 0x80 are read.
         file(WRITE "${OUTPUT_FILE}" "
 #include <cstddef>
 extern const unsigned char _binary_${OUTPUT_SYMBOL}_start[] = { ${ARRAY_VALUES} };

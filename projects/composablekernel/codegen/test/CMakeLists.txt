@@ -4,6 +4,7 @@
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
 add_subdirectory(rtc)
 file(GLOB TEST_SRCS CONFIGURE_DEPENDS *.cpp)
+list(REMOVE_ITEM TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/non_ascii_test.cpp)
 
 # TODO: These tests need to be refactored to remove dependency on main ck
 # headers and device compilation.
@@ -33,6 +34,13 @@ add_embed_library(non_ascii_test
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-add_test(NAME non_ascii_test_compile
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target embed_lib_non_ascii_test
-)
+add_executable(test_non_ascii_embed non_ascii_test.cpp)
+set_target_properties(test_non_ascii_embed PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_link_libraries(test_non_ascii_embed PRIVATE non_ascii_test)
+target_compile_options(test_non_ascii_embed PRIVATE -Werror=narrowing)
+target_compile_definitions(test_non_ascii_embed PRIVATE
+    SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME codegen_test_non_ascii_embed
+    COMMAND ${CMAKE_BINARY_DIR}/bin/test_non_ascii_embed)
+
