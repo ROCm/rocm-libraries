@@ -34,8 +34,6 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <type_traits>
-#include <variant>
 #include <vector>
 
 namespace hipdnn_frontend
@@ -143,35 +141,6 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
 
 } // namespace detail
 
-/// Serialize a KnobSetting to a JSON object.
-inline nlohmann::json knobSettingToJson(const KnobSetting& setting)
-{
-    nlohmann::json knob;
-    knob["knob_id"] = setting.knobId();
-
-    std::visit(
-        [&knob](const auto& value) {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr(std::is_same_v<T, int64_t>)
-            {
-                knob["type"] = "int";
-                knob["value"] = value;
-            }
-            else if constexpr(std::is_same_v<T, double>)
-            {
-                knob["type"] = "double";
-                knob["value"] = value;
-            }
-            else if constexpr(std::is_same_v<T, std::string>)
-            {
-                knob["type"] = "string";
-                knob["value"] = value;
-            }
-        },
-        setting.value());
-
-    return knob;
-}
 /// Get the lowercase string representation of an AutotuneStrategy (for config file output)
 inline std::string strategyToLowerString(AutotuneStrategy strategy)
 {
@@ -378,8 +347,8 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                 continue;
             }
 
-            newEntry
-                = buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria, tensorIds);
+            newEntry = buildOverrideEntry(
+                result, opName, tensorDims, tensorStrides, criteria, tensorIds);
             break; // Only write the rank-0 winner
         }
 
@@ -398,18 +367,18 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
 
         if(!overrides.empty())
         {
-            overrides.erase(std::remove_if(overrides.begin(),
-                                           overrides.end(),
-                                           [&](const nlohmann::json& existing) {
-                                               return existing.contains("op")
-                                                      && existing["op"] == (*newEntry)["op"]
-                                                      && criteriaOrEmpty(existing)
-                                                             == criteriaOrEmpty(*newEntry)
-                                                      && existing.contains("tensors")
-                                                      && tensorSignaturesMatch(existing["tensors"],
-                                                                               (*newEntry)["tensors"]);
-                                           }),
-                            overrides.end());
+            overrides.erase(
+                std::remove_if(overrides.begin(),
+                               overrides.end(),
+                               [&](const nlohmann::json& existing) {
+                                   return existing.contains("op")
+                                          && existing["op"] == (*newEntry)["op"]
+                                          && criteriaOrEmpty(existing) == criteriaOrEmpty(*newEntry)
+                                          && existing.contains("tensors")
+                                          && tensorSignaturesMatch(existing["tensors"],
+                                                                   (*newEntry)["tensors"]);
+                               }),
+                overrides.end());
         }
 
         overrides.push_back(*newEntry);

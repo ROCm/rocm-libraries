@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
@@ -87,22 +88,7 @@ namespace detail
 {
 inline bool hasLeadingWhitespace(std::string_view value)
 {
-    if(value.empty())
-    {
-        return false;
-    }
-    switch(value.front())
-    {
-    case ' ':
-    case '\t':
-    case '\n':
-    case '\r':
-    case '\f':
-    case '\v':
-        return true;
-    default:
-        return false;
-    }
+    return !value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0;
 }
 
 inline std::optional<int64_t> parseEngineNumericId(std::string_view value)

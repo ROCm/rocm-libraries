@@ -278,6 +278,8 @@ TEST_F(TestEngineNames, EngineNameOrIdToIdTreatsWhitespaceAsNameCharacter)
     // internal whitespace all force the FNV-1a name path (matching engineNameToId
     // on the untrimmed string), and an all-whitespace or empty string is a name.
     EXPECT_EQ(engineNameOrIdToId(" 123"), engineNameToId(" 123"));
+    EXPECT_EQ(engineNameOrIdToId("\t123"), engineNameToId("\t123"));
+    EXPECT_EQ(engineNameOrIdToId("\n123"), engineNameToId("\n123"));
     EXPECT_EQ(engineNameOrIdToId("123 "), engineNameToId("123 "));
     EXPECT_EQ(engineNameOrIdToId("1 2 3"), engineNameToId("1 2 3"));
     EXPECT_EQ(engineNameOrIdToId("   "), engineNameToId("   "));

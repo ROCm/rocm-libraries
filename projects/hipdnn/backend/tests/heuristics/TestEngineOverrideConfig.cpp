@@ -223,6 +223,25 @@ TEST(TestEngineOverrideConfig, CriteriaMustMatch)
             .has_value());
 }
 
+TEST(TestEngineOverrideConfig, CriteriaOrderIsNormalizedBeforeMatch)
+{
+    OperationRule rule;
+    rule.op = "resample_fwd";
+    rule.engineName = MIOPEN_ENGINE_NAME;
+    rule.criteria = {Criterion{"resample_mode", 1}, Criterion{"padding_mode", 2}};
+    rule.tensors = {makePattern({2, 4, 16, 16})};
+
+    const auto config = makeConfig({std::move(rule)});
+    const std::vector<TensorData> tensors = {{{2, 4, 16, 16}, {}}};
+
+    auto result
+        = config.matchOperation("resample_fwd",
+                                {Criterion{"padding_mode", 2}, Criterion{"resample_mode", 1}},
+                                viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
 TEST(TestEngineOverrideConfig, MissingCriteriaDoesNotMatchSpecificRule)
 {
     OperationRule rule;
