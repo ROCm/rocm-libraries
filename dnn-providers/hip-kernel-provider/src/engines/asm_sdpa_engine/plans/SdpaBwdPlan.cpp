@@ -385,9 +385,9 @@ namespace asm_sdpa_engine
 // Constructors
 // =============================================================================
 
-SdpaBwdPlan::SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
-                         std::shared_ptr<HipModuleGuard> dqdkdvKernel,
-                         std::shared_ptr<HipModuleGuard> postKernel,
+SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
+                         CachedModule dqdkdvKernel,
+                         CachedModule postKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
@@ -396,12 +396,12 @@ SdpaBwdPlan::SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
 {
 }
 
-SdpaBwdPlan::SdpaBwdPlan(std::shared_ptr<HipModuleGuard> odoKernel,
-                         std::shared_ptr<HipModuleGuard> dqdkdvKernel,
+SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
+                         CachedModule dqdkdvKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
-    , _postKernel(nullptr)
+    , _postKernel(std::nullopt)
     , _params(params)
 {
 }
@@ -552,7 +552,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
         const unsigned int gdxPost = _params.dqConvertTiles.gridDim(mhaArgs.seqlen_q);
 
         if(!launchKernel("SDPA backward DQ_CONVERT",
-                         _postKernel->function(),
+                         (*_postKernel)->function(),
                          &postArgs,
                          sizeof(postArgs),
                          gdxPost,

@@ -414,7 +414,7 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
 
-    auto kernel = loadOrGetCachedModule(coPath, config.knl_name.c_str());
+    auto kernel = moduleCache().getOrLoad(coPath, config.knl_name.c_str());
     if(!kernel)
     {
         return;

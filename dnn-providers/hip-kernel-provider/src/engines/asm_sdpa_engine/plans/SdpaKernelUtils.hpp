@@ -258,36 +258,61 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
 //
 // Process-level cache for loaded kernel modules.  hipModuleLoad() is expensive
 // (~97% of SDPA execution time in profiling), but the set of distinct .co files
-// is small (bounded by CSV config count).  This wrapper returns a
-// shared_ptr<HipModuleGuard>: on the first call for a given (coPath, funcName)
-// pair the module is loaded and cached; subsequent calls return the cached
-// shared_ptr.  Modules are never unloaded until process exit (the static map
-// destructor runs during global teardown).
+// is small (bounded by CSV config count).  Each SdpaModuleCache instance maps
+// (coPath, funcName) pairs to shared_ptr<HipModuleGuard>: on the first call
+// the module is loaded and cached; subsequent calls return the cached
+// shared_ptr.  Modules are never unloaded until the cache is destroyed.
 
 using CachedModule = std::shared_ptr<HipModuleGuard>;
 
-inline CachedModule loadOrGetCachedModule(const std::string& coPath, const char* funcName)
+class SdpaModuleCache
 {
-    static std::mutex s_cacheMutex;
-    static std::unordered_map<std::string, CachedModule> s_cache;
+public:
+    SdpaModuleCache() = default;
+    ~SdpaModuleCache() = default;
 
-    const std::string key = coPath + "::" + funcName;
+    SdpaModuleCache(const SdpaModuleCache&) = delete;
+    SdpaModuleCache& operator=(const SdpaModuleCache&) = delete;
+    SdpaModuleCache(SdpaModuleCache&&) = delete;
+    SdpaModuleCache& operator=(SdpaModuleCache&&) = delete;
 
-    const std::lock_guard<std::mutex> lock(s_cacheMutex);
-    auto it = s_cache.find(key);
-    if(it != s_cache.end())
+    CachedModule getOrLoad(const std::string& coPath, const char* funcName)
     {
-        return it->second;
+        const std::string key = coPath + "::" + funcName;
+
+        const std::lock_guard<std::mutex> lock(_mutex);
+        auto it = _entries.find(key);
+        if(it != _entries.end())
+        {
+            return it->second;
+        }
+
+        auto loaded = loadKernelModule(coPath, funcName);
+        if(!loaded)
+        {
+            return nullptr;
+        }
+        auto cached = std::make_shared<HipModuleGuard>(std::move(*loaded));
+        _entries.emplace(key, cached);
+        return cached;
     }
 
-    auto loaded = loadKernelModule(coPath, funcName);
-    if(!loaded)
+    bool contains(const std::string& coPath, const char* funcName) const
     {
-        return nullptr;
+        const std::string key = coPath + "::" + funcName;
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _entries.find(key) != _entries.end();
     }
-    auto cached = std::make_shared<HipModuleGuard>(std::move(*loaded));
-    s_cache.emplace(key, cached);
-    return cached;
-}
+
+    size_t size() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _entries.size();
+    }
+
+private:
+    mutable std::mutex _mutex;
+    std::unordered_map<std::string, CachedModule> _entries;
+};
 
 } // namespace asm_sdpa_engine

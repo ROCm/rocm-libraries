@@ -6,6 +6,7 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "SdpaKernelUtils.hpp"
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -15,6 +16,12 @@ namespace asm_sdpa_engine
 class SdpaFwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
 public:
+    static SdpaModuleCache& moduleCache()
+    {
+        static SdpaModuleCache s_cache;
+        return s_cache;
+    }
+
     bool isApplicable(
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;

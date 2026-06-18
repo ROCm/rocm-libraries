@@ -23,7 +23,7 @@ public:
     /**
      * @brief Construct a plan with kernel module and precomputed metadata.
      */
-    SdpaFwdPlan(std::shared_ptr<HipModuleGuard> kernel, SdpaFwdParams params);
+    SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params);
 
     ~SdpaFwdPlan() override = default;
 
@@ -43,7 +43,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    std::shared_ptr<HipModuleGuard> _kernel;
+    CachedModule _kernel;
     SdpaFwdParams _params;
 };
 

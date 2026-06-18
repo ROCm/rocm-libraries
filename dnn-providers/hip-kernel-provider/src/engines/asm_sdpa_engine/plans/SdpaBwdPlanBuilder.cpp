@@ -1050,7 +1050,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     // 5. Load kernel modules for resolved stages
     // -------------------------------------------------------------------------
-    auto odoKernel = loadOrGetCachedModule(odoResolved.coPath, odoResolved.knlName.c_str());
+    auto odoKernel = moduleCache().getOrLoad(odoResolved.coPath, odoResolved.knlName.c_str());
     if(!odoKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1060,7 +1060,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     }
 
     auto dqdkdvKernel
-        = loadOrGetCachedModule(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
+        = moduleCache().getOrLoad(dqdkdvResolved.coPath, dqdkdvResolved.knlName.c_str());
     if(!dqdkdvKernel)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1069,18 +1069,19 @@ void SdpaBwdPlanBuilder::buildPlan(
                 + dqdkdvResolved.coPath);
     }
 
-    std::shared_ptr<HipModuleGuard> postKernel;
+    std::optional<CachedModule> postKernel;
     if(dqConvertResolved)
     {
-        postKernel
-            = loadOrGetCachedModule(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
-        if(!postKernel)
+        auto loaded
+            = moduleCache().getOrLoad(dqConvertResolved->coPath, dqConvertResolved->knlName.c_str());
+        if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel module from "
                     + dqConvertResolved->coPath);
         }
+        postKernel = std::move(loaded);
     }
 
     // -------------------------------------------------------------------------
@@ -1141,10 +1142,16 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
     params.accumulatorType = accType;
 
-    // postKernel is nullptr for the A16 path; the shared_ptr-taking ctor handles
-    // both paths uniformly.
-    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
+    if(postKernel)
+    {
+        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+            std::move(odoKernel), std::move(dqdkdvKernel), std::move(*postKernel), params));
+    }
+    else
+    {
+        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+            std::move(odoKernel), std::move(dqdkdvKernel), params));
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(

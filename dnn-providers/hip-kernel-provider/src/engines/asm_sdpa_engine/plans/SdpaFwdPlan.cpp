@@ -10,7 +10,7 @@
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModuleGuard> kernel, SdpaFwdParams params)
+SdpaFwdPlan::SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params)
     : _kernel(std::move(kernel))
     , _params(std::move(params))
 {
