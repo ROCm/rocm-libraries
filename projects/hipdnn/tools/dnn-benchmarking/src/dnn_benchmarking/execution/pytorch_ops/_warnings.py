@@ -7,7 +7,12 @@ from typing import Any, Dict, List
 
 import torch.nn.functional as F
 
-from ._common import _effective_compute_type, _is_float32_compute, _node_param, _node_uid
+from ._common import (
+    _effective_compute_type,
+    _is_float32_compute,
+    _node_param,
+    _node_uid,
+)
 from .handlers.norm import _rmsnorm_graph_can_use_builtin
 from .handlers.reduction import _reduction_mode_name
 from .handlers.resample import _resample_has_asymmetric_padding, _resample_mode_name

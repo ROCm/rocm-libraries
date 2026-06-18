@@ -251,10 +251,14 @@ def handle_rmsnorm(
         y = F.rms_norm(x, normalized_shape, weight=weight, eps=epsilon)
         if bias_uid is not None:
             bias = _tensor(tensors, int(bias_uid), node)
-            y = y + _reshape_affine_for_broadcast(bias, broadcast_shape, x, "RMSNorm bias")
+            y = y + _reshape_affine_for_broadcast(
+                bias, broadcast_shape, x, "RMSNorm bias"
+            )
     else:
         x_float = x.to(dtype=torch.float32)
-        scale_b = _reshape_affine_for_broadcast(scale, broadcast_shape, x, "RMSNorm scale")
+        scale_b = _reshape_affine_for_broadcast(
+            scale, broadcast_shape, x, "RMSNorm scale"
+        )
         inv_rms = torch.rsqrt(
             x_float.square().mean(dim=reduce_dims, keepdim=True) + epsilon
         )
@@ -295,9 +299,9 @@ def handle_rmsnorm_backward(
     x = _tensor(tensors, x_uid, node)
     x_float = x.to(dtype=torch.float32)
     scale = _tensor(tensors, scale_uid, node)
-    inv_rms = _require_fp32_stat(
-        _tensor(tensors, inv_uid, node), "RMSNorm inv_rms"
-    ).to(device=x.device)
+    inv_rms = _require_fp32_stat(_tensor(tensors, inv_uid, node), "RMSNorm inv_rms").to(
+        device=x.device
+    )
 
     _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(x, scale)
     scale_b = _reshape_affine_for_broadcast(scale, broadcast_shape, x, "RMSNorm scale")

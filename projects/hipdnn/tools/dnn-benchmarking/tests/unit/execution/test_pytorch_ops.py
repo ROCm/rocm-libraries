@@ -117,7 +117,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(UnsupportedGraphError, match="Add operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Add operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_mul_missing_second_input_raises(self) -> None:
@@ -135,7 +137,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(UnsupportedGraphError, match="Mul operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Mul operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_sub_missing_second_input_raises(self) -> None:
@@ -153,7 +157,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(UnsupportedGraphError, match="Sub operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Sub operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_div_missing_second_input_raises(self) -> None:
@@ -171,7 +177,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(UnsupportedGraphError, match="Div operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Div operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_unsupported_operation_raises(self) -> None:
@@ -189,7 +197,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(UnsupportedGraphError, match="Unsupported pointwise operation"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Unsupported pointwise operation"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
 
@@ -745,9 +755,9 @@ class TestPyTorchOpsNewHandlers:
         def bc(t: torch.Tensor) -> torch.Tensor:
             return t.reshape(1, 3, 1, 1).float()
 
-        expected = (
-            bc(scale) * ((x.float() - bc(mean)) * bc(inv)) + bc(bias)
-        ).to(torch.bfloat16)
+        expected = (bc(scale) * ((x.float() - bc(mean)) * bc(inv)) + bc(bias)).to(
+            torch.bfloat16
+        )
         assert tensors[6].dtype == torch.bfloat16
         torch.testing.assert_close(tensors[6], expected)
 

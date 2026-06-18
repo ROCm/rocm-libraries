@@ -61,7 +61,9 @@ def handle_batchnorm_inference(
         x,
         _channel_values(_tensor(tensors, scale_uid, node), x),
         _channel_values(_tensor(tensors, bias_uid, node), x),
-        _require_fp32_stat(_channel_values(_tensor(tensors, mean_uid, node), x), "mean"),
+        _require_fp32_stat(
+            _channel_values(_tensor(tensors, mean_uid, node), x), "mean"
+        ),
         _require_fp32_stat(
             _channel_values(_tensor(tensors, inv_uid, node), x), "inv_variance"
         ),
