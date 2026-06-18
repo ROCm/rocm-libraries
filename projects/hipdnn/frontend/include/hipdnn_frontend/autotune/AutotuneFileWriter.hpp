@@ -71,20 +71,6 @@ inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
 namespace detail
 {
 
-inline int64_t getConfigVersion(const nlohmann::json& root)
-{
-    if(root.is_object() && root.contains(config_json::VERSION))
-    {
-        return root.at(config_json::VERSION).get<int64_t>();
-    }
-    return config_version::DEFAULT;
-}
-
-inline bool usesNamedTensorIds(int64_t configVersion)
-{
-    return configVersion >= config_version::NAMED_TENSOR_IDS;
-}
-
 inline bool entryUsesNamedTensorIds(const nlohmann::json& entry)
 {
     if(!entry.contains(config_json::TENSORS) || !entry[config_json::TENSORS].is_array())
@@ -346,11 +332,21 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                 return {ErrorCode::INVALID_VALUE,
                         "AutotuneFileWriter: existing config file is not a versioned object"};
             }
-            const int64_t existingConfigVersion = getConfigVersion(root);
-            if(!usesNamedTensorIds(existingConfigVersion))
+            if(!root.contains(config_json::VERSION))
             {
                 return {ErrorCode::INVALID_VALUE,
                         "AutotuneFileWriter: refusing to update legacy autotune config file"};
+            }
+            const auto& existingConfigVersion = root.at(config_json::VERSION);
+            if(!existingConfigVersion.is_number_integer())
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: existing config version is not an integer"};
+            }
+            if(existingConfigVersion.get<int64_t>() != config_version::CURRENT)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "AutotuneFileWriter: refusing to update non-current autotune config file"};
             }
         }
         else

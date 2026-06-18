@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #endif
 
@@ -83,6 +84,37 @@ AutotuneResult makeResult(int64_t engineId,
     r.rank = rank;
     return r;
 }
+std::string readTextFile(const std::filesystem::path& path)
+{
+    std::ifstream file(path);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+void writeTextFile(const std::filesystem::path& path, const std::string& contents)
+{
+    std::ofstream file(path);
+    file << contents;
+}
+
+std::string writeJsonFile(const std::filesystem::path& path, const nlohmann::json& json)
+{
+    const auto contents = json.dump(2) + '\n';
+    writeTextFile(path, contents);
+    return contents;
+}
+
+nlohmann::json makeExistingVersionedRoot(int64_t version = config_version::CURRENT)
+{
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
+    auto oldEntry = hipdnn_frontend::autotune::detail::buildOverrideEntry(
+        makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {}, {}, tensorIds);
+
+    nlohmann::json root;
+    root[config_json::VERSION] = version;
+    root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array({oldEntry});
+    return root;
+}
 
 std::vector<std::string> tensorIdsFor(std::string_view opName, size_t tensorCount)
 {
@@ -120,6 +152,23 @@ Error writeVersionedAutotuneResults(const std::filesystem::path& filePath,
         tensorStrides,
         criteria,
         tensorIdsFor(opName, tensorDims.size()));
+}
+
+Error writeReplacementConvFprop(const std::filesystem::path& path)
+{
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
+    return writeVersionedAutotuneResults(path, config_op::CONV_FPROP, results, false, dims, {});
+}
+
+void expectReplacementRejectedAndUnchanged(const nlohmann::json& root)
+{
+    const TempFile tmpFile;
+    const auto originalContents = writeJsonFile(tmpFile.path, root);
+    const auto err = writeReplacementConvFprop(tmpFile.path);
+    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
 } // namespace
@@ -221,19 +270,55 @@ TEST(TestAutotuneFileWriter, NamedEntryRejectsLegacyEntryWithSamePositionalSigna
     const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::W};
 
     nlohmann::json root;
-    // No version field: existing entry is legacy and must not be updated by the writer.
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array(
         {buildOverrideEntry(makeResult(1, "OLD"), config_op::CONV_FPROP, dims, {})});
-    {
-        std::ofstream file(tmpFile.path);
-        file << root.dump(2) << '\n';
-    }
+    const auto originalContents = writeJsonFile(tmpFile.path, root);
 
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
     EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
+}
+
+TEST(TestAutotuneFileWriter, CurrentVersionExistingFileUpdatesSuccessfully)
+{
+    const TempFile tmpFile;
+    writeJsonFile(tmpFile.path, makeExistingVersionedRoot());
+
+    auto err = writeReplacementConvFprop(tmpFile.path);
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+
+    std::ifstream file(tmpFile.path);
+    const auto json = nlohmann::json::parse(file);
+    ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+    EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
+    EXPECT_EQ(json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME], "NEW");
+}
+
+TEST(TestAutotuneFileWriter, MissingVersionFileRejectsAndRemainsUnchanged)
+{
+    auto root = makeExistingVersionedRoot();
+    root.erase(config_json::VERSION);
+    expectReplacementRejectedAndUnchanged(root);
+}
+
+TEST(TestAutotuneFileWriter, OlderVersionFileRejectsAndRemainsUnchanged)
+{
+    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT - 1));
+}
+
+TEST(TestAutotuneFileWriter, NewerVersionFileRejectsAndRemainsUnchanged)
+{
+    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT + 1));
+}
+
+TEST(TestAutotuneFileWriter, WrongTypeVersionFileRejectsAndRemainsUnchanged)
+{
+    auto root = makeExistingVersionedRoot();
+    root[config_json::VERSION] = "2";
+    expectReplacementRejectedAndUnchanged(root);
 }
 
 TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTensors)
@@ -249,10 +334,7 @@ TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTe
     nlohmann::json root;
     root[config_json::VERSION] = config_version::CURRENT;
     root[config_json::ENGINE_OVERRIDES] = nlohmann::json::array({oldEntry});
-    {
-        std::ofstream file(tmpFile.path);
-        file << root.dump(2) << '\n';
-    }
+    writeJsonFile(tmpFile.path, root);
 
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
@@ -367,10 +449,9 @@ TEST(TestAutotuneFileWriter, WriteRejectsLegacyExistingFile)
 {
     const TempFile tmpFile;
 
-    {
-        std::ofstream file(tmpFile.path);
-        file << R"({"engine_overrides":{"not":"an array"},"preserved":true})";
-    }
+    const std::string originalContents
+        = R"({"engine_overrides":{"not":"an array"},"preserved":true})";
+    writeTextFile(tmpFile.path, originalContents);
 
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(1, "MIOPEN_ENGINE", 1.0f, true, 0));
@@ -379,6 +460,7 @@ TEST(TestAutotuneFileWriter, WriteRejectsLegacyExistingFile)
     auto err = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
     EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
 TEST(TestAutotuneFileWriter, WriteSkipsFailedResults)

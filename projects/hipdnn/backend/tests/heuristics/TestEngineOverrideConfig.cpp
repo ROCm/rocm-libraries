@@ -27,8 +27,12 @@ using namespace hipdnn_data_sdk::utilities;
 namespace
 {
 namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+// NOLINTNEXTLINE(misc-unused-alias-decls)
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
 namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
+// NOLINTNEXTLINE(misc-unused-alias-decls)
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 struct TensorData
 {
@@ -352,6 +356,106 @@ TEST(TestEngineOverrideConfig, MissingVersionUsesLegacyPositionalTensorMatchingE
         config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, NewerVersionUsesNamedTensorMatching)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT + 1},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_1}, {config_json::DIM, {5, 6}}},
+                     {{config_json::TENSOR_ID, config_tensor::IN_0},
+                      {config_json::DIM, {2, 4}}}})}}})}}.dump());
+    ASSERT_TRUE(config.has_value());
+
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+
+    auto result = config->matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleDimMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    first.tensors = {makePattern({9, 9}), makePattern({5, 6})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const std::vector<TensorData> tensors = {{{2, 4}, {}}, {{5, 6}, {}}};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleCriteriaMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 30}};
+    first.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.tensors = {makePattern({2, 4}), makePattern({5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const std::vector<TensorData> tensors = {{{2, 4}, {}}, {{5, 6}, {}}};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, viewsOf(tensors));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
+}
+
+TEST(TestEngineOverrideConfig, FirstRuleNamedTensorRoleMismatchFallsThroughToSecondMatchingRule)
+{
+    OperationRule first;
+    first.op = config_op::POINTWISE;
+    first.engineName = MIOPEN_ENGINE_NAME;
+    first.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    first.useNamedTensorIds = true;
+    first.tensors = {makeNamedPattern(config_tensor::IN_0, {5, 6}),
+                     makeNamedPattern(config_tensor::IN_1, {2, 4})};
+
+    OperationRule second;
+    second.op = config_op::POINTWISE;
+    second.engineName = HIPBLASLT_ENGINE_NAME;
+    second.criteria = {Criterion{config_criterion::POINTWISE_MODE, 2}};
+    second.useNamedTensorIds = true;
+    second.tensors = {makeNamedPattern(config_tensor::IN_0, {2, 4}),
+                      makeNamedPattern(config_tensor::IN_1, {5, 6})};
+
+    const auto config = makeConfig({std::move(first), std::move(second)});
+    const TensorData x{{2, 4}, {}};
+    const TensorData y{{5, 6}, {}};
+    const std::vector<TensorView> tensors{namedViewOf(config_tensor::IN_0, x),
+                                          namedViewOf(config_tensor::IN_1, y)};
+    auto result = config.matchOperation(
+        config_op::POINTWISE, {Criterion{config_criterion::POINTWISE_MODE, 2}}, tensors);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, HIPBLASLT_ENGINE_ID);
 }
 
 TEST(TestEngineOverrideConfig, NamedTensorRulesRejectSameShapeWrongRole)
