@@ -124,29 +124,18 @@ static ReductionStrategy parse_strategy(const std::string& s)
     return ReductionStrategy::Atomic;
 }
 
-static const char* strategy_name(ReductionStrategy r)
-{
-    switch(r)
-    {
-    case ReductionStrategy::Linear: return "linear";
-    case ReductionStrategy::Tree: return "tree";
-    case ReductionStrategy::Atomic: return "atomic";
-    default: return "none";
-    }
-}
-
 int main(int argc, char** argv)
 {
-    const ck_tile::index_t M = std::stoi(get_opt(argc, argv, "--m", "3840"));
-    const ck_tile::index_t N = std::stoi(get_opt(argc, argv, "--n", "4096"));
-    const ck_tile::index_t K = std::stoi(get_opt(argc, argv, "--k", "2048"));
+    const ck_tile::index_t M = std::stoll(get_opt(argc, argv, "--m", "3840"));
+    const ck_tile::index_t N = std::stoll(get_opt(argc, argv, "--n", "4096"));
+    const ck_tile::index_t K = std::stoll(get_opt(argc, argv, "--k", "2048"));
     const bool validate      = get_opt(argc, argv, "--validate", "1") != "0";
     const ReductionStrategy strategy =
         parse_strategy(get_opt(argc, argv, "--strategy", "atomic"));
 
     std::cout << "Kernel: " << KERNEL_NAME << "\n";
     std::cout << "M=" << M << " N=" << N << " K=" << K
-              << " strategy=" << strategy_name(strategy) << "\n";
+              << " strategy=" << to_string(strategy) << "\n";
 
     // --- Register the kernel into the global registry ---------------------------
     KernelKey key = make_streamk_key(strategy);

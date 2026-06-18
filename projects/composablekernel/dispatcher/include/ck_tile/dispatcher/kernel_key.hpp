@@ -81,6 +81,20 @@ enum class ReductionStrategy : std::uint8_t
     Tree
 };
 
+/// Canonical lower-case name for a reduction strategy. Matches the codegen suffix
+/// scheme (atomic -> "atomic", etc.) so callers/drivers share one spelling.
+inline const char* to_string(ReductionStrategy r)
+{
+    switch(r)
+    {
+    case ReductionStrategy::Atomic: return "atomic";
+    case ReductionStrategy::Linear: return "linear";
+    case ReductionStrategy::Tree: return "tree";
+    case ReductionStrategy::None: return "none";
+    }
+    return "none";
+}
+
 /// KernelKey: Compile-time kernel configuration metadata
 /// Organized into Signature (what operation) and Algorithm (how it's implemented)
 struct KernelKey

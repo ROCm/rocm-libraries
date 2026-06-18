@@ -55,9 +55,9 @@ static std::string get_opt(int argc, char** argv, const std::string& key, const 
 
 int main(int argc, char** argv)
 {
-    const ck_tile::index_t M = std::stoi(get_opt(argc, argv, "--m", "3840"));
-    const ck_tile::index_t N = std::stoi(get_opt(argc, argv, "--n", "4096"));
-    const ck_tile::index_t K = std::stoi(get_opt(argc, argv, "--k", "2048"));
+    const ck_tile::index_t M = std::stoll(get_opt(argc, argv, "--m", "3840"));
+    const ck_tile::index_t N = std::stoll(get_opt(argc, argv, "--n", "4096"));
+    const ck_tile::index_t K = std::stoll(get_opt(argc, argv, "--k", "2048"));
     const int warmup         = std::stoi(get_opt(argc, argv, "--warmup", "10"));
     const int repeat         = std::stoi(get_opt(argc, argv, "--repeat", "50"));
     const bool validate      = get_opt(argc, argv, "--validate", "1") != "0";
