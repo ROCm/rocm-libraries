@@ -14,9 +14,15 @@ namespace hipblaslt_bench_options
         return v;
     }
 
-    bool& dyn_persistent_tile_enabled()
+    int32_t& streamk_tile_scheduling_mode()
     {
-        static bool v = false;
+        static int32_t v = -1;
+        return v;
+    }
+
+    std::string& streamk_tile_scheduling_mode_str()
+    {
+        static std::string v;
         return v;
     }
 }

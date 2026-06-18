@@ -29,6 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
+#include "rocsparse-version.h"
 #include "rocsparse_bfloat16.h"
 
 #include <float.h>
@@ -284,6 +285,16 @@ typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
  * end using rocsparse_spilu0_descr_destroy().
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
+
+#ifdef ROCSPARSE_WITH_ILDLT0
+/*! \ingroup types_module
+ * \brief \p rocsparse_spildlt0_descr is a structure holding the rocSPARSE spildlt0
+ * descriptor data. It must be initialized using
+ * the rocsparse_spildlt0_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spildlt0_descr_destroy().
+ */
+typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -546,7 +557,13 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
-    rocsparse_indextype_u16 = 1, /**< 16-bit unsigned integer. */
+    rocsparse_indextype_u16
+    [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
+                 "release. Use "
+                 "rocsparse_indextype_i32 or rocsparse_indextype_i64 instead.")]]
+    = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
+            removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
+            rocsparse_indextype_i64 instead. */
     rocsparse_indextype_i32 = 2, /**< 32-bit signed integer. */
     rocsparse_indextype_i64 = 3 /**< 64-bit signed integer. */
 } rocsparse_indextype;
@@ -1201,6 +1218,62 @@ typedef enum rocsparse_spilu0_output_
     rocsparse_spilu0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILU0 calculation for output from the SpILU0 descriptor. */
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILU0 descriptor. */
 } rocsparse_spilu0_output;
+
+#ifdef ROCSPARSE_WITH_ILDLT0
+/*! \ingroup types_module
+ *  \brief List of SpILDLT0 algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spildlt0_alg types that are used to perform the incomplete LDL^H factorization
+ *  of level 0.
+ */
+typedef enum rocsparse_spildlt0_alg_
+{
+    rocsparse_spildlt0_alg_default
+} rocsparse_spildlt0_alg;
+
+/*! \ingroup types_module
+ *  \brief List of SpILDLT0 stages.
+ *
+ *  \details
+ *  This is a list of possible stages during SpILDLT0 computation.
+ */
+typedef enum rocsparse_spildlt0_stage_
+{
+    rocsparse_spildlt0_stage_analysis, /**< Analysis. */
+    rocsparse_spildlt0_stage_compute, /**< Performs the actual SpILDLT0 computation. */
+} rocsparse_spildlt0_stage;
+
+/*! \ingroup types_module
+ *  \brief List of inputs to the SpILDLT0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible inputs to the SpILDLT0 descriptor.
+ */
+typedef enum rocsparse_spildlt0_input_
+{
+    rocsparse_spildlt0_input_alg, /**< Select algorithm \ref rocsparse_spildlt0_alg for input on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_boost_enable, /**< Enable diagonal boosting for input on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_boost_tolerance, /**< Select diagonal boosting tolerance on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_boost_value, /**< Select diagonal boosting value on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILDLT0 descriptor. */
+    rocsparse_spildlt0_input_diag, /**< Set the device pointer to the dense array of \p m real-valued diagonal entries of \f$D\f$ for output from SpILDLT0. */
+} rocsparse_spildlt0_input;
+
+/*! \ingroup types_module
+ *  \brief List of outputs to the SpILDLT0 descriptor.
+ *
+ *  \details
+ *  This is a list of possible outputs to the SpILDLT0 descriptor.
+ */
+typedef enum rocsparse_spildlt0_output_
+{
+    rocsparse_spildlt0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILDLT0 calculation for output from the SpILDLT0 descriptor. */
+    rocsparse_spildlt0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILDLT0 descriptor. */
+} rocsparse_spildlt0_output;
+#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.

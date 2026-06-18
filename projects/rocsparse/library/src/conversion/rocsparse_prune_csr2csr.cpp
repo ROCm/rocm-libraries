@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -254,7 +254,7 @@ rocsparse_status rocsparse::prune_csr2csr_nnz_template(rocsparse_handle         
 
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                     nnz_total_dev_host_ptr, 0, sizeof(rocsparse_int), handle->stream));
             }
             else
@@ -272,9 +272,9 @@ rocsparse_status rocsparse::prune_csr2csr_nnz_template(rocsparse_handle         
     T h_threshold;
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &h_threshold, threshold, sizeof(T), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
     }
     else
     {
@@ -291,11 +291,11 @@ rocsparse_status rocsparse::prune_csr2csr_nnz_template(rocsparse_handle         
                                                                h_threshold));
 
     // Compute csr_row_ptr_C with the right index base.
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(csr_row_ptr_C,
-                                       &csr_descr_C->base,
-                                       sizeof(rocsparse_int),
-                                       hipMemcpyHostToDevice,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csr_row_ptr_C,
+                                                 &csr_descr_C->base,
+                                                 sizeof(rocsparse_int),
+                                                 hipMemcpyHostToDevice,
+                                                 handle->stream));
 
     // Perform inclusive scan on csr row pointer array
     size_t temp_storage_size_bytes;

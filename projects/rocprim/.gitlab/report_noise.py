@@ -46,7 +46,7 @@ def print_results(results):
         "mean": max(len(result["mean"]) for result in results),
         "median": max(len(result["median"]) for result in results),
         "max": max(len(result["max"]) for result in results),
-        "bytes": max(len(result["bytes"]) for result in results),
+        "size": max(len(result["size"]) for result in results),
     }
 
     # The name of a column can be longer than its values
@@ -57,7 +57,7 @@ def print_results(results):
     printed += "mean".ljust(longest["mean"] + 2)
     printed += "median".ljust(longest["median"] + 2)
     printed += "max".ljust(longest["max"] + 2)
-    printed += "bytes".ljust(longest["bytes"] + 2)
+    printed += "size".ljust(longest["size"] + 2)
     print(printed)
 
     for result in results:
@@ -86,20 +86,20 @@ def print_results(results):
         printed += colors.END_COLOR
 
         printed += "  "
-        printed += colors.FAIL if result["bad_bytes"] else colors.OK
-        printed += result["bytes"].ljust(longest["bytes"])
+        printed += colors.FAIL if result["bad_size"] else colors.OK
+        printed += result["size"].ljust(longest["size"])
         printed += colors.END_COLOR
 
         print(printed)
 
 
 def get_results(benchmarks, threshold):
-    def get_humanized_bytes(bytes):
+    def get_humanized_size(size):
         for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
-            if bytes < 1024.0 or unit == "PiB":
+            if size < 1024.0 or unit == "PiB":
                 break
-            bytes /= 1024.0
-        return f"{bytes:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} {unit}"
 
     success = True
 
@@ -109,7 +109,7 @@ def get_results(benchmarks, threshold):
         data = benchmark["data"]
         name = benchmark["name"]
         context = data["context"]
-        cli_settings = context["cli_settings"]
+        settings = context["settings"]
         specializations = data["specializations"]
 
         noise_percents = [
@@ -128,7 +128,7 @@ def get_results(benchmarks, threshold):
         median = statistics.median(noise_percents)
         max_ = max(noise_percents)
 
-        bytes_ = int(cli_settings["bytes"])
+        size_ = int(settings["size"])
 
         results.append(
             {
@@ -141,8 +141,8 @@ def get_results(benchmarks, threshold):
                 "median": f"{median:.1f}%",
                 "bad_max": max_ > threshold,
                 "max": f"{max_:.1f}%",
-                "bad_bytes": 0 < bytes_ < 128 * 1024 * 1024,  # 128 MiB
-                "bytes": get_humanized_bytes(int(cli_settings["bytes"])),
+                "bad_size": 0 < size_ < 128 * 1024 * 1024,  # 128 MiB
+                "size": get_humanized_size(size_),
             }
         )
 

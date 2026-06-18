@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"

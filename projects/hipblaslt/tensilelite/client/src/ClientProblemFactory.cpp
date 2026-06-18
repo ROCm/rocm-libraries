@@ -48,6 +48,7 @@ namespace TensileLite
             , m_activationType(ActivationType::None)
             , m_activationNoGuard(false)
             , m_activationEnumArg(std::vector<ActivationType>(1, ActivationType::None))
+            , m_streamKHybridMode(std::vector<int>(1, 0))
             , m_computeInputTypeA(rocisa::DataType::Float)
             , m_computeInputTypeB(rocisa::DataType::Float)
             , m_f32XdlMathOp(rocisa::DataType::Float)
@@ -55,7 +56,7 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
-            , m_padMXScaleTensor(false)
+            , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
             , m_metadataLayout(args["metadata-layout"].as<int>())
@@ -72,7 +73,7 @@ namespace TensileLite
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 hipGetDeviceProperties(&prop, deviceIdx);
                 std::string archName(prop.gcnArchName);
-                m_padMXScaleTensor = (archName.find("gfx950") != std::string::npos);
+                m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
             }
 
             std::vector<bool> isComplex;
@@ -196,6 +197,12 @@ namespace TensileLite
             if(args.count("activation-enum-args"))
                 m_activationEnumArg
                     = args["activation-enum-args"].as<std::vector<ActivationType>>();
+            if(args.count("streamk-hybrid-mode"))
+            {
+                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
+                if(!raw.empty())
+                    m_streamKHybridMode = std::move(raw);
+            }
             if(args.count("use-bias"))
                 m_useBias = args["use-bias"].as<int>();
             if(args.count("bias-source"))
@@ -275,7 +282,13 @@ namespace TensileLite
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
             int factorDimSize  = std::max(
                 1, m_useScaleAlphaVec == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
-            rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize);
+            // StreamK=5 hybrid-mode toggle variants. When the YAML sets
+            // StreamKHybridMode: [0, 1] each base problem is replayed
+            // twice (one static pass, one dynamic pass) so a single
+            // tlrun invocation covers both code paths of an SK5 kernel.
+            int streamKHybridModeSize = std::max(1, (int)m_streamKHybridMode.size());
+            rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize
+                       * streamKHybridModeSize);
 
             std::vector<size_t> aStrides, bStrides, cStrides, dStrides, eStrides, biasStrides;
 
@@ -292,6 +305,11 @@ namespace TensileLite
             if(m_tensorStrides[ContractionProblemGemm::TENSOR::BIAS].size() == 1)
                 biasStrides = m_tensorStrides[ContractionProblemGemm::TENSOR::BIAS][0];
 
+            // Outer loop is intentionally kept at the same indentation
+            // as the inner factor/bias/activation/problem-size loops to
+            // avoid re-indenting ~200 lines of unrelated body code.
+            for(int m = 0; m < streamKHybridModeSize; m++)
+            {
             for(int l = 0; l < factorDimSize; l++)
             {
                 for(int k = 0; k < biasSize; k++)
@@ -460,16 +478,33 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensor);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensor);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                            }
+                            // StreamK=5 hybrid-mode toggle. Accepts the full
+                            // tri-state {0=OFF (static), 1=ON (dynamic per-XCD
+                            // work-queue), 2=AUTO (heuristic)}. The reference
+                            // path is unaffected by the choice, so all three
+                            // values validate cleanly against the CPU ref.
+                            // YAML sweep tests should prefer [0, 1] to
+                            // guarantee both deterministic sub-paths are
+                            // exercised; AUTO is most useful when overriding
+                            // from the command line (e.g.
+                            // `--streamk-hybrid-mode 2`) to exercise the
+                            // runtime heuristic end-to-end on a real problem.
+                            if(m < (int)m_streamKHybridMode.size())
+                            {
+                                rv.back().setParams().setStreamKTileSchedulingMode(
+                                    m_streamKHybridMode[m]);
                             }
                         }
                     }
                 }
             }
+            } // streamk-hybrid-mode outer loop
         }
     } // namespace Client
 } // namespace TensileLite
