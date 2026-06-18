@@ -15,9 +15,11 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -36,19 +38,30 @@ namespace
 {
 
 // Exposes the harness's protected SetUp/TestBody so a test can drive the full
-// lifecycle directly. requiresDevice is forced false: these tests run on CPU-only
-// CI and the stub executors never touch the GPU.
+// lifecycle directly, and overrides executeGraphThroughEngine with a stub so the
+// tests run on CPU-only CI without a real GPU engine.
 class TestableHarness : public IntegrationGraphGoldenReferenceVerificationHarness
 {
 public:
-    explicit TestableHarness(ExecuteFunc executor)
-        : IntegrationGraphGoldenReferenceVerificationHarness(std::move(executor),
-                                                             /*requiresDevice=*/false)
+    using StubFunc = std::function<void(std::unordered_map<int64_t, void*>&)>;
+
+    explicit TestableHarness(StubFunc stub)
+        : IntegrationGraphGoldenReferenceVerificationHarness(/*requiresDevice=*/false)
+        , _stub(std::move(stub))
     {
     }
 
     using IntegrationGraphGoldenReferenceVerificationHarness::SetUp;
     using IntegrationGraphGoldenReferenceVerificationHarness::TestBody;
+
+protected:
+    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
+    {
+        _stub(variantPack);
+    }
+
+private:
+    StubFunc _stub;
 };
 
 class TestGoldenHarnessFixture : public ::testing::Test
@@ -133,23 +146,21 @@ protected:
             std::move(std::get<IntegrationTestBundle>(result)));
     }
 
-    // Fills the output tensor (uid 5) in the live tensor map with `value`. A
-    // stand-in for what a real executor would compute into the output buffer.
-    static void writeOutput(IntegrationTestBundle& bundle, float value)
+    // Fills the output buffer in the variant pack with `value`. A stand-in for
+    // what a real executor would compute into the output buffer.
+    static void writeOutput(std::unordered_map<int64_t, void*>& variantPack, float value)
     {
-        auto& outTensor = *bundle.tensors->at(K_OUTPUT_UID);
-        const std::vector<float> data(K_OUTPUT_ELEMS, value);
-        outTensor.fillWithData(data.data(), data.size() * sizeof(float));
+        auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
+        std::fill(ptr, ptr + K_OUTPUT_ELEMS, value);
     }
 
     // Drives the harness's full lifecycle (SetUp then TestBody) for the given
-    // bundle + executor, capturing every TestPartResult the harness records.
-    static void
-        runCapturing(std::shared_ptr<IntegrationTestBundle> bundle,
-                     IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc executor,
-                     ::testing::TestPartResultArray* results)
+    // bundle + stub executor, capturing every TestPartResult the harness records.
+    static void runCapturing(std::shared_ptr<IntegrationTestBundle> bundle,
+                             TestableHarness::StubFunc stub,
+                             ::testing::TestPartResultArray* results)
     {
-        TestableHarness harness(std::move(executor));
+        TestableHarness harness(std::move(stub));
         harness.setBundle(std::move(bundle), "unit-test-bundle");
 
         const ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -192,7 +203,7 @@ TEST_F(TestGoldenHarnessFixture, ExecutorThrowsYieldsSkip)
     ::testing::TestPartResultArray results;
     runCapturing(
         loadRunnableBundle("throws"),
-        [](IntegrationTestBundle&) {
+        [](std::unordered_map<int64_t, void*>&) {
             throw std::runtime_error("engine does not support this graph");
         },
         &results);
@@ -208,7 +219,7 @@ TEST_F(TestGoldenHarnessFixture, MatchingOutputYieldsPass)
     ::testing::TestPartResultArray results;
     runCapturing(
         loadRunnableBundle("match"),
-        [](IntegrationTestBundle& bundle) { writeOutput(bundle, K_OUTPUT_VALUE); },
+        [](std::unordered_map<int64_t, void*>& vp) { writeOutput(vp, K_OUTPUT_VALUE); },
         &results);
 
     EXPECT_FALSE(anyFailed(results));
@@ -222,7 +233,7 @@ TEST_F(TestGoldenHarnessFixture, MismatchingOutputYieldsFail)
     ::testing::TestPartResultArray results;
     runCapturing(
         loadRunnableBundle("mismatch"),
-        [](IntegrationTestBundle& bundle) { writeOutput(bundle, K_OUTPUT_VALUE + 100.0f); },
+        [](std::unordered_map<int64_t, void*>& vp) { writeOutput(vp, K_OUTPUT_VALUE + 100.0f); },
         &results);
 
     EXPECT_TRUE(anyFailed(results));

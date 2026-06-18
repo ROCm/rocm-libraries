@@ -6,17 +6,19 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <memory>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -24,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/BundleDiscovery.hpp"
 #include "harness/golden/IntegrationTestBundle.hpp"
@@ -41,11 +44,8 @@ using GoldenOutputs
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
-    using ExecuteFunc = std::function<void(IntegrationTestBundle&)>;
-
-    IntegrationGraphGoldenReferenceVerificationHarness(ExecuteFunc executor, bool requiresDevice)
-        : _executeFunc(std::move(executor))
-        , _requiresDevice(requiresDevice)
+    explicit IntegrationGraphGoldenReferenceVerificationHarness(bool requiresDevice)
+        : _requiresDevice(requiresDevice)
     {
     }
 
@@ -120,47 +120,97 @@ protected:
         runGoldenComparison();
     }
 
+    // Builds the graph from its serialized bytes, selects an engine (honouring
+    // an explicit --engine if given), builds plans, and executes into the
+    // variant pack. "Unsupported graph" is signalled by throwing (the harness
+    // translates that into a SKIP). Genuine build/execute errors use ASSERT_*.
+    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack)
+    {
+        auto handle = getSharedHandle();
+
+        const std::vector<uint8_t> graphBytes(
+            _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+        hipdnn_frontend::graph::Graph graph;
+        auto err = graph.from_binary(handle, graphBytes);
+        ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
+
+        std::vector<int64_t> engineIds;
+        auto status = graph.get_ranked_engine_ids(engineIds);
+
+        const auto graphSummary = [&] {
+            return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
+                   + std::to_string(engineIds.size()) + " ranked engine(s)";
+        };
+
+        if(TestConfig::get().hasEngineName())
+        {
+            int64_t targetEngineId = TestConfig::get().getEngineId();
+            if(status.is_bad()
+               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+            {
+                throw std::runtime_error("Engine " + std::string(TestConfig::get().getEngineName())
+                                         + " does not support this graph (" + graphSummary() + ")");
+            }
+            graph.set_preferred_engine_id_ext(targetEngineId);
+        }
+        else
+        {
+            if(status.is_bad() || engineIds.empty())
+            {
+                throw std::runtime_error("No engine supports this graph (" + graphSummary() + ")");
+            }
+        }
+
+        auto result = graph.create_execution_plans();
+        ASSERT_TRUE(result.is_good()) << result.get_message();
+        result = graph.check_support();
+        ASSERT_TRUE(result.is_good()) << result.get_message();
+        result = graph.build_plans();
+        ASSERT_TRUE(result.is_good()) << result.get_message();
+
+        int64_t workspaceSize = 0;
+        result = graph.get_workspace_size(workspaceSize);
+        ASSERT_TRUE(result.is_good()) << result.get_message();
+        ASSERT_GE(workspaceSize, 0);
+        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+        result = graph.execute(handle, variantPack, workspace.get());
+        ASSERT_TRUE(result.is_good()) << result.get_message();
+    }
+
 private:
-    ExecuteFunc _executeFunc;
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 
     void runGoldenComparison()
     {
-        // SetUp guarantees we only reach TestBody with tensor data present.
         auto& tensorMap = *_bundle->tensors;
 
-        // A bundle with no output tensors has nothing to compare against —
-        // executing it would only exercise the graph path. Treat as a skip.
         if(_bundle->outputTensorUids.empty())
         {
             GTEST_SKIP() << "Bundle has no output tensors to compare: " << _bundlePath;
         }
 
-        // Save the loaded output values as golden and zero the live outputs so the
-        // runner computes into clean buffers.
         const auto golden = extractGolden(tensorMap);
 
-        // The executor runs the bundle in place (it reads the graph + input
-        // tensors and writes the computed outputs back into the bundle's tensor
-        // map). It signals "I cannot run this graph" by throwing (e.g. an op with
-        // no GPU reference plan, or an engine that does not support the graph).
-        // GTEST_SKIP() cannot be issued from inside the executor lambda because it
-        // only returns from the lambda, not from TestBody — control would fall
-        // through to the comparison below and fail zeroed outputs against golden
-        // data. So the executor throws and the harness, which is inside TestBody,
-        // translates "unsupported" into a real skip here.
-        //
-        // ASSERT_NO_FATAL_FAILURE still wraps the call so that a genuine GTest
-        // assertion inside the executor (e.g. a build/execute error) FAILs and
-        // stops the test rather than continuing into the comparison. It does not
-        // catch C++ exceptions, which is why the try/catch is also required.
+        // Build the variant pack from the tensor map.
+        std::unordered_map<int64_t, void*> variantPack;
+        for(auto& [uid, tensor] : tensorMap)
+        {
+            variantPack[uid] = tensor->rawDeviceData();
+        }
+
+        // executeGraphThroughEngine signals "unsupported graph" by throwing;
+        // the harness translates that into a SKIP. ASSERT_NO_FATAL_FAILURE
+        // still wraps the call so that a genuine GTest assertion inside the
+        // executor FAILs rather than falling through to the comparison.
         bool executorThrew = false;
         std::string executorError;
         try
         {
-            ASSERT_NO_FATAL_FAILURE(_executeFunc(*_bundle));
+            ASSERT_NO_FATAL_FAILURE(executeGraphThroughEngine(variantPack));
         }
         catch(const std::exception& e)
         {
@@ -172,6 +222,11 @@ private:
         {
             GTEST_SKIP() << "Executor could not run bundle " << _bundlePath << ": "
                          << executorError;
+        }
+
+        for(auto uid : _bundle->outputTensorUids)
+        {
+            tensorMap.at(uid)->markDeviceModified();
         }
 
         auto wrapper = _bundle->graphWrapper();
@@ -193,13 +248,9 @@ private:
         }
     }
 
-    // Compare one output tensor against its golden reference and report mismatches.
-    //
-    // Floating-point dtypes go through computeTensorDiff(), which walks the tensor
-    // once and returns a structured summary (mismatch count, worst-element index,
-    // expected/actual/abs-diff) — that single pass IS the pass/fail decision and
-    // the failure report, no second walk. Integer dtypes have no computeTensorDiff
-    // specialization, so they keep the boolean allClose validator path.
+    // Compare one output tensor against its golden reference via the allClose
+    // validator (which covers both CPU and GPU validation paths). Only on failure
+    // do we compute and report the element-wise tensor diff for diagnostics.
     void compareOutputTensor(int64_t uid,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
@@ -208,6 +259,30 @@ private:
                              float atol,
                              float rtol) const
     {
+        auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
+        const bool passed = validator->allClose(expected, actual);
+
+        if(!passed)
+        {
+            std::ostringstream report;
+            report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
+            appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
+            EXPECT_TRUE(false) << report.str();
+        }
+    }
+
+    // Appends an element-wise diff summary for FP types; non-FP types get a
+    // generic note (computeTensorDiff has no integer specialization).
+    static void
+        appendTensorDiff(std::ostream& os,
+                         int64_t uid,
+                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                         hipdnn_data_sdk::utilities::ITensor& expected,
+                         hipdnn_data_sdk::utilities::ITensor& actual,
+                         float atol,
+                         float rtol)
+    {
         using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
         using hipdnn_data_sdk::types::bfloat16;
         using hipdnn_data_sdk::types::half;
@@ -215,49 +290,34 @@ private:
         switch(dataType)
         {
         case DT::FLOAT:
-            compareFp<float>(uid, attrs, dataType, expected, actual, atol, rtol);
+            appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
             return;
         case DT::HALF:
-            compareFp<half>(uid, attrs, dataType, expected, actual, atol, rtol);
+            appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
             return;
         case DT::BFLOAT16:
-            compareFp<bfloat16>(uid, attrs, dataType, expected, actual, atol, rtol);
+            appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
             return;
         case DT::DOUBLE:
-            compareFp<double>(uid, attrs, dataType, expected, actual, atol, rtol);
+            appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
             return;
         default:
-            break;
+            os << "  (no element-wise diff available for this data type)\n";
         }
-
-        // Integer (and any non-FP) dtypes: boolean validator fallback.
-        auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
-        EXPECT_TRUE(validator->allClose(expected, actual))
-            << reportHeader(uid, attrs, dataType, expected, atol, rtol)
-            << "  (no element-wise diff available for this data type)\n";
     }
 
     template <typename T>
-    void compareFp(int64_t uid,
-                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                   hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                   hipdnn_data_sdk::utilities::ITensor& expected,
-                   hipdnn_data_sdk::utilities::ITensor& actual,
-                   float atol,
-                   float rtol) const
+    static void appendFpDiff(std::ostream& os,
+                             int64_t uid,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                             hipdnn_data_sdk::utilities::ITensor& expected,
+                             hipdnn_data_sdk::utilities::ITensor& actual,
+                             float atol,
+                             float rtol)
     {
         const auto summary
             = hipdnn_test_sdk::utilities::computeTensorDiff<T>(expected, actual, atol, rtol);
-
-        const bool passed = summary.mismatchCount == 0;
-        std::ostringstream report;
-        if(!passed)
-        {
-            report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
-            hipdnn_test_sdk::utilities::printTensorDiffSummary(
-                report, labelFor(uid, attrs), summary);
-        }
-        EXPECT_TRUE(passed) << report.str();
+        hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
     }
 
     // The human-readable label for an output tensor: its name if it has one,

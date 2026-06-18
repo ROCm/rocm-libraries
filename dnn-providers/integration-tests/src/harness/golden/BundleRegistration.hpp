@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -12,12 +11,9 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/BundleDiscovery.hpp"
 #include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
@@ -39,83 +35,6 @@ struct LoadedBundle
     std::shared_ptr<IntegrationTestBundle> bundle;
 };
 
-// The Engine executor: builds the graph from its serialized bytes, selects an
-// engine (honouring an explicit --engine if given), builds plans, and executes
-// into the variant pack. "Unsupported graph" is signalled by throwing (the
-// harness translates that into a SKIP — a GTEST_SKIP() here would only return
-// from the lambda, not TestBody). Genuine build/execute errors use ASSERT_* so
-// they FAIL the test.
-inline IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc makeEngineExecutor()
-{
-    return [](IntegrationTestBundle& bundle) {
-        auto handle = getSharedHandle();
-
-        // SetUp guarantees tensors is present before the executor runs.
-        auto& tensorMap = *bundle.tensors;
-
-        const std::vector<uint8_t> graphBytes(
-            bundle.graphBuffer.data(), bundle.graphBuffer.data() + bundle.graphBuffer.size());
-
-        hipdnn_frontend::graph::Graph graph;
-        auto err = graph.from_binary(handle, graphBytes);
-        ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
-
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
-
-        const auto graphSummary = [&] {
-            return std::to_string(bundle.outputTensorUids.size()) + " output tensor(s), "
-                   + std::to_string(engineIds.size()) + " ranked engine(s)";
-        };
-
-        if(TestConfig::get().hasEngineName())
-        {
-            int64_t targetEngineId = TestConfig::get().getEngineId();
-            if(status.is_bad()
-               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-            {
-                throw std::runtime_error("Engine " + std::string(TestConfig::get().getEngineName())
-                                         + " does not support this graph (" + graphSummary() + ")");
-            }
-            graph.set_preferred_engine_id_ext(targetEngineId);
-        }
-        else
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                throw std::runtime_error("No engine supports this graph (" + graphSummary() + ")");
-            }
-        }
-
-        auto result = graph.create_execution_plans();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        result = graph.check_support();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        result = graph.build_plans();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-
-        int64_t workspaceSize = 0;
-        result = graph.get_workspace_size(workspaceSize);
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-        std::unordered_map<int64_t, void*> variantPack;
-        for(auto& [uid, tensor] : tensorMap)
-        {
-            variantPack[uid] = tensor->rawDeviceData();
-        }
-
-        result = graph.execute(handle, variantPack, workspace.get());
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-
-        for(auto uid : bundle.outputTensorUids)
-        {
-            tensorMap.at(uid)->markDeviceModified();
-        }
-    };
-}
-
 // Registers one GTest test per preloaded bundle, run by the Engine executor.
 // This is the runtime, macro-free equivalent of TEST_F + INSTANTIATE_TEST_SUITE_P:
 // the suite/test names come from the filesystem scan, so they cannot be baked in
@@ -129,24 +48,18 @@ inline IntegrationGraphGoldenReferenceVerificationHarness::ExecuteFunc makeEngin
 // disambiguate against, so no runner suffix is appended.
 inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 {
-    const auto executor = makeEngineExecutor();
-
     for(const auto& bundle : bundles)
     {
         ::testing::RegisterTest(
-            bundle.suiteName.c_str(), // GTest suite name (before the '.')
-            bundle.testName.c_str(), // GTest test name (after the '.')
-            nullptr, // type_param: unused (not a TYPED_TEST)
-            nullptr, // value_param: unused (no GetParam() string)
+            bundle.suiteName.c_str(),
+            bundle.testName.c_str(),
+            nullptr,
+            nullptr,
             __FILE__,
-            __LINE__, // all bundles report this site; the harness prints the
-            // actual bundle path on failure (see buildFailureReport)
-            // Factory: GTest calls this to construct the test when it runs. Each
-            // bundle's factory captures its own preloaded bundle. The fixture is
-            // the single shared harness, parameterized by the injected executor.
-            [loaded = bundle.bundle, path = bundle.jsonPath, executor]() -> ::testing::Test* {
+            __LINE__,
+            [loaded = bundle.bundle, path = bundle.jsonPath]() -> ::testing::Test* {
                 auto* test = new IntegrationGraphGoldenReferenceVerificationHarness(
-                    executor, /*requiresDevice=*/true);
+                    /*requiresDevice=*/true);
                 test->setBundle(loaded, path);
                 return test;
             });
