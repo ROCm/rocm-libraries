@@ -223,6 +223,12 @@ endif()
 # be called here (an ancestor of library/src) so ctest can discover
 # tests registered under library/src.
 option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
+# Opt-in: run the internal tests automatically as part of the build.
+option( ROCFFT_RUN_INTERNAL_TESTS "Run internal tests as part of the build" OFF )
+# GoogleTest filter for the build-time run, e.g. "function_pool*" or
+# "-*slow*".  Empty means run all internal tests.
+set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
+  "GoogleTest filter applied to internal tests run at build time (empty = all)" )
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   enable_testing()
 endif()

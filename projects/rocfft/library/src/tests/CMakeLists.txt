@@ -62,3 +62,17 @@ target_link_libraries( rocfft-internal-test PRIVATE
 # TEST, so e.g. "ctest -R function_pool" works.
 include( GoogleTest )
 gtest_discover_tests( rocfft-internal-test )
+
+# Opt-in: also run the tests automatically when the executable is built,
+# so a test failure fails the build.  ROCFFT_INTERNAL_TESTS_FILTER (if set)
+# restricts which tests run via GoogleTest's --gtest_filter.
+if( ROCFFT_RUN_INTERNAL_TESTS )
+  set( internal_tests_run_args "" )
+  if( ROCFFT_INTERNAL_TESTS_FILTER )
+    set( internal_tests_run_args --gtest_filter=${ROCFFT_INTERNAL_TESTS_FILTER} )
+  endif()
+  add_custom_command( TARGET rocfft-internal-test POST_BUILD
+    COMMAND rocfft-internal-test ${internal_tests_run_args}
+    COMMENT "Running internal tests..."
+    VERBATIM )
+endif()
