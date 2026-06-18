@@ -16,9 +16,10 @@ Organized by pass:
 """
 import pytest
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
+    GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
     ReadGranularity,
@@ -37,14 +38,23 @@ from rocisa.code import Module
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
     fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    wave32 = kernel.get("WavefrontSize", 64) == 32
+    ab_bf16 = AB_B16_W32 if wave32 else AB_B16
+    cd_f32 = CD_F32_W32 if wave32 else CD_F32
     _geo = {
-        'A': AB_B4 if fp4 else AB_B16,
-        'B': AB_B4 if fp4 else AB_B16,
+        'A': AB_B4 if fp4 else ab_bf16,
+        'B': AB_B4 if fp4 else ab_bf16,
         'MXSA': MXSA_B4,
         'MXSB': MXSB_B4,
-        'D': CD_F32,
+        'D': cd_f32,
     }
-    return TileInfo(_geo[tc], tc, None, kernel)
+    # TDM path queries writer.states.subtileLdsSwizzle in TileInfo.__init__.
+    # Provide a minimal stub so makeTileInfo can be called without a full writer.
+    writer_stub = None
+    if kernel.get("enableTDM%s" % tc, False):
+        from types import SimpleNamespace
+        writer_stub = SimpleNamespace(states=SimpleNamespace(subtileLdsSwizzle=False))
+    return TileInfo(_geo[tc], tc, writer_stub, kernel)
 
 
 # ── Shared fixtures ───────────────────────────────────────────
@@ -60,7 +70,7 @@ def _mock_dtype(num_bytes=2):
 
 
 def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
-                  miWaveGroup=None, sourceSwap=False):
+                  miWaveGroup=None, sourceSwap=False, arch="gfx950"):
     mxblock = 32 if fp4 else 0
     bpe = 0.5 if fp4 else 2
     matrixInstK = 128 if fp4 else 32
@@ -68,6 +78,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         depthU = 256 if fp4 else 64
     if miWaveGroup is None:
         miWaveGroup = [2, 2]
+    is_gfx1250 = (arch == "gfx1250")
+    waveSize = 32 if is_gfx1250 else 64
     dtype = _mock_dtype(bpe)
     problemType = {
         "DataTypeA": dtype,
@@ -92,9 +104,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MIInputPerThreadA": matrixInstK // 4,
         "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
-        "WavefrontSize": 64,
+        "WavefrontSize": waveSize,
         "SourceSwap": sourceSwap,
-        "MIArchVgpr": False,
+        "MIArchVgpr": is_gfx1250,
         "NonTemporalA": 0,
         "NonTemporalB": 0,
         "NonTemporalMXSA": 0,
@@ -102,6 +114,11 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "NoTailLoop": False,
         "ProblemType": problemType,
     }
+    if is_gfx1250:
+        kernel["ISA"] = (12, 5, 0)
+        kernel["UseSubtileImpl"] = True
+        kernel["enableTDMA"] = True
+        kernel["enableTDMB"] = True
     if fp4:
         kernel["_DepthUMXSA"] = depthU // mxblock
         kernel["_DepthUMXSB"] = depthU // mxblock
@@ -278,10 +295,13 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     ri = rocIsa.getInstance()
     import shutil
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-    # Always re-init to gfx950: rocisa is a process-wide singleton and
-    # gfx1250 codegen tests may have changed it in the same pytest session.
-    ri.init((9, 5, 0), asmpath)
-    ri.setKernel((9, 5, 0), 64)
+    # Pick ISA + wavesize from the kernel — rocisa is a process-wide singleton,
+    # so re-init each call to override any prior state from other tests.
+    isa = tuple(kernel.get("ISA", (9, 5, 0)))
+    waveSize = kernel.get("WavefrontSize", 64)
+    ri.init(isa, asmpath)
+    ri.setKernel(isa, waveSize)
+    is_gfx1250 = (isa == (12, 5, 0))
 
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
@@ -292,12 +312,27 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr, False)
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
+    writer.sgprs = {}
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        archCaps={"LDSBankCount": 64, "LDSBankWidth": 4,
+                  "HasWmmaArbStallBit": is_gfx1250},
+        asmCaps={"HasMFMA": not is_gfx1250,
+                 "HasWMMA_AccImmZero": is_gfx1250},
         unrollIdx=0,
-        laneSGPRCount=2,
-        subtileLdsSwizzle=True,
+        laneSGPRCount=1 if is_gfx1250 else 2,
+        subtileLdsSwizzle=not is_gfx1250,
     )
+    if is_gfx1250:
+        writer.sgprPool.checkOut(12)
+        writer.sgprs["StrideA0I"] = 10
+        writer.sgprs["StrideB1J"] = 11
+        for tc in ['A', 'B']:
+            writer.sgprs["tdm%sGroup0" % tc] = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+            writer.sgprs["tdm%sGroup1" % tc] = writer.sgprPool.checkOutAligned(8, 4, preventOverflow=False)
+            writer.sgprs["tdmLdsAddr%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+            writer.sgprs["tdmLdsSwapMask%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+            writer.sgprs["Address%s" % tc] = writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False)
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
     writer.loopCounterName = lambda kernel, loopIdx: "LoopCounterL"
@@ -2407,6 +2442,8 @@ if __name__ == "__main__":
                         help="MIWaveGroup as MxN (default: 2x2)")
     parser.add_argument("--pgr", type=int, choices=[0, 1, 2], default=1,
                         help="PrefetchGlobalRead level (default: 1)")
+    parser.add_argument("--arch", choices=["gfx950", "gfx1250"], default="gfx950",
+                        help="Target arch (default: gfx950). gfx1250 enables wave32 + TDM.")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Step through each phase interactively")
     args = parser.parse_args()
@@ -2426,17 +2463,29 @@ if __name__ == "__main__":
     partSizeM, partSizeN = int(ps_parts[0]), int(ps_parts[1])
 
     kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
-                           miWaveGroup=list(waveGroup))
+                           miWaveGroup=list(waveGroup), arch=args.arch)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
     scaleTiB = makeTileInfo('MXSB', kernel) if fp4 else None
 
-    # Mirror Kernel.py:1139-1140 — gr granularity widens to (2,2) when the
-    # tile's GR load ratio exceeds 1.0.
-    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    # Mirror Kernel.py mainLoop GR granularity selection:
+    #   - gfx950 (buffer load): mn=subtileShape[0] (doubled when loadRatioGR>1),
+    #                            k=subtileShape[1]
+    #   - gfx1250 (TDM):        one tensor_load_to_lds covers the full local
+    #                            MMA grid -> mn=localMMATileGrid[0], k=[1]
+    if args.arch == "gfx1250":
+        grA = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+        grB = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+    else:
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
 
+    # gfx1250 enables TDM (tensor_load_to_lds); GR doesn't pressure SIMD issue
+    # slots, so bunch all GR atoms into partition 0 / subIterK 0. Mirrors
+    # Kernel.py's grPlacement selection.
+    grPlacement = (GRPlacementStrategy.BUNCHED if args.arch == "gfx1250"
+                   else GRPlacementStrategy.SPREAD)
     cfg_kwargs = dict(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -2448,6 +2497,7 @@ if __name__ == "__main__":
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=args.pgr,
+        grPlacement=grPlacement,
     )
     if fp4:
         cfg_kwargs.update(
@@ -2460,7 +2510,7 @@ if __name__ == "__main__":
         )
     cfg = SchedulerConfig(**cfg_kwargs)
 
-    print(f"Config: MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
+    print(f"Config: arch={args.arch}, MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
           f"WG={waveGroup[0]}x{waveGroup[1]}, "
           f"partitionSize={partSizeM}x{partSizeN}, pgr={args.pgr}")
     print(f"        numMFMATilesM={cfg.numMFMATilesM}, "
