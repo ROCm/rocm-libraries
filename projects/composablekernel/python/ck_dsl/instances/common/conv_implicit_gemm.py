@@ -327,6 +327,11 @@ class ImplicitGemmConvSpec:
     async_dma: bool = False
     unroll_k: bool = False  # NEW: Clean Python-level K-loop unrolling
     lds_k_pad: Optional[int] = None
+    # Per-operand vector widths (elements). ``None`` means auto-select via the
+    # shared ``choose_load_vec`` / ``CShuffleEpilogue.from_grid`` heuristics.
+    vector_size_a: Optional[int] = None
+    vector_size_b: Optional[int] = None
+    vector_size_c: Optional[int] = None
     lds_layout: Optional[LdsLayout] = None
     # Chiplet-aware grid swizzle (multi-XCD L2 locality). When True,
     # the kernel flattens its 2D blockIdx into a linear WGID, runs it
@@ -1058,7 +1063,9 @@ def build_implicit_gemm_conv(
     ]
 
     threads = spec.block_size
-    load_vec = _choose_load_vec(spec)
+    _auto_load_vec = _choose_load_vec(spec)
+    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
+    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1155,14 +1162,14 @@ def build_implicit_gemm_conv(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
-            load_vec=load_vec,
+            load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
-            load_vec=load_vec,
+            load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
         )
 
@@ -1656,7 +1663,10 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid).store(
+    _cshuffle_kwargs: dict = {}
+    if spec.vector_size_c is not None:
+        _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
+    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
         b,
         accs=accs,
         addr_fn=d_addr,

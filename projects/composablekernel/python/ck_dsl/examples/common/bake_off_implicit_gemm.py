@@ -40,6 +40,13 @@ from ck_dsl.instances.common.conv_implicit_gemm import (
     build_implicit_gemm_conv,
 )
 
+def get_vector_sizes(C: int, K: int, dtype: str) -> tuple[int, int, int]:
+    def _vec(n: int) -> int:
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+        return next(v for v in sizes if n % v == 0)
+
+    vec_c = _vec(C)
+    return vec_c, vec_c, _vec(K)
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -167,6 +174,8 @@ def main() -> int:
         dW=args.dW,
     )
 
+    vector_size_a, vector_size_b, vector_size_c = get_vector_sizes(C=args.C, K=args.K, dtype=dtype)
+
     # Winning config from the sweep in `instances.conv_implicit_gemm`:
     #   tile (64, 64, 64)
     #   warp grid (2, 2)
@@ -192,6 +201,9 @@ def main() -> int:
         warp_tile_k=warp_tile_k,
         pipeline=args.pipeline,
         epilogue=args.epilogue,
+        vector_size_a=vector_size_a,
+        vector_size_b=vector_size_b,
+        vector_size_c=vector_size_c,
     )
 
     kernel = build_implicit_gemm_conv(spec)
