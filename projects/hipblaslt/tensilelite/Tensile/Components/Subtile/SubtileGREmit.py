@@ -1093,10 +1093,14 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   ldsConstOffset = ldsOffsetMap.get(tc, 0)
 
   sizeTile0, sizeTile1 = du, mt
-  ldsBlockSizePerPad = kernel[f"LdsBlockSizePerPad{tc}"]
-  ldsPadSize = int(kernel[f"LdsPad{tc}"] * bpe)
-  # TDM hardware padding not yet validated for subtile; assert until enabled in calcLdsPad.
-  assert ldsPadSize == 0, f"Subtile TDM padding not yet supported (LdsPad{tc}={kernel[f'LdsPad{tc}']})"
+  # TDM D# Group1 pad fields
+  #   padAmountBytes   -> pad_amount   [31:25], bytes inserted per pad event
+  #   padIntervalBytes -> pad_interval [24:22], bytes written between pads
+  # Sourced from TileInfo.ldsRowPadBytes so GR and LR
+  # see the same value.
+  tileInfoForTc = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  padAmountBytes = int(getattr(tileInfoForTc, "ldsRowPadBytes", 0))
+  padIntervalBytes = int(du * bpe) if padAmountBytes else 0
 
   mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
   mod.add(comp.setDataType(dtype, descSgprName(1)))
@@ -1114,9 +1118,9 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
       elif ti == 1 and wgM > 1:
         mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
                                  shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
-    if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+    if padIntervalBytes != 0 and padAmountBytes != 0:
       tileBytes = round(mt // numWavesThisAxis * du * bpe)
-      padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
+      padBytes = tileBytes // padIntervalBytes * padAmountBytes
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
               f"woffset = wId * ({tileBytes}+{padBytes})"))
     else:
@@ -1138,7 +1142,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   sizeShifterDim = sizeShifter
 
   mod.add(comp.setIterationEnabled(descSgprName(1), False))
-  mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+  mod.add(comp.setPadding(descSgprName(1), padIntervalBytes, padAmountBytes))
   mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), writer, sizeShifterDim))
   mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), writer))
 

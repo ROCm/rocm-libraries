@@ -183,6 +183,20 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
+ * @brief StreamK=5 hybrid sub-path selector.
+ *
+ * Picks between the SK3 static work-assignment sub-path and the SK4
+ * dynamic per-XCD work-queue sub-path inside a single SK5 kernel
+ * launch. Used by ::origami::streamk::select_hybrid_mode().
+ */
+enum class hybrid_mode_t : std::uint32_t {
+  static_ = 0,        ///< SK3 static work-assignment sub-path
+  dynamic = 1,        ///< SK4 dynamic per-XCD work-queue sub-path
+  count,              ///< Count of hybrid modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
  * @brief Prediction mode types for latency estimation.
  *
  * Different approaches for predicting kernel performance.

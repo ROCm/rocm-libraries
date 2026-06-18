@@ -111,16 +111,16 @@ fetch_gtest_dependency()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Copy golden reference data into the build tree so tests can find it at
-# <exe_dir>/../lib/golden_reference_data/
+# Copy integration test bundles into the build tree so tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
 # NOTE: file(COPY) runs at configure time only. If you add or modify files
-# under golden_reference_data/, re-run cmake to pick up the changes.
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/golden_reference_data/"
-     DESTINATION "${CMAKE_BINARY_DIR}/lib/golden_reference_data")
+# under integration_test_bundles/, re-run cmake to pick up the changes.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration_test_bundles/"
+     DESTINATION "${CMAKE_BINARY_DIR}/lib/integration_test_bundles")
 
-# Install golden reference data so installed tests can find it at
-# <exe_dir>/../lib/golden_reference_data/
-install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/golden_reference_data"
+# Install integration test bundles so installed tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration_test_bundles"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 

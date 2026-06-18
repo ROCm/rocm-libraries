@@ -312,7 +312,7 @@ class TestComputeFlops:
             "nodes": [
                 {
                     "name": "ln",
-                    "type": "LayerNormAttributes",
+                    "type": "LayernormAttributes",
                     "inputs": {"x_tensor_uid": 1},
                     "outputs": {"y_tensor_uid": 2},
                 }
@@ -374,6 +374,19 @@ class TestComputeFlops:
         flops, partial = compute_flops(graph)
         # Conv is still counted; the unknown node only flips partial.
         assert flops == 2 * 16 * 16 * 3 * 3 * 16 * 16 * 16
+        assert partial is True
+
+    def test_all_unknown_nodes_returns_none_not_zero(self):
+        # A graph whose nodes are all unmodellable must report unknown
+        # (None), not a misleading 0 FLOPs that reads as a real count.
+        graph = {
+            "tensors": [{"uid": 1, "dims": [2, 2]}],
+            "nodes": [
+                {"name": "m", "type": "MysteryAttributes", "inputs": {}, "outputs": {}}
+            ],
+        }
+        flops, partial = compute_flops(graph)
+        assert flops is None
         assert partial is True
 
     def test_empty_graph(self):
