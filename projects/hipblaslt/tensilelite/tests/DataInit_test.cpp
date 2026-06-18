@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
+#include "DataInitializationTestUtils.hpp"
 #include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -41,12 +42,11 @@ namespace
 {
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
-    // Mirrors tests/MXScalePadding_test.cpp::makeMXProblem so the geometry
-    // matches what the real client produces, then enables MX scaling on each
-    // side independently. mxBlock==0 means "do NOT call setMXScale*", so the
-    // problem's mxBlockA() / mxBlockB() stays 0 and isMXTensor returns
-    // false on that side. This is exactly the lever needed to drive every
-    // branch of isMXProblemExceptF6.
+    // Reuses the shared plain-problem geometry, then enables MX scaling on
+    // each side independently. mxBlock==0 means "do NOT call setMXScale*",
+    // so the problem's mxBlockA() / mxBlockB() stays 0 and isMXTensor
+    // returns false on that side. This is exactly the lever needed to drive
+    // every branch of isMXProblemExceptF6.
     // -----------------------------------------------------------------------
     ContractionProblemGemm makeProblem(rocisa::DataType aType,
                                        rocisa::DataType bType,
@@ -59,18 +59,19 @@ namespace
                                        bool             transA = true,
                                        bool             transB = false)
     {
-        auto problem = ContractionProblemGemm::GEMM_Strides(
-            transA, transB,
-            aType, bType,
-            rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
-            M, N, K, batch,
-            transA ? K : M,                 // lda
-            transA ? K * M : M * K,         // strideA
-            transB ? N : K,                 // ldb
-            transB ? N * K : K * N,         // strideB
-            M, M * N,                       // ldc, strideC
-            M, M * N,                       // ldd, strideD
-            0.0);                           // beta
+        TensileLite::testing::PlainProblemSpec spec;
+        spec.m     = M;
+        spec.n     = N;
+        spec.k     = K;
+        spec.batch = batch;
+        spec.transA = transA;
+        spec.transB = transB;
+        spec.aType  = aType;
+        spec.bType  = bType;
+        spec.cType  = rocisa::DataType::BFloat16;
+        spec.dType  = rocisa::DataType::BFloat16;
+
+        auto problem = TensileLite::testing::makePlainProblem(spec);
         if(mxBlockA > 0) problem.setMXScaleA(rocisa::DataType::E8, mxBlockA);
         if(mxBlockB > 0) problem.setMXScaleB(rocisa::DataType::E8, mxBlockB);
         return problem;

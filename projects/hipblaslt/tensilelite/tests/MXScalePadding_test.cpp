@@ -6,7 +6,9 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Utils.hpp>
 
-using namespace TensileLite;
+#include "DataInitializationTestUtils.hpp"
+
+using TensileLite::ContractionProblemGemm;
 
 // ============================================================================
 // MX Scale Padding Tests
@@ -29,21 +31,19 @@ static ContractionProblemGemm makeMXProblem(size_t M,
                                             bool   transA = true,
                                             bool   transB = false)
 {
-    auto problem = ContractionProblemGemm::GEMM_Strides(
-        transA,
-        transB,
-        rocisa::DataType::Float4,
-        rocisa::DataType::Float4,
-        rocisa::DataType::BFloat16,
-        rocisa::DataType::BFloat16,
-        M, N, K, batch,
-        transA ? K : M,
-        transA ? K * M : M * K,
-        transB ? N : K,
-        transB ? N * K : K * N,
-        M, M * N,
-        M, M * N,
-        0.0);
+    TensileLite::testing::PlainProblemSpec spec;
+    spec.m     = M;
+    spec.n     = N;
+    spec.k     = K;
+    spec.batch = batch;
+    spec.transA = transA;
+    spec.transB = transB;
+    spec.aType  = rocisa::DataType::Float4;
+    spec.bType  = rocisa::DataType::Float4;
+    spec.cType  = rocisa::DataType::BFloat16;
+    spec.dType  = rocisa::DataType::BFloat16;
+
+    auto problem = TensileLite::testing::makePlainProblem(spec);
 
     problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
     problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
