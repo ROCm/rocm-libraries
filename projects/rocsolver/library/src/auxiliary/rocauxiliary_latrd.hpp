@@ -36,6 +36,7 @@
 #include <sstream>
 
 #include <hip/hip_cooperative_groups.h>
+#include "../../../grid.sync/softwareGridSync.hpp"
 
 #include "../auxiliary/rocauxiliary_lacgv.hpp"
 #include "../auxiliary/rocauxiliary_larfg.hpp"
@@ -51,6 +52,8 @@ static bool print_debug_messages_latrd_forsytrd
 static bool latrd_forsytrd_multi_kernel = std::getenv("LATRD_MULTI_KERNEL") != nullptr ? true : false;
 
 static bool force_coop_launch = std::getenv("COOP_LAUNCH") != nullptr ? true : false;
+
+static bool latrd_sw_grid_sync = std::getenv("LATRD_SW_GRID_SYNC") != nullptr ? true : false;
 
 #define HIP_TRACE(call)                                                                      \
     do                                                                                       \
@@ -2796,7 +2799,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     }
 }
 
-template <int MAX_THDS, typename T, typename I, typename S, typename U>
+template <int MAX_THDS, typename T, typename I, typename S, typename U, bool SW_SYNC = false>
 __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                                                                      const rocblas_int nb,
                                                                      U AA,
@@ -2811,10 +2814,11 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                                                                      const rocblas_int shiftW,
                                                                      const rocblas_int ldw,
                                                                      const rocblas_stride strideW,
-                                                                     T* work)
+                                                                     T* work,
+                                                                     uint8_t* syncBuf)
 {
     constexpr bool is_complex_t = rocblas_is_complex<T>;
-    auto grid = cooperative_groups::this_grid();
+    [[maybe_unused]] SoftwareGridSync swGrid(syncBuf);
 
     I batch_id = blockIdx.z;
     I bid = blockIdx.x;
@@ -2903,7 +2907,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                 if(lane_id == 0 && ii < nj + 1)
                     pA[ii + j + j * ldSA] -= temp;
             }
-            grid.sync();
+            if constexpr(SW_SYNC)
+                swGrid.sync();
+            else
+                cooperative_groups::this_grid().sync();
             // Work has to be synchronized here because A(j:n-1, j) is used to compute a
             // Householder reflector in Step 3.
         }
@@ -2950,7 +2957,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                 tau[j] = T(0);
             }
         }
-        grid.sync();
+        if constexpr(SW_SYNC)
+            swGrid.sync();
+        else
+            cooperative_groups::this_grid().sync();
 
         //
         // Compute w = tau_j*A*v - 1/2*tau_j^2*(v'*A*v)*v
@@ -3028,7 +3038,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                 __syncthreads();
             }
         }
-        grid.sync();
+        if constexpr(SW_SYNC)
+            swGrid.sync();
+        else
+            cooperative_groups::this_grid().sync();
 
         // Part D:
         //
@@ -3070,7 +3083,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                     w[j + 1 + ii] += temp;
             }
         }
-        grid.sync();
+        if constexpr(SW_SYNC)
+            swGrid.sync();
+        else
+            cooperative_groups::this_grid().sync();
 
         // Part E:
         //
@@ -3095,7 +3111,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
             for(I ii = tid; ii < nj; ii += MAX_THDS)
                 pW[(j + 1 + ii) + j * ldSW] = alpha * v[ii] + tau_j[0] * w[ii + j + 1];
         }
-        grid.sync();
+        if constexpr(SW_SYNC)
+            swGrid.sync();
+        else
+            cooperative_groups::this_grid().sync();
     }
 }
 
@@ -3188,7 +3207,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
         const bool is_batched = batch_count > 1;
         static const rocblas_int latrd_switch_size = []() {
             const char* v = std::getenv("LATRD_COOP_SWITCH_SIZE");
-            return v ? std::atoi(v) : 1280;
+            return v ? std::atoi(v) : 8192;
         }();
         bool use_fused_kernel = select_coop_launch && (n < latrd_switch_size) && !is_batched
             && !rocblas_is_complex<T> && (lmemsize_fused <= props->sharedMemPerBlock);
@@ -3238,18 +3257,16 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             rocblas_stride shiftA_ = shiftA + idx2D(j, j, lda);
             T* tau_j_ = tau + j;
             S* E_j_ = E + j;
-            void* kernelArgs[] = {(void*)&n,      (void*)&k,       (void*)&A,    (void*)&shiftA_,
-                                  (void*)&lda,    (void*)&strideA, (void*)&E_j_, (void*)&strideE,
-                                  (void*)&tau_j_, (void*)&strideP, (void*)&W,    (void*)&shiftW,
-                                  (void*)&ldw,    (void*)&strideW, (void*)&work};
 
             // Compute grid width: enough blocks to cover n rows, capped by cooperative-launch limit.
             // hipLaunchCooperativeKernel requires gridDim.x * gridDim.z <= max resident blocks.
-            void* kernel_fn = (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U>);
+            void* kernel_fn = latrd_sw_grid_sync
+                ? (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, true>)
+                : (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, false>);
             int max_blocks_per_sm = 0;
             HIP_TRACE(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, kernel_fn,
                                                                    FUSED_THDS, lmemsize_fused));
-            rocblas_int max_total_blocks = max_blocks_per_sm * props->multiProcessorCount;
+            rocblas_int max_total_blocks = (max_blocks_per_sm) * props->multiProcessorCount;
             rocblas_int max_grid_x = std::max(1, max_total_blocks / batch_count);
             // LATRD_COOP_GRID_X allows GPU-specific tuning of grid width.
             static const rocblas_int env_grid_x = []() {
@@ -3260,20 +3277,41 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             if(want_grid_x < 1)
             {
                 // Pick default block size (needs tunning)
-                want_grid_x = std::min(std::max(1, n / 2), 512);
+                want_grid_x = std::max(1, n / 2);
             }
             rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
 
+            // Allocate software grid-sync buffer when LATRD_SW_GRID_SYNC is set.
+            // The buffer has one byte per block per sync call; 5 syncs per j-iteration.
+            uint8_t* d_sync_buf = nullptr;
+            if(latrd_sw_grid_sync)
+            {
+                size_t num_blocks = (size_t)grid_x * batch_count;
+                size_t num_syncs  = (size_t)5 * k; // 5 grid syncs per outer loop iteration
+                size_t sync_buf_size = softwareGridSync_buf_bytes(num_blocks, num_syncs);
+                HIP_TRACE(hipMalloc(&d_sync_buf, sync_buf_size));
+                HIP_TRACE(hipMemset(d_sync_buf, 0, sync_buf_size));
+            }
+
+            void* kernelArgs[] = {(void*)&n,      (void*)&k,          (void*)&A,    (void*)&shiftA_,
+                                  (void*)&lda,    (void*)&strideA,    (void*)&E_j_, (void*)&strideE,
+                                  (void*)&tau_j_, (void*)&strideP,    (void*)&W,    (void*)&shiftW,
+                                  (void*)&ldw,    (void*)&strideW,    (void*)&work, (void*)&d_sync_buf};
+
             if(print_debug_messages_latrd_forsytrd)
                 std::fprintf(stderr,
-                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d\n", n,
-                             max_blocks_per_sm, max_total_blocks, grid_x);
+                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d\n",
+                             n, max_blocks_per_sm, max_total_blocks, grid_x,
+                             (int)latrd_sw_grid_sync);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
                                                  dim3(FUSED_THDS), kernelArgs, lmemsize_fused,
                                                  stream));
 
             HIP_TRACE(hipDeviceSynchronize());
+
+            if(d_sync_buf)
+                HIP_TRACE(hipFree(d_sync_buf));
         }
         else
         {
