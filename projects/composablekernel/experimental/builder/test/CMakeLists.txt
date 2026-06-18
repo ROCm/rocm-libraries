@@ -321,6 +321,13 @@ add_custom_target(check-builder
     COMMENT "Running all experimental builder tests..."
 )
 
+# These test_ckb* tests register with CTest above, so a full `ctest` run will
+# try to execute them. Attach their build targets to the build-only closure so
+# `ninja check_prebuild && ctest` builds them first instead of hitting Not Run.
+if(TARGET check_prebuild)
+    add_dependencies(check_prebuild build-smoke-builder build-regression-builder)
+endif()
+
 ################################################################################
 # Build Summary
 ################################################################################

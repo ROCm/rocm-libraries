@@ -12,7 +12,7 @@
 #
 # Exit codes:
 #   0 = Success (selective build targets generated)
-#   1 = Full build required (run ninja check)
+#   1 = Full build required (build phase runs ninja check_prebuild)
 #
 # Output files:
 #   tests_to_run.json - Selected tests and executables

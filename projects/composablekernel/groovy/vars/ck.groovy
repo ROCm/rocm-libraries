@@ -899,8 +899,10 @@ def cmake_build(Map conf=[:]){
                     // needs no source tree, NINJA_JOBS, or WORKSPACE_ROOT. To run the
                     // test phase on a different node, carry build/ over (shared FS or
                     // stash/unstash) and point BUILD_DIR at it. Both run here for now.
-                    // Env is scoped to each script invocation (inline assignment), not
-                    // exported into the stage shell.
+                    // Only call-specific values (workspace, job count, arch) are passed
+                    // inline; tunable knobs (PARALLEL, PROCESS_NINJA_TRACE,
+                    // NINJA_FTIME_TRACE) rely on the script defaults so they stay
+                    // overridable via withEnv/params instead of being pinned here.
                     stage("Smart Build (${arch_name})") {
                         // try/finally so the selection artifacts + log are archived
                         // even when the build fails - that is exactly when they are
@@ -908,11 +910,8 @@ def cmake_build(Map conf=[:]){
                         try {
                             sh """
                                 WORKSPACE_ROOT=${env.WORKSPACE} \\
-                                PARALLEL=32 \\
                                 NINJA_JOBS=${nt} \\
                                 ARCH_NAME=${arch_name} \\
-                                PROCESS_NINJA_TRACE=false \\
-                                NINJA_FTIME_TRACE=false \\
                                 bash ../script/dependency-parser/smart_build.sh
                             """
                         } finally {
@@ -920,9 +919,12 @@ def cmake_build(Map conf=[:]){
                         }
                     }
                     stage("Smart Test (${arch_name})") {
-                        // BUILD_DIR is the cross-node seam: it defaults to the build
-                        // dir we are in (same node); on a separate test node set it to
-                        // the carried-over build/. CTEST_PARALLEL is exposed as a tunable.
+                        // BUILD_DIR is the cross-node seam: smart_test.sh defaults it to
+                        // the build dir we are in (same node); on a separate test node
+                        // override it via withEnv to the carried-over build/. BUILD_DIR
+                        // and CTEST_PARALLEL are left to the script defaults (not pinned
+                        // here) so they stay overridable; only the call-specific
+                        // JUNIT_OUTPUT is passed inline.
                         // try/finally so the log + JUnit report are archived on test
                         // failures too.
                         //
@@ -935,8 +937,6 @@ def cmake_build(Map conf=[:]){
                         def junitFile = "junit_${sanitizedJobName}_${env.BUILD_NUMBER}_${arch_name}_smarttest.xml"
                         try {
                             sh """
-                                BUILD_DIR=\$(pwd) \\
-                                CTEST_PARALLEL=4 \\
                                 JUNIT_OUTPUT=${junitFile} \\
                                 bash ../script/dependency-parser/smart_test.sh
                             """
