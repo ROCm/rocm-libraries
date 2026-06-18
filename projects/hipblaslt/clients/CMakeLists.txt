@@ -133,6 +133,29 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+        target_compile_definitions(hipblaslt-test PRIVATE ROCBLASLT_INTERNAL_API)
+        # For coverage testing, link against hipblaslt's object files to access internal symbols
+        # This ensures we test the real library code, not stubs
+        target_link_libraries(hipblaslt-test PRIVATE
+            $<TARGET_OBJECTS:hipblaslt>
+            tensilelite::tensilelite-host
+            ${CMAKE_DL_LIBS}
+        )
+        # Add roctracer if HIPBLASLT_ENABLE_MARKER is enabled
+        if(HIPBLASLT_ENABLE_MARKER)
+            target_link_libraries(hipblaslt-test PRIVATE ${rocTracer})
+        endif()
+        # Add msgpack if not using YAML
+        if(NOT HIPBLASLT_ENABLE_YAML)
+            target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+        endif()
+        # Add rocroller dependencies if enabled
+        if(HIPBLASLT_ENABLE_ROCROLLER)
+            target_link_libraries(hipblaslt-test PRIVATE
+                $<TARGET_OBJECTS:hipblaslt-rocroller>
+                rocroller
+            )
+        endif()
     endif()
 
     add_subdirectory(tests)
