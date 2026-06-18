@@ -82,6 +82,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_sell.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp
+    test_spsm_csr_reuse_descr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
     test_spvec_descr.cpp
@@ -165,6 +166,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_spmv_sell.yaml
     cuda/12.8/test_spsm_coo.yaml
     cuda/12.8/test_spsm_csr.yaml
+    cuda/12.8/test_spsm_csr_reuse_descr.yaml
     cuda/12.8/test_spsv_coo.yaml
     cuda/12.8/test_spsv_csr.yaml
     cuda/12.8/test_spvv.yaml)

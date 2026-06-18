@@ -127,6 +127,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
 )
 
