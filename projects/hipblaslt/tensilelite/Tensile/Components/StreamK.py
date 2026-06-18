@@ -4017,8 +4017,6 @@ class StreamKHybrid(StreamK):
 # feature flags without an instantiated KernelWriter.
 _STREAMK_VARIANT_BY_INT = {
     0: StreamKOff,
-    1: StreamKBasic,
-    2: StreamKTwoTileOriginal,
     3: StreamKTwoTileDPFirst,
     4: StreamKDynamic,
     5: StreamKHybrid,
