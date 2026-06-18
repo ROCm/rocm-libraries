@@ -135,6 +135,15 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
         {
             static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
             static constexpr index_t kK      = MmaOp::kK;
+
+            // This value is the size of the middle K dimension, or equivalent the second-fastest
+            // changing K dimension of the layout unmerge operations. This value probably should
+            // never be used with AttrNumAccess.
+            static constexpr index_t kABKLane = MmaOp::kK / MmaOp::kABKPerLane / AttrNumAccessAV;
+            static constexpr index_t kCM1PerLane =
+                MmaOp::kCMPerLane / MmaOp::kCMNumAccess; // Tentative
+            static constexpr index_t kN = MmaOp::kN;     // Tentative
+            static constexpr index_t kM = MmaOp::kM;     // Tentative
         };
     };
 
