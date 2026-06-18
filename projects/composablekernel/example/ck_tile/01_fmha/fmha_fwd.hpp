@@ -208,9 +208,11 @@ struct FmhaFwdTypeConfig<FmhaFwdMxFp4>
     using LSEDataType           = float; // data type for lse(logsumexp L_j = max_j + log(l_j))
     using SaccDataType          = float; // data type for first gemm accumulation
     using SMPLComputeDataType   = float; // data type for reduction, softmax
-    using PDataType             = ck_tile::pk_fp4_t; // data type for A matrix of second gemm
-    using OaccDataType          = float;             // data type for second gemm accumulation
-    using ODataType             = float;
+    using PDataType =
+        ck_tile::pk_fp6x16_t; // data type for A matrix of second gemm (pk_fp4_t or pk_fp6x16_t, use
+                              // pk_fp6x16_t for higher precision for free)
+    using OaccDataType = float; // data type for second gemm accumulation
+    using ODataType    = float;
 
     using QScaleDataType = ck_tile::e8m0_t;
     using KScaleDataType = ck_tile::e8m0_t;
@@ -874,7 +876,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.q_descale_ptr,
                                          args.k_descale_ptr,
                                          args.v_descale_ptr,
-                                         nullptr, // lse_ptr
+                                         args.lse_ptr,
                                          args.o_ptr,
                                          args.seqstart_q_ptr,
                                          args.seqstart_k_ptr,
@@ -893,7 +895,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.nhead_stride_q,
                                          args.nhead_stride_k,
                                          args.nhead_stride_v,
-                                         0, // nhead_stride_lse
+                                         args.nhead_stride_lse,
                                          args.nhead_stride_o,
                                          args.window_size_left,
                                          args.window_size_right,
@@ -910,7 +912,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.q_descale_ptr,
                                          args.k_descale_ptr,
                                          args.v_descale_ptr,
-                                         nullptr, // lse_ptr
+                                         args.lse_ptr,
                                          args.o_ptr,
                                          args.seqlen_q,
                                          args.seqlen_k,
@@ -927,12 +929,12 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.nhead_stride_q,
                                          args.nhead_stride_k,
                                          args.nhead_stride_v,
-                                         0, // nhead_stride_lse
+                                         args.nhead_stride_lse,
                                          args.nhead_stride_o,
                                          args.batch_stride_q,
                                          args.batch_stride_k,
                                          args.batch_stride_v,
-                                         0, // batch_stride_lse
+                                         args.batch_stride_lse,
                                          args.batch_stride_o,
                                          args.window_size_left,
                                          args.window_size_right,

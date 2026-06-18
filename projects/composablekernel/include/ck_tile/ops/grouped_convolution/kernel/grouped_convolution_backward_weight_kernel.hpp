@@ -35,6 +35,15 @@ struct is_streamk_partitioner<StreamKTilePartitioner<Shape, S, P>> : std::true_t
 {
 };
 
+template <typename T>
+struct is_compute_v6_pipeline : std::false_type
+{
+};
+template <typename Problem, typename Policy>
+struct is_compute_v6_pipeline<GemmPipelineAgBgCrCompV6<Problem, Policy>> : std::true_type
+{
+};
+
 template <typename... Args>
 CK_TILE_HOST void LogInfo(Args&&... args) noexcept
 {
@@ -447,15 +456,19 @@ struct GroupedConvolutionBackwardWeightKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // Wavelet pipelines launch extra load waves (LaunchBlockSize > BlockSize); others use
+    // BlockSize. See GroupedConvLaunchBlockSize in grouped_convolution_utils.hpp.
+    static constexpr index_t kBlockSize = GroupedConvLaunchBlockSize<GemmPipeline>;
 
     using OutDataType = remove_cvref_t<typename GemmPipeline::ADataType>;
     using InDataType  = remove_cvref_t<typename GemmPipeline::BDataType>;
     using DsDataType  = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
     using WeiDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
-    static constexpr bool IsSplitKSupported = true;
-    static constexpr bool IsStreamK         = is_streamk_partitioner<TilePartitioner>::value;
+    static constexpr bool LargeTensors        = GemmPipeline::LargeTensors;
+    static constexpr bool IsSplitKSupported   = true;
+    static constexpr bool IsStreamK           = is_streamk_partitioner<TilePartitioner>::value;
+    static constexpr bool IsComputeV6Pipeline = is_compute_v6_pipeline<GemmPipeline>::value;
 
     using GroupedConvBwdWeightKernelArgsSpecialized =
         std::conditional_t<IsStreamK,
@@ -677,6 +690,30 @@ struct GroupedConvolutionBackwardWeightKernel
             return false;
         }
 
+        // V6 pipeline requires num_loop >= PrefetchStages + 1 = 4
+        // Otherwise it produces incorrect results (num_loop=1) or is just inefficient (num_loop=2
+        // or 3).
+        if constexpr(IsComputeV6Pipeline)
+        {
+            const index_t num_loop =
+                integer_divide_ceil(kargs.GemmK, kargs.k_batch * TilePartitioner::KPerBlock);
+            constexpr int num_loop_threashold = GemmPipeline_::PrefetchStages + 1;
+            if(num_loop < num_loop_threashold)
+            {
+                LogInfo("For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= ",
+                        num_loop_threashold,
+                        ". Now GemmK is ",
+                        kargs.GemmK,
+                        ", k_batch is ",
+                        kargs.k_batch,
+                        ", KPerBlock is ",
+                        number<TilePartitioner::KPerBlock>{},
+                        ", num_loop is ",
+                        num_loop);
+                return false;
+            }
+        }
+
         if constexpr(!std::is_same_v<typename EpiloguePipeline::ODataType, float> &&
                      !std::is_same_v<typename EpiloguePipeline::ODataType, double>)
         {
@@ -889,17 +926,21 @@ struct GroupedConvolutionBackwardWeightKernel
                      const index_t block_idx_m,
                      const index_t block_idx_n)
     {
-        const auto& c_tensor_view =
-            make_tensor_view<address_space_enum::global, DstInMemOp>(c_ptr, kargs.c_grid_desc_m_n);
+        const auto& c_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     DstInMemOp,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     LargeTensors>(c_ptr, kargs.c_grid_desc_m_n);
 
-        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
-        // Add padding for not contiguous dim due to the lack of OOB check
-        // Not needed from gfx950.
+        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add.
+        // Add padding for not contiguous dim due to the lack of OOB check.
+        // On gfx950, the bf16 atomic_add-specific padding is not needed, but LargeTensors
+        // still require padding.
 #if defined(__gfx950__)
-        constexpr bool pad_not_contiguous_dim = false;
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
 #else
         constexpr bool pad_not_contiguous_dim =
-            std::is_same_v<WeiDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
+            LargeTensors || (std::is_same_v<WeiDataType, bf16_t> &&
+                             DstInMemOp == memory_operation_enum::atomic_add);
 #endif
         const auto& c_pad_view = pad_tensor_view(
             c_tensor_view,
@@ -918,6 +959,8 @@ struct GroupedConvolutionBackwardWeightKernel
                       const index_t block_idx_m,
                       const index_t block_idx_n)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
                 static_assert(std::is_same_v<std::tuple_element_t<i, DsLayout>, OutLayout>,
@@ -927,8 +970,11 @@ struct GroupedConvolutionBackwardWeightKernel
                 static_assert(std::is_same_v<std::tuple_element_t<i, DsDataType>, WeiDataType>,
                               "Not supported!");
 
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<WeiDataType*>(ds_ptr[i]), kargs.c_grid_desc_m_n);
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::coherence_default,
+                                        LargeTensors>(static_cast<WeiDataType*>(ds_ptr[i]),
+                                                      kargs.c_grid_desc_m_n);
             },
             number<NumDTensor>{});
 
@@ -937,7 +983,7 @@ struct GroupedConvolutionBackwardWeightKernel
                 return pad_tensor_view(ds_tensor_view[i],
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, true>{});
+                                       sequence<pad_not_contiguous_dim, true>{});
             },
             number<NumDTensor>{});
 
@@ -957,15 +1003,19 @@ struct GroupedConvolutionBackwardWeightKernel
                      const index_t block_idx_n,
                      const index_t block_idx_k)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
-        const auto& b_tensor_view =
-            make_tensor_view<address_space_enum::global>(b_ptr, kargs.b_grid_desc_k_n);
+        const auto& b_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     memory_operation_enum::set,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     LargeTensors>(b_ptr, kargs.b_grid_desc_k_n);
 
         const auto& b_pad_view =
             pad_tensor_view(b_tensor_view,
                             make_tuple(number<TilePartitioner::KPerBlock>{} * kargs.k_batch,
                                        number<TilePartitioner::NPerBlock>{}),
-                            sequence<false, true>{});
+                            sequence<pad_not_contiguous_dim, true>{});
 
         return make_tile_window(
             b_pad_view,
@@ -979,15 +1029,19 @@ struct GroupedConvolutionBackwardWeightKernel
                      const index_t block_idx_m,
                      const index_t block_idx_k)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
-        const auto& a_tensor_view =
-            make_tensor_view<address_space_enum::global>(a_ptr, kargs.a_grid_desc_k_m);
+        const auto& a_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     memory_operation_enum::set,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     LargeTensors>(a_ptr, kargs.a_grid_desc_k_m);
 
         const auto& a_pad_view =
             pad_tensor_view(a_tensor_view,
                             make_tuple(number<TilePartitioner::KPerBlock>{} * kargs.k_batch,
                                        number<TilePartitioner::MPerBlock>{}),
-                            sequence<false, true>{});
+                            sequence<pad_not_contiguous_dim, true>{});
 
         return make_tile_window(
             a_pad_view,
@@ -1027,25 +1081,27 @@ struct GroupedConvolutionBackwardWeightKernel
         const auto& c_block_tile = GemmPipeline{}.template operator()(
             a_block_window, b_block_window, num_loop, smem_ptr_0);
 
-        // Run Epilogue Pipeline with k_batch dispatching
-        if(kargs.k_batch == 1)
-        {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
-                c_ptr, kargs, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
-        }
-        else
-        {
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+        // Run the epilogue with split-K dispatch, wrapped for wavelet load/math waves.
+        RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+            if(kargs.k_batch == 1)
             {
-                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
                     c_ptr, kargs, block_idx_m, block_idx_n);
 
                 EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
             }
-        }
+            else
+            {
+                if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                               is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                        c_ptr, kargs, block_idx_m, block_idx_n);
+
+                    EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
+            }
+        });
     }
 
     CK_TILE_DEVICE void CallExplicitGemm(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
@@ -1086,6 +1142,9 @@ struct GroupedConvolutionBackwardWeightKernel
             "Currently supported: gfx90a, gfx942, gfx950.");
 
         __shared__ char smem_ptr[GetSmemSize()];
+
+        // Group offset (blockIdx.y = group batch index)
+        const auto blockIdX       = amd_wave_read_first_lane(blockIdx.x);
         const index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
 
         StreamKDispatch(
@@ -1128,7 +1187,8 @@ struct GroupedConvolutionBackwardWeightKernel
                                static_cast<const InDataType*>(kargs.in_ptr),
                                static_cast<WeiDataType*>(kargs.wei_ptr),
                                smem_ptr);
-            });
+            },
+            blockIdX);
     }
 
     /// @brief Stream-K loop: iterate over assigned K-iterations, run GEMM pipeline,
@@ -1308,6 +1368,7 @@ struct GroupedConvolutionBackwardWeightKernel
     {
         if constexpr(IsStreamK)
         {
+#if !defined(__gfx1250__)
             if constexpr(GemmPipeline_::Async)
             {
 #if defined(__gfx950__)
@@ -1318,6 +1379,7 @@ struct GroupedConvolutionBackwardWeightKernel
             {
                 RunStreamK(kargs);
             }
+#endif
         }
         else if constexpr(GroupedConvTraitsType_::ExplicitGemm)
         {

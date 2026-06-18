@@ -25,10 +25,6 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
 
-"project: fusilli-provider":
-- changed-files:
-  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
-
 "project: hipdnn-integration-tests":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
@@ -79,6 +75,10 @@
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
+"project: rocalution":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocalution/**/*'
+
 "project: rocblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'
@@ -107,6 +107,10 @@
 "project: rocthrust":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
+
+"project: rpp":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rpp/**/*'
 
 "shared: mxdatagenerator":
 - changed-files:

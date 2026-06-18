@@ -15,6 +15,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -26,7 +32,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.4.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.4.1" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -59,6 +65,7 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
+option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -248,16 +255,17 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
-    # Re-enable once origami is available in TheRock.
-    # if(HIPBLASLT_ENABLE_THEROCK)
-    #     find_package(origami REQUIRED)
-    if(FALSE)
-    else()
-        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(origami CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::origami)
         block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_INSTALL OFF)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+            set(ORIGAMI_ENABLE_FETCH ON)
+            set(ORIGAMI_BUILD_TESTING OFF)
+            set(ORIGAMI_ENABLE_PYTHON OFF)
+            set(BUILD_TESTING OFF)
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
         endblock()
     endif()
 endif()
@@ -768,4 +776,24 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
+endif()
+
+if(HIPBLASLT_VALIDATE_INSTALL)
+    set(_hipblaslt_validate_py "${Python_EXECUTABLE}")
+    if(NOT _hipblaslt_validate_py)
+        set(_hipblaslt_validate_py python3)
+    endif()
+    install(CODE "
+        set(_root \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}\")
+        message(STATUS \"hipBLASLt: validating install tree at \${_root}\")
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/validate_library_layout.py\" \"\${_root}\"
+            RESULT_VARIABLE _layout_rc)
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_dat_integrity.py\" \"\${_root}/lib/hipblaslt/library\"
+            RESULT_VARIABLE _dat_rc)
+        if(NOT _layout_rc EQUAL 0 OR NOT _dat_rc EQUAL 0)
+            message(FATAL_ERROR \"hipBLASLt post-install validation failed (layout=\${_layout_rc} dat=\${_dat_rc})\")
+        endif()
+    ")
 endif()

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -636,17 +636,18 @@ public:
         this->set(block_id, lookback_scan_prefix_flag::complete, value);
     }
 
-    /// \brief This device function queries the value and the flag of the given prefix.
+    /// \brief This device function queries the value of the given prefix, given a known flag.
     ///
     /// \param [in] block_id the index of the prefix to be queried.
-    /// \param [out] flag the flag of the prefix.
+    /// \param [in] flag the flag of the prefix.
     /// \param [out] value the value of the prefix.
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
+    void get_value_with_known_flag(const unsigned int              block_id,
+                                   const lookback_scan_prefix_flag flag,
+                                   T&                              value)
     {
         const unsigned int padding = ::rocprim::arch::wavefront::size();
 
-        flag = this->get_flag(block_id);
 #if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
         rocprim::detail::atomic_fence_acquire_order_only();
 
@@ -667,6 +668,19 @@ public:
                                                        : prefixes_complete_values);
         value              = values[padding + block_id];
 #endif
+    }
+
+    /// \brief This device function queries the value and the flag of the given prefix.
+    ///
+    /// \param [in] block_id the index of the prefix to be queried.
+    /// \param [out] flag the flag of the prefix.
+    /// \param [out] value the value of the prefix.
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void get(const unsigned int block_id, lookback_scan_prefix_flag& flag, T& value)
+    {
+        flag = this->get_flag(block_id);
+
+        this->get_value_with_known_flag(block_id, flag, value);
     }
 
     /// \brief This device function queries the value of the given prefix. It should only be called after all the blocks/prefixes are complete.
@@ -767,7 +781,7 @@ public:
         }
 
         T block_prefix;
-        this->get(lookback_block_id, flag, block_prefix);
+        this->get_value_with_known_flag(lookback_block_id, flag, block_prefix);
 
         // Now just sum all these values to get the prefix
         // Note that the values are striped across the threads.
@@ -803,7 +817,8 @@ private:
 
         lookback_scan_prefix_flag flag = static_cast<lookback_scan_prefix_flag>(
             ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
-        while(flag == lookback_scan_prefix_flag::empty)
+
+        while(::rocprim::detail::warp_any(flag == lookback_scan_prefix_flag::empty))
         {
             if(UseSleep)
             {

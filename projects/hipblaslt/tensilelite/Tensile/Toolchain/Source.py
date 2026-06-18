@@ -46,6 +46,28 @@ def makeSourceToolchain(compiler_path, bundler_path, asan_build=False, build_id_
    return SourceToolchain(compiler, bundler)
 
 
+def _archNamesFromBundlerTarget(rawArch: str):
+    """Split a bundler arch token into (filenameArch, baseArch).
+
+    The bundler emits gcn arch tokens of the form ``gfx942:sramecc+:xnack+``.
+    Per-base layout requires:
+
+      * The directory uses only the base arch (`gfx942`) so every target-feature
+        variant co-locates in one subdir. Splitting at the first ':' is the
+        single source of truth — callers that strip with `split("-xnack")[0]`
+        AFTER ':' -> '-' conversion leave `gfx942-sramecc+` as the directory
+        and silently place files in the wrong subdir.
+      * The filename keeps the full feature set so xnack+/xnack- code objects
+        don't collide, with ':' rewritten to '-' for filesystem safety.
+
+    Returns ``(filenameArch, baseArch)`` — both extracted from the same source
+    token so they cannot drift apart.
+    """
+    baseArch     = rawArch.split(":", 1)[0]
+    filenameArch = re.sub(":", "-", rawArch)
+    return filenameArch, baseArch
+
+
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
     """Generates a code object file path using the target, base, and build path.
 
@@ -75,7 +97,7 @@ def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Pa
 def buildSourceCodeObjectFiles(
         compiler: Compiler,
         bundler: Bundler,
-        destDir: Union[Path, str],
+        destRoot: Union[Path, str],
         tmpObjDir: Union[Path, str],
         includeDir: Union[Path, str],
         kernelPath: Union[Path, str],
@@ -85,7 +107,9 @@ def buildSourceCodeObjectFiles(
 
     Args:
         toolchain: The source toolchain.
-        destDir: The destination directory where HSA code object files are placed.
+        destRoot: The library/ root directory. Per-arch outputs are written to
+            destRoot/<base-arch>/; target features (xnack+/xnack-) are stripped
+            from the directory path and survive only in the filename suffix.
         tmpObjDir: The directory where HIP source object files are created.
         includeDir: The include directory path.
         kernelPath: The path to the kernel source file.
@@ -98,7 +122,7 @@ def buildSourceCodeObjectFiles(
 
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
-        destDir = Path(ensurePath(destDir))
+        destRoot = Path(ensurePath(destRoot))
         kernelPath = Path(kernelPath)
 
         objFilename = kernelPath.stem + '.o'
@@ -107,8 +131,9 @@ def buildSourceCodeObjectFiles(
 
     # Try to restore pre-built code objects from the helper-kernel cache.
     # On a hit we skip compilation/unbundling entirely and return early.
+    # The cache restore routes each file to its per-base subdir under destRoot.
     with timing_context("python_kernel_build_src_co.cache_check"):
-        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destDir)
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot)
     if hit:
         stop = timer()
         print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
@@ -122,11 +147,12 @@ def buildSourceCodeObjectFiles(
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)
           if match:
-            arch = re.sub(":", "-", match.group())
+            arch, baseArch = _archNamesFromBundlerTarget(match.group())
             coPathRaw = _computeSourceCodeObjectFilename(target, kernelPath.stem, tmpObjDir, arch)
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
+            destDir = Path(ensurePath(destRoot / baseArch))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)
