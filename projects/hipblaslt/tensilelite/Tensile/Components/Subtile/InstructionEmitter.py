@@ -549,11 +549,19 @@ class InstructionEmitter:
             # corrupts the v_mfma_scale operand bypass and double-zeros
             # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
             #
-            # Only skip the data K-mask for multi-DU MX kernels; single-DU MX
-            # paths still emit it.
+            # Skip the data K-mask for the MX paths that the gfx950 corruption
+            # actually hits: all multi-DU MX kernels, and all 8-bit-float MX
+            # (MXFP8) kernels regardless of unroll depth. GPU-validated on
+            # gfx950 (full-element, K%MIK!=0 tails): single-DU MXFP8 fails with
+            # the mask and passes without it, while MXFP4 (4-bit) passes either
+            # way -- so single-DU MXFP4 keeps the mask and stays develop-
+            # identical, but single-DU MXFP8 must skip it like multi-DU does.
             _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
                                    or self.config.numUnroll.get('B', 1) > 1)
-            if not (self.hasScale and _emit_mask_multi_du):
+            _data_is_8bit_float = kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+            _skip_data_kmask = self.hasScale and (_emit_mask_multi_du
+                                                  or _data_is_8bit_float)
+            if not _skip_data_kmask:
                 for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
                                               ("B", bIds, self.vgprTilesB)):
                     for tid in ids:
