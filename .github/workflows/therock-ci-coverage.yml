@@ -119,6 +119,9 @@ jobs:
           # Version-matched coverage tooling, so the report job does not depend on the dist.
           cp -av "${LLVM_BIN}/llvm-profdata" "${STAGE}/bin/"
           cp -av "${LLVM_BIN}/llvm-cov" "${STAGE}/bin/"
+          # The llvm tools are dynamically linked against libLLVM; stage it next to
+          # them so the report job can run them via LD_LIBRARY_PATH.
+          find "${DIST}" -type f -name 'libLLVM.so*' -exec cp -av {} "${STAGE}/bin/" \;
           echo "Staged coverage objects:"
           ls -lR "${STAGE}"
 
@@ -187,30 +190,35 @@ jobs:
     name: Coverage Report (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
     needs: [therock-coverage-test]
     if: ${{ !cancelled() && needs.therock-coverage-test.result != 'skipped' }}
-    runs-on: ubuntu-24.04
-    env:
-      OBJECTS_DIR: ${{ github.workspace }}/coverage-objects
-      PROFRAW_DIR: ${{ github.workspace }}/coverage-profraw
-      REPORT_DIR: ${{ github.workspace }}/coverage-report
+    runs-on: azure-linux-scale-rocm
+    # Run in the build container so the staged llvm tools (and libLLVM) have a
+    # compatible base environment.
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
     steps:
       - name: Download coverage objects and llvm tools
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: coverage-objects-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
-          path: ${{ env.OBJECTS_DIR }}
+          path: coverage-objects
 
       - name: Download coverage profraw artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: coverage-profraw-${{ inputs.amdgpu_families }}-*
-          path: ${{ env.PROFRAW_DIR }}
+          path: coverage-profraw
           merge-multiple: true
 
       - name: Merge profraw and generate coverage report
         run: |
           set -euo pipefail
+          OBJECTS_DIR="${GITHUB_WORKSPACE}/coverage-objects"
+          PROFRAW_DIR="${GITHUB_WORKSPACE}/coverage-profraw"
+          REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
           mkdir -p "${REPORT_DIR}"
           chmod +x "${OBJECTS_DIR}/bin/llvm-profdata" "${OBJECTS_DIR}/bin/llvm-cov"
+          # The llvm tools are dynamically linked against the staged libLLVM.so.
+          export LD_LIBRARY_PATH="${OBJECTS_DIR}/bin:${LD_LIBRARY_PATH:-}"
           LLVM_PROFDATA="${OBJECTS_DIR}/bin/llvm-profdata"
           LLVM_COV="${OBJECTS_DIR}/bin/llvm-cov"
           LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
@@ -242,5 +250,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-report-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
-          path: ${{ env.REPORT_DIR }}
+          path: coverage-report
           if-no-files-found: warn
