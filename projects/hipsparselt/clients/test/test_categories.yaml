@@ -66,6 +66,29 @@ test_categories:
       - "weekly"
       - "full"
 
+  ffm_quick:
+    description: "Smoke - same as Jenkins smoke (timeout: 2 hours)"
+    test_patterns:
+      - "*smoke*"
+    exclude:
+      - "*known_bug*"
+      - "*spmm*"
+    labels:
+      - "ffm"
+      - "ffm_quick"
+      - "ffm_full"
+
+  ffm_full:
+    description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
+    test_patterns:
+      - "*HMM*"
+    exclude:
+      - "*known_bug*"
+      - "*spmm*"
+    labels:
+      - "ffm"
+      - "ffm_full"
+
   spmm_quick:
     description: "Smoke - sparse kernel only (timeout: 5 mins)"
     test_patterns:
@@ -129,6 +152,29 @@ test_categories:
       - "spmm_stress"
       - "spmm_weekly"
       - "spmm_full"
+  
+  spmm_ffm_quick:
+    description: "Smoke - sparse kernel only (timeout: 5 mins)"
+    test_patterns:
+      - "*smoke*spmm*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "spmm"
+      - "ffm"
+      - "spmm_ffm_quick"
+      - "spmm_ffm_full"
+  
+  spmm_ffm_full:
+    description: "Stress / weekly - sparse kernel only (stress + HMM)"
+    test_patterns:
+      - "*HMM*spmm*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "spmm"
+      - "ffm"
+      - "spmm_ffm_full"
 
 # GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
 # exclude_gpu:
@@ -144,6 +190,8 @@ execution_settings:
     standard: 1800    # 30 mins (standard can take over an hour)
     comprehensive: 7200   # 2 hours
     full: 86400       # 24 hours
+    ffm_quick: 7200    # 2 hours
+    ffm_full: 7200    # 2 hours
     spmm_quick: 900    # 15 mins (spmm_quick suite can exceed 300s after ctest parallelism reduction)
     spmm_standard: 1800
     spmm_comprehensive: 7200
