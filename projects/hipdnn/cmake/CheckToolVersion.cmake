@@ -9,7 +9,7 @@ if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
 if(NOT EXPECTED_LLVM_VERSION)
-    set(EXPECTED_LLVM_VERSION "22")
+    set(EXPECTED_LLVM_VERSION "20")
 endif()
 
 # Allows using any tool when the found version doesn't match expected.
