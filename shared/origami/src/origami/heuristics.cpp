@@ -428,20 +428,33 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 3: Reject subtile kernels for small K (K < 512)
+  // HEURISTIC 3: Reject subtile kernels for small K with a large free dim
   // ========================================================================
-  // Subtile kernels are not competitive when the reduction dimension is small,
-  // so force their latency to the maximum (rank_configs drops max-latency
-  // configs) whenever the kernel uses the subtile implementation and K < 512.
+  // Subtile kernels are not competitive when the reduction dimension is small
+  // (K < 512) and either free dimension is large (M > 1024 or N > 1024). Force
+  // their latency to the maximum (rank_configs drops max-latency configs) in
+  // that regime.
+  //
+  // A single heuristic_key_t ANDs all of its fields, so the (M > 1024 OR
+  // N > 1024) condition is expressed as two entries: if either matches, the
+  // merged params set reject = true. (min_m = 1025 matches M > 1024.)
   {
-    heuristic_key_t key;
-    key.subtile = true;
-    key.max_k   = 511;  // matches K < 512
+    heuristic_params_t reject_params;
+    reject_params.reject = true;
 
-    heuristic_params_t params;
-    params.reject = true;
+    // K < 512 AND M > 1024
+    heuristic_key_t key_m;
+    key_m.subtile = true;
+    key_m.max_k   = 511;
+    key_m.min_m   = 1025;
+    add_entry(key_m, reject_params);
 
-    add_entry(key, params);
+    // K < 512 AND N > 1024
+    heuristic_key_t key_n;
+    key_n.subtile = true;
+    key_n.max_k   = 511;
+    key_n.min_n   = 1025;
+    add_entry(key_n, reject_params);
   }
 }
 
