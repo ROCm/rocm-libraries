@@ -162,7 +162,7 @@ inline void registerBundleTests()
             if(status.is_bad()
                || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
             {
-                throw std::runtime_error("Engine " + TestConfig::get().getEngineName()
+                throw std::runtime_error("Engine " + std::string(TestConfig::get().getEngineName())
                                          + " does not support this graph (" + graphSummary() + ")");
             }
             graph.set_preferred_engine_id_ext(targetEngineId);
