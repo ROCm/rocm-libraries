@@ -27,22 +27,7 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
         op_type = str(node.get("type", ""))
         name = str(node.get("name") or op_type)
 
-        if op_type == "LayernormAttributes":
-            if (
-                _node_uid(node, "mean_tensor_uid", ("outputs",), required=False)
-                is not None
-                or _node_uid(
-                    node, "inv_variance_tensor_uid", ("outputs",), required=False
-                )
-                is not None
-            ):
-                warnings.append(
-                    f"{name}: LayernormAttributes uses torch.nn.functional.layer_norm "
-                    "for y but computes requested mean/inv-variance outputs manually; "
-                    "PyTorch reference timing is not solely built-in PyTorch operator time."
-                )
-
-        elif op_type == "RMSNormAttributes":
+        if op_type == "RMSNormAttributes":
             reasons: List[str] = []
             if not hasattr(F, "rms_norm"):
                 reasons.append("torch.nn.functional.rms_norm is unavailable")

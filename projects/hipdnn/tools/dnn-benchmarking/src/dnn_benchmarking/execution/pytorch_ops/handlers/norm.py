@@ -198,30 +198,31 @@ def handle_layernorm(
         bias, normalized_shape, x, "Layernorm bias"
     )
 
-    y = F.layer_norm(
+    stat_shape = x.shape[: x.ndim - len(normalized_shape)] + (1,) * len(
+        normalized_shape
+    )
+    # Fused layernorm: a single op (dispatches to a native/MIOpen kernel on ROCm)
+    # returns (y, mean, rstd) so the saved statistics come from the primitive
+    # rather than separate hand-rolled mean/variance reductions.
+    out, mean, rstd = torch.ops.aten.native_layer_norm(
         x_float,
         normalized_shape,
-        weight=weight,
-        bias=bias_value,
-        eps=epsilon,
-    ).to(dtype=x.dtype)
-    _store_tensor_for_uid(tensors, graph_json, y_uid, y)
+        weight.to(torch.float32),
+        bias_value.to(torch.float32),
+        epsilon,
+    )
+    _store_tensor_for_uid(tensors, graph_json, y_uid, out.to(dtype=x.dtype))
 
-    reduce_dims = tuple(range(x.ndim - len(normalized_shape), x.ndim))
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
-    if mean_uid is not None or inv_uid is not None:
-        mean = x_float.mean(dim=reduce_dims, keepdim=True)
-        variance = x_float.var(dim=reduce_dims, unbiased=False, keepdim=True)
-        if mean_uid is not None:
-            _store_tensor_for_uid(tensors, graph_json, int(mean_uid), mean)
-        if inv_uid is not None:
-            _store_tensor_for_uid(
-                tensors,
-                graph_json,
-                int(inv_uid),
-                torch.rsqrt(variance + epsilon),
-            )
+    if mean_uid is not None:
+        _store_tensor_for_uid(
+            tensors, graph_json, int(mean_uid), mean.reshape(stat_shape)
+        )
+    if inv_uid is not None:
+        _store_tensor_for_uid(
+            tensors, graph_json, int(inv_uid), rstd.reshape(stat_shape)
+        )
 
 
 @register_handler("RMSNormAttributes")

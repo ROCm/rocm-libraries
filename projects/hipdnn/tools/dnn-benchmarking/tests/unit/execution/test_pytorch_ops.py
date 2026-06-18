@@ -852,9 +852,9 @@ class TestPyTorchOpsNewHandlers:
 
         warnings = pytorch_ops.get_reference_warnings(graph_json)
 
-        assert len(warnings) == 5
+        assert len(warnings) == 4
         assert all("not solely built-in PyTorch operator time" in w for w in warnings)
-        assert any("LayernormAttributes" in w for w in warnings)
+        assert not any("LayernormAttributes" in w for w in warnings)
         assert any("RMSNormBackwardAttributes" in w for w in warnings)
         assert any("MUL_NO_ZEROS" in w for w in warnings)
         assert any("AVGPOOL_EXCLUDE_PADDING" in w for w in warnings)
