@@ -88,6 +88,16 @@ inline unsigned long long get_total_system_memory(bool is_apu)
 // needed on APU systems where CPU and GPU share a single memory pool, making it
 // easy to exhaust memory with large test inputs.
 //
+// MemCheck is generally intended to be used in tests that loop over increasing test sizes,
+// where it's OK to bail out and still report test success if the test can't be run
+// for large test sizes.
+//
+// A reasonable rule-of-thumb is that if a test can allocate more than about ~100MB of
+// total host+device memory, it may be a good candidate for MemCheck.  We don't need
+// to MemCheck tests that don't allocate much memory because they are unlikely to fail
+// allocating memory and the additional checks just increases complexity and maintenance
+// unnecessarily.
+//
 // The alloc() functions are called before the actual memory allocation so the
 // code can gracefully handle an out-of-memory situation.
 //
