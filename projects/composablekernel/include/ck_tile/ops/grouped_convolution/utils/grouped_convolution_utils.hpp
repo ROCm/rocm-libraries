@@ -24,13 +24,6 @@ CK_TILE_HOST void LogInfo(Args&&... args) noexcept
     }
 }
 
-enum class GroupedConvDirection
-{
-    FORWARD,
-    BACKWARD_DATA,
-    BACKWARD_WEIGHT
-};
-
 // Wavelet pipeline support shared by all three grouped-conv directions. The wavelet GEMM
 // pipeline launches extra load-only waves (LaunchBlockSize > BlockSize) and splits the
 // workgroup into math waves (hold accumulators, run the epilogue) and load waves (run a
