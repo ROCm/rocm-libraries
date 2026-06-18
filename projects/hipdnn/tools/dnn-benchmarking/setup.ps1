@@ -12,15 +12,18 @@
 
     Parameters mirror setup.sh where they apply on Windows. setup.sh's venv
     management (--reuse-venv / --workspace) is omitted: this script installs into
-    an env you select rather than creating one. --torch-mode's rocm/cuda values
-    are omitted too (ROCm torch isn't available on Windows).
+    an env you select rather than creating one. --torch-mode's cuda value is
+    omitted too (no CUDA on a ROCm Windows box).
 
 .PARAMETER PythonExe
     Python interpreter to install into. Default: the active venv, else 'python' on
     PATH. Recommended: the ROCm wheel env's python (rocm_sdk + _rocm_sdk_devel).
 
 .PARAMETER TorchMode
-    How torch is provided (setup.sh --torch-mode, Windows subset). Default: cpu.
+    How torch is provided (setup.sh --torch-mode, Windows subset). Default: rocm.
+      rocm:     install the ROCm torch nightly for -GpuArch (from -TorchIndexUrl,
+                else https://rocm.nightlies.amd.com/v2/<GpuArch>/). Only archs with
+                published Windows wheels work (e.g. gfx1151; gfx1150 has none).
       cpu:      install CPU-only torch (from -TorchIndexUrl or the PyTorch CPU index).
       existing: reuse torch already installed in the env (error if absent).
       none:     leave torch uninstalled.
@@ -42,7 +45,7 @@
 
 .PARAMETER GpuArch
     GPU architecture to build for, i.e. GPU_TARGETS (setup.sh --gpu-arch).
-    Default: gfx1150.
+    Default: gfx1151 (matches wheel_build_setup.ps1).
 
 .PARAMETER Force
     Clean reconfigure: wipe build dirs before -ForceBuild, and rewrite the .pth.
@@ -55,17 +58,20 @@
 
 .EXAMPLE
     pwsh ./setup.ps1 -TorchMode existing
+
+.EXAMPLE
+    pwsh ./setup.ps1 -TorchMode rocm -GpuArch gfx1151
 #>
 [CmdletBinding()]
 param(
     [string]$PythonExe,
-    [ValidateSet('cpu', 'existing', 'none')]
-    [string]$TorchMode = 'cpu',
+    [ValidateSet('rocm', 'cpu', 'existing', 'none')]
+    [string]$TorchMode = 'rocm',
     [string]$TorchIndexUrl,
     [switch]$ForceBuild,
     [string]$RocmPrefix,
     [string]$InstallDir,
-    [string]$GpuArch = 'gfx1150',
+    [string]$GpuArch = 'gfx1151',
     [switch]$Force
 )
 
@@ -124,22 +130,28 @@ function New-CMakeStages {
 }
 
 function Get-TorchMode {
-    # Mirror setup.sh get_torch_mode: rocm / cuda / cpu / missing.
+    # Mirror setup.sh get_torch_mode: rocm / cuda / cpu / missing. `import torch`
+    # from a ROCm wheel with no visible GPU can print SDK probe warnings to
+    # stdout, which this captures, so emit the mode on its own final line and read
+    # only that last line (the leading newline guards a warning lacking one).
     $code = @'
 try:
     import torch
 except Exception:
-    print("missing")
+    mode = "missing"
 else:
     if getattr(torch.version, "hip", None):
-        print("rocm")
+        mode = "rocm"
     elif getattr(torch.version, "cuda", None):
-        print("cuda")
+        mode = "cuda"
     else:
-        print("cpu")
+        mode = "cpu"
+print("\n" + mode)
 '@
-    $mode = (& $Python -c $code 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $mode) { return 'missing' }
+    $out = @(& $Python -c $code 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $out.Count -eq 0) { return 'missing' }
+    $mode = $out | Select-Object -Last 1
+    if (-not $mode) { return 'missing' }
     return $mode.Trim()
 }
 
@@ -319,6 +331,15 @@ if ($ForceBuild) {
     $pythonFwd  = Fwd $Python
     $installFwd = Fwd $InstallDir
 
+    # Hand the GPU arch to the HIP device-code builds explicitly: the wheel SDK
+    # ships no rocm_agent_enumerator/offload-arch on PATH and the build may run
+    # with no GPU, so HIP can't autodetect the offload target. -GpuArch is the
+    # single source of truth, passed below as -DGPU_TARGETS/-DAMDGPU_TARGETS;
+    # export PYTORCH_ROCM_ARCH too as belt-and-suspenders for any torch HIP
+    # extension compile (none today — the bindings are nanobind host code).
+    # Don't override a caller-set value.
+    if (-not $env:PYTORCH_ROCM_ARCH) { $env:PYTORCH_ROCM_ARCH = $GpuArch }
+
     # hipDNN: configure -> build -> install (Python bindings included).
     $hipdnnArgs = @(
         '-GNinja'
@@ -330,6 +351,7 @@ if ($ForceBuild) {
         "-DROCM_PATH=`"$wheelFwd`""
         "-DPython_EXECUTABLE=`"$pythonFwd`""
         "-DGPU_TARGETS=$GpuArch"
+        "-DAMDGPU_TARGETS=$GpuArch"
         '-DENABLE_CLANG_FORMAT=OFF'
         '-DHIPDNN_SKIP_TESTS=ON'
         '-DHIPDNN_BUILD_PYTHON_BINDINGS=ON'
@@ -349,6 +371,7 @@ if ($ForceBuild) {
             "-DROCM_CMAKE_PATH=`"$wheelFwd`""
             "-DROCM_PATH=`"$wheelFwd`""
             "-DGPU_TARGETS=$GpuArch"
+            "-DAMDGPU_TARGETS=$GpuArch"
             '-DMIOPENPROVIDER_SKIP_TESTS=ON'
             # clang-format/-tidy are required-by-default dev lints that hard-fail
             # configure when the tools aren't on PATH; off for an artifact build.
@@ -433,6 +456,27 @@ Invoke-Native $Python @('-m', 'pip', 'install', '-e', $ScriptDir)
 
 $installedTorch = Get-TorchMode
 switch ($TorchMode) {
+    'rocm' {
+        if ($installedTorch -eq 'rocm') {
+            Write-Step "Torch mode 'rocm': ROCm torch already present; leaving as-is."
+        }
+        elseif ($installedTorch -ne 'missing') {
+            throw ("-TorchMode rocm requested, but the env already has '$installedTorch' torch. " +
+                   "Use a clean env (or -TorchMode existing) before switching torch modes.")
+        }
+        else {
+            $idx = if ($TorchIndexUrl) { $TorchIndexUrl } else { "https://rocm.nightlies.amd.com/v2/$GpuArch/" }
+            Write-Step "Installing ROCm PyTorch ($GpuArch) from $idx"
+            # ROCm nightlies are pre-release, so --pre lets pip select them; raise
+            # the socket timeout/retries for the large wheel on a slow link.
+            Invoke-Native $Python @('-m', 'pip', 'install', '--pre', 'torch',
+                '--index-url', $idx, '--timeout', '120', '--retries', '10')
+            if ((Get-TorchMode) -ne 'rocm') {
+                Write-Warn ("Installed torch is not ROCm-enabled. $GpuArch may have no Windows torch " +
+                            "wheel in the nightlies index; check the index or pass -TorchIndexUrl.")
+            }
+        }
+    }
     'none' {
         Write-Step "Torch mode 'none': leaving torch uninstalled."
     }
