@@ -259,48 +259,55 @@ TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
     EXPECT_THROW(hipdnn_test_sdk::utilities::loadGraphAndTensors(it->jsonPath), std::exception);
 }
 
-// The harness uses graphJsonParses() to distinguish a malformed bundle (FAIL)
-// from absent tensor data (SKIP). It must return false only for genuinely
-// unparseable JSON, regardless of whether .bin files are present.
-TEST_F(TestBundleDiscoveryFixture, GraphJsonParsesRejectsMalformedAcceptsValid)
+// The harness uses checkBundlePreload().graphJsonParses to distinguish a
+// malformed bundle (FAIL) from absent tensor data (SKIP). It must be false only
+// for genuinely unparseable JSON, regardless of whether .bin files are present.
+TEST_F(TestBundleDiscoveryFixture, PreloadCheckGraphJsonParsesRejectsMalformedAcceptsValid)
 {
     auto dir = _tempDir / "bundle";
     std::filesystem::create_directories(dir);
 
     const auto goodPath = dir / "good.json";
     std::ofstream(goodPath) << R"({"tensors": []})";
-    EXPECT_TRUE(graphJsonParses(goodPath));
+    EXPECT_TRUE(checkBundlePreload(goodPath).graphJsonParses);
 
     const auto badPath = dir / "bad.json";
     std::ofstream(badPath) << "{{NOT VALID JSON AT ALL";
-    EXPECT_FALSE(graphJsonParses(badPath));
+    EXPECT_FALSE(checkBundlePreload(badPath).graphJsonParses);
 
-    EXPECT_FALSE(graphJsonParses(dir / "does_not_exist.json"));
+    EXPECT_FALSE(checkBundlePreload(dir / "does_not_exist.json").graphJsonParses);
 }
 
-// tensorDataPresent() drives the SKIP decision: true only when every tensor's
-// companion .bin exists. A valid graph with no .bin files (DVC not pulled) must
-// return false so the harness skips rather than fails.
-TEST_F(TestBundleDiscoveryFixture, TensorDataPresentDetectsMissingBinFiles)
+// checkBundlePreload().tensorDataPresent drives the SKIP decision: true only
+// when every tensor's companion .bin exists. A valid graph with no .bin files
+// (DVC not pulled) must be false so the harness skips rather than fails.
+TEST_F(TestBundleDiscoveryFixture, PreloadCheckTensorDataPresentDetectsMissingBinFiles)
 {
     auto dir = _tempDir / "bundle";
     std::filesystem::create_directories(dir);
     const auto jsonPath = dir / "b.json";
     std::ofstream(jsonPath) << R"({"tensors": [{"uid": 0}, {"uid": 1}]})";
 
-    // No .bin files yet -> data not present.
-    EXPECT_FALSE(tensorDataPresent(jsonPath));
+    // No .bin files yet -> data not present (but JSON still parses).
+    {
+        const auto check = checkBundlePreload(jsonPath);
+        EXPECT_TRUE(check.graphJsonParses);
+        EXPECT_FALSE(check.tensorDataPresent);
+    }
 
     // Only one of two blobs present -> still not present.
     std::ofstream(dir / "b.tensor0.bin") << "x";
-    EXPECT_FALSE(tensorDataPresent(jsonPath));
+    EXPECT_FALSE(checkBundlePreload(jsonPath).tensorDataPresent);
 
     // Both blobs present -> data present.
     std::ofstream(dir / "b.tensor1.bin") << "y";
-    EXPECT_TRUE(tensorDataPresent(jsonPath));
+    EXPECT_TRUE(checkBundlePreload(jsonPath).tensorDataPresent);
 }
 
-TEST_F(TestBundleDiscoveryFixture, LoadIntegrationTestBundlePopulatesAllFields)
+// loadIntegrationTestBundle() must fully populate the bundle from disk: every
+// tensor loaded, the single output tensor's data captured as golden reference,
+// and metadata left empty when no .meta.json companion exists.
+TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesAllFields)
 {
     auto dir = _tempDir / "op" / "loadtest";
     createLoadableBundle(dir, "loadtest");
@@ -314,15 +321,39 @@ TEST_F(TestBundleDiscoveryFixture, LoadIntegrationTestBundlePopulatesAllFields)
     EXPECT_EQ(bundle.graphAndTensors.outputTensorUids.size(), 1u);
     EXPECT_EQ(bundle.graphAndTensors.outputTensorUids.front(), 5);
 
-    // goldenOutputs should hold the original data for the output tensor.
-    EXPECT_EQ(bundle.goldenOutputs.size(), 1u);
-    EXPECT_NE(bundle.goldenOutputs.find(5), bundle.goldenOutputs.end());
+    // goldenOutputs is present (this bundle has an output tensor) and holds the
+    // original data for that output tensor.
+    ASSERT_TRUE(bundle.goldenOutputs.has_value());
+    EXPECT_EQ(bundle.goldenOutputs->size(), 1u);
+    EXPECT_NE(bundle.goldenOutputs->find(5), bundle.goldenOutputs->end());
 
     // metadata is optional — this bundle has no .meta.json so it should be empty.
     EXPECT_FALSE(bundle.metadata.has_value());
 }
 
-TEST_F(TestBundleDiscoveryFixture, LoadIntegrationTestBundleThrowsOnMissingBin)
+// When a .meta.json companion is present, loadIntegrationTestBundle() must
+// surface it via the optional metadata field.
+TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
+{
+    auto dir = _tempDir / "op" / "withmeta";
+    createLoadableBundle(dir, "withmeta");
+    std::ofstream(dir / "withmeta.meta.json")
+        << R"({"format_version": 1, "operation": "BatchnormInference", "seed": 42})";
+    const auto jsonPath = dir / "withmeta.json";
+
+    auto bundle = loadIntegrationTestBundle(jsonPath);
+
+    ASSERT_TRUE(bundle.metadata.has_value());
+    EXPECT_EQ(bundle.metadata->operation, "BatchnormInference");
+    ASSERT_TRUE(bundle.metadata->seed.has_value());
+    EXPECT_EQ(*bundle.metadata->seed, 42);
+}
+
+// loadIntegrationTestBundle() is the happy-path loader: it must throw when a
+// tensor's .bin blob is absent rather than returning a partial bundle. The
+// harness relies on this (guarded by checkBundlePreload) to turn missing DVC
+// data into a SKIP.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleThrowsOnMissingBin)
 {
     auto dir = _tempDir / "op" / "nobin";
     createMinimalBundle(dir, "nobin");

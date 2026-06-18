@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +14,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
@@ -98,9 +98,8 @@ inline void registerBundleTests()
     auto dataDir = resolveDataDir();
     if(!std::filesystem::exists(dataDir))
     {
-        std::cerr << "Warning: --allow-bundles enabled but data directory "
-                     "does not exist: "
-                  << dataDir << '\n';
+        HIPDNN_PLUGIN_LOG_WARN(
+            "--allow-bundles enabled but data directory does not exist: " << dataDir);
         return;
     }
 
@@ -111,13 +110,13 @@ inline void registerBundleTests()
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Error during bundle discovery: " << e.what() << '\n';
+        HIPDNN_PLUGIN_LOG_ERROR("Error during bundle discovery: " << e.what());
         throw;
     }
 
     if(bundles.empty())
     {
-        std::cerr << "Warning: --allow-bundles enabled but no bundles found in " << dataDir << '\n';
+        HIPDNN_PLUGIN_LOG_WARN("--allow-bundles enabled but no bundles found in " << dataDir);
         return;
     }
 
@@ -146,14 +145,25 @@ inline void registerBundleTests()
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
 
+        // "Unsupported graph" is signalled by throwing, not GTEST_SKIP(): this
+        // lambda runs inside TestBody (via the harness' _executeFunc), where a
+        // GTEST_SKIP() would only return from the lambda and let the comparison
+        // proceed against zeroed outputs. The harness catches this and issues the
+        // real skip. We include the engine context the executor knows; the
+        // harness adds the bundle path on its side.
+        const auto graphSummary = [&] {
+            return std::to_string(gat.outputTensorUids.size()) + " output tensor(s), "
+                   + std::to_string(engineIds.size()) + " ranked engine(s)";
+        };
+
         if(TestConfig::get().hasEngineName())
         {
             int64_t targetEngineId = TestConfig::get().getEngineId();
             if(status.is_bad()
                || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
             {
-                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
-                             << " does not support this graph";
+                throw std::runtime_error("Engine " + TestConfig::get().getEngineName()
+                                         + " does not support this graph (" + graphSummary() + ")");
             }
             graph.set_preferred_engine_id_ext(targetEngineId);
         }
@@ -161,7 +171,7 @@ inline void registerBundleTests()
         {
             if(status.is_bad() || engineIds.empty())
             {
-                GTEST_SKIP() << "No engine supports this graph";
+                throw std::runtime_error("No engine supports this graph (" + graphSummary() + ")");
             }
         }
 
@@ -197,8 +207,8 @@ inline void registerBundleTests()
     detail::registerBundlesForMode(bundles, "GpuRef", gpuExecutor, true);
     detail::registerBundlesForMode(bundles, "Engine", engineExecutor, true);
 
-    std::cout << "Registered " << bundles.size()
-              << " bundle(s) across CpuRef, GpuRef, and Engine runners\n";
+    HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size()
+                                         << " bundle(s) across CpuRef, GpuRef, and Engine runners");
 }
 
 } // namespace hipdnn_integration_tests::golden

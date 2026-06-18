@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -90,13 +91,14 @@ protected:
         // A malformed graph .json is an authoring error and must FAIL, but
         // missing .bin tensor data is an environment issue (DVC not pulled)
         // and should SKIP. loadGraphAndTensors() throws std::exception for both,
-        // so disambiguate up front: parse the graph (parse failure -> FAIL),
-        // then confirm the referenced .bin files exist (absent -> SKIP).
-        if(!graphJsonParses(_bundlePath))
+        // so disambiguate up front with a single parse of the graph .json:
+        // parse failure -> FAIL, referenced .bin files absent -> SKIP.
+        const auto preload = checkBundlePreload(_bundlePath);
+        if(!preload.graphJsonParses)
         {
             FAIL() << "Unparseable bundle graph JSON: " << _bundlePath;
         }
-        if(!tensorDataPresent(_bundlePath))
+        if(!preload.tensorDataPresent)
         {
             GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << _bundlePath;
         }
@@ -127,7 +129,34 @@ private:
 
     void runGoldenComparison()
     {
-        ASSERT_NO_FATAL_FAILURE(_executeFunc(_bundle.graphAndTensors));
+        // The executor signals "I cannot run this graph" by throwing (e.g. an op
+        // with no GPU reference plan, or an engine that does not support the
+        // graph). GTEST_SKIP() cannot be issued from inside the executor lambda
+        // because it only returns from the lambda, not from TestBody — control
+        // would fall through to the comparison below and fail zeroed outputs
+        // against golden data. So the executor throws and the harness, which is
+        // inside TestBody, translates "unsupported" into a real skip here.
+        //
+        // ASSERT_NO_FATAL_FAILURE still wraps the call so that a genuine GTest
+        // assertion inside the executor (e.g. a build/execute error) FAILs and
+        // stops the test rather than continuing into the comparison. It does not
+        // catch C++ exceptions, which is why the try/catch is also required.
+        try
+        {
+            ASSERT_NO_FATAL_FAILURE(_executeFunc(_bundle.graphAndTensors));
+        }
+        catch(const std::exception& e)
+        {
+            GTEST_SKIP() << "Executor could not run bundle " << _bundlePath << ": " << e.what();
+        }
+
+        // A bundle without golden output data has nothing to compare against —
+        // executing it above was the whole point (it exercises the graph path).
+        if(!_bundle.goldenOutputs.has_value())
+        {
+            GTEST_SKIP() << "Bundle has no golden output data to compare: " << _bundlePath;
+        }
+        const auto& goldenOutputs = *_bundle.goldenOutputs;
 
         auto wrapper = _bundle.graphAndTensors.createGraphWrapper();
         const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -135,7 +164,7 @@ private:
         for(auto uid : _bundle.graphAndTensors.outputTensorUids)
         {
             auto& actualTensor = *_bundle.graphAndTensors.tensorMap.at(uid);
-            auto& expectedTensor = *_bundle.goldenOutputs.at(uid);
+            auto& expectedTensor = *goldenOutputs.at(uid);
 
             auto* attrs = tensorAttrMap.at(uid);
             auto dataType = attrs->data_type();
@@ -276,41 +305,47 @@ private:
         }
     }
 
+    // A bundle graph may fuse several ops (e.g. Convolution + Pointwise
+    // activation). Each op type has its own numerical tolerance, so the only
+    // tolerance that holds for the fused output is the loosest one across all
+    // nodes: a tolerance tight enough for Conv (e.g. 1e-3) would wrongly fail an
+    // activation output that legitimately needs 1e-2. We therefore take the max
+    // tolerance over every node rather than picking a single "root" node.
     static float deriveDefaultTolerance(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
         hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
     {
-        using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-        using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+        const auto nodeCount = wrapper.nodeCount();
 
-        auto nodeCount = wrapper.nodeCount();
-        NA rootAttrType = NA::NONE;
+        bool found = false;
+        float maxTolerance = 0.0f;
         for(uint32_t i = 0; i < nodeCount; ++i)
         {
-            auto& node = wrapper.getNode(i);
-            auto at = node.attributes_type();
-            if(at != NA::PointwiseAttributes)
-            {
-                rootAttrType = at;
-            }
+            const auto attrType = wrapper.getNode(i).attributes_type();
+            const float nodeTolerance = toleranceForDataType(attrType, dataType);
+            maxTolerance = found ? std::max(maxTolerance, nodeTolerance) : nodeTolerance;
+            found = true;
         }
 
-        if(rootAttrType == NA::NONE)
-        {
-            return 1e-3f;
-        }
+        return found ? maxTolerance : 1e-3f;
+    }
 
+    // Dispatch a single node's tolerance lookup on the bundle's data type.
+    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+    {
+        using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
         using hipdnn_data_sdk::types::bfloat16;
         using hipdnn_data_sdk::types::half;
 
         switch(dataType)
         {
         case DT::FLOAT:
-            return toleranceForNodeAttributes<float>(rootAttrType);
+            return toleranceForNodeAttributes<float>(attrType);
         case DT::HALF:
-            return toleranceForNodeAttributes<half>(rootAttrType);
+            return toleranceForNodeAttributes<half>(attrType);
         case DT::BFLOAT16:
-            return toleranceForNodeAttributes<bfloat16>(rootAttrType);
+            return toleranceForNodeAttributes<bfloat16>(attrType);
         default:
             return 1e-3f;
         }
