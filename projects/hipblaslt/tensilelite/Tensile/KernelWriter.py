@@ -6229,19 +6229,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        # Main-loop pointer swaps can leave LROs in the Blk half. Reset before
-        # tail MACs for every scheduler; localReadResetOffsets is empty for
-        # 1LDSBuffer / DirectToVgpr cases.
-        module.addComment1("Tail: local read reset offsets a")
-        module.add(self.localReadResetOffsets(kernel, tensorParametersA))
-        if kernel["ProblemType"]["MXBlockA"]:
-          module.addComment1("Tail: local read reset offsets mxsa")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.addComment1("Tail: local read reset offsets mxsb")
-          module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
-        module.addComment1("Tail: local read reset offsets b")
-        module.add(self.localReadResetOffsets(kernel, tensorParametersB))
+        # Main-loop pointer swaps can leave LROs in the Blk half. SIA0 non-TDM
+        # also needs this reset before tail MACs, but SIA0 TDM tail descriptors
+        # already select the correct LDS bank and clearing the LRO Blk bit here
+        # regresses those kernels.
+        if (kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"] or
+            not (kernel["enableTDMA"] and kernel["enableTDMB"])):
+          module.addComment1("Tail: local read reset offsets a")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersA))
+          if kernel["ProblemType"]["MXBlockA"]:
+            module.addComment1("Tail: local read reset offsets mxsa")
+            module.add(self.localReadResetOffsets(kernel, tensorParametersA["MX"]))
+          if kernel["ProblemType"]["MXBlockB"]:
+            module.addComment1("Tail: local read reset offsets mxsb")
+            module.add(self.localReadResetOffsets(kernel, tensorParametersB["MX"]))
+          module.addComment1("Tail: local read reset offsets b")
+          module.add(self.localReadResetOffsets(kernel, tensorParametersB))
 
         module.addComment1("Tail: local read init pointers a")
         module.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
