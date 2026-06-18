@@ -93,7 +93,7 @@ public:
     return *(begin() + i);
   }
 
-  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(head_flags, iterator);
+  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(head_flags, iterator)
 
 private:
   iterator m_begin;
