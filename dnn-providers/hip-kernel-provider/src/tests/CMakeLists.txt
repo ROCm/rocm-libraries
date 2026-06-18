@@ -68,6 +68,10 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(engines/hip_mlops_engine)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    add_subdirectory(engines/hip_flash2_engine)
+endif()
+
 clang_tidy_check(hip_kernel_provider_tests)
 
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
