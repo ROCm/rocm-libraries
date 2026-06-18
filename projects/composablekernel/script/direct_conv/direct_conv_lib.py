@@ -299,6 +299,30 @@ def filter_cases(
 # profiler
 # ===========================================================================
 
+# Some lines the profiler (or its native runtime) writes to stderr are benign
+# and must not be treated as a case failure. The classic offender is the
+# OpenMP / ROCr thread-affinity setup racing against thread teardown, which
+# prints "pthread_setaffinity_np failed: No such process" (ESRCH) -- the kernel
+# still ran and verified fine. Extend this list with other known-benign noise.
+_BENIGN_STDERR_RES = [
+    re.compile(r"pthread_setaffinity_np\s+failed", re.IGNORECASE),
+]
+
+
+def filter_stderr(stderr: str) -> str:
+    """Drop known-benign runtime noise from ``stderr``.
+
+    Returns the stderr text with lines matching any ``_BENIGN_STDERR_RES``
+    pattern removed (and surrounding blank lines trimmed). A run is only
+    considered failed when real diagnostics remain after this filtering.
+    """
+    kept = [
+        ln for ln in stderr.splitlines()
+        if not any(rx.search(ln) for rx in _BENIGN_STDERR_RES)
+    ]
+    return "\n".join(kept).strip()
+
+
 def run_profiler(
     bin_path: Path, binary: str, args: str, timeout: float | None = None
 ) -> tuple[str, str, int]:
@@ -468,7 +492,9 @@ def run_case(bin_path: Path, case: Case, verbose: bool = False) -> Result:
         print(f"  $ ckProfiler {case.binary} {case.args}")
 
     stdout, stderr, returncode = run_profiler(bin_path, case.binary, case.args)
-    stderr = stderr.strip()
+    # Drop known-benign runtime noise (e.g. the pthread_setaffinity_np ESRCH
+    # warning) so it does not get mistaken for a verification failure below.
+    stderr = filter_stderr(stderr)
     name, avg_time, tflops, gb_s = parse_best_perf(stdout)
     failed = parse_failed_instances(stdout)
 
@@ -640,8 +666,11 @@ def direct_conv_status(
          "applicable instance(s) present but failed verification".
       2. No [Valid] direct conv line in stdout -> no applicable instance.
       3. Otherwise -> OK.
+
+    Known-benign runtime noise (e.g. the pthread_setaffinity_np ESRCH warning)
+    is stripped first so it is not misread as a verification failure.
     """
-    if stderr.strip():
+    if filter_stderr(stderr):
         return DirectConvStatus.INCORRECT
     if dc_tflops is None:
         return DirectConvStatus.NO_INSTANCE
