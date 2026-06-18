@@ -87,13 +87,19 @@ def old_gen_dir(stem: str) -> Path:
 
 
 def build_old_so(stem: str) -> Path | None:
-    """Compile old TE's generated kernel header into a bridge-loadable .so."""
+    """Compile old TE's generated kernel header into a bridge-loadable .so.
+
+    Cached: if the .so already exists it is reused, so a parallel --build-only
+    pre-pass (CPU-bound hipcc) can be separated from the serial GPU measurement.
+    """
     hdr = old_gen_dir(stem) / f"gemm_universal_single_{stem}.hpp"
     if not hdr.exists():
         return None
     OUT.mkdir(parents=True, exist_ok=True)
     obj = OUT / f"{stem}.o"
     lib = OUT / f"libold_{stem}.so"
+    if lib.exists():
+        return lib
     common = [
         "-fPIC", "-O3",
         f"-I{DISP / 'include'}", f"-I{ROOT / 'include'}", f"-I{ROOT}", f"-I{GEN}",
@@ -136,6 +142,41 @@ def meas(so: Path, M: int, N: int, K: int) -> float | None:
     return statistics.median(samples) if samples else None
 
 
+def meas_all(so: Path) -> dict:
+    """Median TFLOPS per shape from REPEATS *batched* worker calls.
+
+    One worker call measures ALL shapes (5x fewer python+numpy+CDLL startups
+    than per-shape meas()), which is the throughput lever for a full sweep on a
+    single GPU. Returns {shape_str: tflops|None}."""
+    out = {f"{M}x{N}x{K}": None for (M, N, K) in SHAPES}
+    if not so or not Path(so).exists():
+        return out
+    items = [{"so_path": str(so), "problem": {"M": M, "N": N, "K": K},
+              "kernel_name": "x"} for (M, N, K) in SHAPES]
+    payload = json.dumps({"items": items, "verify": False})
+    env = os.environ.copy()
+    env["HIP_VISIBLE_DEVICES"] = DEVICE
+    env["GEMM_PYPATH"] = PYPATH
+    samples = {s: [] for s in out}
+    for _ in range(REPEATS):
+        p = subprocess.run([sys.executable, str(WORKER)], input=payload.encode(),
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           env=env, timeout=900)
+        for line in p.stdout.decode().splitlines():
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            idx = d.get("idx")
+            if isinstance(idx, int) and 0 <= idx < len(SHAPES) and d.get("ok"):
+                M, N, K = SHAPES[idx]
+                samples[f"{M}x{N}x{K}"].append(d["tflops"])
+    for s, xs in samples.items():
+        if xs:
+            out[s] = statistics.median(xs)
+    return out
+
+
 def pipeline_of(stem: str) -> str:
     for p in ("compv3", "compv4", "mem"):
         if f"_{p}_" in stem:
@@ -148,6 +189,11 @@ def main():
     ap.add_argument("stems", nargs="*", help="kernel stems to A/B")
     ap.add_argument("--stems-file", help="file with one stem per line")
     ap.add_argument("--csv", help="write results to CSV (resume-aware)")
+    ap.add_argument("--build-only", action="store_true",
+                    help="parallel-compile old-TE .so for all stems, then exit "
+                         "(CPU pre-pass; GPU measurement reuses the cache)")
+    ap.add_argument("--jobs", type=int, default=min(os.cpu_count() or 8, 16),
+                    help="parallel compile jobs for --build-only")
     args = ap.parse_args()
 
     stems = list(args.stems)
@@ -155,6 +201,33 @@ def main():
         stems += [l.strip() for l in Path(args.stems_file).read_text().splitlines()
                   if l.strip()]
     stems = stems or DEFAULT_STEMS
+
+    # Parallel CPU pre-compile of every old-TE .so (no GPU touched).
+    if args.build_only:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        ok = miss = fail = 0
+        print(f"build-only: {len(stems)} stems, jobs={args.jobs}", flush=True)
+        with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+            futs = {ex.submit(build_old_so, s): s for s in stems}
+            for i, fut in enumerate(as_completed(futs), 1):
+                try:
+                    r = fut.result()
+                except Exception:
+                    r = None
+                s = futs[fut]
+                if r is None:
+                    # distinguish "no header" from "compile failed"
+                    if (old_gen_dir(s) / f"gemm_universal_single_{s}.hpp").exists():
+                        fail += 1
+                    else:
+                        miss += 1
+                else:
+                    ok += 1
+                if i % 100 == 0:
+                    print(f"  [{i}/{len(stems)}] ok={ok} no_header={miss} fail={fail}",
+                          flush=True)
+        print(f"build-only DONE: ok={ok} no_header={miss} fail={fail}", flush=True)
+        return
 
     # CSV sweep mode: same columns as the (now-corrected) sweep, resume-aware.
     if args.csv:
@@ -182,10 +255,13 @@ def main():
                 dtype, layout = parts[0], parts[1]
                 old_so = build_old_so(stem)
                 br_so = BR_SO_DIR / f"libgemm_{stem}.so"
+                # Batched: one worker call per side covers all shapes.
+                bridge = meas_all(br_so)
+                old = meas_all(old_so) if old_so else {}
                 for (M, N, K) in todo:
                     shape = f"{M}x{N}x{K}"
-                    b = meas(br_so, M, N, K)
-                    o = meas(old_so, M, N, K) if old_so else None
+                    b = bridge.get(shape)
+                    o = old.get(shape)
                     gap = (b - o) / o * 100 if (b and o) else float("nan")
                     w.writerow(dict(
                         stem=stem, pipeline=pipeline_of(stem), dtype=dtype,
