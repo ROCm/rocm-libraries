@@ -22,13 +22,6 @@ Typical usage
       --train training.parquet \\
       --analytics --dry-run [--analytics-out shape_report.csv]
 
-  # Constrain generation to specific subsets regardless of OOF error
-  python3 generate_targeted_shapes_conv.py \\
-      --oof   oof_predictions.parquet \\
-      --train training.parquet \\
-      --out   shapes.csv \\
-      --force-subsets "N=2" "N=2,grouped"
-
   # Dry run: print subset analysis only, do not write files
   python3 generate_targeted_shapes_conv.py \\
       --oof   oof_predictions.parquet \\
@@ -114,7 +107,7 @@ def _efficiency(pred_tflops, actual_tflops):
 
 
 def _build_per_shape(oof_df: pd.DataFrame) -> pd.DataFrame:
-    """Return one row per shape: oracle_tflops, pred_best_tflops, efficiency, subset labels."""
+    """Return one row per shape: oracle_tflops, actual_tflops_of_pred_best, efficiency, subset labels."""
     df = oof_df.copy()
     df["oracle_tflops"] = df.groupby(SHAPE_COLS)["tflops"].transform("max")
     df["pred_rank"] = df.groupby(SHAPE_COLS)["oof_pred_tflops"].rank(
@@ -176,14 +169,14 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
     print("\n=== Worst 20 Shapes ===")
     worst = per_shape.head(20)
     print(worst[SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency"]]
-          .rename(columns={"tflops": "pred_best_tflops"})
+          .rename(columns={"tflops": "actual_tflops_of_pred_best"})
           .to_string(index=False))
 
     if analytics_out is not None:
         out_cols = SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency",
                                   "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"]
         analytics_out.parent.mkdir(parents=True, exist_ok=True)
-        per_shape[out_cols].rename(columns={"tflops": "pred_best_tflops"}).to_csv(
+        per_shape[out_cols].rename(columns={"tflops": "actual_tflops_of_pred_best"}).to_csv(
             analytics_out, index=False
         )
         print(f"\nPer-shape analysis written to {analytics_out}")
@@ -193,14 +186,16 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
 # Shape validity + GEMM dimension check
 # ---------------------------------------------------------------------------
 
-def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw) -> bool:
+def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw, dilation_h: int = 1, dilation_w: int = 1) -> bool:
     if C % G != 0 or K % G != 0:
         return False
     # Per-group channel counts must be 8-aligned.
     if (C // G) % 8 != 0 or (K // G) % 8 != 0:
         return False
-    Ho = (Hi + 2 * ph - Y) // sh + 1
-    Wo = (Wi + 2 * pw - X) // sw + 1
+    eff_Y = (Y - 1) * dilation_h + 1
+    eff_X = (X - 1) * dilation_w + 1
+    Ho = (Hi + 2 * ph - eff_Y) // sh + 1
+    Wo = (Wi + 2 * pw - eff_X) // sw + 1
     if Ho < 1 or Wo < 1:
         return False
     # GEMM dims must all be >= MIN_TILE
@@ -213,19 +208,6 @@ def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw) -> bool:
 # ---------------------------------------------------------------------------
 # Targeted shape generator
 # ---------------------------------------------------------------------------
-
-def _parse_force_subset(token: str) -> dict:
-    """Parse a token like 'N=2' or 'N=2,grouped' into a predicate dict."""
-    pred = {}
-    for part in token.split(","):
-        part = part.strip()
-        if "=" in part:
-            k, v = part.split("=", 1)
-            pred[k.strip()] = v.strip()
-        else:
-            # bare word interpreted as group_type
-            pred["group_type"] = part
-    return pred
 
 
 def _matches_subset(N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt, filter_bkt,
@@ -395,13 +377,8 @@ def main():
                     help="Number of shard CSVs to write alongside all_shapes.csv (default: 32)")
     ap.add_argument("--threshold", type=float, default=0.90,
                     help="Mean efficiency below which a subset is targeted (default: 0.90)")
-    ap.add_argument("--force-subsets", nargs="*", default=[],
-                    metavar="PRED",
-                    help="Override threshold and always target these subsets. "
-                         "Format: 'N=2' or 'N=2,grouped' or 'spatial=small'. "
-                         "Multiple tokens allowed.")
     ap.add_argument("--density", type=int, default=1, choices=[1, 2, 3],
-                    help="Grid density multiplier (1=default, 2=denser, default: 1)")
+                    help="Grid density multiplier (1=default, 2+=denser grid, default: 1)")
     ap.add_argument("--target", type=int, default=None,
                     help="Maximum number of output shapes; stratified sampling "
                          "is applied when the generated pool exceeds this value")
@@ -456,14 +433,8 @@ def main():
             "filter":     r.filter_bkt,
         })
 
-    for token in args.force_subsets:
-        pred = _parse_force_subset(token)
-        targeted_subsets.append(pred)
-        print(f"  Force-targeting subset: {pred}", file=sys.stderr)
-
     if not targeted_subsets:
-        print("No subsets below threshold and no --force-subsets specified. "
-              "Nothing to generate.", file=sys.stderr)
+        print("No subsets below threshold. Nothing to generate.", file=sys.stderr)
         return
 
     print(f"\nTargeting {len(targeted_subsets)} subset(s):", file=sys.stderr)

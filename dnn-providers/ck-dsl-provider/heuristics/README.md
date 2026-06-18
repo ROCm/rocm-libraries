@@ -66,10 +66,30 @@ The decompressed `.lgbm` is excluded from git via `models/.gitignore`.
 
 ---
 
+## Validation
+
+After updating a model, spot-check heuristic quality against a held-out oracle
+sweep using `validate_ml_vs_oracle_conv.py`:
+
+```bash
+python3 $CK_HEURISTICS/validation/grouped_conv/validate_ml_vs_oracle_conv.py \
+    --model          $HEURISTICS/models/grouped_conv_forward_fp16_gfx942 \
+    --oracle-parquet $WORK/results/validation_sweep.parquet
+```
+
+The script compares the model's top-1 kernel choice against the empirically
+fastest kernel for each shape and reports mean/P10 efficiency.
+
+---
+
 ## Full retraining workflow (single machine)
 
 The steps below run entirely on one machine with a ROCm GPU. No cluster
 or Slurm required. All paths are relative to the repo root unless noted.
+
+Replace `gfx942` with `gfx90a` or `gfx950` throughout to retrain for a
+different architecture. The `--arch` flag controls hardware feature injection
+in `convert_dsl_csv_to_parquet.py` and the output directory name convention.
 
 Variables used throughout:
 
@@ -243,8 +263,8 @@ python3 $CK_HEURISTICS/generate_targeted_shapes_conv.py \
 
 This prints:
 - Global mean/P10/P50/P90 top-1 efficiency
-- Per-subset breakdown sorted worst-first (N × group_type × spatial × channel)
-- Worst 20 individual shapes
+- Per-subset breakdown sorted worst-first (N × group_type × spatial × channel × filter)
+- Worst 20 individual shapes; `actual_tflops_of_pred_best` is the measured tflops of the model's top-1 kernel choice (not the model's predicted tflops)
 
 **Target: mean ≥ 0.90 and P10 ≥ 0.75 across all subsets.**
 
@@ -285,7 +305,6 @@ Key flags:
 | `--target` | all | Cap on output shapes; stratified sampling preserves bucket diversity |
 | `--density` | 1 | `2` = denser grid (adds intermediate N/spatial/channel values) |
 | `--threshold` | 0.90 | Mean efficiency below which a subset is targeted |
-| `--force-subsets` | — | Always target named subsets, e.g. `"N=1,grouped"` `"spatial=large"` |
 | `--analytics` | off | Print global stats and worst 20 shapes |
 | `--dry-run` | off | Analyse only; do not write shape files |
 
