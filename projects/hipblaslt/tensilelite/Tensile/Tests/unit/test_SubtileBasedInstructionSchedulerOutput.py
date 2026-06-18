@@ -144,13 +144,12 @@ P0 subIterK=1:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] TextBlock
+  [i02] TextBlock
   [i02] VXorB32
-  [i02] VXorB32
-  [i03] TextBlock
   [i03] VXorB32
+  [i03] TextBlock
   [i04] VXorB32
-  [i04] lr
+  [i04] VXorB32
   [i05] lr
   [i05] lr
   [i06] lr
@@ -170,23 +169,23 @@ P0 subIterK=1:
   [i13] lr
   [i13] lr
   [i14] lr
-  [i14] m0
-  [i15] gr
-  [i16] m0
-  [i17] gr
-  [i18] m0
-  [i19] gr
-  [i19] SAddU32
-  [i20] SAddCU32
-  [i20] TextBlock
-  [i21] SXorB32
-  [i21] m0
-  [i22] gr
+  [i14] lr
+  [i15] m0
+  [i16] gr
+  [i17] m0
+  [i18] gr
+  [i19] m0
+  [i20] gr
+  [i20] SAddU32
+  [i21] SAddCU32
+  [i21] TextBlock
+  [i22] SXorB32
+  [i22] m0
+  [i23] gr
 P0 subIterK=2:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] lr
   [i02] lr
   [i02] lr
   [i03] lr
@@ -202,55 +201,55 @@ P0 subIterK=2:
   [i08] lr
   [i08] lr
   [i09] lr
-  [i09] m0
-  [i10] gr
-  [i11] m0
-  [i12] gr
-  [i13] m0
-  [i14] gr
-  [i15] m0
-  [i16] gr
-  [i17] m0
-  [i18] gr
-  [i19] m0
-  [i20] gr
-  [i21] m0
-  [i22] gr
-  [i22] SAddU32
-  [i23] SAddCU32
-  [i23] TextBlock
-  [i24] SXorB32
+  [i09] lr
+  [i10] m0
+  [i11] gr
+  [i12] m0
+  [i13] gr
+  [i14] m0
+  [i15] gr
+  [i16] m0
+  [i17] gr
+  [i18] m0
+  [i19] gr
+  [i20] m0
+  [i21] gr
+  [i22] m0
+  [i23] gr
+  [i23] SAddU32
+  [i24] SAddCU32
   [i24] TextBlock
-  [i25] m0
-  [i26] gr
-  [i26] TextBlock
-  [i27] SAddU32
-  [i27] SAddCU32
-  [i28] TextBlock
-  [i28] SXorB32
+  [i25] SXorB32
+  [i25] TextBlock
+  [i26] m0
+  [i27] gr
+  [i27] TextBlock
+  [i28] SAddU32
+  [i28] SAddCU32
   [i29] TextBlock
-  [i29] m0
-  [i30] gr
+  [i29] SXorB32
   [i30] TextBlock
-  [i31] SAddU32
-  [i31] SAddCU32
-  [i32] TextBlock
-  [i32] SXorB32
+  [i30] m0
+  [i31] gr
+  [i31] TextBlock
+  [i32] SAddU32
+  [i32] SAddCU32
+  [i33] TextBlock
+  [i33] SXorB32
 P0 subIterK=3:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] TextBlock
+  [i02] TextBlock
   [i02] VXorB32
-  [i02] VXorB32
-  [i03] TextBlock
   [i03] VXorB32
+  [i03] TextBlock
   [i04] VXorB32
-  [i04] TextBlock
-  [i05] VXorB32
+  [i04] VXorB32
   [i05] TextBlock
+  [i05] VXorB32
+  [i06] TextBlock
   [i06] VXorB32
-  [i06] lr
   [i07] lr
   [i07] lr
   [i08] lr
@@ -274,46 +273,47 @@ P0 subIterK=3:
   [i17] lr
   [i17] lr
   [i18] lr
-  [i18] m0
-  [i19] gr
-  [i20] m0
-  [i21] gr
-  [i22] m0
-  [i23] gr
-  [i24] m0
-  [i25] gr
-  [i26] m0
-  [i27] gr
-  [i28] m0
-  [i29] gr
-  [i30] m0
-  [i31] gr
-  [i32] m0
-  [i33] gr
-  [i33] SAddU32
-  [i34] SAddCU32
-  [i34] TextBlock
-  [i35] SXorB32
-  [i35] m0
-  [i36] gr
-  [i37] m0
-  [i38] gr
-  [i39] m0
-  [i40] gr
-  [i41] m0
-  [i42] gr
-  [i43] m0
-  [i44] gr
-  [i45] m0
-  [i46] gr
-  [i47] m0
-  [i48] gr
-  [i49] m0
-  [i50] gr
-  [i50] SAddU32
-  [i51] SAddCU32
-  [i51] TextBlock
-  [i52] SXorB32
+  [i18] lr
+  [i19] m0
+  [i20] gr
+  [i21] m0
+  [i22] gr
+  [i23] m0
+  [i24] gr
+  [i25] m0
+  [i26] gr
+  [i27] m0
+  [i28] gr
+  [i29] m0
+  [i30] gr
+  [i31] m0
+  [i32] gr
+  [i33] m0
+  [i34] gr
+  [i34] SAddU32
+  [i35] SAddCU32
+  [i35] TextBlock
+  [i36] SXorB32
+  [i36] m0
+  [i37] gr
+  [i38] m0
+  [i39] gr
+  [i40] m0
+  [i41] gr
+  [i42] m0
+  [i43] gr
+  [i44] m0
+  [i45] gr
+  [i46] m0
+  [i47] gr
+  [i48] m0
+  [i49] gr
+  [i50] m0
+  [i51] gr
+  [i51] SAddU32
+  [i52] SAddCU32
+  [i52] TextBlock
+  [i53] SXorB32
 """
 
 
@@ -433,9 +433,9 @@ P1 subIterK=0:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] lr
   [i02] lr
-  [i02] TextBlock
+  [i02] lr
+  [i03] TextBlock
   [i03] m0
   [i04] gr
   [i04] TextBlock
@@ -447,13 +447,13 @@ P1 subIterK=1:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] TextBlock
+  [i02] TextBlock
   [i02] VXorB32
-  [i02] VXorB32
-  [i03] lr
+  [i03] VXorB32
   [i03] lr
   [i04] lr
-  [i04] TextBlock
+  [i04] lr
+  [i05] TextBlock
   [i05] m0
   [i06] gr
   [i06] TextBlock
@@ -465,31 +465,30 @@ P1 subIterK=2:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] lr
   [i02] lr
-  [i02] m0
-  [i03] gr
-  [i04] m0
-  [i05] gr
-  [i05] SAddU32
-  [i06] SAddCU32
-  [i06] TextBlock
-  [i07] SXorB32
+  [i02] lr
+  [i03] m0
+  [i04] gr
+  [i05] m0
+  [i06] gr
+  [i06] SAddU32
+  [i07] SAddCU32
+  [i07] TextBlock
+  [i08] SXorB32
 P1 subIterK=3:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
   [i01] sync
-  [i01] TextBlock
+  [i02] TextBlock
   [i02] VXorB32
-  [i02] VXorB32
-  [i03] TextBlock
   [i03] VXorB32
+  [i03] TextBlock
   [i04] VXorB32
-  [i04] TextBlock
-  [i05] VXorB32
+  [i04] VXorB32
   [i05] TextBlock
+  [i05] VXorB32
+  [i06] TextBlock
   [i06] VXorB32
-  [i06] lr
   [i07] lr
   [i07] lr
   [i08] lr
@@ -506,6 +505,7 @@ P1 subIterK=3:
   [i13] lr
   [i14] lr
   [i14] lr
+  [i15] lr
   [i15] lr
   [i15] lr
   [i15] lr
