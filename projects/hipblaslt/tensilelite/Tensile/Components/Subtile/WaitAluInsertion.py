@@ -90,3 +90,23 @@ def insertLRSwapWaitAlu(module, writer, kernel):
     result.add(inst)
 
   return result
+
+
+def insertWmmaSrcWarWaitAlu(module, writer, kernel):
+  """Wait for WMMA source reads before a ds_load reloads the same VGPRs.
+
+  PGR=0 reuses one VGPR tile set every iteration, so the next ds_load can
+  overwrite tiles the previous WMMAs are still reading.  Expert scheduling mode
+  disables the hardware check that would catch this, so insert the wait before
+  each ds_load.  No-op unless expert scheduling mode is active.
+  """
+  if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    return module
+
+  result = Module(module.name)
+  for inst in module.flatitems():
+    if isinstance(inst, LocalReadInstruction):
+      result.add(SWaitAlu(vm_vsrc=0,
+                          comment="wait for WMMA src read before LDS reload (WAR)"))
+    result.add(inst)
+  return result
