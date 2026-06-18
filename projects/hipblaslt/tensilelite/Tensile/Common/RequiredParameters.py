@@ -43,6 +43,7 @@ def getRequiredParametersMin() -> set:
         'AssertSummationElementMultiple',
         'ClusterLocalRead',
         'ConvertAfterDS',
+        'CompactLoopStore',
         'DirectToVgprA',
         'DirectToVgprB',
         'DirectToVgprSparseMetadata',

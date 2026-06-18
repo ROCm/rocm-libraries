@@ -61,6 +61,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/BranchHelpersTest.cpp
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
+    unit/asm/MemTokenConsistencyCheckPassTest.cpp
 )
 
 # High-Level IR Tests
@@ -135,6 +136,23 @@ gtest_discover_tests(unit_tests
     TIMEOUT 60
     PROPERTIES LABELS "unit_tests"
 )
+
+# Static link-level guard for #8342: assert libstinkytofu has no DT_NEEDED on a
+# plugin. This is an ELF property that a runtime gtest cannot observe (a broken
+# libstinkytofu would fail to load before any test starts), so it is checked by
+# inspecting the built .so directly. Linux/ELF only and only meaningful for a
+# shared libstinkytofu.
+if(UNIX AND NOT APPLE AND BUILD_SHARED_LIBS AND CMAKE_READELF)
+    add_test(
+        NAME LibStinkytofuHasNoPluginDependency
+        COMMAND ${CMAKE_COMMAND}
+            -DLIB=$<TARGET_FILE:stinkytofu>
+            -DREADELF=${CMAKE_READELF}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNoPluginDependency.cmake
+    )
+    set_tests_properties(LibStinkytofuHasNoPluginDependency
+        PROPERTIES LABELS "unit_tests")
+endif()
 
 # =============================================================================
 # All Tests Target (convenience target to build all test executables)

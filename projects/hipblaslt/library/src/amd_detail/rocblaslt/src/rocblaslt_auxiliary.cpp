@@ -508,7 +508,9 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         swizzleA,
                                         swizzleB,
                                         batchMode,
-                                        bias_stride};
+                                        bias_stride,
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
 
     if(scaleAlphaVec)
     {
@@ -1421,18 +1423,24 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
-            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+            case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
                 if(sizeof(int32_t) <= sizeInBytes)
                 {
                     int32_t requested = 0;
                     memcpy(&requested, buf, sizeof(int32_t));
-                    // Treat any nonzero as "enable"; clamp to 0/1 for forward-compat.
-                    matmulDesc->dyn_persistent_tile_ext = (requested != 0) ? 1 : 0;
+                    if(requested < 0 || requested > 2)
+                    {
+                        log_error(__func__,
+                                  "invalid streamk_tile_scheduling_ext mode value",
+                                  requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->streamk_tile_scheduling_ext = requested;
                 }
                 else
                 {
                     log_error(__func__,
-                              "invalid dyn_persistent_tile_ext buf size",
+                              "invalid streamk_tile_scheduling_ext buf size",
                               sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
@@ -1762,17 +1770,17 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->sm_count_target, sizeof(int32_t));
                 break;
-            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+            case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);
                 if(sizeInBytes < sizeof(int32_t))
                 {
                     log_error(__func__,
-                              "invalid dyn_persistent_tile_ext buf size",
+                              "invalid streamk_tile_scheduling_ext buf size",
                               sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
-                memcpy(buf, &matmulDesc->dyn_persistent_tile_ext, sizeof(int32_t));
+                memcpy(buf, &matmulDesc->streamk_tile_scheduling_ext, sizeof(int32_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
@@ -2380,6 +2388,7 @@ rocblaslt_status
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
+                                     const int32_t          streamKTileSchedulingMode,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -2394,6 +2403,13 @@ rocblaslt_status
             __func__,
             "will be deprecated for groupedgemm in the future, please use get_all_algos instead");
     }
+    // Apply the GemmPreference-supplied StreamK tile scheduling mode onto
+    // every contraction problem currently carried by gemmData so the
+    // SK5 arg-pack and the heuristic-selection paths see the same
+    // mode value. applyStreamKTileSchedulingMode is defined in
+    // tensile_host.cpp (its body needs the TensileDataGemm /
+    // TensileDataGroupedGemm types).
+    applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
     rocblaslt_status status = rocblaslt_status_success;
     try
     {

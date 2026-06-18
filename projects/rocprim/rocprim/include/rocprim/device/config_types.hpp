@@ -733,8 +733,8 @@ template<class Config,
          template<class, class, class>
          class LaunchSelector,
          arch::wavefront::target TargetWaveSize = get_wavefront_size(Target::g)>
-ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
-void trampoline_kernel(Kernel kernel)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS((LaunchSelector<Config, Selector, Target>::block_size)) void
+    trampoline_kernel(Kernel kernel)
 {
     using TargetConfig = target_config<Config, Selector, Target, TargetWaveSize>;
 
