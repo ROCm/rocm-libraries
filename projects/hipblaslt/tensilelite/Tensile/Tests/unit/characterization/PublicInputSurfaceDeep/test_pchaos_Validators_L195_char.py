@@ -81,6 +81,7 @@ def test_real_function_nt_accepts_hipinfo(monkeypatch):
     assert supportedDeviceEnumerator("hipinfo") is True
 
 
+@pytest.mark.nt_path_simulation
 def test_real_function_nt_rejects_rocm_agent_enumerator(monkeypatch):
     """TRUE branch (os.name='nt'): supportedDeviceEnumerator returns False for 'rocm_agent_enumerator'.
 

@@ -243,6 +243,7 @@ def test_windows_with_extensions_nt(monkeypatch):
     assert files == ["amdclang++", "amdclang++.exe", "amdclang++.bat"]
 
 
+@pytest.mark.nt_path_simulation
 def test_supported_component_windows_branch(monkeypatch):
     monkeypatch.setattr(V.os, "name", "nt")
     monkeypatch.setenv("PATHEXT", ".EXE")
@@ -251,6 +252,7 @@ def test_supported_component_windows_branch(monkeypatch):
     assert V._supportedComponent("amdclang++.exe", ["amdclang++"]) is True
 
 
+@pytest.mark.nt_path_simulation
 def test_supported_device_enumerator_windows(monkeypatch):
     monkeypatch.setattr(V.os, "name", "nt")
     monkeypatch.setenv("PATHEXT", ".EXE")

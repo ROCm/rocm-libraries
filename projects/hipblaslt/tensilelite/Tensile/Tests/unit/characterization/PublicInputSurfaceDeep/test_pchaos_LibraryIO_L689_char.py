@@ -130,14 +130,19 @@ def test_true_branch_predicate_pure(monkeypatch):
 
 
 def test_true_branch_no_cu_no_gpu_raises(monkeypatch):
-    """TRUE branch (CU unset, no GPU): getCUCount raises SystemExit.
+    """TRUE branch (CU unset, rocminfo returns empty): getCUCount raises SystemExit.
 
-    When CU is absent, getCUCount calls rocminfo.  In a CPU-only container the
-    subprocess either returns empty output or fails, so the post-try guard at
-    line 701 fires and printExit raises SystemExit.  This pins the ACTUAL
-    observed behavior in the test environment.
+    When CU is absent, getCUCount calls rocminfo.  We stub subprocess.run to
+    return empty stdout (simulating a CPU-only environment), so the post-try
+    guard at line 701 fires and printExit raises SystemExit.
     """
+    import subprocess
+
+    class _FakeResult:
+        stdout = b""
+
     monkeypatch.delenv("CU", raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _FakeResult())
     getCUCount = _import_getCUCount()
     with pytest.raises(SystemExit):
         getCUCount()
