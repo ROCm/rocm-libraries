@@ -12,6 +12,7 @@ try:
     from .origami import (
         # Enums
         architecture_t,
+        gfx950_constants_profile,
         data_type_t,
         transpose_t,
         grid_selection_t,
@@ -101,6 +102,7 @@ __all__ = [
     "__version__",
     # Enums
     "architecture_t",
+    "gfx950_constants_profile",
     "data_type_t",
     "transpose_t",
     "grid_selection_t",

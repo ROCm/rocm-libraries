@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
@@ -31,6 +32,11 @@ NB_MODULE(origami, m) {
       .value("gfx1152", hardware_t::architecture_t::gfx1152)
       .value("gfx1153", hardware_t::architecture_t::gfx1153)
       .value("gfx1250", hardware_t::architecture_t::gfx1250)
+      .export_values();
+
+  nanobind::enum_<hardware_t::gfx950_constants_profile>(m, "gfx950_constants_profile")
+      .value("id75a0", hardware_t::gfx950_constants_profile::id75a0)
+      .value("id75a8", hardware_t::gfx950_constants_profile::id75a8)
       .export_values();
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
@@ -233,17 +239,33 @@ NB_MODULE(origami, m) {
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,                                 // N_CU
-                          size_t,                                 // lds_capacity
-                          size_t,                                 // rf_capacity
-                          size_t,                                 // NUM_XCD
-                          double,                                 // mem1_perf_ratio
-                          double,                                 // mem2_perf_ratio
-                          double,                                 // mem3_perf_ratio
-                          size_t,                                 // L2_capacity
-                          double,                                 // compute_clock_ghz
-                          size_t,                                 // parallel_mi_cu
-                          std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
+                          size_t,
+                          size_t,
+                          size_t,
+                          size_t,
+                          double,
+                          double,
+                          double,
+                          size_t,
+                          double,
+                          size_t,
+                          std::tuple<double, double, double>,
+                          std::optional<int>>(),
+           nanobind::arg("arch"),
+           nanobind::arg("N_CU"),
+           nanobind::arg("lds_capacity"),
+           nanobind::arg("rf_capacity"),
+           nanobind::arg("NUM_XCD"),
+           nanobind::arg("mem1_perf_ratio"),
+           nanobind::arg("mem2_perf_ratio"),
+           nanobind::arg("mem3_perf_ratio"),
+           nanobind::arg("L2_capacity"),
+           nanobind::arg("compute_clock_ghz"),
+           nanobind::arg("parallel_mi_cu"),
+           nanobind::arg("mem_bw_per_wg_coefficients"),
+           nanobind::arg("pci_chip_id") = nanobind::none(),
+           "Construct hardware from architecture and measured ratios. "
+           "pci_chip_id is optional (default None); Origami does not query HIP for it.")
       .def("print", &hardware_t::print)
       .def("get_valid_matrix_instructions",
            &hardware_t::get_valid_matrix_instructions,
@@ -262,22 +284,45 @@ NB_MODULE(origami, m) {
       .def_rw("compute_clock_ghz", &hardware_t::compute_clock_ghz)
       .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
       .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
-      .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
+      .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
+      .def_rw("pci_chip_id", &hardware_t::pci_chip_id);
 
   m.def("get_hardware_for_device",
-        static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),
-        "This gets a hardware object for a device.");
+        [](int device_id, std::optional<int> pci_chip_id) {
+          return hardware_t::get_hardware_for_device(device_id, pci_chip_id);
+        },
+        nanobind::arg("device_id"),
+        nanobind::arg("pci_chip_id") = nanobind::none(),
+        "This gets a hardware object for a device. Optional pci_chip_id (e.g. 0x75a8) "
+        "selects gfx950 memory-constant row; when omitted, defaults to id75a0 (no HIP PCI query).");
 
-  // Needs named arguments
-  m.def("get_hardware_for_arch",
-        &hardware_t::get_hardware_for_arch,
-        nanobind::arg("arch"),
-        nanobind::arg("N_CU"),
-        nanobind::arg("lds_capacity"),
-        nanobind::arg("rf_capacity"),
-        nanobind::arg("L2_capacity"),
-        nanobind::arg("compute_clock_khz"),
-        "Create hardware object for a specific architecture with specified parameters.");
+  // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
+  m.def(
+      "get_hardware_for_arch",
+      [](hardware_t::architecture_t arch,
+         size_t N_CU,
+         size_t lds_capacity,
+         size_t L2_capacity,
+         int compute_clock_khz,
+         std::optional<int> pci_chip_id) {
+        return hardware_t::get_hardware_for_arch(arch,
+                                                 N_CU,
+                                                 lds_capacity,
+                                                 rf_capacity,
+                                                 L2_capacity,
+                                                 compute_clock_khz,
+                                                 pci_chip_id);
+      },
+      nanobind::arg("arch"),
+      nanobind::arg("N_CU"),
+      nanobind::arg("lds_capacity"),
+      nanobind::arg("rf_capacity"),
+      nanobind::arg("L2_capacity"),
+      nanobind::arg("compute_clock_khz"),
+      nanobind::arg("pci_chip_id") = nanobind::none(),
+      "Create hardware object for a specific architecture with specified parameters. "
+      "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
+      "(0x75a8 -> id75a8; absent or other values -> id75a0).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,

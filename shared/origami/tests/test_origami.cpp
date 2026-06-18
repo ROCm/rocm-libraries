@@ -1288,4 +1288,38 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
       REQUIRE(capped_mt.n == 192);
     }
   }
+TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
+  using origami::hardware_t;
+  const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
+  const auto c_v2 = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
+  REQUIRE(c_def.mem1_perf_ratio != c_v2.mem1_perf_ratio);
+  REQUIRE(c_def.mem2_perf_ratio != c_v2.mem2_perf_ratio);
+  REQUIRE(c_def.mem3_perf_ratio != c_v2.mem3_perf_ratio);
+  REQUIRE(c_def.mem_bw_per_wg_coefficients != c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE(c_def.parallel_mi_cu == c_v2.parallel_mi_cu);
+
+  const auto g942_v2 = hardware_t::get_arch_constants(
+      hardware_t::architecture_t::gfx942, std::make_optional(0x75a8));
+  const auto g942_def =
+      hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
+  REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
+
+  const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                        256,
+                                                        65536,
+                                                        32 * 1024 * 1024,
+                                                        2'100'000,
+                                                        std::nullopt);
+  const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                     128,
+                                                     65536,
+                                                     32 * 1024 * 1024,
+                                                     2'100'000,
+                                                     std::make_optional(0x75a8));
+  REQUIRE(hw_def.mem1_perf_ratio != hw_v2.mem1_perf_ratio);
+  REQUIRE(hw_def.mem_bw_per_wg_coefficients == c_def.mem_bw_per_wg_coefficients);
+  REQUIRE(hw_v2.mem_bw_per_wg_coefficients == c_v2.mem_bw_per_wg_coefficients);
+  REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.has_value());
+  REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
 }
