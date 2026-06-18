@@ -916,22 +916,35 @@ def cmake_build(Map conf=[:]){
                                 bash ../script/dependency-parser/smart_build.sh
                             """
                         } finally {
-                            archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smart_build.log", allowEmptyArchive: true
+                            archiveArtifacts artifacts: "tests_to_run.json,tests_to_run.txt,build_targets.txt,build_mode.env,smart_build.log", allowEmptyArchive: true
                         }
                     }
                     stage("Smart Test (${arch_name})") {
                         // BUILD_DIR is the cross-node seam: it defaults to the build
                         // dir we are in (same node); on a separate test node set it to
                         // the carried-over build/. CTEST_PARALLEL is exposed as a tunable.
-                        // try/finally so smart_test.log is archived on test failures too.
+                        // try/finally so the log + JUnit report are archived on test
+                        // failures too.
+                        //
+                        // JUnit filename follows the same globally-unique convention as
+                        // the trace artifacts (job + run + arch), plus a stage slug, so
+                        // reports never collide across branches/runs/arches/stages.
+                        // JOB_NAME encodes the branch/PR in multibranch, so this is
+                        // unique even though BUILD_NUMBER is only per-branch.
+                        def sanitizedJobName = env.JOB_NAME.replaceAll(/[\/\\:*?"<>| ]/, '_').replaceAll('%2F', '_')
+                        def junitFile = "junit_${sanitizedJobName}_${env.BUILD_NUMBER}_${arch_name}_smarttest.xml"
                         try {
                             sh """
                                 BUILD_DIR=\$(pwd) \\
                                 CTEST_PARALLEL=4 \\
+                                JUNIT_OUTPUT=${junitFile} \\
                                 bash ../script/dependency-parser/smart_test.sh
                             """
                         } finally {
-                            archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
+                            // none mode runs no tests, so the report may be absent -
+                            // allowEmptyResults keeps that from failing the stage.
+                            junit testResults: "${junitFile}", allowEmptyResults: true
+                            archiveArtifacts artifacts: "smart_test.log,${junitFile}", allowEmptyArchive: true
                         }
                     }
                 }

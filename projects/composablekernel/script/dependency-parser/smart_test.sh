@@ -19,11 +19,14 @@
 # Environment variables:
 #   BUILD_DIR - Build directory (defaults to current directory)
 #   CTEST_PARALLEL - ctest parallel level (default: 4)
+#   JUNIT_OUTPUT - JUnit XML report path written by ctest (default: junit.xml).
+#                  CI sets this to a globally-unique name (job/run/arch/stage).
 
 set -e
 
 BUILD_DIR="${BUILD_DIR:-$(pwd)}"
 CTEST_PARALLEL="${CTEST_PARALLEL:-4}"
+JUNIT_OUTPUT="${JUNIT_OUTPUT:-junit.xml}"
 
 # Tee all output to a per-phase log so the test stage can archive it
 # independently of the build stage. Process substitution (not a pipe) keeps the
@@ -38,6 +41,7 @@ echo "Smart Test (test execution)"
 echo "========================================="
 echo "BUILD_DIR: ${BUILD_DIR}"
 echo "CTEST_PARALLEL: ${CTEST_PARALLEL}"
+echo "JUNIT_OUTPUT: ${JUNIT_OUTPUT}"
 echo "-----------------------------------------"
 
 # The build phase records the mode in build_mode.env; its presence confirms
@@ -68,39 +72,32 @@ case "${MODE}" in
     full)
         echo ""
         echo "Full mode - running the complete ctest suite..."
-        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure
+        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure --output-junit "${JUNIT_OUTPUT}"
         echo ""
         echo "[OK] Smart test complete (full mode)"
         exit 0
         ;;
     selective)
-        if [ ! -f tests_to_run.json ]; then
-            echo "Error: tests_to_run.json missing (selective mode expects it from smart_build.sh)"
+        # tests_to_run.txt is the selection list (one ctest test name per line)
+        # emitted by the parser. `ctest --tests-from-file` runs all of them in a
+        # single invocation with exact-name matching, so there is no `-R` regex
+        # length limit and no chunking. (The JSON still carries regex_chunks for
+        # other consumers; the test phase no longer reads them.)
+        if [ ! -f tests_to_run.txt ]; then
+            echo "Error: tests_to_run.txt missing (selective mode expects it from smart_build.sh)"
             exit 1
         fi
+        # Require a non-empty list. An empty file would run zero tests yet exit 0,
+        # silently skipping the test phase in the mode meant to run tests - the
+        # 'none' mode is the only sanctioned no-op. Fail loudly instead.
+        if [ ! -s tests_to_run.txt ] || ! grep -q '[^[:space:]]' tests_to_run.txt; then
+            echo "Error: tests_to_run.txt is empty (selective mode expects >=1 test)"
+            exit 1
+        fi
+        NUM_TESTS=$(grep -c '[^[:space:]]' tests_to_run.txt)
         echo ""
-        echo "Selective mode - running affected tests..."
-        # Require regex_chunks to be a non-empty array. A missing/empty/wrong-type
-        # value would make NUM_CHUNKS=0, so the loop would run zero tests and still
-        # exit 0 - silently skipping the test phase in the mode that is supposed to
-        # run tests. Fail loudly instead.
-        if ! jq -e '.regex_chunks | type == "array" and length > 0' tests_to_run.json >/dev/null 2>&1; then
-            echo "Error: regex_chunks missing, empty, or not an array in tests_to_run.json (selective mode)"
-            exit 1
-        fi
-        NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
-        echo "Running ${NUM_CHUNKS} test chunk(s)"
-
-        if [ "$NUM_CHUNKS" -eq 1 ]; then
-            TEST_REGEX=$(jq -r '.regex_chunks[0]' tests_to_run.json)
-            CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -R "${TEST_REGEX}"
-        else
-            for ((i=0; i<NUM_CHUNKS; i++)); do
-                TEST_REGEX=$(jq -r ".regex_chunks[$i]" tests_to_run.json)
-                echo "Running test chunk $((i+1))/${NUM_CHUNKS}"
-                CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -R "${TEST_REGEX}"
-            done
-        fi
+        echo "Selective mode - running ${NUM_TESTS} affected test(s)..."
+        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure --tests-from-file tests_to_run.txt --output-junit "${JUNIT_OUTPUT}"
         echo ""
         echo "[OK] Smart test complete (selective mode)"
         exit 0

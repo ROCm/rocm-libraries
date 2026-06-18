@@ -286,8 +286,19 @@ def main():
     with open(output_json, "w") as f:
         json.dump(output, f, indent=2)
 
+    # Emit a sibling test-list file (one ctest test name per line) for
+    # `ctest --tests-from-file`. This lets the test phase run every selected test
+    # in a single ctest invocation - no `-R` regex length limit, hence no
+    # chunking, and exact-name matching for free. The JSON keeps regex/
+    # regex_chunks for other consumers; this file is what smart_test.sh reads.
+    list_file = os.path.splitext(output_json)[0] + ".txt"
+    with open(list_file, "w") as f:
+        for name in (os.path.basename(t) for t in tests):
+            f.write(f"{name}\n")
+
     # Print summary
     print(f"Exported {len(tests)} tests to run to {output_json}")
+    print(f"Exported {len(tests)} test names to {list_file}")
 
     # Print changed files for visibility
     if changed_files:

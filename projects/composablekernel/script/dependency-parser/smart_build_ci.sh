@@ -46,7 +46,7 @@ if ! bash "${SCRIPT_DIR}/ci_safety_check.sh"; then
     exit 1
 fi
 
-echo "✓ CI safety check passed - selective build enabled"
+echo "[OK]CI safety check passed - selective build enabled"
 
 # Step 2: Generate dependency map
 echo ""
@@ -75,7 +75,7 @@ if [ ! -f "enhanced_dependency_mapping.json" ]; then
     exit 1
 fi
 
-echo "✓ Dependency map generated"
+echo "[OK]Dependency map generated"
 
 # Step 3: Select affected tests
 echo ""
@@ -107,7 +107,7 @@ if ! jq -e '.tests_to_run | type == "array"' tests_to_run.json >/dev/null 2>&1; 
 fi
 
 num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json)
-echo "✓ Selected ${num_tests} tests"
+echo "[OK]Selected ${num_tests} tests"
 
 if [ "${num_tests}" -eq 0 ]; then
     echo ""
@@ -121,10 +121,25 @@ fi
 # Step 5: Extract build targets (executables)
 echo ""
 echo "Step 4: Extracting build targets..."
-jq -r '.executables[]' tests_to_run.json | tr '\n' ' ' > build_targets.txt
+# Validate .executables the same way as .tests_to_run above: it must be a
+# non-empty array here (num_tests>0 was just confirmed). A missing/null/wrong
+# shape would otherwise slip through and, combined with the jq extraction below,
+# yield an empty build_targets.txt - which makes smart_build.sh run `ninja` with
+# no explicit targets, silently building the default set while reporting
+# selective mode. Any selector uncertainty falls back to a full build.
+if ! jq -e '.executables | type == "array" and length > 0' tests_to_run.json >/dev/null 2>&1; then
+    echo "Error: executables missing, empty, or not an array in tests_to_run.json - forcing full build"
+    echo "full" > build_targets.txt
+    exit 1
+fi
+
+# Build the target list with a single jq join() rather than `jq ... | tr`. The
+# pipeline form hides a jq failure behind tr's exit status (no pipefail here), so
+# a broken extraction could masquerade as an empty-but-successful target list.
+jq -r '.executables | join(" ")' tests_to_run.json > build_targets.txt
 
 num_targets=$(jq -r '.executables | length' tests_to_run.json)
-echo "✓ Generated ${num_targets} build targets"
+echo "[OK]Generated ${num_targets} build targets"
 
 # Display summary
 echo ""
@@ -145,5 +160,5 @@ echo "Sample build targets (first 5):"
 head -1 build_targets.txt | tr ' ' '\n' | head -5
 
 echo ""
-echo "✓ Smart build preparation complete"
+echo "[OK]Smart build preparation complete"
 exit 0
