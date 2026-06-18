@@ -97,6 +97,15 @@ class STINKYTOFU_EXPORT PassBuilder {
     /// Load a single plugin shared library (.so on Linux, .dll on Windows).
     static bool loadPlugin(const std::string& path);
 
+    /// Absolute path to StinkyTofu's own bundled example plugin, or "" if it was
+    /// not built (STINKYTOFU_BUILD_EXAMPLES=OFF) or cannot be located on disk.
+    ///
+    /// This is stinkytofu answering "where is *my* plugin", computed relative to
+    /// the loaded libstinkytofu — it is not a general plugin lookup. Consumers
+    /// that ship their own plugins (rocisa, TensileLite) know their own install
+    /// location and pass it straight to loadPlugin(); they do not call this.
+    static std::string examplePluginPath();
+
     /// Explicitly close all loaded plugin handles.
     /// C++ callers should invoke this before shutdown.
     /// Python callers should NOT call this — plugin handles are

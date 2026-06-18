@@ -35,4 +35,7 @@
 #define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
 /* clang-format on */
 
+/* Feature flags baked in at build time. */
+#cmakedefine ROCSPARSE_WITH_ILDLT0
+
 #endif /* ROCSPARSE_VERSION_H */

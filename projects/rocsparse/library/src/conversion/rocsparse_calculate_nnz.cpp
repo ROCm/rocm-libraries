@@ -61,7 +61,7 @@ rocsparse_status rocsparse::calculate_nnz(
         end   = v;
         break;
     }
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         uint16_t u, v;
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(

@@ -143,13 +143,13 @@ class TestHelloWorldPassIntegration:
 
     @pytest.fixture(autouse=True)
     def _load_plugin(self):
-        import glob
-        import os
-        plugin_dir = os.path.join(os.path.dirname(rocisa.__file__), "plugins")
-        candidates = glob.glob(os.path.join(plugin_dir, "*helloworld*"))
-        if not candidates:
-            pytest.skip("HelloWorldPass plugin .so not found at " + plugin_dir)
-        rocisa.loadPlugin(candidates[0])
+        # Ask stinkytofu where its own example plugin is; it resolves the path
+        # relative to the loaded libstinkytofu. Empty means it was built with
+        # STINKYTOFU_BUILD_EXAMPLES=OFF (e.g. a production ROCm package).
+        path = rocisa.stinkytofuExamplePluginPath()
+        if not path:
+            pytest.skip("StinkyTofu example plugin not built (STINKYTOFU_BUILD_EXAMPLES=OFF)")
+        rocisa.loadPlugin(path)
 
     def test_hello_world_pass_executes(self):
         st = _make_stinky_module()
