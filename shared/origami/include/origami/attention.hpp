@@ -5,6 +5,7 @@
 
 #include <vector>
 #include "origami/hardware.hpp"
+#include "origami/origami_export.h"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -17,7 +18,7 @@ namespace attention {
  * @param config Kernel configuration.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_work_utilization(const problem_t& problem, const config_t& config);
+ORIGAMI_EXPORT double calculate_work_utilization(const problem_t& problem, const config_t& config);
 
 /**
  * @brief calculate the output utilization which is the ratio of the useful problem volume to the total scheduled volume.
@@ -27,7 +28,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
  * @param vector_elems elements in the vector.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
+ORIGAMI_EXPORT double calculate_output_utilization(const problem_t& problem, const config_t& config, size_t vector_elems);
 
 /**
  * @brief Computes the number of active compute units if there is only one wave and it is partial, Otherwise, returns hardware.N_CU
@@ -40,7 +41,7 @@ double calculate_output_utilization(const problem_t& problem, const config_t& co
  * @param split split
  * @return tuple<size_t, size_t, size_t, size_t> tuple(num_wgs, num_active_cus, numWaves, splitFactor)
  */
-std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t& problem,
+ORIGAMI_EXPORT std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t& problem,
                                                                 const hardware_t& hardware,
                                                                 const config_t& config,
                                                                 grid_selection_t grid_selection,
@@ -54,7 +55,7 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
  * @param num_active_cus number of CU's
  * @return double memory bandwidth
  */
-double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus);
+ORIGAMI_EXPORT double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus);
 
 /**
  * @brief This function rounds the number of elements up to the smallest value whose total size (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
@@ -63,7 +64,7 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
  * @param element_size_bits size in bits
  * @return size_t
  */
-size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+ORIGAMI_EXPORT size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
  * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.
@@ -74,7 +75,7 @@ size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
  * @param l2_capacity_bytes l2 capacity in bytes
  * @return double
  */
-double compute_l2_hit_rate_global(const problem_t& problem,
+ORIGAMI_EXPORT double compute_l2_hit_rate_global(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
                                   size_t l2_capacity_bytes);
@@ -88,7 +89,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
  * @param bytes_per_element bytes per element
  * @return double arithmetic intensity.
  */
-double arithmetic_intensity(double m, double n, double k, double bytes_per_element);
+ORIGAMI_EXPORT double arithmetic_intensity(double m, double n, double k, double bytes_per_element);
 
 /**
  * @brief Emulated tf32 arithmetic intensity.
@@ -99,7 +100,7 @@ double arithmetic_intensity(double m, double n, double k, double bytes_per_eleme
  * @param bytes_per_element bytes per element
  * @return double arithmetic intensity.
  */
-double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element);
+ORIGAMI_EXPORT double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element);
 
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K
@@ -109,7 +110,7 @@ double emulated_tf32_arithmetic_intensity(double m, double n, double k, double b
  * @param mi Micro tile dimensions
  * @return size_t Number of matrix instructions
  */
-size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
+ORIGAMI_EXPORT size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
 
 /**
  * @brief Compute the latency to process a single macro-tile for the given problem and hardware.
@@ -119,7 +120,7 @@ size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
  * @param config Kernel configuration.
  * @return size_t Latency in cycles.
  */
-size_t compute_mt_compute_latency(const problem_t& problem,
+ORIGAMI_EXPORT size_t compute_mt_compute_latency(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config);
 
@@ -131,7 +132,7 @@ size_t compute_mt_compute_latency(const problem_t& problem,
  * @param a_dtype Data type of operand A
  * @return bool True if MT fits in RF, false otherwise
  */
-bool check_rf_capacity(const hardware_t& hardware,
+ORIGAMI_EXPORT bool check_rf_capacity(const hardware_t& hardware,
                         dim3_t mt,
                         data_type_t a_dtype);
 
@@ -143,7 +144,7 @@ bool check_rf_capacity(const hardware_t& hardware,
  * @param a_dtype Data type of operand A
  * @return bool True if MT fits in LDS, false otherwise
  */
-bool check_lds_capacity(const hardware_t& hardware,
+ORIGAMI_EXPORT bool check_lds_capacity(const hardware_t& hardware,
                         dim3_t mt,
                         data_type_t a_dtype);
 /**
@@ -156,7 +157,7 @@ bool check_lds_capacity(const hardware_t& hardware,
  * @param splitting_factor
  * @return double Predicted L2-hitrate.
  */
-double estimate_l2_hit(const problem_t& problem,
+ORIGAMI_EXPORT double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        std::size_t splitting_factor);
@@ -171,7 +172,7 @@ double estimate_l2_hit(const problem_t& problem,
  * @param splitting_factor
  * @return double Predicted MALL-hitrate.
  */
-double estimate_mall_hit(const problem_t& problem,
+ORIGAMI_EXPORT double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
                          std::size_t num_active_cus,
@@ -187,7 +188,7 @@ double estimate_mall_hit(const problem_t& problem,
  * @param splitting_factor
  * @return double Latency in cycles.
  */
-double compute_memory_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
                               std::size_t num_active_cus,
@@ -203,7 +204,7 @@ double compute_memory_latency(const problem_t& problem,
  * @param splitting_factor
  * @return double Latency in cycles.
  */
-double compute_tile_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
                             std::size_t num_active_cus,
@@ -223,7 +224,7 @@ double compute_tile_latency(const problem_t& problem,
  * @param splitting_factor
  * @return double Latency in cycles.
  */
-double compute_timestep_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_timestep_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 std::size_t num_active_cus,
@@ -239,7 +240,7 @@ double compute_timestep_latency(const problem_t& problem,
  * @param max_cus
  * @return double Latency in cycles.
  */
-double compute_total_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              size_t max_cus);
