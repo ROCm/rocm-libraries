@@ -739,6 +739,16 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     },
 )
 
+// Vector ALU — VOP1 only (indirect dst via M0)
+// v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+// runtime (indirect VGPR write).
+DEF_T(VMovRelsD2B32Inst, "v_movrelsd_2_b32", .format = VOP1,
+    .operand_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, vgpr, 32},
+    },
+)
+
 // Vector ALU — VOP2 non-commutative (dual VOP2/VOP3 encoding)
 DEF_BATCH(.format = VOP2,
     VSubF16Inst, "v_sub_f16",

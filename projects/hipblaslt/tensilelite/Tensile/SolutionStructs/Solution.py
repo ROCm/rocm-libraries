@@ -2363,6 +2363,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
 
+    if state["CompactLoopStore"]:
+      if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
+        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
+        return
+
     # MX scale layout + transport derivation and validation. See
     # _deriveAndValidateMXScaleLayoutAndTransport for the full set of rules.
     if not _deriveAndValidateMXScaleLayoutAndTransport(

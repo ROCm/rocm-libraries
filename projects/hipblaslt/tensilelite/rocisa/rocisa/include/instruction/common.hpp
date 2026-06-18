@@ -5538,6 +5538,32 @@ namespace rocisa
         }
     };
 
+    // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+    // runtime (indirect VGPR write). CompactLoopStore uses it so one batch body
+    // covers multiple MI accumulator slices -- each CLS loop iter sets M0 to a
+    // different stride and re-runs the same body.
+    struct VMovRelsD2B32 : public CommonInstruction
+    {
+        VMovRelsD2B32(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_movrelsd_2_b32");
+        }
+
+        VMovRelsD2B32(const VMovRelsD2B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMovRelsD2B32>(*this);
+        }
+    };
+
     struct _VMovB64 : public CommonInstruction
     {
         _VMovB64(const std::shared_ptr<Container>& dst,

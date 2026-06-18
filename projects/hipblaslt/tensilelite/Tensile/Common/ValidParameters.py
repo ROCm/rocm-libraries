@@ -412,6 +412,9 @@ validParameters = { # we need to make sure this matches develop
     "OptNoLoadLoop": [0, 1, 2],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
+    # CompactLoopStore default (opt-in, off by default). When enabled, the
+    # per-batch global write body is wrapped in a CLS countdown loop and
+    "CompactLoopStore": [False, True],
     # Attempt to load directly from global memory into Vgpr.
     # Assembly only
     "DirectToVgprA": [False, True],

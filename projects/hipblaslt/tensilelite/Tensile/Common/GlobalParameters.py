@@ -468,6 +468,7 @@ defaultBenchmarkCommonParameters = [
     {"OptNoLoadLoop": [1]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
+    {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprMXSA": [False]},
