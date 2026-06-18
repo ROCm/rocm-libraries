@@ -337,6 +337,7 @@ std::string RocBlasLt_TestName_to_string(std::unordered_map<std::string, size_t>
     // Replace non-alphanumeric characters with letters
     std::replace(name.begin(), name.end(), '-', 'n'); // minus
     std::replace(name.begin(), name.end(), '.', 'p'); // decimal point
+    std::replace(name.begin(), name.end(), '+', 'P'); // plus (e.g. exponent in 1e+09)
 
     // Complex (A,B) is replaced with ArBi
     name.erase(std::remove(name.begin(), name.end(), '('), name.end());
