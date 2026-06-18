@@ -160,12 +160,8 @@ def _effective_compute_type(node: Dict[str, Any], graph_json: Dict[str, Any]) ->
 
 
 def _is_float32_compute(node: Dict[str, Any], graph_json: Dict[str, Any]) -> bool:
-    """True only for the canonical float32 token. hipDNN serializes DataType::FLOAT
-    to exactly the lowercase string "float" via NLOHMANN_JSON_SERIALIZE_ENUM in
-    flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/Common.hpp:91-114
-    (one entry, no "fp32"/"float32" alias; the "fp32" in frontend Types.hpp is a
-    separate debug stringifier, not the JSON path). Match that one token exactly;
-    _effective_compute_type already resolves "unset"/missing to the "float" default."""
+    """True only for hipDNN's canonical float32 token: DataType::FLOAT serializes
+    to exactly the lowercase string "float" (no "fp32"/"float32" JSON alias)."""
     return _effective_compute_type(node, graph_json) == "float"
 
 
