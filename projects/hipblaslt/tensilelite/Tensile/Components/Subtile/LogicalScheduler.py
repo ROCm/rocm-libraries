@@ -2634,9 +2634,9 @@ class LogicalScheduler:
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
         if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
-            from rocisa.code import TextBlock
             from rocisa.container import mgpr
             from rocisa.instruction import SMovB32 as _SMovB32
+            from rocisa.instruction import STtraceData as _STtraceData
         for ui in range(uf):
             if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
                 # Mainloop iteration marker for SQTT / trace decoder: write
@@ -2644,7 +2644,7 @@ class LogicalScheduler:
                 # only uses low 8 bits, so M0 wrap past 256 is fine.
                 module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
                                     comment="trace: M0 = LoopCounterL"))
-                module.add(TextBlock("s_ttracedata                                      // trace: emit M0 to SQTT\n"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
