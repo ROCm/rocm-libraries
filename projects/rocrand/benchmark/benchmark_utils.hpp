@@ -240,7 +240,7 @@ inline auto gpu_memcpy(void* dst, const void* src, size_t count, memcpy_kind_t k
 /// philox engine.
 template<distribution D, int N, typename T>
 struct gpu_rand
-{ };
+{};
 
 // This macro is used to concat two strings, this is to work around
 // a quirk when concatting two strings directly. I.e. `foo##bar`

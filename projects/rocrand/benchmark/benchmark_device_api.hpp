@@ -99,10 +99,10 @@ constexpr int get_vectorization()
 {
     // Sobol doesn't support vectorization.
     // Mtgp32 does support box-muller, but is not implemented in benchmarks.
-    constexpr bool is_sobol  = std::is_same_v<EngineState, rand_state_sobol32_t>
-                               || std::is_same_v<EngineState, rand_state_sobol64_t>
-                               || std::is_same_v<EngineState, rand_state_scrambled_sobol32_t>
-                               || std::is_same_v<EngineState, rand_state_scrambled_sobol64_t>;
+    constexpr bool is_sobol = std::is_same_v<EngineState, rand_state_sobol32_t>
+                              || std::is_same_v<EngineState, rand_state_sobol64_t>
+                              || std::is_same_v<EngineState, rand_state_scrambled_sobol32_t>
+                              || std::is_same_v<EngineState, rand_state_scrambled_sobol64_t>;
     constexpr bool is_mtgp32 = std::is_same_v<EngineState, rand_state_mtgp32_t>;
     if constexpr(is_sobol || is_mtgp32)
     {
@@ -156,12 +156,13 @@ struct unrolled
 {
     /// Number of elements in generated vector.
     __device__
-    static constexpr int n = Generator::n;
+    static constexpr int n
+        = Generator::n;
 
     __device__
     unrolled(Generator& gen)
         : gen(gen)
-    { }
+    {}
     Generator& gen;
 
     __device__
@@ -749,7 +750,7 @@ struct generator<DISTRIBUTION_LOG_NORMAL, T, Engine> : public generator_type
 template<typename T, typename Engine>
 struct generator<DISTRIBUTION_POISSON, T, Engine> : public generator_type
 {
-    generator(double l) : lambda(l) { }
+    generator(double l) : lambda(l) {}
     double lambda;
 
     static constexpr int n = vectorization<Engine, DISTRIBUTION_POISSON, T>;
@@ -765,7 +766,7 @@ struct generator<DISTRIBUTION_POISSON, T, Engine> : public generator_type
 template<typename T, typename Engine>
 struct generator<DISTRIBUTION_DISCRETE_POISSON, T, Engine> : public generator_type
 {
-    generator(double l) : lambda(l) { }
+    generator(double l) : lambda(l) {}
     rand_discrete_distribution_t discrete_distribution;
     double                       lambda;
 
