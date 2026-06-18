@@ -198,7 +198,7 @@ public:
   DEFINE_OPERATOR(>)
   DEFINE_OPERATOR(>=)
   DEFINE_OPERATOR(&&)
-  DEFINE_OPERATOR(||);
+  DEFINE_OPERATOR(||)
 
 #undef DEFINE_OPERATOR
 
@@ -341,7 +341,7 @@ protected:
   virtual bool post_test_smoke_check(const UnitTest& test, bool concise);
 
 public:
-  inline virtual ~UnitTestDriver(){};
+  inline virtual ~UnitTestDriver() {}
 
   void register_test(UnitTest* test);
   virtual bool run_tests(const ArgumentSet& args, const ArgumentMap& kwargs);
