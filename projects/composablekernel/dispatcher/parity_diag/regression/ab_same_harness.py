@@ -128,6 +128,7 @@ def meas(so: Path, M: int, N: int, K: int) -> float | None:
     env = os.environ.copy()
     env["HIP_VISIBLE_DEVICES"] = DEVICE
     env["GEMM_PYPATH"] = PYPATH
+    env["LD_LIBRARY_PATH"] = "/opt/rocm/lib:" + env.get("LD_LIBRARY_PATH", "")
     samples = []
     for _ in range(REPEATS):
         p = subprocess.run([sys.executable, str(WORKER)], input=payload.encode(),
@@ -157,6 +158,7 @@ def meas_all(so: Path) -> dict:
     env = os.environ.copy()
     env["HIP_VISIBLE_DEVICES"] = DEVICE
     env["GEMM_PYPATH"] = PYPATH
+    env["LD_LIBRARY_PATH"] = "/opt/rocm/lib:" + env.get("LD_LIBRARY_PATH", "")
     samples = {s: [] for s in out}
     for _ in range(REPEATS):
         p = subprocess.run([sys.executable, str(WORKER)], input=payload.encode(),
