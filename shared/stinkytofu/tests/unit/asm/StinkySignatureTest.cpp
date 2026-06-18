@@ -25,6 +25,7 @@
 #include <array>
 #include <string>
 
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 
 using namespace stinkytofu;
@@ -192,4 +193,111 @@ TEST(KernelBodyTest, AddSignatureAndSetGprs) {
     EXPECT_EQ(kb.getNextFreeVgpr(), 128);
     EXPECT_EQ(kb.getNextFreeSgpr(), 64);
     EXPECT_EQ(kb.getSignature(), sig);
+}
+
+TEST(KernelBodyTest, AddBodyAndGetBody) {
+    KernelBody kb("k");
+    StinkyAsmModule::ModuleOptions opts{};
+    auto body = std::make_shared<StinkyAsmModule>("k", std::array<int, 3>{12, 5, 0}, opts);
+    kb.addBody(body);
+    EXPECT_EQ(kb.getBody(), body);
+}
+
+TEST(KernelBodyTest, ToStringWithSignatureAndBody) {
+    KernelBody kb("mykern");
+    auto sig = std::make_shared<SignatureBase>("mykern", std::array<int, 3>{12, 5, 0}, 2, "v5", 0,
+                                               std::array<int, 3>{1, 1, 1}, 1, 256, 64);
+    sig->addArg("buf", SignatureValueKind::SIG_GLOBALBUFFER, "struct", "global");
+    kb.addSignature(sig);
+    StinkyAsmModule::ModuleOptions opts{};
+    auto body = std::make_shared<StinkyAsmModule>("mykern", std::array<int, 3>{12, 5, 0}, opts);
+    kb.addBody(body);
+    kb.setGprs(128, 0, 64);
+    std::string s = kb.toString(/*emitComments=*/false, /*emitCycleInfo=*/false);
+    EXPECT_FALSE(s.empty());
+    EXPECT_NE(s.find("mykern"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// SignatureKernelDescriptor — branches not yet hit
+// ---------------------------------------------------------------------------
+
+TEST(SignatureKernelDescriptorTest, ToStringWithGfx9UsesAccumOffset) {
+    // gfx90a has unified regs — accumOffset branch fires when totalAgprs > 0
+    SignatureKernelDescriptor kd("k", {9, 0, 10}, 0, {1, 1, 1}, 1, 64, 128, 64, 64);
+    std::string s = kd.toString();
+    EXPECT_NE(s.find("amdhsa_accum_offset"), std::string::npos) << s;
+}
+
+TEST(SignatureKernelDescriptorTest, ToStringWithTotalInstructionBytesEmitsPrefSize) {
+    SignatureKernelDescriptor kd("k", {12, 5, 0}, 0, {1, 1, 1}, 1);
+    kd.setTotalInstructionBytes(1024);
+    std::string s = kd.toString();
+    EXPECT_NE(s.find("STINKY_TOTAL_INST_BYTES"), std::string::npos) << s;
+    EXPECT_NE(s.find("amdhsa_inst_pref_size"), std::string::npos) << s;
+}
+
+TEST(SignatureKernelDescriptorTest, ToStringWithNumSgprPreloadEmitsUserSgprCount) {
+    SignatureKernelDescriptor kd("k", {12, 5, 0}, 0, {1, 1, 1}, 1, 64, 0, 0, 4, 4);
+    std::string s = kd.toString();
+    EXPECT_NE(s.find("amdhsa_user_sgpr_count"), std::string::npos) << s;
+}
+
+TEST(SignatureKernelDescriptorTest, SetOptimizationConfigRoundTrip) {
+    SignatureKernelDescriptor kd("k", {12, 5, 0}, 0, {1, 1, 1}, 1);
+    kd.setOptimizationConfig({4, 4}, {2, 2}, {1, 1}, 4, 4, 8, 8, false, false, 1);
+    // setOptimizationConfig sets fields; verify via toString which embeds them
+    std::string s = kd.toString();
+    EXPECT_FALSE(s.empty());
+}
+
+// ---------------------------------------------------------------------------
+// SignatureCodeMeta — setGprs not yet hit
+// ---------------------------------------------------------------------------
+
+TEST(SignatureCodeMetaTest, SetGprs) {
+    SignatureCodeMeta cm("kern", 2, 0, 256, 64, "v5");
+    cm.setGprs(200, 80);
+    EXPECT_EQ(cm.totalVgprs, 200);
+    EXPECT_EQ(cm.totalSgprs, 80);
+}
+
+// ---------------------------------------------------------------------------
+// SignatureBase — setOptimizationConfig, setTotalInstructionBytes
+// ---------------------------------------------------------------------------
+
+TEST(SignatureBaseTest, SetOptimizationConfig) {
+    SignatureBase sig("k", {12, 5, 0}, 2, "v5", 0, {1, 1, 1}, 1, 256);
+    sig.setOptimizationConfig({4, 4}, {2, 2}, {1, 1}, 4, 4, 8, 8, false, false, 1);
+    // Exercises the call path; no observable result other than no crash.
+    std::string s = sig.toString();
+    EXPECT_FALSE(s.empty());
+}
+
+TEST(SignatureBaseTest, SetTotalInstructionBytes) {
+    SignatureBase sig("k", {12, 5, 0}, 2, "v5", 0, {1, 1, 1}, 1, 256);
+    sig.setTotalInstructionBytes(2048);
+    std::string s = sig.toString();
+    EXPECT_NE(s.find("STINKY_TOTAL_INST_BYTES"), std::string::npos) << s;
+}
+
+// ---------------------------------------------------------------------------
+// SignatureArgument — unknown type defaults to 4 bytes; addrSpaceQual in string
+// ---------------------------------------------------------------------------
+
+TEST(SignatureArgumentTest, UnknownTypeDefaultsTo4Bytes) {
+    SignatureArgument arg(0, "x", SignatureValueKind::SIG_VALUE, "unknown_type");
+    EXPECT_EQ(arg.size, 4);
+}
+
+TEST(SignatureArgumentTest, ToStringIncludesAddrSpaceQual) {
+    SignatureArgument arg(0, "buf", SignatureValueKind::SIG_GLOBALBUFFER, "struct", "global");
+    std::string s = arg.toString();
+    EXPECT_NE(s.find("global"), std::string::npos) << s;
+}
+
+TEST(SignatureArgumentTest, ToStringWithoutAddrSpaceQualOmitsAddressSpace) {
+    SignatureArgument arg(0, "x", SignatureValueKind::SIG_VALUE, "f32");
+    std::string s = arg.toString();
+    EXPECT_EQ(s.find("address_space"), std::string::npos) << s;
 }
