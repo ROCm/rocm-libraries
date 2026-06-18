@@ -59,6 +59,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -67,19 +69,24 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
 
+      # pydantic is required by repo_config_model.py (used by config_loader.py)
       - name: Install dependencies
         run: pip install pydantic
 
       - name: Determine changed projects from git diff
         id: configure
-        env:
-          # For PRs: compare against the base commit
-          # For pushes: compare against the previous commit
-          BASE_REF: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
         run: |
-          CHANGED_PROJECTS=$(python3 .github/scripts/get_changed_projects.py)
-          echo "Changed projects: $CHANGED_PROJECTS"
-          echo "changed_projects=$CHANGED_PROJECTS" >> $GITHUB_OUTPUT
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            # For PRs, compute the merge-base to match the actual PR diff
+            BASE_REF=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+            echo "Using merge-base for PR: $BASE_REF"
+          else
+            # For pushes, compare against the previous commit
+            BASE_REF="HEAD^"
+            echo "Using HEAD^ for push"
+          fi
+          export BASE_REF
+          python3 .github/scripts/get_changed_projects.py
 
   setup:
     needs: configure
@@ -103,7 +110,8 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     secrets: inherit
@@ -113,7 +121,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      changed_projects: ${{ needs.configure.outputs.changed_projects }}
+      # Empty string when run_all_tests=true triggers full test run in downstream workflow
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
@@ -126,7 +135,8 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     secrets: inherit
@@ -136,7 +146,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      changed_projects: ${{ needs.configure.outputs.changed_projects }}
+      # Empty string when run_all_tests=true triggers full test run in downstream workflow
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
