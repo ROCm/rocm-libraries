@@ -237,6 +237,55 @@ class TestGfx950ByteIdentical(unittest.TestCase):
                 )
                 self.assertEqual(legacy, explicit, f"{pl}/{ep} drifted on gfx950")
 
+    def test_emit_sched_hints_arch_resolution(self):
+        # emit_sched_hints=None (default) is arch-resolved: gfx950 OMITS the
+        # compv4 sched_group_barrier/sched_barrier schedule (the measured +2%
+        # uplift; see optimization/utilities/skills/empirical-case-studies.md
+        # Case Study 7) while gfx942 keeps the historical emission. Explicit
+        # True/False overrides the arch default on either arch.
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+            build_universal_gemm,
+        )
+
+        def n_hints(arch, hints):
+            spec = UniversalGemmSpec(
+                name="sched",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                trait=TraitSpec(
+                    pipeline="compv4",
+                    scheduler="intrawave",
+                    epilogue="default",
+                    emit_sched_hints=hints,
+                ),
+                data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+            )
+            ir = lower_kernel_to_llvm(build_universal_gemm(spec, arch=arch), arch=arch)
+            return ir.count("sched.group.barrier") + ir.count("sched.barrier")
+
+        # gfx950 default takes the uplift (no schedule hints emitted).
+        self.assertEqual(n_hints("gfx950", None), 0)
+        # gfx942 default preserves the historical compv4 schedule.
+        self.assertGreater(n_hints("gfx942", None), 0)
+        # Explicit override forces the choice regardless of the arch default.
+        self.assertGreater(n_hints("gfx950", True), 0)
+        self.assertEqual(n_hints("gfx950", False), 0)
+        self.assertEqual(n_hints("gfx942", False), 0)
+
 
 class TestUnifiedGfx1151Gemm(unittest.TestCase):
     """The MMA-contract unification: the SAME GEMM body emits WMMA on gfx1151."""

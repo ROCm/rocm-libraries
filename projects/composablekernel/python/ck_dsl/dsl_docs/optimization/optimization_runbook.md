@@ -1185,6 +1185,15 @@ On gfx950 the LLVM backend silently removes explicit
 or `probe_intrinsic_counts.py` (`sched.barrier` / `sched.group.barrier`
 should be 0 after lowering on gfx950).
 
+The converse is also actionable on gfx950: the schedule directives the
+compv4/compv3 GEMM pipeline *emits* (`sched_group_barrier` HotLoop +
+per-cluster `s_setprio` / `sched_barrier(0)`) are **net-negative** — they
+over-constrain the backend, and removing them lets the hardware scheduler pack
+MFMAs tighter (MfmaUtil 63% -> 68%, +1.9–2.5% on square fp16/bf16 GEMM). Take
+the win with `TraitSpec.emit_sched_hints=False` (default `None` is
+arch-resolved: already OFF on gfx950, ON elsewhere). Full data:
+empirical-case-studies.md Case Study 7.
+
 **`iglp_opt` — the canned backend GEMM scheduler (the one that survives).**
 `b.iglp_opt(n)` lowers to `__builtin_amdgcn_iglp_opt(n)` (LLVM
 `llvm.amdgcn.iglp.opt`) — a *different* mechanism from `sched_barrier`: instead
