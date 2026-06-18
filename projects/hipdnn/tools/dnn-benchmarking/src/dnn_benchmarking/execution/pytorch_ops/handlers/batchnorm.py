@@ -59,10 +59,10 @@ def handle_batchnorm_inference(
     x = _tensor(tensors, x_uid, node)
     y = _bn_affine(
         x,
-        _channel_values(_tensor(tensors, scale_uid, node), x, dtype=torch.float32),
-        _channel_values(_tensor(tensors, bias_uid, node), x, dtype=torch.float32),
-        _channel_values(_tensor(tensors, mean_uid, node), x, dtype=torch.float32),
-        _channel_values(_tensor(tensors, inv_uid, node), x, dtype=torch.float32),
+        _channel_values(_tensor(tensors, scale_uid, node), x),
+        _channel_values(_tensor(tensors, bias_uid, node), x),
+        _channel_values(_tensor(tensors, mean_uid, node), x),
+        _channel_values(_tensor(tensors, inv_uid, node), x),
     )
     _store_tensor(tensors, y_uid, y)
 
