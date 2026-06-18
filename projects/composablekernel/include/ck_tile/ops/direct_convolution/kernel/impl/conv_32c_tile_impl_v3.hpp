@@ -288,7 +288,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     }
 
     // C_in covering rule: the workgroup reduces total_block_c() channels across
-    // its waves. With channel padding, the real C_in may be smaller — but it
+    // its waves. With channel padding, the real C_in may be smaller -- but it
     // must land in (total_block_c() - cpg, total_block_c()] so that exactly this
     // config minimally covers C_in (the last wave's cpg-slice is the partial
     // one, and no fully-empty wave exists). Phase 2 supports any C_in within
@@ -307,7 +307,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     }
 
     // The output-channel count (k_tot for Fprop, c_tot for Dgrad) may be any
-    // positive value; partial block_k_size tiles — down to sub-8 — are masked
+    // positive value; partial block_k_size tiles -- down to sub-8 -- are masked
     // at element granularity at output time and need no config restriction.
 
     // Channel padding splits into two INDEPENDENT cases with different needs:
@@ -624,7 +624,7 @@ struct ConvInputLoader
             //
             // Sub-8 (Phase 2): the partial block that straddles C_in (channels
             // [floor(C_in/8)*8, +8) where some are < C_in and some are not) is
-            // still LOADED — its garbage lanes are multiplied by zeroed weights
+            // still LOADED -- its garbage lanes are multiplied by zeroed weights
             // in the MFMA, so they contribute nothing. Only fully-out-of-range
             // blocks (>= ceil(C_in/8)) are masked. The input read is hardware
             // bounds-checked (buffer resource), so loading the partial block is
@@ -791,7 +791,7 @@ struct WeightLoader : direct_conv::WeightAccessor8<
 
                 // Channel padding.
                 //   K dim (output): block_k_start + k selects a full weight row;
-                //     a row >= K_total is OOB — zero the whole uint4.
+                //     a row >= K_total is OOB -- zero the whole uint4.
                 //   C dim (reduction): c_base..c_base+7 are reduction channels.
                 //     For sub-8 (Phase 2) the last uint4 straddles C_total: load
                 //     the valid lanes and zero the rest (element-wise), which both
@@ -861,10 +861,10 @@ struct WeightLoader : direct_conv::WeightAccessor8<
                 // weight K dim (k_slice_start+k, a full row) and the output maps
                 // to the weight C dim (block_c_start+c8*8, within the uint4).
                 //   K dim (reduction): a row >= K_total is OOB and an invalid
-                //     reduction channel — zero the whole uint4 (MFMA contribution
+                //     reduction channel -- zero the whole uint4 (MFMA contribution
                 //     0).
                 //   C dim (output): for sub-8 (Phase 2) the last uint4 straddles
-                //     C_total — load the valid lanes and zero the rest to avoid
+                //     C_total -- load the valid lanes and zero the rest to avoid
                 //     the OOB DRAM read (the invalid output lanes are also masked
                 //     at write time).
                 if constexpr(Padded)
@@ -981,9 +981,9 @@ struct WeightLoader : direct_conv::WeightAccessor8<
 // In v3, all waves share the same block_k_size K-channels. Only wave 0
 // writes the output after cross-wave LDS reduction.
 //
-// M16N16K32 only (M32N32K16 was dropped — no live instance used it and the
-// efficient shape is M16N16K32): lane % 16 → spatial, lane / 16 → K-group
-// (4 groups × 4 K). Single 8B DRAM write per thread (unpadded).
+// M16N16K32 only (M32N32K16 was dropped -- no live instance used it and the
+// efficient shape is M16N16K32): lane % 16 -> spatial, lane / 16 -> K-group
+// (4 groups x 4 K). Single 8B DRAM write per thread (unpadded).
 //
 // Output-channel padding is expressed as a CK Tile pad transform via
 // DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor. Each thread
@@ -1035,7 +1035,7 @@ struct OutputWriterV3
         if constexpr(Padded)
         {
             // Derive per-group output-channel validity from the pad-transform
-            // descriptor (computed once, here in the ctor — off the hot path).
+            // descriptor (computed once, here in the ctor -- off the hot path).
             const int k_base = bc.block_k_out + k_offset;
             const auto kdesc =
                 direct_conv::DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor(bc.K);
@@ -1093,12 +1093,12 @@ struct OutputWriterV3
 // (reduce_lds), which is dead after cross_wave_reduce completes.
 //
 // Staging LDS layout: [BLOCK_Q, BLOCK_K] contiguous fp16.
-//   M16N16K32: 16 × 16 = 256 fp16 = 512B = 32 uint4
+//   M16N16K32: 16 x 16 = 256 fp16 = 512B = 32 uint4
 //
 // DRAM store: tid-based linear mapping.
 //   Each active thread reads one uint4 (8 fp16) from staging LDS
-//   and writes it to DRAM. Active threads: BLOCK_Q × BLOCK_K8.
-//     M16N16K32: 16 × 2 = 32 active threads
+//   and writes it to DRAM. Active threads: BLOCK_Q x BLOCK_K8.
+//     M16N16K32: 16 x 2 = 32 active threads
 //
 // Output-channel padding is expressed as a CK Tile pad transform via
 // DenseSharedDescriptors<TC>::Output::MakeChannelPadDescriptor: each active
@@ -1281,7 +1281,7 @@ CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>*
     using ElementType = ToType<cfg.data_type>;
 
     // Select MFMA functor based on data type. M16N16K32 only (M32N32K16 was
-    // dropped — no live instance used it and M16N16K32 is the efficient shape).
+    // dropped -- no live instance used it and M16N16K32 is the efficient shape).
     static_assert(cfg.mfma_shape == MfmaShape::M16N16K32,
                   "v3 dense kernel supports only MfmaShape::M16N16K32");
     using MfmaFn =

@@ -1231,7 +1231,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3CspwDgradTest, Dgrad_Config64_C256_K256_Pad1
 }
 
 // =============================================================================
-// Channel padding (Phase 1) — 8-channel-granularity reduction + output masking.
+// Channel padding (Phase 1) -- 8-channel-granularity reduction + output masking.
 //
 // Exercises shapes where the reduction-channel count (C_in) is NOT an exact
 // multiple of the config's total_block_c(), and/or the output-channel count
@@ -1333,7 +1333,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3ChannelPadDgradTest, Dgrad_Cfg1_C64_K40)
 }
 
 // Config 1: partial output channels (C=c_tot not a multiple of 16).
-// Note: the output dim (c_tot for Dgrad) must stay > 32 — is_non_grouped()
+// Note: the output dim (c_tot for Dgrad) must stay > 32 -- is_non_grouped()
 // routes c_tot <= 32 to the grouped kernels, so output padding below 33 is
 // unreachable through the dense dispatch.
 TEST_F(DirectConvNonGrouped32cFp16V3ChannelPadDgradTest, Dgrad_Cfg1_C40_K64)
@@ -1379,13 +1379,13 @@ TEST_F(DirectConvNonGrouped32cFp16V3ChannelPadDgradTest, Dgrad_Cfg0_C40_K104_Lar
 }
 
 // =============================================================================
-// v3 Phase 2 — sub-8 channel padding tests.
+// v3 Phase 2 -- sub-8 channel padding tests.
 //
 // Channel counts that are NOT multiples of 8. The straddling channel tile is
 // loaded and zeroed at element granularity:
 //   - reduction (C_in): the weight loader element-wise zeros lanes >= C_real,
 //     so the MFMA contribution of the partial tile's invalid lanes is exactly 0
-//     (the input partial tile is loaded as-is — its garbage lanes x 0 = 0).
+//     (the input partial tile is loaded as-is -- its garbage lanes x 0 = 0).
 //   - output (K_out): the output writer masks per-element, so partial 4-K / 8-K
 //     write groups straddling K_real only emit the valid channels.
 //
@@ -1623,7 +1623,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleDgradTest, Dgrad_Cfg57_Cycli
 }
 
 // =============================================================================
-// v3 Phase 2 — REDUCTION-channel padding combined with SWIZZLE.
+// v3 Phase 2 -- REDUCTION-channel padding combined with SWIZZLE.
 //
 // The descriptor-based input path makes the reduction-pad validity check
 // swizzle-aware: a thread is masked iff the SWIZZLED physical channel block it
@@ -1831,7 +1831,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3OutputPadSwizzleCspw1DgradTest, Dgrad_Cfg8_X
 }
 
 // =============================================================================
-// v3 — REDUCTION-channel padding combined with SWIZZLE and c_slices_per_wave > 1.
+// v3 -- REDUCTION-channel padding combined with SWIZZLE and c_slices_per_wave > 1.
 //
 // Lifts the last reduction-pad restriction (c_slices_per_wave == 1). Each wave
 // streams CS = 0..cspw-1 chunks of BLOCK_C8 channel-8 blocks; the global
@@ -1950,7 +1950,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionPadSwizzleCspwDgradTest, Dgrad_Cfg5
 }
 
 // =============================================================================
-// v3 — COVERING-WINDOW GAP FILL (W = waves * c_slices_per_wave = 9 and 10).
+// v3 -- COVERING-WINDOW GAP FILL (W = waves * c_slices_per_wave = 9 and 10).
 //
 // The dispatcher previously instantiated W in {2,3,4,5,6,7,8,12,16,24,32,48,64}
 // only, leaving reductions needing W=9 (total_block_c=288) or W=10
@@ -2021,14 +2021,14 @@ TEST_F(DirectConvNonGrouped32cFp16V3CoveringGapDgradTest, Dgrad_Cfg66_W10_C80_K3
 }
 
 // =============================================================================
-// v3 — REDUCTION <= 32 (waves_per_wg=1, total_block_c=32).
+// v3 -- REDUCTION <= 32 (waves_per_wg=1, total_block_c=32).
 //
 // The smallest covering config used to be waves=2 (window (32,64]), so any
 // reduction <= 32 had no instance, and the dense applicability gate also
 // rejected groups==1 shapes with channels <= 32. The gate is now groups != 1,
 // and waves=1 configs cover reduction in (0,32]:
-//   key 60/61 = waves=1 None        (Dgrad/Fprop) — robust for sub-32 padding
-//   key 62/63 = waves=1 CyclicShift (Dgrad/Fprop) — exact C==32 path
+//   key 60/61 = waves=1 None        (Dgrad/Fprop) -- robust for sub-32 padding
+//   key 62/63 = waves=1 CyclicShift (Dgrad/Fprop) -- exact C==32 path
 // Output channel kept > 32 so the shape is genuinely non-grouped.
 // =============================================================================
 
@@ -2101,7 +2101,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3ReductionLE32DgradTest, Dgrad_Cfg62_CS_C64_K
 }
 
 // =============================================================================
-// v3 — waves_per_wg=1, c_slices_per_wave > 1 (config keys 68-83).
+// v3 -- waves_per_wg=1, c_slices_per_wave > 1 (config keys 68-83).
 //
 // Single-wave configs that stream the full C-reduction as cspw chunks of 32
 // channels through ONE wavefront, eliminating the cross-wave LDS reduction.

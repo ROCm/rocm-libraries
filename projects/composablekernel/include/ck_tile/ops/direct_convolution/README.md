@@ -103,7 +103,7 @@ CDNA4-only hardware features (see notes below).
 - **LDS footprint > 64KB**: the 16c kernel needs 72KB of LDS, exceeding
   gfx942's 64KB per-workgroup limit.
 - **16-byte buffer-load-to-LDS** (dwordx4 async copy): used by every variant for
-  performant input/weight staging. This one is not a blocker — the kernels fall back to a
+  performant input/weight staging. This one is not a blocker -- the kernels fall back to a
   portable load+store register round-trip on non-gfx950 archs.
 
 On non-gfx950 architectures, only gfx942 is currently tested. 
@@ -115,18 +115,18 @@ Unsupported direct-conv instances are filtered out at generation time.
 Here's a rough project structure
 
 ```
-kernel/                                  — kernel implementations
-  grouped_4c_tile_conv_impl_v3.hpp  — 4-channel grouped fp16/bf16 kernel (MFMA 4x4x4 batch-16) using CK Tile abstractions.
-  grouped_8c_tile_conv_impl_v2.hpp  — 8-channel grouped fp16/bf16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using CK Tile abstractions.
-  grouped_16c_tile_conv_impl_v2.hpp — 16-channel grouped fp16/bf16 kernel (MFMA 16x16x16) using CK Tile abstractions.
-  grouped_32c_tile_conv_impl_v2.hpp — 32-channel grouped fp16/bf16 kernel (MFMA 16x16x32) using CK Tile abstractions.
-utils/                                   — utilities for kernel implementations
-  conv_params.hpp                        — Conv2dParams, SizeView, Direction/DataType enums
-  types.hpp                              — fp16/bf16/fp32/fp8 type aliases and mapping
-  launch_params.hpp                      — LaunchParams (grid, block, shared memory)
-  kernel_variant.hpp                     — KernelVariant dispatch interface
-  swizzle.hpp                            — LDS swizzle for bank-conflict-free access
-  transpose_lds_layout.hpp               — DS_READ_TR_B16 layout for CDNA4 Dgrad
+kernel/                                  -- kernel implementations
+  grouped_4c_tile_conv_impl_v3.hpp  -- 4-channel grouped fp16/bf16 kernel (MFMA 4x4x4 batch-16) using CK Tile abstractions.
+  grouped_8c_tile_conv_impl_v2.hpp  -- 8-channel grouped fp16/bf16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using CK Tile abstractions.
+  grouped_16c_tile_conv_impl_v2.hpp -- 16-channel grouped fp16/bf16 kernel (MFMA 16x16x16) using CK Tile abstractions.
+  grouped_32c_tile_conv_impl_v2.hpp -- 32-channel grouped fp16/bf16 kernel (MFMA 16x16x32) using CK Tile abstractions.
+utils/                                   -- utilities for kernel implementations
+  conv_params.hpp                        -- Conv2dParams, SizeView, Direction/DataType enums
+  types.hpp                              -- fp16/bf16/fp32/fp8 type aliases and mapping
+  launch_params.hpp                      -- LaunchParams (grid, block, shared memory)
+  kernel_variant.hpp                     -- KernelVariant dispatch interface
+  swizzle.hpp                            -- LDS swizzle for bank-conflict-free access
+  transpose_lds_layout.hpp               -- DS_READ_TR_B16 layout for CDNA4 Dgrad
 ```
 
 ## Building
@@ -225,10 +225,10 @@ If you have also the implicit GEMM instances enabled, use more threads (64 or 12
 There is a [python CLI](../../../../script/direct_conv/direct_conv_bench.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv/direct_conv_cases.txt).
 It has three subcommands:
 
-- `run` — run every case and print a text summary (smoke / correctness).
-- `regress` — compare best TFLOPS against per-arch expected values (10% tolerance)
+- `run` -- run every case and print a text summary (smoke / correctness).
+- `regress` -- compare best TFLOPS against per-arch expected values (10% tolerance)
   and write a markdown report; exits nonzero on a regression.
-- `compare` — compare implicit-GEMM vs direct-conv performance (markdown table,
+- `compare` -- compare implicit-GEMM vs direct-conv performance (markdown table,
   optional `--plot` PNG; needs an implicit-GEMM-enabled build).
 
 This can be used to verify that all instances produce correct results as well as for testing performance regresion/improvement after refactoring.
