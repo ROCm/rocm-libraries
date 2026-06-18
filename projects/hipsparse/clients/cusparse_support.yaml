@@ -1,0 +1,307 @@
+# cusparse_support.yaml
+#
+# Defines which hipSPARSE routines are supported for which CUDA version ranges.
+# This file is only relevant when building against CUDA/cuSPARSE.
+# On the ROCm/HIP backend all routines are assumed to be supported.
+#
+# CUDART_VERSION integer encoding: major * 1000 + minor * 10 + patch
+#
+#   CUDA 10.1.0  ->  10010
+#   CUDA 10.2.0  ->  10020
+#   CUDA 11.0.0  ->  11000
+#   CUDA 11.2.0  ->  11020
+#   CUDA 11.3.0  ->  11030
+#   CUDA 11.3.1  ->  11031
+#   CUDA 12.0.0  ->  12000
+#   CUDA 13.0.0  ->  13000
+#
+# Per-routine fields (all optional):
+#
+#   min_cuda_version: minimum CUDART_VERSION required, inclusive
+#                     (routine is supported when CUDART_VERSION >= min_cuda_version)
+#   max_cuda_version: exclusive upper bound on CUDART_VERSION
+#                     (routine is supported when CUDART_VERSION < max_cuda_version)
+#
+# A routine that is absent from this file, or whose entry carries no version
+# constraints, is considered supported for every CUDA version.
+
+routines:
+
+  # ── Level 1 ──────────────────────────────────────────────────────────────
+  # Removed in CUDA 12 (deprecated sparse vector APIs)
+  axpyi:  { max_cuda_version: 12000 }
+  gthr:   { max_cuda_version: 12000 }
+  gthrz:  { max_cuda_version: 12000 }
+  roti:   { max_cuda_version: 12000 }
+  sctr:   { max_cuda_version: 12000 }
+
+  # Removed in CUDA 11
+  doti:   { max_cuda_version: 11000 }
+  dotci:  { max_cuda_version: 11000 }
+
+  # ── Level 2 ──────────────────────────────────────────────────────────────
+  # Removed in CUDA 13 (legacy BSR APIs)
+  bsrsv2: { max_cuda_version: 13000 }
+
+  # Note: the original compile-time guard required CUDA 10.1 Update 1 or later.
+  # CUDART_VERSION does not distinguish between 10.1.0 and 10.1 Update 1 (both
+  # map to 10010), so we approximate the lower bound as >= 10010.  The initial
+  # 10.1.0 release is too old to matter in practice.
+  coomv:  { min_cuda_version: 10010 }
+  csrmv:  { min_cuda_version: 10010 }
+
+  # Added in CUDA 11.3
+  csrsv:  { min_cuda_version: 11030 }
+
+  # Removed in CUDA 12
+  gemvi:  { max_cuda_version: 12000 }
+
+  # Removed in CUDA 11
+  hybmv:  { max_cuda_version: 11000 }
+
+  # ── Level 3 ──────────────────────────────────────────────────────────────
+  # Removed in CUDA 13
+  bsrmm:  { max_cuda_version: 13000 }
+
+  # Removed in CUDA 12
+  bsrsm2: { max_cuda_version: 12000 }
+
+  # Added in CUDA 10.1
+  coomm:  { min_cuda_version: 10010 }
+  cscmm:  { min_cuda_version: 10010 }
+  csrmm:  { min_cuda_version: 10010 }
+
+  # Added in CUDA 11.3.1
+  coosm:  { min_cuda_version: 11031 }
+  csrsm:  { min_cuda_version: 11031 }
+
+  # Removed in CUDA 11
+  gemmi:  { max_cuda_version: 11000 }
+
+  # ── Extra ─────────────────────────────────────────────────────────────────
+  # Removed in CUDA 11
+  csrgeam:  { max_cuda_version: 11000 }
+  csrgemm:  { max_cuda_version: 11000 }
+
+  # ── Preconditioners ───────────────────────────────────────────────────────
+  # Removed in CUDA 13
+  bsric02:  { max_cuda_version: 13000 }
+  bsrilu02: { max_cuda_version: 13000 }
+  csric02:  { max_cuda_version: 13000 }
+  csrilu02: { max_cuda_version: 13000 }
+
+  # ── Tridiagonal solvers (supported for all CUDA versions) ─────────────────
+  gtsv2:                  {}
+  gtsv2_nopivot:          {}
+  gtsv2_strided_batch:    {}
+  gtsv_interleaved_batch: {}
+  gpsv_interleaved_batch: {}
+
+  # ── Conversion (supported for all CUDA versions) ──────────────────────────
+  bsr2csr:          {}
+  csr2coo:          {}
+  csr2csc:          {}
+  csr2hyb:          {}
+  csr2bsr:          {}
+  csr2gebsr:        {}
+  csr2csr_compress: {}
+  coo2csr:          {}
+  hyb2csr:          {}
+  csr2dense:        {}
+  csc2dense:        {}
+  coo2dense:        {}
+  dense2csr:        {}
+  dense2csc:        {}
+  dense2coo:        {}
+  gebsr2csr:        {}
+  gebsr2gebsc:      {}
+  gebsr2gebsr:      {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# algorithm_support
+#
+# Describes which algorithm enum values are available and what the default is
+# for each generic sparse operation, as a function of CUDA version.
+#
+# Structure per operation:
+#   rocm:
+#     default_value:    integer value of the default algorithm enum
+#     description:      human-readable choices string (used in --help output)
+#     supported_values: list of supported integer algorithm values
+#   cuda_version_ranges:  (evaluated top-to-bottom; first match wins)
+#     - min_cuda_version: inclusive lower bound (absent = from the beginning)
+#       max_cuda_version: exclusive upper bound (absent = no upper bound)
+#       default_value:    -1 means "not supported on this CUDA version"
+#       description:      human-readable choices string
+#       supported_values: list of supported integer values (empty when unsupported)
+#
+# CUDART_VERSION integer encoding: major * 1000 + minor * 10 + patch
+# ─────────────────────────────────────────────────────────────────────────────
+algorithm_support:
+
+  csr2csc:
+    rocm:
+      default_value: 0  # HIPSPARSE_CSR2CSC_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running csr2csc. Possible choices are default: 0, Alg1: 1, Alg2: 2 (default:0)"
+      supported_values: [0, 1, 2]
+    cuda_version_ranges:
+      - max_cuda_version: 10010
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 10010
+        max_cuda_version: 12000
+        default_value: 1  # HIPSPARSE_CSR2CSC_ALG1
+        description: "Indicates what algorithm to use when running csr2csc. Possible choices are default: 1, Alg1: 1, Alg2: 2 (default:1)"
+        supported_values: [1, 2]
+      - min_cuda_version: 12000
+        default_value: 0  # HIPSPARSE_CSR2CSC_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running csr2csc. Possible choices are default: 0, Alg1: 1 (default:0)"
+        supported_values: [0, 1]
+
+  dense2sparse:
+    rocm:
+      default_value: 0  # HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running dense2sparse. Possible choices are default: 0 (default:0)"
+      supported_values: [0]
+    cuda_version_ranges:
+      - max_cuda_version: 11020
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11020
+        default_value: 0  # HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running dense2sparse. Possible choices are default: 0 (default:0)"
+        supported_values: [0]
+
+  sparse2dense:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPARSETODENSE_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running sparse2dense. Possible choices are default: 0 (default:0)"
+      supported_values: [0]
+    cuda_version_ranges:
+      - max_cuda_version: 11020
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11020
+        default_value: 0  # HIPSPARSE_SPARSETODENSE_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running sparse2dense. Possible choices are default: 0 (default:0)"
+        supported_values: [0]
+
+  sddmm:
+    rocm:
+      default_value: 0  # HIPSPARSE_SDDMM_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running sddmm. Possible choices are default: 0 (default:0)"
+      supported_values: [0]
+    cuda_version_ranges:
+      - max_cuda_version: 11022
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11022
+        default_value: 0  # HIPSPARSE_SDDMM_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running sddmm. Possible choices are default: 0 (default:0)"
+        supported_values: [0]
+
+  spgemm:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPGEMM_DEFAULT
+      description: "Indicates what algorithm to use when running spgemm. Possible choices are default: 0, Deterministic: 1, Non-Deterministic: 2, Alg1: 3, Alg2: 4, Alg3: 5 (default:0)"
+      supported_values: [0, 1, 2, 3, 4, 5]
+    cuda_version_ranges:
+      - max_cuda_version: 11000
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11000
+        max_cuda_version: 11031
+        default_value: 0  # HIPSPARSE_SPGEMM_DEFAULT
+        description: "Indicates what algorithm to use when running spgemm. Possible choices are default: 0 (default:0)"
+        supported_values: [0]
+      - min_cuda_version: 11031
+        max_cuda_version: 12000
+        default_value: 0  # HIPSPARSE_SPGEMM_DEFAULT
+        description: "Indicates what algorithm to use when running spgemm. Possible choices are default: 0, Deterministic: 1, Non-Deterministic: 2 (default:0)"
+        supported_values: [0, 1, 2]
+      - min_cuda_version: 12000
+        default_value: 0  # HIPSPARSE_SPGEMM_DEFAULT
+        description: "Indicates what algorithm to use when running spgemm. Possible choices are default: 0, Deterministic: 1, Non-Deterministic: 2, Alg1: 3, Alg2: 4, Alg3: 5 (default:0)"
+        supported_values: [0, 1, 2, 3, 4, 5]
+
+  spmm:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPMM_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running spmm. Possible choices are default: 0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)"
+      supported_values: [0, 1, 2, 3, 4, 5, 6, 12, 13]
+    cuda_version_ranges:
+      - max_cuda_version: 10010
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      # HIPSPARSE_MM_ALG_DEFAULT (deprecated) = HIPSPARSE_SPMM_ALG_DEFAULT = 0
+      - min_cuda_version: 10010
+        max_cuda_version: 11003
+        default_value: 0
+        description: "Indicates what algorithm to use when running spmm. Possible choices are default: 0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4 (default:0)"
+        supported_values: [0, 1, 2, 3, 4]
+      - min_cuda_version: 11003
+        max_cuda_version: 11021
+        default_value: 0  # HIPSPARSE_SPMM_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running spmm. Possible choices are default: 0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, Blocked ELL Alg1: 13 (default:0)"
+        supported_values: [0, 1, 2, 3, 4, 5, 6, 13]
+      - min_cuda_version: 11021
+        default_value: 0  # HIPSPARSE_SPMM_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running spmm. Possible choices are default: 0, COO Alg1: 1, COO Alg2: 2, COO Alg3: 3, CSR Alg1: 4, COO Alg4: 5, CSR Alg2: 6, CSR Alg3: 12, Blocked ELL Alg1: 13 (default:0)"
+        supported_values: [0, 1, 2, 3, 4, 5, 6, 12, 13]
+
+  spmv:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPMV_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running spmv. Possible choices are default: 0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)"
+      supported_values: [0, 1, 2, 3, 4]
+    cuda_version_ranges:
+      - max_cuda_version: 10010
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      # HIPSPARSE_MV_ALG_DEFAULT (deprecated) = HIPSPARSE_SPMV_ALG_DEFAULT = 0
+      - min_cuda_version: 10010
+        max_cuda_version: 11021
+        default_value: 0
+        description: "Indicates what algorithm to use when running spmv. Possible choices are default: 0, COO Alg: 1, CSR Alg1: 2, CSR Alg2: 3 (default:0)"
+        supported_values: [0, 1, 2, 3]
+      - min_cuda_version: 11021
+        default_value: 0  # HIPSPARSE_SPMV_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running spmv. Possible choices are default: 0, COO Alg1: 1, CSR Alg1: 2, CSR Alg2: 3, COO Alg2: 4 (default:0)"
+        supported_values: [0, 1, 2, 3, 4]
+
+  spsm:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPSM_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running spsm. Possible choices are default: 0 (default:0)"
+      supported_values: [0]
+    cuda_version_ranges:
+      - max_cuda_version: 11031
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11031
+        default_value: 0  # HIPSPARSE_SPSM_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running spsm. Possible choices are default: 0 (default:0)"
+        supported_values: [0]
+
+  spsv:
+    rocm:
+      default_value: 0  # HIPSPARSE_SPSV_ALG_DEFAULT
+      description: "Indicates what algorithm to use when running spsv. Possible choices are default: 0 (default:0)"
+      supported_values: [0]
+    cuda_version_ranges:
+      - max_cuda_version: 11030
+        default_value: -1
+        description: "No algorithm supported in selected cusparse version"
+        supported_values: []
+      - min_cuda_version: 11030
+        default_value: 0  # HIPSPARSE_SPSV_ALG_DEFAULT
+        description: "Indicates what algorithm to use when running spsv. Possible choices are default: 0 (default:0)"
+        supported_values: [0]

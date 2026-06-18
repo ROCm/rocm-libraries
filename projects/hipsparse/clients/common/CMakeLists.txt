@@ -13,6 +13,7 @@ target_sources(hipsparse-clients-common PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_parse_data.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_template_specialization.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cusparse_routine_support.cpp"
 )
 
 target_include_directories(hipsparse-clients-common PUBLIC
@@ -26,11 +27,15 @@ target_compile_definitions(hipsparse-clients-common PRIVATE GOOGLE_TEST)
 # GTest is required for arg_check.cpp and unit.cpp
 find_package(GTest REQUIRED)
 
+# yaml-cpp is required for cusparse_routine_support.cpp
+find_package(yaml-cpp REQUIRED)
+
 target_link_libraries(hipsparse-clients-common 
     PUBLIC 
         roc::hipsparse
     PRIVATE
         GTest::gtest
+        yaml-cpp
 )
 
 if(NOT WIN32)
