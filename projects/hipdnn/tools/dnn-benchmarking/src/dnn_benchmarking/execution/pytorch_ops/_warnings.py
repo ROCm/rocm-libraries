@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 import torch.nn.functional as F
 
-from ._common import _node_param, _node_uid
+from ._common import _effective_compute_type, _is_float32_compute, _node_param, _node_uid
 from .handlers.norm import _rmsnorm_graph_can_use_builtin
 from .handlers.reduction import _reduction_mode_name
 from .handlers.resample import _resample_has_asymmetric_padding, _resample_mode_name
@@ -26,6 +26,14 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
     for node in graph_json.get("nodes", []):
         op_type = str(node.get("type", ""))
         name = str(node.get("name") or op_type)
+
+        if not _is_float32_compute(node, graph_json):
+            cdt = _effective_compute_type(node, graph_json)
+            warnings.append(
+                f"{name}: graph compute_data_type={cdt!r} is not float32; the PyTorch "
+                f"reference assumes float32 accumulation and does not honor other compute "
+                f"types, so its results and timing may not match the engine."
+            )
 
         if op_type == "RMSNormAttributes":
             reasons: List[str] = []

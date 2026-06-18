@@ -34,7 +34,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {2: torch.zeros(1)})
 
     def test_conv_missing_w_tensor_uid_raises(self) -> None:
@@ -50,7 +50,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(1)})
 
     def test_conv_missing_y_tensor_uid_raises(self) -> None:
@@ -66,7 +66,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(
                 graph_json, {1: torch.zeros(1), 2: torch.zeros(1)}
             )
@@ -83,7 +83,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(2, 2)})
 
     def test_pointwise_missing_input_raises(self) -> None:
@@ -98,7 +98,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {})
 
     def test_pointwise_add_missing_second_input_raises(self) -> None:
@@ -117,7 +117,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Add operation requires two inputs"):
+        with pytest.raises(UnsupportedGraphError, match="Add operation requires two inputs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_mul_missing_second_input_raises(self) -> None:
@@ -135,7 +135,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Mul operation requires two inputs"):
+        with pytest.raises(UnsupportedGraphError, match="Mul operation requires two inputs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_sub_missing_second_input_raises(self) -> None:
@@ -153,7 +153,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Sub operation requires two inputs"):
+        with pytest.raises(UnsupportedGraphError, match="Sub operation requires two inputs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_div_missing_second_input_raises(self) -> None:
@@ -171,7 +171,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Div operation requires two inputs"):
+        with pytest.raises(UnsupportedGraphError, match="Div operation requires two inputs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_unsupported_operation_raises(self) -> None:
@@ -189,7 +189,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Unsupported pointwise operation"):
+        with pytest.raises(UnsupportedGraphError, match="Unsupported pointwise operation"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
 
@@ -612,9 +612,9 @@ class TestPyTorchOpsNewHandlers:
 
         assert abs(float(tensors[6].reshape(-1)[0]) - 1.00390625) < 1e-6
 
-    def test_batchnorm_rejects_non_fp32_compute_type(self) -> None:
+    def test_batchnorm_non_fp32_compute_warns(self) -> None:
         graph = self._bn_training_graph()
-        graph["nodes"][0]["compute_data_type"] = "bfloat16"
+        graph["nodes"][0]["compute_data_type"] = "half"
         tensors = {
             1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
             2: torch.randn(3, dtype=torch.bfloat16),
@@ -622,8 +622,59 @@ class TestPyTorchOpsNewHandlers:
             4: torch.tensor([1e-5]),
         }
 
-        with pytest.raises(UnsupportedGraphError):
-            pytorch_ops.execute_graph(graph, tensors)
+        pytorch_ops.execute_graph(graph, tensors)
+
+        assert 5 in tensors
+        warnings = pytorch_ops.get_reference_warnings(graph)
+        assert any("compute_data_type" in w and "half" in w for w in warnings)
+
+    def test_non_fp32_compute_warns_for_any_op(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "name": "mm",
+                    "type": "MatmulAttributes",
+                    "compute_data_type": "half",
+                    "inputs": {"a_tensor_uid": 1, "b_tensor_uid": 2},
+                    "outputs": {"c_tensor_uid": 3},
+                }
+            ],
+        }
+
+        warnings = pytorch_ops.get_reference_warnings(graph_json)
+
+        assert any("compute_data_type" in w and "half" in w for w in warnings)
+
+    def test_layernorm_preserves_graph_dtype(self) -> None:
+        x = torch.randn(2, 3, 4, dtype=torch.bfloat16)
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5},
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        tensors = {
+            1: x,
+            2: torch.randn(4, dtype=torch.bfloat16),
+            3: torch.randn(4, dtype=torch.bfloat16),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
 
     def _bn_inference_variance_graph(self) -> dict:
         return {
@@ -1102,7 +1153,7 @@ class TestPyTorchOpsNewHandlers:
             ]
         }
         q = torch.randn(1, 1, 2, 4)
-        with pytest.raises(ValueError, match="Nonzero SDPA dropout"):
+        with pytest.raises(UnsupportedGraphError, match="Nonzero SDPA dropout"):
             pytorch_ops.execute_graph(graph_json, {1: q, 2: q, 3: q})
 
     @staticmethod
@@ -1252,7 +1303,7 @@ class TestPyTorchOpsNewHandlers:
             ],
         }
         stats = torch.zeros(1, 1, 2, 1)
-        with pytest.raises(ValueError, match="dBias"):
+        with pytest.raises(UnsupportedGraphError, match="dBias"):
             pytorch_ops.execute_graph(
                 graph_json, {1: q, 2: q, 3: q, 4: q, 5: q, 6: stats}
             )
@@ -1307,7 +1358,7 @@ class TestPyTorchOpsNewHandlers:
         q = torch.randn(1, 4, 4, 8)
         v = torch.randn(1, 3, 4, 8)  # 3 does not divide Hq=4
         stats = torch.zeros(1, 4, 4, 1)
-        with pytest.raises(ValueError, match="V head count"):
+        with pytest.raises(UnsupportedGraphError, match="V head count"):
             self._run_sdpa_backward(q, q, v, q, q, stats, {"attn_scale_value": scale})
 
     def test_sdpa_forward_independent_kv_heads(self) -> None:

@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 
+from ...common.exceptions import UnsupportedGraphError
+
 
 # Type alias for operation handlers
 OpHandler = Callable[[Dict[str, Any], Dict[int, torch.Tensor], Dict[str, Any]], None]
@@ -101,7 +103,14 @@ def execute_graph(
     for node in graph_json.get("nodes", []):
         op_type = node.get("type")
         handler = _OP_HANDLERS.get(op_type)
-        if handler:
-            handler(node, tensors, graph_json)
-        else:
+        if handler is None:
             raise ValueError(f"Unsupported operation type: {op_type}")
+        try:
+            handler(node, tensors, graph_json)
+        except UnsupportedGraphError:
+            raise
+        except Exception as e:
+            raise UnsupportedGraphError(
+                f"PyTorch reference could not execute {op_type!r} with the provided "
+                f"dtypes/parameters: {e}"
+            ) from e

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import torch
 
 from ..common import torch_support
+from ..common.exceptions import UnsupportedGraphError
 
 from ..config.benchmark_config import (
     BenchmarkConfig,
@@ -276,6 +277,8 @@ class PyTorchCudaExecutor:
         """
         try:
             pytorch_ops.execute_graph(self._graph_json, tensors)
+        except UnsupportedGraphError:
+            raise
         except Exception as e:
             raise PyTorchExecutionError(f"Graph execution failed: {e}") from e
 

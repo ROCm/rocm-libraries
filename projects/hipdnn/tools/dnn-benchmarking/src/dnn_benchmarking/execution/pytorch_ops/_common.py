@@ -8,8 +8,6 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import torch
 
-from ...common.exceptions import UnsupportedGraphError
-
 __all__ = [
     "_as_tuple",
     "_node_section",
@@ -23,7 +21,8 @@ __all__ = [
     "_store_tensor",
     "_store_channel_tensor",
     "_channel_values",
-    "_require_fp32_compute",
+    "_effective_compute_type",
+    "_is_float32_compute",
     "_reject_peer_stats",
     "_channel_broadcast",
     "_scalar_value",
@@ -152,20 +151,22 @@ def _channel_values(
     return values
 
 
-def _require_fp32_compute(
-    node: Dict[str, Any], graph_json: Dict[str, Any], operation: str
-) -> None:
-    """The PyTorch batchnorm reference accumulates in float32; a graph that
-    declares any other compute type cannot be matched, so treat it as
-    inapplicable rather than silently computing in the wrong precision."""
+def _effective_compute_type(node: Dict[str, Any], graph_json: Dict[str, Any]) -> str:
+    """Resolve a node's compute_data_type: node value, else graph-level, else 'float'."""
     cdt = node.get("compute_data_type")
     if not cdt or str(cdt).lower() == "unset":
         cdt = graph_json.get("compute_data_type", "float")
-    if str(cdt).lower() not in ("float", "fp32", "float32"):
-        raise UnsupportedGraphError(
-            f"{operation}: PyTorch reference accumulates in float32; graph "
-            f"compute_data_type={cdt!r} cannot be matched"
-        )
+    return str(cdt)
+
+
+def _is_float32_compute(node: Dict[str, Any], graph_json: Dict[str, Any]) -> bool:
+    """True only for the canonical float32 token. hipDNN serializes DataType::FLOAT
+    to exactly the lowercase string "float" via NLOHMANN_JSON_SERIALIZE_ENUM in
+    flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/Common.hpp:91-114
+    (one entry, no "fp32"/"float32" alias; the "fp32" in frontend Types.hpp is a
+    separate debug stringifier, not the JSON path). Match that one token exactly;
+    _effective_compute_type already resolves "unset"/missing to the "float" default."""
+    return _effective_compute_type(node, graph_json) == "float"
 
 
 def _reject_peer_stats(node: Dict[str, Any], operation: str) -> None:
