@@ -1,0 +1,75 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Policy
+# ------
+# A tensor-wait anchor must drain its conflicting tensor_load_to_lds dep on
+# EVERY incoming CFG path. At a loop header the two incoming paths are the
+# preheader and the self back-edge, each carrying its own per-path tensor
+# FIFO. The back-edge FIFO must NOT be unioned into the preheader FIFO, or
+# the header anchor would be sized for an over-deep merge.
+#
+# Self-loop with a loop-carried token-0 tensor dep (the tensor analog of
+# waitcnt_insertion_loop_carried_local_prefix on the DS counter):
+#
+#   ^entry:   tensor_load [0]                 ; prologue producer of carried val
+#             s_branch ^header
+#   ^header:  tensor_load [1]                 ; local prefix L1
+#             tensor_load [1]                 ; local prefix L2
+#             tensor_load [1]                 ; local prefix L3
+#             s_barrier   [0]                 ; consumes carried token-0 val (PHI)
+#             tensor_load [0]                 ; carried producer (next iter)
+#             s_cbranch ^header / ^exit
+#
+# ^header has TWO predecessors:
+#   * ^entry  (preheader FIFO carries the prologue token-0 load)
+#   * ^header (self back-edge FIFO carries L1,L2,L3 + the carried producer)
+#
+# In steady state the barrier consumes the carried token-0 load from the
+# PREVIOUS iteration. At the barrier the tensor FIFO holds
+#   { carried(prev), L1, L2, L3 }
+# so the carried load is the oldest of 4 outstanding ops and the correct
+# drain is `s_wait_tensorcnt 3` (wait for the carried load; leave L1,L2,L3
+# outstanding). The local prefix MUST be counted -- the wait depends on how
+# many tensor loads were issued before the consumer this iteration, not just
+# the carried producer's position at loop-body exit.
+#
+# A positive tlcnt = 3 also pins convergence: a non-convergent solver would
+# hit the iteration cap and fall back to `s_wait_tensorcnt 0` at every
+# anchor, so a `0` here would be indistinguishable from that failure.
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_per_path_self_loop_anchor
+#
+# Preheader issues the prologue token-0 load that seeds the carried dep.
+# CHECK: ^entry
+# CHECK: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK: s_branch
+#
+# Loop header: three token-1 local-prefix loads, then the anchor drains the
+# carried token-0 dep (oldest of 4 -> tlcnt = 3) right before the barrier,
+# then the carried producer reloads token 0 for the next iteration.
+# CHECK: ^header
+# CHECK: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 3
+# CHECK-NEXT: s_barrier{{.*}}tokens = [0]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK: s_cbranch_scc1
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_tensor_per_path_self_loop_anchor() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("header")
+  Successors: ^header
+^header:
+  "st.tensor_load_to_lds"(s[20:23], s[30:37]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[40:43], s[50:57]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[60:63], s[64:71]) { mod.memtoken = { tokens = [1] } }
+  "st.s_barrier"() { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("header", SCC0)
+  Successors: ^header, ^exit
+^exit:
+}

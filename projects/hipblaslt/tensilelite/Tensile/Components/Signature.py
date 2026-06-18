@@ -222,6 +222,26 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4. The host pushes only the 6 args matching the
+            # mode it selected for this launch; the SK4 reader names
+            # (TotalItems, SKTiles, SKSplit, SKItersPerWI, SKGrid) are emitted
+            # as RegSet aliases (see the SK5 block in KernelWriterAssembly.py)
+            # onto the same physical SGPRs as the SK3 primary names
+            # (MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG,
+            # skGrid, skTiles) respectively.
+            #
+            # The mode bit (bit 30 of slot 2) selects the active path. The
+            # signature metadata uses SK3 names as the primary kernarg labels
+            # because they are what defineSgpr() declares; SK4 names exist
+            # only as register aliases.
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 24
         elif kernel["StreamK"]:
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")

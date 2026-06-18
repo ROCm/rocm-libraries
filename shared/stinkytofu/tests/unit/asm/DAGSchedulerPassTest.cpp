@@ -80,6 +80,48 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
+    // Run with the tensor_load_to_lds credit-pool throttle enabled.
+    // distributeGlobalRead routes tensor loads into globalReadQueue; depth/latency
+    // configure the in-flight credit pool.
+    void runPassWithGlobalReadThrottle(int depth, int drainLatency) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.distributeGlobalRead = true;
+        pfc.dagFeatures.globalReadQueueDepth = depth;
+        pfc.dagFeatures.globalReadDrainLatency = drainLatency;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    // Linearized mnemonic order of a block (skips PHIs and non-Stinky IR).
+    static std::vector<std::string> mnemonicSequence(const BasicBlock& block) {
+        std::vector<std::string> seq;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            const HwInstDesc* hw = inst->getHwInstDesc();
+            if (!hw || !hw->mnemonic) continue;
+            seq.push_back(hw->mnemonic);
+        }
+        return seq;
+    }
+
+    // Largest run of consecutive tensor_load_to_lds in a mnemonic sequence.
+    static int maxConsecutiveTensorLoads(const std::vector<std::string>& seq) {
+        int run = 0, best = 0;
+        for (const std::string& m : seq) {
+            if (m == "tensor_load_to_lds") {
+                run++;
+                best = std::max(best, run);
+            } else {
+                run = 0;
+            }
+        }
+        return best;
+    }
+
     // Build a single-BB self-loop so the scheduler uses the loop-aware CDNA5 path.
     // Returns the loop body BB with the branch already appended.
     BasicBlock* buildLoopBB(const char* label = "loop_body") {
@@ -113,6 +155,16 @@ class DAGSchedulerPassTest : public ::testing::Test {
     StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
         StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
         inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+        return inst;
+    }
+
+    // A tensor_load_to_lds with an LDS pseudo dest-reg so the DAG scheduler treats
+    // it as movable (without LDS pseudo-regs hasSideEffect() makes it a region
+    // boundary and it never enters globalReadQueue). Mirrors createMovableDsLoad.
+    StinkyInstruction* createMovableTensorLoad(BasicBlock* targetBB, int src0Reg, int src1Reg,
+                                               int ldsToken) {
+        StinkyInstruction* inst = createTensorLoadInBlock(targetBB, arch, src0Reg, src1Reg);
+        inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
         return inst;
     }
 };
@@ -313,4 +365,107 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_InstructionCountPreserved) {
     int afterCount = countStinkyInstructions(*bb);
 
     EXPECT_EQ(afterCount, beforeCount) << "Scheduler must preserve instruction count";
+}
+
+// ---------------------------------------------------------------------------
+// tensor_load_to_lds bounded in-flight credit pool (dagFeatures.globalReadQueueDepth
+// / globalReadDrainLatency). The throttle is loop-only (uses the CDNA5 loop path),
+// so all of these build a self-loop body with 4 movable tensor_loads + 10 VALU.
+//
+// Model: each issued tensor_load holds a credit for `drainLatency` cycles, decayed
+// once per issued instruction (~1 cycle/pick here). With depth D, at most D credits
+// may be in flight, so once D loads have issued the scheduler must interleave VALU
+// until a credit drains before issuing the next load.
+//
+// NOTE on the chosen numbers: a credit must survive long enough to still be in
+// flight when the next load wants to issue, so the throttle only engages when
+// drainLatency > depth. At 1 issue/cycle a credit that drains in <= depth cycles
+// frees before the cap is reached, so the hardware sustains D loads/cycle with no
+// stall. We therefore use drainLatency comfortably above depth and assert the
+// back-to-back run equals exactly depth (D loads, then forced interleave).
+// ---------------------------------------------------------------------------
+
+// Depth 2: exactly 2 tensor_loads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth2_RespectsQueueDepth) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/2, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 2)
+        << "depth=2: at most 2 tensor_loads in flight before an interleave is forced";
+}
+
+// Depth 3: exactly 3 tensor_loads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth3_RespectsQueueDepth) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/3, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 3)
+        << "depth=3: at most 3 tensor_loads in flight before an interleave is forced";
+}
+
+// Depth 1: degenerate cap — every tensor_load must be separated by other work.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth1_SeparatesEveryLoad) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/1, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 1) << "depth=1: no two tensor_loads may be adjacent";
+}
+
+// All instructions are preserved regardless of throttle (count invariant).
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_PreservesInstructionCount) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithGlobalReadThrottle(/*depth=*/2, /*drainLatency=*/8);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
+}
+
+// Throttle off (depth=0): feature is opt-in and does not perturb the default path.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithGlobalReadThrottle(/*depth=*/0, /*drainLatency=*/0);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
 }
