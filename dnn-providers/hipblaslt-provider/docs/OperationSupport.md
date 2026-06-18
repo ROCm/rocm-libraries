@@ -32,7 +32,7 @@ Matmul(a, b) → d
 - Output: `FP32`, `FP16`, or `BF16`
 - Compute type: `FP32`
 
-**Hardware support:** Supported on **gfx12** and **gfx950** only.
+**Hardware support:** Supported on **gfx950** and **gfx1250** only.
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the

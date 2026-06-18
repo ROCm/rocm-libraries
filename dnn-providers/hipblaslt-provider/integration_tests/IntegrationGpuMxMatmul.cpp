@@ -40,12 +40,13 @@ protected:
             return;
         }
 
-        // OCP FP8 MX data types are only supported on gfx12 and gfx950.
+        // MX block-scaled data types (FP8/FP6/FP4) are supported only on gfx950
+        // and gfx1250.
         const std::string archName = currentDeviceArchRaw();
-        const bool supported = archName.rfind("gfx12", 0) == 0 || archName.rfind("gfx950", 0) == 0;
+        const bool supported = archName.rfind("gfx950", 0) == 0 || archName.rfind("gfx125", 0) == 0;
         if(!supported)
         {
-            GTEST_SKIP() << "OCP FP8 MX data types are not supported on " << archName;
+            GTEST_SKIP() << "MX block-scaled data types are not supported on " << archName;
         }
     }
 
