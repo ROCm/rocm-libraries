@@ -225,6 +225,17 @@ inline bool isReturn(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_endpgm;
 }
 
+// Last real (non-pseudo) instruction in a block, or nullptr if the block is
+// label-only. Walks back from the terminator, skipping trailing pseudos
+// (label / asm directive).
+inline StinkyInstruction* lastRealInst(BasicBlock& bb) {
+    for (IRBase* n = bb.getTerminator(); n; n = n->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(n);
+        if (inst && !isPseudoInst(inst)) return inst;
+    }
+    return nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // True16 half-selectors
 // ---------------------------------------------------------------------------
@@ -799,17 +810,7 @@ class InsertWaitAluPassImpl : public Pass {
         for (BasicBlock& bb : func) {
             if (bbsWithExitDisable.count(&bb)) continue;
             if (!bb.getSuccessors().empty()) continue;
-            StinkyInstruction* tail = nullptr;
-            StinkyInstruction* labelAnchor = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-                if (isPseudoInst(inst)) {
-                    if (!labelAnchor && inst->getUnifiedOpcode() == GFX::LABEL) labelAnchor = inst;
-                    continue;
-                }
-                tail = inst;
-            }
+            StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
                 const bool tailExits =
                     isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
@@ -817,18 +818,21 @@ class InsertWaitAluPassImpl : public Pass {
                 bbsWithExitDisable.insert(&bb);
                 continue;
             }
-            // Skip if the BB is unreachable — every predecessor terminates with a
-            // return (s_endpgm). That covers a trailing `label_ASM_End:` after
+            // Label-only BB. Skip if unreachable — every predecessor terminates
+            // with a return (s_endpgm), e.g. a trailing `label_ASM_End:` after
             // `s_endpgm`, where the disable would be dead code.
+            StinkyInstruction* labelAnchor = nullptr;
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && inst->getUnifiedOpcode() == GFX::LABEL) {
+                    labelAnchor = inst;
+                    break;
+                }
+            }
             if (labelAnchor) {
                 bool reachable = bb.getPredecessors().empty();
                 for (BasicBlock* pred : bb.getPredecessors()) {
-                    StinkyInstruction* predTail = nullptr;
-                    for (auto it = pred->begin(); it != pred->end(); ++it) {
-                        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                        if (!inst || isPseudoInst(inst)) continue;
-                        predTail = inst;
-                    }
+                    StinkyInstruction* predTail = lastRealInst(*pred);
                     if (!predTail || !isReturn(*predTail)) {
                         reachable = true;
                         break;
@@ -846,12 +850,7 @@ class InsertWaitAluPassImpl : public Pass {
         // are never disabled here (their exit converges at the label, Pass A).
         for (BasicBlock& bb : func) {
             if (bbsWithExitDisable.count(&bb)) continue;
-            StinkyInstruction* tail = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst || isPseudoInst(inst)) continue;
-                tail = inst;
-            }
+            StinkyInstruction* tail = lastRealInst(bb);
             if (!tail) continue;
             if (isConditionalBranch(*tail)) continue;
             BasicBlock* exitSucc = nullptr;
