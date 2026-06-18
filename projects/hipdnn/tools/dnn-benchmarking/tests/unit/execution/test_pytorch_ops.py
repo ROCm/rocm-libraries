@@ -694,25 +694,11 @@ class TestPyTorchOpsNewHandlers:
             ]
         }
 
-    def test_batchnorm_inference_variance_preserves_graph_dtype(self) -> None:
-        tensors = {
-            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
-            2: torch.zeros(3, dtype=torch.bfloat16),
-            3: torch.ones(3, dtype=torch.bfloat16),
-            4: torch.ones(3, dtype=torch.bfloat16),
-            5: torch.zeros(3, dtype=torch.bfloat16),
-            6: torch.tensor([1e-5]),
-        }
-
-        pytorch_ops.execute_graph(self._bn_inference_variance_graph(), tensors)
-
-        assert tensors[7].dtype == torch.bfloat16
-
     def test_batchnorm_inference_variance_rejects_ineligible_dtype(self) -> None:
         tensors = {
             1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
-            2: torch.zeros(3, dtype=torch.bfloat16),
-            3: torch.ones(3, dtype=torch.bfloat16),
+            2: torch.zeros(3, dtype=torch.float32),
+            3: torch.ones(3, dtype=torch.float32),
             4: torch.ones(3, dtype=torch.float16),
             5: torch.zeros(3, dtype=torch.float16),
             6: torch.tensor([1e-5]),
@@ -723,10 +709,11 @@ class TestPyTorchOpsNewHandlers:
 
     def test_batchnorm_inference_affine_outputs_bf16(self) -> None:
         # The affine inference path computes in fp32 and stores to the graph
-        # output dtype (bf16 here).
+        # output dtype (bf16 here). Stat tensors (mean/inv_variance) are fp32 per
+        # the engine's batchnorm stat-dtype contract.
         x = torch.randn(2, 3, 2, 2, dtype=torch.bfloat16)
-        mean = torch.randn(3, dtype=torch.bfloat16)
-        inv = torch.rand(3, dtype=torch.bfloat16) + 0.5
+        mean = torch.randn(3, dtype=torch.float32)
+        inv = torch.rand(3, dtype=torch.float32) + 0.5
         scale = torch.randn(3, dtype=torch.bfloat16)
         bias = torch.randn(3, dtype=torch.bfloat16)
         graph = {
@@ -763,6 +750,52 @@ class TestPyTorchOpsNewHandlers:
         ).to(torch.bfloat16)
         assert tensors[6].dtype == torch.bfloat16
         torch.testing.assert_close(tensors[6], expected)
+
+    def test_batchnorm_inference_variance_rejects_non_fp32_stat(self) -> None:
+        # Engine requires float32 mean/variance stats; a bf16 stat graph is
+        # inapplicable even when activations and affine params are bf16.
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.zeros(3, dtype=torch.bfloat16),
+            3: torch.ones(3, dtype=torch.bfloat16),
+            4: torch.ones(3, dtype=torch.bfloat16),
+            5: torch.zeros(3, dtype=torch.bfloat16),
+            6: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            pytorch_ops.execute_graph(self._bn_inference_variance_graph(), tensors)
+
+    def test_batchnorm_backward_rejects_non_fp32_stat(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ]
+        }
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            3: torch.zeros(3, dtype=torch.bfloat16),
+            4: torch.ones(3, dtype=torch.bfloat16),
+            5: torch.ones(3, dtype=torch.bfloat16),
+        }
+
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            pytorch_ops.execute_graph(graph_json, tensors)
 
     def test_layernorm_matches_torch_and_aux_outputs(self) -> None:
         x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
 from .._registry import register_handler
+from ....common.exceptions import UnsupportedGraphError
 
 
 def _bn_reduce_dims(x: torch.Tensor) -> Tuple[int, ...]:
@@ -42,6 +43,20 @@ def _bn_affine(
     return (scale_b * ((x_float - mean_b) * inv_b) + bias_b).to(dtype=x.dtype)
 
 
+def _require_fp32_stat(values: torch.Tensor, name: str) -> torch.Tensor:
+    """hipDNN's MIOpen batchnorm provider supports only float32 mean/variance stat
+    tensors; a non-fp32 stat tensor is GRAPH_NOT_SUPPORTED on the engine and cannot
+    be faithfully matched (native_batch_norm_backward also rejects non-fp32 saved
+    stats), so the reference treats such a graph as inapplicable rather than
+    silently promoting it to float32."""
+    if values.dtype != torch.float32:
+        raise UnsupportedGraphError(
+            f"Batchnorm reference requires a float32 {name} stat tensor; graph "
+            f"declares {values.dtype}, which the engine reports as unsupported"
+        )
+    return values
+
+
 @register_handler("BatchnormInferenceAttributes")
 def handle_batchnorm_inference(
     node: Dict[str, Any],
@@ -61,8 +76,10 @@ def handle_batchnorm_inference(
         x,
         _channel_values(_tensor(tensors, scale_uid, node), x),
         _channel_values(_tensor(tensors, bias_uid, node), x),
-        _channel_values(_tensor(tensors, mean_uid, node), x),
-        _channel_values(_tensor(tensors, inv_uid, node), x),
+        _require_fp32_stat(_channel_values(_tensor(tensors, mean_uid, node), x), "mean"),
+        _require_fp32_stat(
+            _channel_values(_tensor(tensors, inv_uid, node), x), "inv_variance"
+        ),
     )
     _store_tensor(tensors, y_uid, y)
 
@@ -88,8 +105,12 @@ def handle_batchnorm_inference_variance(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x)
-    running_var = _channel_values(_tensor(tensors, variance_uid, node), x)
+    running_mean = _require_fp32_stat(
+        _channel_values(_tensor(tensors, mean_uid, node), x), "mean"
+    )
+    running_var = _require_fp32_stat(
+        _channel_values(_tensor(tensors, variance_uid, node), x), "variance"
+    )
     weight = _channel_values(_tensor(tensors, scale_uid, node), x)
     bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
@@ -213,11 +234,11 @@ def handle_batchnorm_backward(
         mean, variance = _bn_mean_var(x)
         inv_variance = torch.rsqrt(variance + 1e-5)
     else:
-        mean = _channel_values(
-            _tensor(tensors, int(mean_uid), node), x, dtype=torch.float32
+        mean = _require_fp32_stat(
+            _channel_values(_tensor(tensors, int(mean_uid), node), x), "mean"
         )
-        inv_variance = _channel_values(
-            _tensor(tensors, int(inv_uid), node), x, dtype=torch.float32
+        inv_variance = _require_fp32_stat(
+            _channel_values(_tensor(tensors, int(inv_uid), node), x), "inv_variance"
         )
 
     # Fused batchnorm backward: a single op that dispatches to MIOpen on ROCm and
