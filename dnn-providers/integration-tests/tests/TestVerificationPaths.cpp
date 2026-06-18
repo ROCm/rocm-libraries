@@ -208,14 +208,14 @@ TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough
 }
 
 // ---------------------------------------------------------------------------
-// Path 3 (continued) — All three runner suffixes register per bundle
+// Path 3 (continued) — Engine runner suffix is appended per bundle
 //
-// Proves that for a bundle with golden data, all three verification runners
-// (CpuRef, GpuRef, Engine) produce distinct suite names.  This is how the
-// system provides three independent cross-checks against the same golden
-// ground truth.
+// Proves that registerBundles appends the "_Engine" suffix to the discovered
+// suite name.  Bundles are registered only for the Engine runner (CpuRef /
+// GpuRef were removed — the standalone pipeline tests above cover those
+// executors directly).
 // ---------------------------------------------------------------------------
-TEST(TestVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
+TEST(TestVerificationRouting, EngineRunnerSuffixIsAppended)
 {
     auto path = std::filesystem::temp_directory_path() / "golden_suffix_test";
     std::filesystem::remove_all(path);
@@ -229,17 +229,9 @@ TEST(TestVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
 
     const auto& bundle = bundles.front();
 
-    const auto cpuSuite = bundle.suiteName + "_CpuRef";
-    const auto gpuSuite = bundle.suiteName + "_GpuRef";
     const auto engineSuite = bundle.suiteName + "_Engine";
-
-    EXPECT_NE(cpuSuite, gpuSuite);
-    EXPECT_NE(cpuSuite, engineSuite);
-    EXPECT_NE(gpuSuite, engineSuite);
-
-    EXPECT_NE(cpuSuite.find("CpuRef"), std::string::npos);
-    EXPECT_NE(gpuSuite.find("GpuRef"), std::string::npos);
     EXPECT_NE(engineSuite.find("Engine"), std::string::npos);
+    EXPECT_EQ(engineSuite, "BatchnormInference_nchw_fp32_Small_Engine");
 }
 
 // NOLINTEND(readability-identifier-naming)

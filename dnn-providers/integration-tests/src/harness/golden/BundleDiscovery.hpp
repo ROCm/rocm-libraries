@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+
 namespace hipdnn_integration_tests::golden
 {
 
@@ -50,9 +52,9 @@ struct DiscoveredBundle
 
 // Generic recursive file scanner: returns every file under `directory` whose
 // extension matches `extension` (e.g. ".json"), sorted for deterministic test
-// ordering. It carries NO bundle knowledge — meta-file exclusion is layered
-// on top by the caller (see isMetaFile / discoverBundles). This is the clean
-// split called for in ALMIOPEN-1968: a generic scan, with bundle filtering
+// ordering. It carries NO bundle knowledge — graph-vs-companion filtering is
+// layered on top by the caller (see isGraphFile / discoverBundles). This is the
+// clean split called for in ALMIOPEN-1968: a generic scan, with bundle filtering
 // applied separately rather than baked into the directory walk.
 inline std::vector<std::filesystem::path>
     scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
@@ -100,23 +102,31 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
     return leaves;
 }
 
-// Meta-file filter: true for companion .json files that are NOT bundle graphs
-// and must be excluded from discovery. Currently only metadata: a bare
-// `meta.json` or any `{Name}.meta.json`.
+// Discovery predicate (ALLOWLIST): true only for a bundle GRAPH .json — the file
+// that should become a test. It is the inverse of "is a companion": every .json
+// that is NOT a graph (metadata today, claims tomorrow) is skipped by discovery.
 //
-// NOTE: discoverBundles registers a test for every .json this returns false for,
-// so this is the single chokepoint for "companion, not a graph." Any future
-// non-graph companion (e.g. a planned support.json) MUST be added here —
-// otherwise it is misregistered as a graph bundle and fails at load time as a
-// spurious test.
-inline bool isMetaFile(const std::filesystem::path& jsonPath)
+// A graph is identified positively and generically, so new companion kinds need
+// no change here:
+//   * companions use the form {Name}.{kind}.json (e.g. Small.meta.json -> stem
+//     "Small.meta"); a graph's stem therefore has NO embedded '.'. This single
+//     rule excludes ANY {Name}.{kind} companion — meta, a future claims, etc. —
+//     without enumerating the kind.
+//   * reserved BARE companion names (e.g. "meta.json", which has no {Name} prefix
+//     and so slips past the dotted-stem rule). This is the only thing that must
+//     grow, and only for a new *bare* companion (none planned beyond meta).
+inline bool isGraphFile(const std::filesystem::path& jsonPath)
 {
-    if(jsonPath.filename() == "meta.json")
+    if(jsonPath.extension() != ".json")
     {
-        return true;
+        return false;
     }
     const auto stem = jsonPath.stem().string();
-    return stem.size() >= 5 && stem.substr(stem.size() - 5) == ".meta";
+    if(stem.find('.') != std::string::npos)
+    {
+        return false; // {Name}.{kind}.json companion (meta, claims, ...)
+    }
+    return stem != "meta"; // reserved bare companion name
 }
 
 // Maps any non-[alnum_] char to '_' so a path segment is a legal GTest name
@@ -185,16 +195,19 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     return {suite, test};
 }
 
-// Recursively discovers bundles under the data root. Every non-meta .json (see
-// isMetaFile) is a bundle; its GTest name comes from its path via
-// deriveTestName. No fixed folder structure is required — see deriveTestName for
-// the rationale (structure is validated out-of-band by the Python verifier).
+// Recursively discovers bundles under the data root. Every graph .json (see
+// isGraphFile — i.e. any .json that is not a companion) is a bundle; its GTest
+// name comes from its path via deriveTestName. No fixed folder structure is
+// required — see deriveTestName for the rationale (structure is validated
+// out-of-band by the Python verifier).
 //
-// Hard errors (throw), so authoring mistakes abort startup loudly rather than
-// silently dropping coverage:
-//   - a leaf folder (no subdirectories) that contains no graph .json — an empty
-//     bundle folder; if a user makes case_12312/ they meant to put a bundle in
-//     it. This also catches a completely empty data root.
+// Graceful handling:
+//   - a leaf folder (no subdirectories) that contains no graph .json is warned
+//     and skipped. Partial DVC pulls can leave empty folders; aborting the
+//     entire binary would prevent all other tests from running. A completely
+//     empty data root returns an empty vector (no bundles).
+//
+// Hard errors (throw):
 //   - a generated test-name collision: two bundles whose paths sanitize to the
 //     same GTest name (naming both paths so the clash is obvious).
 inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
@@ -208,23 +221,19 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
         const bool hasGraph = std::any_of(std::filesystem::directory_iterator(leaf),
                                           std::filesystem::directory_iterator(),
                                           [](const std::filesystem::directory_entry& e) {
-                                              return e.is_regular_file()
-                                                     && e.path().extension() == ".json"
-                                                     && !isMetaFile(e.path());
+                                              return e.is_regular_file() && isGraphFile(e.path());
                                           });
         if(!hasGraph)
         {
-            throw std::runtime_error("Bundle leaf folder contains no graph .json: " + leaf.string()
-                                     + "; every bundle folder must contain a graph .json (an empty "
-                                       "folder is a mistake)");
+            HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
         }
     }
 
     for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
     {
-        if(isMetaFile(jsonPath))
+        if(!isGraphFile(jsonPath))
         {
-            continue;
+            continue; // companion (.meta.json, future .claims.json, ...), not a graph
         }
 
         const DerivedTestName derived = deriveTestName(jsonPath, bundleDir);
