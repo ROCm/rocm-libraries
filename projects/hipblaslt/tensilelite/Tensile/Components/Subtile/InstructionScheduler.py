@@ -204,8 +204,6 @@ class _SchedulingRules:
         # Cross-path state
         self.lastDsReadPos = -1
         self.earliestWaitCntPos = totalSlots
-        self.waitGrBarrierPos: Optional[int] = None
-        self.maxDsReadAfterWaitGr = -1
         # Per-path state
         self._resetPath()
 
@@ -251,27 +249,7 @@ class _SchedulingRules:
             return not any(_isBufferLoad(item[1]) for s in slots for item in placer._placed[s])
         return not any(_isM0Update(item[1]) for s in slots for item in placer._placed[s])
 
-    def grAfterWaitGrDsReads(self, placer, pos, inst):
-        """Keep GR (m0 / buffer_load) out of the window after wait_gr+barrier until ds_reads finish."""
-        if not (_isBufferLoad(inst) or _isM0Update(inst)):
-            return True
-        if self.waitGrBarrierPos is None or self.maxDsReadAfterWaitGr < 0:
-            return True
-        if pos <= self.waitGrBarrierPos:
-            return True
-        return pos > self.maxDsReadAfterWaitGr
-
     # ── Adjusters: (placer, limit, inst) -> limit ──
-
-    def deferGrAfterWaitGrDsReads(self, placer, limit, inst):
-        """Once past wait_gr, start searching for GR only after post-barrier ds_reads."""
-        if not (_isBufferLoad(inst) or _isM0Update(inst)):
-            return limit
-        if self.waitGrBarrierPos is None or self.maxDsReadAfterWaitGr < 0:
-            return limit
-        if limit <= self.waitGrBarrierPos:
-            return limit
-        return max(limit, self.maxDsReadAfterWaitGr + 1)
 
     def spreadBufferLoads(self, placer, limit, inst):
         """Spread buffer_load instructions evenly across available range."""
@@ -316,27 +294,6 @@ class _SchedulingRules:
             numTailInsts = sum(1 for mid, _ in pathInsts if mid in tailModuleIds)
             # this is an approximation as we don't know exactly how many slots will be use by modules after the GR yet (in this codepath)
             self.bufLoadMaxSlot = max(0, rawMax - numTailInsts)
-
-    def setPostWaitGrDsReadFence(self, placer) -> None:
-        """After the wait_gr path is placed, record ds_read coverage for GR deferral."""
-        wg_pos = None
-        for pos, slot in enumerate(placer._placed):
-            for _, inst in slot:
-                if _isWaitGr(inst):
-                    wg_pos = pos if wg_pos is None else min(wg_pos, pos)
-        if wg_pos is None:
-            self.waitGrBarrierPos = None
-            self.maxDsReadAfterWaitGr = -1
-            return
-        max_ds = -1
-        for pos, slot in enumerate(placer._placed):
-            if pos <= wg_pos:
-                continue
-            for _, inst in slot:
-                if _isDsRead(inst):
-                    max_ds = max(max_ds, pos)
-        self.waitGrBarrierPos = wg_pos
-        self.maxDsReadAfterWaitGr = max_ds
 
 
 def _classifyPaths(pathOrders, emittedModules):
@@ -460,8 +417,11 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
 
     When multiDU is True (MX multi-DU path):
       - LR path containing a WAIT_GR is placed forward (wait_gr → sync → LR insts).
-      - wait_gr+barrier stay contiguous; GR m0/buffer_load defer until that path's
-        post-barrier ds_reads complete.
+      - wait_gr+barrier stay contiguous.
+      The GR-defer hazard (next-iteration GR must not overwrite an LDS buffer
+      still being read post-barrier) is modeled as a logical dependency edge in
+      the LogicalScheduler, so it is enforced by module ordering rather than by
+      a placement rule here.
 
       TODO : To be tested on multi-partition setup.
     """
@@ -497,9 +457,6 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
     base_validators = [rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait,
                        rules.minGapDsReadToWait, rules.noM0WithBufferLoad]
     base_adjusters = [rules.spreadBufferLoads]
-    if multiDU:
-        base_validators.append(rules.grAfterWaitGrDsReads)
-        base_adjusters.insert(0, rules.deferGrAfterWaitGrDsReads)
     placer = _SlotPlacer(
         len(mfmas) - 1, n, pathOrders,
         validators=base_validators,
@@ -515,8 +472,6 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
         if not hasWaitGR:
             rules.setupBufLoadSpreading(placer, pathInsts, order)
         placer.placePath(pathInsts, reverse=reverse, multiDU=multiDU)
-        if multiDU and hasWaitGR:
-            rules.setPostWaitGrDsReadFence(placer)
 
     scheduled = Module()
     _emitPreMfma(scheduled)
