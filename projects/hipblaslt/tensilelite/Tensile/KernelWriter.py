@@ -6073,9 +6073,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersA["MX"]))
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersB["MX"]))
 
-      # reset memToken for tail loop
-      self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
-      self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
+      # LDS mem tokens: baseline buffer 0 for tail-loop codegen
+      self.resetLdsTokensForTailLoop()
       module.addComment1("Update M0 for DTLDS")
       moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
@@ -10757,7 +10756,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
+  def resetLdsTokensForTailLoop(self) -> None:
+    """Point all LDS-related memory tokens at buffer 0 before tail-loop codegen.
+
+    Keep assignments in sync with the baseline next to ``memTokenLdsBuffer*`` setup
+    (``ldsReadTokenIdx`` / ``ldsTensorTokenIdx`` / ``ldsDirectToLDSTokenIdx`` /
+    ``ldsWriteTokenIdx``).
+    """
+    t0 = self.states.memTokenLdsBuffer0
+    self.states.ldsWriteTokenIdx = t0
+    self.states.ldsReadTokenIdx = t0
+    self.states.ldsTensorTokenIdx = t0
+    self.states.ldsDirectToLDSTokenIdx = t0
 
   def resetTDMDescriptorForTail(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
