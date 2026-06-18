@@ -44,6 +44,46 @@ namespace
         }
         return ::testing::AssertionSuccess();
     }
+
+    void setBatchPointerResetPolicyArgs(Client::po::variables_map& args)
+    {
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "max-enqueues-per-sync",
+                                                     std::any(int(-1)));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "min-flops-per-sync",
+                                                     std::any(size_t(0)));
+        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-a", std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-b", std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-c", std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-d", std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "print-tensor-ref",
+                                                     std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "print-tensor-bias",
+                                                     std::any(false));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "print-tensor-amaxd",
+                                                     std::any(false));
+    }
+
+    Client::po::variables_map
+        makeBatchPointerResetArgs(std::vector<std::vector<size_t>> problemSizes)
+    {
+        auto args = TensileLite::testing::buildBaseDataInitArgs(std::move(problemSizes));
+        setBatchPointerResetPolicyArgs(args);
+        return args;
+    }
+
+    Client::po::variables_map makeRingBatchPointerArgs(
+        std::vector<std::vector<size_t>> problemSizes, int elementsToValidate = 1)
+    {
+        auto args = TensileLite::testing::buildRingArgs(std::move(problemSizes),
+                                                        elementsToValidate);
+        setBatchPointerResetPolicyArgs(args);
+        return args;
+    }
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -84,7 +124,7 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
     // Factory problem must be at least as large as the largest test problem
     // so that the allocated GPU buffers are big enough.
     // Use M=64, N=64, batch=4, K=64 — index order is {i, j, l, k}.
-    auto args = TensileLite::testing::buildBaseDataInitArgs({{64, 64, BATCH, 64}});
+    auto args = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
 
     ClientProblemFactory factory(args);
     DataInitialization   dataInit(args, factory);
@@ -141,6 +181,74 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
     }
 }
 
+TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+
+    auto args = makeRingBatchPointerArgs({{64, 64, BATCH, 64}}, 1);
+
+    ClientProblemFactory factory(args);
+    DataInitialization   dataInit(args, factory);
+
+    auto inputs1 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
+
+    auto* ci1 = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->batchA, nullptr);
+
+    void* batchA_p1[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p1, ci1->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride1   = (uint8_t*)batchA_p1[1] - (uint8_t*)batchA_p1[0];
+    ptrdiff_t expected1 = ptrdiff_t(32 * 32);
+    EXPECT_EQ(stride1, expected1) << "Problem 1 batch pointer stride mismatch";
+
+    auto* slot0BatchA = ci1->batchA;
+
+    dataInit.beginAsyncReset(&p1);
+    dataInit.beginAsyncReset(&p1);
+
+    auto warmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
+    dataInit.waitCopyDone(nullptr);
+
+    ASSERT_NE(warmInputs.get(), nullptr);
+    auto* warmCi = dynamic_cast<ContractionInputs*>(warmInputs.get());
+    ASSERT_NE(warmCi, nullptr);
+    ASSERT_NE(warmCi->batchA, nullptr);
+    EXPECT_NE(warmCi->batchA, slot0BatchA);
+
+    dataInit.preProblem(&p2);
+    dataInit.cancelAsyncReset();
+
+    auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
+
+    auto* ci2 = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+    EXPECT_EQ(ci2->batchA, slot0BatchA);
+
+    void* batchA_p2[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p2, ci2->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride2   = (uint8_t*)batchA_p2[1] - (uint8_t*)batchA_p2[0];
+    ptrdiff_t expected2 = ptrdiff_t(64 * 64);
+    EXPECT_EQ(stride2, expected2)
+        << "After switching to problem 2, the batch pointer stride should reflect "
+           "problem 2's aStride (" << expected2 << " bytes), but got " << stride2
+        << ". This indicates cancelAsyncReset did not clear the warm ring.";
+}
+
 // ---------------------------------------------------------------------------
 // Structural invariant: switching to a different ContractionProblemGemm
 // object must trigger batch-pointer re-upload even when preProblem() is not
@@ -176,7 +284,7 @@ TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
     auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
 
     // Buffer must be sized for the largest problem.
-    auto args = TensileLite::testing::buildBaseDataInitArgs({{64, 64, BATCH, 64}});
+    auto args = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
 
     ClientProblemFactory factory(args);
     DataInitialization   dataInit(args, factory);
