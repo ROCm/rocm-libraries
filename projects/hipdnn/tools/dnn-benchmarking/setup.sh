@@ -447,18 +447,23 @@ detect_gpu_arch() {
 }
 
 get_torch_mode() {
-    python - <<'PY'
+    # `import torch` from a ROCm wheel with no visible GPU can print SDK probe
+    # warnings to stdout, and this value is captured via command substitution.
+    # Emit the mode on its own final line (the leading newline guards against a
+    # warning that lacks a trailing newline) and read only that last line.
+    python - <<'PY' | tail -n1
 try:
     import torch
 except Exception:
-    print("missing")
+    mode = "missing"
 else:
     if getattr(torch.version, "hip", None):
-        print("rocm")
+        mode = "rocm"
     elif getattr(torch.version, "cuda", None):
-        print("cuda")
+        mode = "cuda"
     else:
-        print("cpu")
+        mode = "cpu"
+print("\n" + mode)
 PY
 }
 
@@ -629,6 +634,7 @@ build_hipdnn() {
     rm -rf "$BUILD_DIR"
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -666,6 +672,7 @@ build_provider() {
     rm -rf "$build_dir"
     cmake -S "$provider_dir" -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -818,6 +825,22 @@ if [ "$INSTALLED_TORCH_MODE" = "cuda" ] || [ "$TORCH_MODE" = "cuda" ]; then
     echo "Run PyTorch-backend benchmarks with:"
     echo "  python -m dnn_benchmarking --graph <graph.json> --backend pytorch"
     exit 0
+fi
+
+# Resolve the GPU arch once and hand it to the HIP device-code builds. The
+# wheel-bundled ROCm SDK ships no rocm_agent_enumerator/offload-arch on PATH and
+# the build may run with no GPU, so HIP cannot autodetect the offload arch; pass
+# it explicitly via hipDNN's documented GPU_TARGETS instead of letting HIP fall
+# back to a default target list. --gpu-arch (or detection on a configured host)
+# is the single source of truth -- no external GPU_TARGETS or
+# ROCM_SDK_TARGET_FAMILY is required.
+RESOLVED_GPU_ARCH=$(detect_gpu_arch)
+HIPDNN_HIP_ARCH_ARGS=()
+if [ -n "$RESOLVED_GPU_ARCH" ]; then
+    HIPDNN_HIP_ARCH_ARGS=(-DGPU_TARGETS="$RESOLVED_GPU_ARCH" -DAMDGPU_TARGETS="$RESOLVED_GPU_ARCH")
+    # Belt-and-suspenders for any torch C++/HIP extension compile (none today:
+    # the Python bindings are nanobind host code linking hip::host).
+    export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$RESOLVED_GPU_ARCH}"
 fi
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
