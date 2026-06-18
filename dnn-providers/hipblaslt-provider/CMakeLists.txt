@@ -203,7 +203,7 @@ if(NOT HIPDNN_SKIP_TESTS)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-        enable_testing()
+        #enable_testing() is already invoked at module scope by Tests.cmake, so not needed here.
         message(STATUS "hipblaslt-provider: YAML-based test categorization")
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
         # Install-time CTestTestfile uses relative paths so `ctest` can run from the
