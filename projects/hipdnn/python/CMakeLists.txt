@@ -102,7 +102,7 @@ else()
     install(TARGETS hipdnn_frontend_python
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/hipdnn_frontend")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/tests"
