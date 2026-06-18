@@ -177,17 +177,37 @@ set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
+# dladdr() used in IntrinsicRegistry.cpp requires -ldl
+# Threads required for std::call_once (separate libpthread on glibc < 2.34)
+find_package(Threads REQUIRED)
+
+# Private link deps shared by stinkytofu_objs, stinkytofu, and stinkytofu_static.
+# All three need the same libraries for linking/include propagation.
+set(STINKYTOFU_PRIVATE_LINK_LIBS
+    stinkytofu-warnings
+    amd_comgr
+    ${CMAKE_DL_LIBS}
+    Threads::Threads
+)
+
+# Public include dirs shared by stinkytofu and stinkytofu_static.
+set(STINKYTOFU_PUBLIC_INCLUDE_DIRS
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+)
+
 # All sources are compiled once into an OBJECT library. The shared/static
 # stinkytofu targets and the test-only stinkytofu_static target all reuse
 # these object files, avoiding redundant compilation.
 add_library(stinkytofu_objs OBJECT ${STINKYTOFU_GENERATED_SOURCES})
-target_link_libraries(stinkytofu_objs PRIVATE stinkytofu-warnings)
+target_link_libraries(stinkytofu_objs PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+# CMake auto-defines <target>_EXPORTS for SHARED/STATIC targets but not for
+# OBJECT libraries. Explicitly define stinkytofu_EXPORTS so STINKYTOFU_EXPORT
+# expands to dllexport (not dllimport) when compiling the object files.
+target_compile_definitions(stinkytofu_objs PRIVATE stinkytofu_EXPORTS)
 target_include_directories(stinkytofu_objs
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:include/stinkytofu>
     PRIVATE
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
         "${TABLEGEN_OUTPUT_DIR}"
         "${HW_ARCH_HEADERS_DIR}"
 )
@@ -195,20 +215,21 @@ add_dependencies(stinkytofu_objs tablegen_generated)
 
 # stinkytofu: shared (default) or static depending on BUILD_SHARED_LIBS.
 # External consumers (rocisa, stinkytofu-opt) link this target.
+# stinkytofu_objs is PRIVATE so it does not appear in the install export set.
+# Public include dirs are set directly on stinkytofu so consumers get them.
 add_library(stinkytofu $<TARGET_OBJECTS:stinkytofu_objs>)
-target_link_libraries(stinkytofu PUBLIC stinkytofu_objs)
+target_link_libraries(stinkytofu PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+target_include_directories(stinkytofu
+    PUBLIC
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
+        $<INSTALL_INTERFACE:include/stinkytofu>
+)
 set_target_properties(stinkytofu PROPERTIES
     VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
     SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
 if(NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(stinkytofu_objs PUBLIC STINKYTOFU_STATIC)
+    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
 endif()
-
-# dladdr() used in IntrinsicRegistry.cpp requires -ldl
-# Threads required for std::call_once (separate libpthread on glibc < 2.34)
-find_package(Threads REQUIRED)
-target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
-target_link_libraries(stinkytofu PRIVATE amd_comgr)
 
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
@@ -231,9 +252,9 @@ add_subdirectory(src)
 # BUILD_SHARED_LIBS=OFF because stinkytofu itself is already a static lib.
 if(BUILD_SHARED_LIBS AND STINKYTOFU_BUILD_TESTS)
     add_library(stinkytofu_static STATIC $<TARGET_OBJECTS:stinkytofu_objs>)
-    target_link_libraries(stinkytofu_static PUBLIC stinkytofu_objs)
+    target_link_libraries(stinkytofu_static PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+    target_include_directories(stinkytofu_static PUBLIC ${STINKYTOFU_PUBLIC_INCLUDE_DIRS})
     target_compile_definitions(stinkytofu_static PUBLIC STINKYTOFU_STATIC)
-    target_link_libraries(stinkytofu_static PRIVATE ${CMAKE_DL_LIBS} Threads::Threads amd_comgr)
     if(WIN32)
         target_link_options(stinkytofu_static INTERFACE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
         target_link_libraries(stinkytofu_static INTERFACE delayimp)

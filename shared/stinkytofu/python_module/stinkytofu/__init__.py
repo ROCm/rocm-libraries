@@ -95,10 +95,17 @@ if _bi is not None:
         if _child.is_dir() and (_child / "CMakeCache.txt").exists():
             _build_dirs.add(_child.resolve())
 
+    # Only scan directories that are actually compiled into the Python bindings.
+    # tests/, tools/, examples/ etc. are never part of _stinkytofu.so so they
+    # are not valid staleness signals — a new test file should not force a rebuild.
+    _scan_dirs = [
+        d for d in (_source_root / "src", _source_root / "include") if d.is_dir()
+    ]
     _stale = [
         str(p)
+        for _dir in _scan_dirs
         for _pattern in ("*.[ch]pp", "*.h", "*.def", "*.inc")
-        for p in _source_root.rglob(_pattern)
+        for p in _dir.rglob(_pattern)
         if p.stat().st_mtime > _so_mtime
         and "_deps" not in p.parts
         and not any(p.resolve().is_relative_to(_b) for _b in _build_dirs)
