@@ -18,8 +18,10 @@
  *
  * Lifetime: every IR node is arena-owned (ckc_ir_builder_t.arena). Nothing is
  * freed individually. The cached _C32_DIST is built on the first call's builder
- * arena; it is dtype-independent host-side analysis state (the Python caches it
- * at module scope), reused for the process lifetime.
+ * arena and is dtype-independent host-side analysis state (the Python caches it
+ * at module scope). Because the C builder/arena is freed at the end of each
+ * build, the cache is per-build (not process-lifetime): ckc_attn2d_c32_dist_reset()
+ * clears it at every build entry so build N+1 never reads build N's freed arena.
  *
  * Error model: pure helpers return a sentinel (NULL/false); builder variants
  * latch the first Python ValueError/NotImplementedError onto the sticky-error
@@ -495,12 +497,25 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
 
 /* ------------------------------------------------------ _C32_DIST (cached) */
 /* make_static_tile_distribution(make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
- * -- a process-lifetime host-side distribution (Python caches it at module
- * scope). Built lazily on the first 32x32-C-helper call. */
+ * -- a host-side distribution the Python caches at module scope. Built lazily on
+ * the first 32x32-C-helper call of a build.
+ *
+ * Re-entrancy: the cached ckc_tile_distribution_t (and all its inner nodes) is
+ * arena-allocated off the *current build's* ckc_ir_builder. When that builder is
+ * freed at the end of a build, this pointer dangles; reusing it on the next
+ * build feeds freed memory into calculate_x. So the cache is per-build, not
+ * process-lifetime: ckc_attn2d_c32_dist_reset() clears it at each build entry
+ * (see the gfx942/gfx950 public entries). */
+static const ckc_tile_distribution_t* g_c32_dist = NULL;
+
+/* Re-entrancy reset: drop the dangling per-build cache before a new build. */
+void ckc_attn2d_c32_dist_reset(void)
+{
+    g_c32_dist = NULL;
+}
 
 static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
 {
-    static const ckc_tile_distribution_t* g_c32_dist = NULL;
     const ckc_mfma_atom_t* atom;
     const ckc_tile_distribution_encoding_t* enc;
     const ckc_tile_distribution_t* dist;

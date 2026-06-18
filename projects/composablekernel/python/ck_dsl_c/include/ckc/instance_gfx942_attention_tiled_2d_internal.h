@@ -556,6 +556,13 @@ ckc_for_t ckc_gfx942_attn2d_drive_kv_loop(ckc_gfx942_attn2d_build_ctx_t* ctx);
  * ctx->m_cur / ctx->l_cur / ctx->acc_cur and writes ctx->out_carry. */
 void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx);
 
+/* Re-entrancy reset for the file-scope REGISTER_PV scratch (p_regs_f32_buf) that
+ * emit_kv_body uses to carry the in-register P groups from the softmax sub-block
+ * to the PV sub-block. The slots hold builder-bound values that dangle once a
+ * build's arena is freed; call this at the build entry so each build starts from
+ * clean NULL. */
+void ckc_gfx942_attn2d_reset_softmax_scratch(void);
+
 /* Inbound softmax-derived state for the PV bucket. The QK/softmax front half
  * fills this and hands it to ckc_gfx942_attn2d_emit_pv_bucket; the PV bucket runs
  * acc *= alpha; acc += P @ V and emits the scf_yield carry. */

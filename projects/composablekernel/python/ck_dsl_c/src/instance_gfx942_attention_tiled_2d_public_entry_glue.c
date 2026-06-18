@@ -424,6 +424,16 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
     if (b == NULL || spec == NULL)
         return NULL;
 
+    /* Re-entrancy: clear every cross-build static this generator caches against
+     * the previous build's (now-freed) arena before emitting build N. Without
+     * this, the lazily-built _C32_DIST distribution and the REGISTER_PV scratch
+     * carry dangling pointers from build N-1 into the new IR (a NULL operand to
+     * warp_shuffle_xor on the second call). The generator is invoked once per
+     * workspace-query and once per buildPlan, per graph, so this runs many times
+     * per process. (_scalar_new funnels here too.) */
+    ckc_attn2d_c32_dist_reset();
+    ckc_gfx942_attn2d_reset_softmax_scratch();
+
     /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
      * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
      * smem_alloc, SSA constants, KV-loop bounds + the online-softmax iter-arg

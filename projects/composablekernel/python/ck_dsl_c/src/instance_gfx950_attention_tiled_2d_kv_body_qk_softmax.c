@@ -423,6 +423,27 @@ ckc_value_t* ckc_gfx950_attn2d_pack_p_a32(ckc_gfx950_attn2d_build_ctx_t* ctx,
     }
 }
 
+/* REGISTER_PV scratch: P kept in registers, flattened [reg][n] (stride
+ * QK_N_TILES) to hand from the softmax sub-block to the PV bucket within one
+ * emit_kv_body call (Python p_regs_f32[reg][n]). It is filled in the softmax
+ * emit and read in the PV emit of the SAME build, so it must outlive the softmax
+ * sub-block -- hence file scope rather than a stack local.
+ *
+ * Re-entrancy: the slots hold builder-bound ckc_value_t* that dangle once a
+ * build's arena is freed. Each build's fill loop overwrites only the slots its
+ * own (REGS_PER_LANE x QK_N_TILES) geometry touches, so a later build with a
+ * smaller extent could otherwise hand a previous build's freed pointer to the PV
+ * bucket. ckc_gfx950_attn2d_reset_softmax_scratch() zeroes the buffer at the
+ * build entry so every build starts from clean NULL. */
+static ckc_value_t* p_regs_f32_buf[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE
+                                   * CKC_GFX950_ATTN2D_MAX_N_TILES];
+
+/* Re-entrancy reset: clear the REGISTER_PV scratch before a new build. */
+void ckc_gfx950_attn2d_reset_softmax_scratch(void)
+{
+    memset(p_regs_f32_buf, 0, sizeof(p_regs_f32_buf));
+}
+
 /* ===================================================================== *
  *  Front half of the QK + mask + softmax body.
  *
@@ -435,12 +456,6 @@ ckc_value_t* ckc_gfx950_attn2d_pack_p_a32(ckc_gfx950_attn2d_build_ctx_t* ctx,
 void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
     ckc_ir_builder_t* b = ctx->b;
-
-    /* REGISTER_PV: P kept in registers, flattened [reg][n] (stride QK_N_TILES)
-     * to hand to the PV bucket (Python p_regs_f32[reg][n]). Function-scope so
-     * it outlives the softmax sub-block where it is filled. */
-    static ckc_value_t* p_regs_f32_buf[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE
-                                       * CKC_GFX950_ATTN2D_MAX_N_TILES];
 
     /* ---- recompute the prologue-derived invariants this half needs ---- */
     ckc_value_t* neg_inf = fh_neg_inf(ctx);

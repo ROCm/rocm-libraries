@@ -252,6 +252,14 @@ ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int e
  * ``n_tile32*32`` is added on top. Returns NULL on a builder error. */
 ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n_tile32);
 
+/* Re-entrancy reset for the lazily-built _C32_DIST cache. The cache holds a
+ * tile distribution arena-allocated off a build's IRBuilder; that builder is
+ * freed at the end of the build, so the cached pointer dangles. Call this at the
+ * start of every tiled-attention build entry (gfx942 + gfx950) so a fresh build
+ * rebuilds the distribution against its own arena instead of reading freed
+ * memory. Safe to call when nothing is cached (no-op). */
+void ckc_attn2d_c32_dist_reset(void);
+
 #ifdef __cplusplus
 }
 #endif
