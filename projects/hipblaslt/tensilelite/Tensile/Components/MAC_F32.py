@@ -97,7 +97,6 @@ class MAC_F32_Plain(MAC):
                     vgpr("ValuA_X%d_I%d+%d" % (m, iui, a)),
                     vgpr("ValuB_X%d_I%d+%d" % (m, iui, b)))
 
-        items = []
         for iui in range(0, innerUnroll):
             paired = [[False] * TT1 for _ in range(TT0)]
             for j in range(0, TT1 - 1, 2):
@@ -106,22 +105,14 @@ class MAC_F32_Plain(MAC):
                                                ((i + 1, j), (i, j + 1))):
                         cX, aX, bX = cell(i0, j0, iui)
                         cY, aY, bY = cell(i1, j1, iui)
-                        items.append(VDualFMACF32(dstX=cX, src0X=aX, src1X=bX,
-                                                  dstY=cY, src0Y=aY, src1Y=bY,
-                                                  comment="VOPD dual-issue FMA"))
+                        module.add(VDualFMACF32(dstX=cX, src0X=aX, src1X=bX,
+                                                dstY=cY, src0Y=aY, src1Y=bY,
+                                                comment="VOPD dual-issue FMA"))
                         paired[i0][j0] = paired[i1][j1] = True
             for idx1 in range(TT1):
                 for idx0 in range(TT0):
                     if not paired[idx0][idx1]:
                         c, a, b = cell(idx0, idx1, iui)
-                        items.append(VMacF32(dst=c, src0=a, src1=b))
-
-        # Raise priority on the first mac and reset after the block, matching the
-        # single-issue path above.
-        for n, it in enumerate(items):
-            module.add(it)
-            if n == 0:
-                module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
-        module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
+                        module.add(VMacF32(dst=c, src0=a, src1=b))
 
         return module
