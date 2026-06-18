@@ -93,7 +93,14 @@ echo ""
 export WORKSPACE_ROOT
 export PARALLEL
 
-if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
+if bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
+    :
+else
+    selector_rc=$?
+    if [ ${selector_rc} -ne 1 ]; then
+        echo "Error: smart_build_ci.sh failed with exit code ${selector_rc}"
+        exit ${selector_rc}
+    fi
     # Full build required (exit code 1 from smart_build_ci.sh).
     echo "SMART_BUILD_MODE=full" > build_mode.env
     echo "Full build mode - building the complete test/example closure (no run)"
@@ -106,7 +113,6 @@ if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     echo "[OK] Smart build complete (full mode - all tests built)"
     exit 0
 fi
-
 # Step 2: Selective build mode - read targets.
 BUILD_TARGETS=$(cat build_targets.txt)
 
