@@ -6,7 +6,7 @@
 # Requires PyTorch with ROCm support.
 #
 # Usage:
-#   cd <repo-root>/dnn-providers/integration-tests/golden_reference_data/quick/SdpaFwd
+#   cd <repo-root>/dnn-providers/integration-tests/integration_test_bundles/quick/SdpaFwd
 #   bash generate_golden_data.sh
 
 set -euo pipefail
