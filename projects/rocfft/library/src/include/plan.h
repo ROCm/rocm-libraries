@@ -446,8 +446,10 @@ struct rocfft_plan_t
 
 #ifdef ROCFFT_RCCL_ENABLE
     // populate the rccl communicator from the description's local devices,
-    // before any plan-building path is chosen.  empty when not applicable
-    void InitRCCLCommunicator();
+    // before any plan-building path is chosen,  empty when not applicable.
+    // any failure is swallowed internally, leaving rccl empty so
+    // the caller falls back to the P2P / A2A paths
+    void InitRCCLCommunicator() noexcept;
 #endif
 
     // check log level, log the topologically sorted plan if plan

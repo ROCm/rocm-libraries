@@ -204,25 +204,6 @@ std::vector<int> rocfft_rccl_comm_t::get_devices() const
     return devices;
 }
 
-void rocfft_rccl_comm_t::check_async_error(int device_id) const
-{
-    ncclComm_t   comm        = get_comm(device_id);
-    ncclResult_t async_error = ncclSuccess;
-    ncclResult_t result      = ncclCommGetAsyncError(comm, &async_error);
-    if(result != ncclSuccess)
-        throw rocfft_rccl_exception_t(
-            "ncclCommGetAsyncError failed on device " + std::to_string(device_id), result);
-
-    // if a nonblocking op is still running, keep waiting
-    if(async_error == ncclSuccess || async_error == ncclInProgress)
-        return;
-
-    // a genuine async error leaves the communicator unusable, abort it
-    ncclCommAbort(comm);
-    throw rocfft_rccl_exception_t("RCCL asynchronous error on device " + std::to_string(device_id),
-                                  async_error);
-}
-
 // RAII group wrapper
 rocfft_rccl_group_t::rocfft_rccl_group_t()
 {

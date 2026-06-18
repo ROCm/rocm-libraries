@@ -3773,39 +3773,57 @@ rocfft_plan_t::field_view_t rocfft_plan_t::field_view_t::get_embedding_view() co
 }
 
 #ifdef ROCFFT_RCCL_ENABLE
-void rocfft_plan_t::InitRCCLCommunicator()
+void rocfft_plan_t::InitRCCLCommunicator() noexcept
 {
-    // RCCL path is single-process multi-GPU today: one comm spans the
-    // local devices and the grouped send/recv path uses device ids as
-    // NCCL peer ranks
-    if(desc.inFields.empty() || desc.outFields.empty())
-        return;
-    if(desc.get_local_comm_size() != 1)
-        return;
-
-    const auto local_comm_rank = desc.get_local_comm_rank();
-
-    std::set<int> device_set;
-    for(const auto& brick : desc.inFields.front().bricks)
+    // any failure here leaves rccl empty so the caller falls back to the P2P / A2A paths
+    try
     {
-        if(brick.location.comm_rank == local_comm_rank)
-            device_set.insert(brick.location.device);
+        // RCCL path is currently single-process multi-GPU, one comm spans the
+        // local devices and the grouped send/recv path uses device ids as
+        // NCCL peer ranks
+        if(desc.inFields.empty() || desc.outFields.empty())
+            return;
+        if(desc.get_local_comm_size() != 1)
+            return;
+
+        const auto local_comm_rank = desc.get_local_comm_rank();
+
+        std::set<int> device_set;
+        for(const auto& brick : desc.inFields.front().bricks)
+        {
+            if(brick.location.comm_rank == local_comm_rank)
+                device_set.insert(brick.location.device);
+        }
+        for(const auto& brick : desc.outFields.front().bricks)
+        {
+            if(brick.location.comm_rank == local_comm_rank)
+                device_set.insert(brick.location.device);
+        }
+
+        // include the device active at plan creation so it always
+        // participates in the communicator
+        int current_device = 0;
+        if(hipGetDevice(&current_device) != hipSuccess || current_device == hipInvalidDeviceId)
+            throw std::runtime_error("hipGetDevice failed");
+        device_set.insert(current_device);
+
+        if(device_set.size() > 1)
+            rccl = rocfft_rccl_comm_t::create(device_set);
     }
-    for(const auto& brick : desc.outFields.front().bricks)
+    catch(const std::exception& e)
     {
-        if(brick.location.comm_rank == local_comm_rank)
-            device_set.insert(brick.location.device);
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "InitRCCLCommunicator failed, proceeding without RCCL: " << e.what()
+                << std::endl;
     }
-
-    // include the device active at plan creation so it always
-    // participates in the communicator
-    int current_device = 0;
-    if(hipGetDevice(&current_device) != hipSuccess || current_device == hipInvalidDeviceId)
-        throw std::runtime_error("hipGetDevice failed");
-    device_set.insert(current_device);
-
-    if(device_set.size() > 1)
-        rccl = rocfft_rccl_comm_t::create(device_set);
+    catch(...)
+    {
+        if(LOG_PLAN_ENABLED())
+            *LogSingleton::GetInstance().GetPlanOS()
+                << "InitRCCLCommunicator failed with unknown exception, proceeding without RCCL"
+                << std::endl;
+    }
 }
 #endif
 
@@ -4841,19 +4859,9 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
             return rcfft;
 
 #ifdef ROCFFT_RCCL_ENABLE
-        // init rccl before any plan-building path is chosen, on failure
-        // leave rccl empty and fall back to the P2P / A2A paths
-        try
-        {
-            plan->InitRCCLCommunicator();
-        }
-        catch(const std::exception& e)
-        {
-            if(LOG_PLAN_ENABLED())
-                *LogSingleton::GetInstance().GetPlanOS()
-                    << "InitRCCLCommunicator failed, proceeding without RCCL: " << e.what()
-                    << std::endl;
-        }
+        // init rccl before any plan-building path is chosen.
+        // on failure it leaves rccl empty and we fall back to the P2P / A2A paths
+        plan->InitRCCLCommunicator();
 #endif
 
         log_bench(rocfft_bench_command(plan));

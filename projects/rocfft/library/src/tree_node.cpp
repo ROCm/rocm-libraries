@@ -719,9 +719,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
 
 void CommRCCLAllToAll::Wait()
 {
-    // poll each event, checking for async RCCL errors so a stalled
-    // collective throws instead of hanging (NCCL-recommended pattern)
-    const auto devices = rccl.get_devices();
+    // poll each completion event until the collective finishes
     for(size_t r = 0; r < agents.size(); ++r)
     {
         if(!agents[r].event)
@@ -729,10 +727,7 @@ void CommRCCLAllToAll::Wait()
 
         hipError_t status;
         while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
-        {
-            rccl.check_async_error(devices[r]);
             std::this_thread::yield();
-        }
         if(status != hipSuccess)
             throw std::runtime_error("hipEventQuery failed for RCCL AllToAll");
     }
@@ -842,8 +837,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
 
 void CommRCCLGrouped::Wait()
 {
-    // poll each event, checking for async RCCL errors so a stalled
-    // transfer throws instead of hanging (NCCL-recommended pattern)
+    // poll each completion event until the transfer finishes
     for(auto& t : transfers)
     {
         if(!t.event)
@@ -851,10 +845,7 @@ void CommRCCLGrouped::Wait()
 
         hipError_t status;
         while((status = hipEventQuery(t.event)) == hipErrorNotReady)
-        {
-            rccl.check_async_error(t.local_location.device);
             std::this_thread::yield();
-        }
         if(status != hipSuccess)
             throw std::runtime_error("hipEventQuery failed for RCCL Grouped");
     }

@@ -107,10 +107,6 @@ public:
     // in a well-defined order matching the NCCL rank numbering.
     std::vector<int> get_devices() const;
 
-    // throws rocfft_rccl_exception_t if the device's communicator reports
-    // an asynchronous error (e.g. a stalled collective)
-    void check_async_error(int device_id) const;
-
     // all-to-all with uniform counts across every rank.  the three
     // per-rank vectors (sendbufs / recvbufs / streams) must each
     // have size num_ranks() and be indexed by RCCL rank; the
