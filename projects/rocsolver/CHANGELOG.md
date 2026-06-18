@@ -6,13 +6,17 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
 * Support added for the gfx1250 architecture.
 
 ### Changed
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed an out-of-bounds read in `bdsqr_lower2upper`.
 * Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
+
 ### Known issues
 ### Upcoming changes
 
