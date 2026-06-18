@@ -35,10 +35,10 @@ python3 ../script/dependency-parser/main.py select \
   --output tests_to_run.json
 
 # 4. Build only affected tests
-ninja $(jq -r '.executables[]' tests_to_run.json | tr '\n' ' ')
+ninja $(jq -r '.executables | join(" ")' tests_to_run.json)
 
-# 5. Run affected tests
-ctest -R "$(jq -r '.regex' tests_to_run.json)"
+# 5. Run affected tests (one invocation, exact-name matching, no regex limit)
+ctest --tests-from-file tests_to_run.txt --output-on-failure
 ```
 
 ### Post-Build Approach (Legacy)
@@ -251,24 +251,11 @@ stage('Selective Test') {
             '''
 
             // Build only affected tests
-            sh 'ninja $(jq -r ".executables[]" tests_to_run.json | tr "\\n" " ")'
+            sh 'ninja $(jq -r ".executables | join(\" \")" tests_to_run.json)'
 
-            // Run affected tests (handles large test sets with regex_chunks)
-            sh '''
-                NUM_CHUNKS=$(jq -r ".regex_chunks | length" tests_to_run.json)
-                if [ "$NUM_CHUNKS" -eq 0 ]; then
-                    echo "No tests to run"
-                elif [ "$NUM_CHUNKS" -eq 1 ]; then
-                    # Single chunk - use simple regex
-                    ctest -R "$(jq -r ".regex_chunks[0]" tests_to_run.json)" --output-on-failure
-                else
-                    # Multiple chunks - run separately to avoid regex length limits
-                    for i in $(seq 0 $((NUM_CHUNKS - 1))); do
-                        echo "Running test chunk $((i + 1))/$NUM_CHUNKS"
-                        ctest -R "$(jq -r ".regex_chunks[$i]" tests_to_run.json)" --output-on-failure
-                    done
-                fi
-            '''
+            // Run affected tests in a single invocation (exact-name matching,
+            // no regex length limit, so no chunking needed)
+            sh 'ctest --tests-from-file tests_to_run.txt --output-on-failure'
         }
     }
 }
@@ -299,21 +286,12 @@ stage('Selective Test') {
 - name: Build and Test
   run: |
     cd build
-    TARGETS=$(jq -r '.executables[]' tests_to_run.json | tr '\n' ' ')
+    TARGETS=$(jq -r '.executables | join(" ")' tests_to_run.json)
     ninja $TARGETS
 
-    # Run tests using regex_chunks to handle large test sets
-    NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
-    if [ "$NUM_CHUNKS" -eq 0 ]; then
-      echo "No tests to run"
-    elif [ "$NUM_CHUNKS" -eq 1 ]; then
-      ctest -R "$(jq -r '.regex_chunks[0]' tests_to_run.json)" --output-on-failure
-    else
-      for i in $(seq 0 $((NUM_CHUNKS - 1))); do
-        echo "Running test chunk $((i + 1))/$NUM_CHUNKS"
-        ctest -R "$(jq -r ".regex_chunks[$i]" tests_to_run.json)" --output-on-failure
-      done
-    fi
+    # Run affected tests in a single invocation (exact-name matching,
+    # no regex length limit, so no chunking needed)
+    ctest --tests-from-file tests_to_run.txt --output-on-failure
 ```
 
 ### Jenkins Integration with Safety Checks
@@ -346,8 +324,8 @@ stage('Build and Test') {
                         compile_commands.json build.ninja --parallel 32
                     python3 script/dependency-parser/main.py select \
                         cmake_dependency_mapping.json origin/${CHANGE_TARGET} HEAD
-                    ninja $(jq -r '.executables[]' tests_to_run.json)
-                    ctest -R "$(jq -r '.regex' tests_to_run.json)"
+                    ninja $(jq -r '.executables | join(" ")' tests_to_run.json)
+                    ctest --tests-from-file tests_to_run.txt --output-on-failure
                 '''
             } else {
                 // Full build path
