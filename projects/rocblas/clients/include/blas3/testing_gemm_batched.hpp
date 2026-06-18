@@ -155,9 +155,9 @@ nullptr, ldb, nullptr, nullptr, ldc, batch_count));
 
 // the following tests still output to C
 
-// If K==0, then alpha, A and B can be nullptr without issue.
+// If K==0, then A and B can be nullptr without issue.
 DAPI_CHECK(rocblas_gemm_batched_fn,(handle, transA, transB, M, N, 0,
-nullptr, nullptr, lda, nullptr, ldb, beta, dC.ptr_on_device(), ldc, batch_count));
+alpha, nullptr, lda, nullptr, ldb, beta, dC.ptr_on_device(), ldc, batch_count));
 
 // If alpha==0, then A and B can be nullptr without issue
 DAPI_CHECK(rocblas_gemm_batched_fn,(handle, transA, transB, M, N, K, zero,

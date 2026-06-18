@@ -24,50 +24,39 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-inline void compute_exposure_48_host(__m256 *p, __m256 &pExposureParam)
-{
-    p[0] = _mm256_mul_ps(p[0], pExposureParam);    // exposure adjustment
-    p[1] = _mm256_mul_ps(p[1], pExposureParam);    // exposure adjustment
-    p[2] = _mm256_mul_ps(p[2], pExposureParam);    // exposure adjustment
-    p[3] = _mm256_mul_ps(p[3], pExposureParam);    // exposure adjustment
-    p[4] = _mm256_mul_ps(p[4], pExposureParam);    // exposure adjustment
-    p[5] = _mm256_mul_ps(p[5], pExposureParam);    // exposure adjustment
+inline void compute_exposure_48_host(__m256* p, __m256& pExposureParam) {
+    p[0] = _mm256_mul_ps(p[0], pExposureParam);  // exposure adjustment
+    p[1] = _mm256_mul_ps(p[1], pExposureParam);  // exposure adjustment
+    p[2] = _mm256_mul_ps(p[2], pExposureParam);  // exposure adjustment
+    p[3] = _mm256_mul_ps(p[3], pExposureParam);  // exposure adjustment
+    p[4] = _mm256_mul_ps(p[4], pExposureParam);  // exposure adjustment
+    p[5] = _mm256_mul_ps(p[5], pExposureParam);  // exposure adjustment
 }
 
-inline void compute_exposure_24_host(__m256 *p, __m256 &pExposureParam)
-{
-    p[0] = _mm256_mul_ps(p[0], pExposureParam);    // exposure adjustment
-    p[1] = _mm256_mul_ps(p[1], pExposureParam);    // exposure adjustment
-    p[2] = _mm256_mul_ps(p[2], pExposureParam);    // exposure adjustment
+inline void compute_exposure_24_host(__m256* p, __m256& pExposureParam) {
+    p[0] = _mm256_mul_ps(p[0], pExposureParam);  // exposure adjustment
+    p[1] = _mm256_mul_ps(p[1], pExposureParam);  // exposure adjustment
+    p[2] = _mm256_mul_ps(p[2], pExposureParam);  // exposure adjustment
 }
 
-inline void compute_exposure_16_host(__m256 *p, __m256 &pExposureParam)
-{
-    p[0] = _mm256_mul_ps(p[0], pExposureParam);    // exposure adjustment
-    p[1] = _mm256_mul_ps(p[1], pExposureParam);    // exposure adjustment
+inline void compute_exposure_16_host(__m256* p, __m256& pExposureParam) {
+    p[0] = _mm256_mul_ps(p[0], pExposureParam);  // exposure adjustment
+    p[1] = _mm256_mul_ps(p[1], pExposureParam);  // exposure adjustment
 }
 
-inline void compute_exposure_8_host(__m256 *p, __m256 &pExposureParam)
-{
-    p[0] = _mm256_mul_ps(p[0], pExposureParam);    // exposure adjustment
+inline void compute_exposure_8_host(__m256* p, __m256& pExposureParam) {
+    p[0] = _mm256_mul_ps(p[0], pExposureParam);  // exposure adjustment
 }
 
-RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                     RpptDescPtr srcDescPtr,
-                                     Rpp8u *dstPtr,
-                                     RpptDescPtr dstDescPtr,
-                                     Rpp32f *exposureFactorTensor,
-                                     RpptROIPtr roiTensorPtrSrc,
-                                     RpptRoiType roiType,
-                                     RppLayoutParams layoutParams,
-                                     rpp::Handle& handle)
-{
+RppStatus exposure_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* exposureFactorTensor,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -82,7 +71,8 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32u alignedLength = (bufferLength / 48) * 48;
@@ -93,16 +83,15 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
         pExposureParam = _mm256_set1_ps(multiplyingFactor);
 
         // Exposure with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -110,23 +99,25 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                     __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);     // simd loads
+                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
                     compute_exposure_48_host(p, pExposureParam);  // exposure adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 
                     srcPtrTemp += vectorIncrement;
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
-                    *dstPtrTempR = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (srcPtrTemp[0])) * multiplyingFactor));
-                    *dstPtrTempG = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (srcPtrTemp[1])) * multiplyingFactor));
-                    *dstPtrTempB = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (srcPtrTemp[2])) * multiplyingFactor));
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                    *dstPtrTempR = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(srcPtrTemp[0])) * multiplyingFactor));
+                    *dstPtrTempG = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(srcPtrTemp[1])) * multiplyingFactor));
+                    *dstPtrTempB = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(srcPtrTemp[2])) * multiplyingFactor));
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -142,16 +133,15 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Exposure with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -159,23 +149,27 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
+                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);                // simd loads
                     compute_exposure_48_host(p, pExposureParam);  // exposure adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp, p);    // simd stores
+                    rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
+                                   p);  // simd stores
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
                     srcPtrTempB += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrement;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
-                    dstPtrTemp[0] = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (*srcPtrTempR)) * multiplyingFactor));
-                    dstPtrTemp[1] = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (*srcPtrTempG)) * multiplyingFactor));
-                    dstPtrTemp[2] = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (*srcPtrTempB)) * multiplyingFactor));
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    dstPtrTemp[0] = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(*srcPtrTempR)) * multiplyingFactor));
+                    dstPtrTemp[1] = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(*srcPtrTempG)) * multiplyingFactor));
+                    dstPtrTemp[2] = (Rpp8u)RPPPIXELCHECK(
+                        std::nearbyintf(((Rpp32f)(*srcPtrTempB)) * multiplyingFactor));
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -191,36 +185,33 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Exposure without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
+        else {
             Rpp32u alignedLength = (bufferLength / 16) * 16;
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8u *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8u *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                    {
+                    for (; vectorLoopCount < alignedLength;
+                         vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[2];
 
-                        rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);    // simd loads
+                        rpp_simd_load(rpp_load16_u8_to_f32_avx, srcPtrTemp, p);  // simd loads
                         compute_exposure_16_host(p, pExposureParam);  // exposure adjustment
-                        rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);    // simd stores
+                        rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
 
                         srcPtrTemp += vectorIncrementPerChannel;
                         dstPtrTemp += vectorIncrementPerChannel;
                     }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
-                        *dstPtrTemp = (Rpp8u) RPPPIXELCHECK(std::nearbyintf(((Rpp32f) (*srcPtrTemp)) * multiplyingFactor));
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                        *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
+                            std::nearbyintf(((Rpp32f)(*srcPtrTemp)) * multiplyingFactor));
 
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -237,22 +228,15 @@ RppStatus exposure_u8_u8_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp32f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32f *exposureFactorTensor,
-                                       RpptROIPtr roiTensorPtrSrc,
-                                       RpptRoiType roiType,
-                                       RppLayoutParams layoutParams,
-                                       rpp::Handle& handle)
-{
+RppStatus exposure_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* exposureFactorTensor,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -267,7 +251,8 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32u alignedLength = (bufferLength / 24) * 24;
@@ -278,16 +263,15 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
         pExposureParam = _mm256_set1_ps(multiplyingFactor);
 
         // Exposure with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -295,22 +279,21 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                     __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);    // simd loads
+                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
                     compute_exposure_24_host(p, pExposureParam);  // exposure adjustment
-                    //Boundary checks for f32
+                    // Boundary checks for f32
                     rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 
                     srcPtrTemp += vectorIncrement;
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = RPPPIXELCHECKF32(srcPtrTemp[0] * multiplyingFactor);
                     *dstPtrTempG = RPPPIXELCHECKF32(srcPtrTemp[1] * multiplyingFactor);
                     *dstPtrTempB = RPPPIXELCHECKF32(srcPtrTemp[2] * multiplyingFactor);
@@ -329,16 +312,15 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
         }
 
         // Exposure with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -346,22 +328,23 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);     // simd loads
+                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);                // simd loads
                     compute_exposure_24_host(p, pExposureParam);  // exposure adjustment
-                    //Boundary checks for f32
+                    // Boundary checks for f32
                     rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, p);    // simd stores
+                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
+                                   p);  // simd stores
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
                     srcPtrTempB += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrement;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = RPPPIXELCHECKF32((*srcPtrTempR) * multiplyingFactor);
                     dstPtrTemp[1] = RPPPIXELCHECKF32((*srcPtrTempG) * multiplyingFactor);
                     dstPtrTemp[2] = RPPPIXELCHECKF32((*srcPtrTempB) * multiplyingFactor);
@@ -380,37 +363,33 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
         }
 
         // Exposure without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
+        else {
             Rpp32u alignedLength = (bufferLength / 8) * 8;
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp32f *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32f *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                    {
+                    for (; vectorLoopCount < alignedLength;
+                         vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[1];
 
-                        rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, p);    // simd loads
+                        rpp_simd_load(rpp_load8_f32_to_f32_avx, srcPtrTemp, p);  // simd loads
                         compute_exposure_8_host(p, pExposureParam);  // exposure adjustment
-                        //Boundary checks for f32
+                        // Boundary checks for f32
                         rpp_pixel_check_0to1(p, 1);
-                        rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);    // simd stores
+                        rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
 
                         srcPtrTemp += vectorIncrementPerChannel;
                         dstPtrTemp += vectorIncrementPerChannel;
                     }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = RPPPIXELCHECKF32((*srcPtrTemp) * multiplyingFactor);
 
                         srcPtrTemp++;
@@ -428,22 +407,15 @@ RppStatus exposure_f32_f32_host_tensor(Rpp32f *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp16f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32f *exposureFactorTensor,
-                                       RpptROIPtr roiTensorPtrSrc,
-                                       RpptRoiType roiType,
-                                       RppLayoutParams layoutParams,
-                                       rpp::Handle& handle)
-{
+RppStatus exposure_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                       RpptDescPtr dstDescPtr, Rpp32f* exposureFactorTensor,
+                                       RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                       RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -458,7 +430,8 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32u alignedLength = (bufferLength / 24) * 24;
@@ -469,16 +442,15 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
         pExposureParam = _mm256_set1_ps(multiplyingFactor);
 
         // Exposure with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -486,26 +458,28 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                     __m256 p[3];
 
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);     // simd loads
+                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
                     compute_exposure_24_host(p, pExposureParam);  // exposure adjustment
-                    //Boundary checks for f16
+                    // Boundary checks for f16
                     rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 
                     srcPtrTemp += vectorIncrement;
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
-                    *dstPtrTempR = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[0] * multiplyingFactor);
-                    *dstPtrTempG = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[1] * multiplyingFactor);
-                    *dstPtrTempB = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[2] * multiplyingFactor);
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                    *dstPtrTempR =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[0] * multiplyingFactor);
+                    *dstPtrTempG =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[1] * multiplyingFactor);
+                    *dstPtrTempB =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)srcPtrTemp[2] * multiplyingFactor);
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -521,16 +495,15 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
         }
 
         // Exposure with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -538,25 +511,29 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
+                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);                // simd loads
                     compute_exposure_24_host(p, pExposureParam);  // exposure adjustment
-                    //Boundary checks for f16
+                    // Boundary checks for f16
                     rpp_pixel_check_0to1(p, 3);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp, p);    // simd stores
+                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
+                                   p);  // simd stores
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
                     srcPtrTempB += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrement;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
-                    dstPtrTemp[0] = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempR) * multiplyingFactor);
-                    dstPtrTemp[1] = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempG) * multiplyingFactor);
-                    dstPtrTemp[2] = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempB) * multiplyingFactor);
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    dstPtrTemp[0] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempR) * multiplyingFactor);
+                    dstPtrTemp[1] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempG) * multiplyingFactor);
+                    dstPtrTemp[2] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*srcPtrTempB) * multiplyingFactor);
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -572,38 +549,35 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
         }
 
         // Exposure without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
+        else {
             Rpp32u alignedLength = (bufferLength / 8) * 8;
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp16f *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp16f *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                    {
+                    for (; vectorLoopCount < alignedLength;
+                         vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[1];
 
-                        rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, p);    // simd loads
+                        rpp_simd_load(rpp_load8_f16_to_f32_avx, srcPtrTemp, p);  // simd loads
                         compute_exposure_8_host(p, pExposureParam);  // exposure adjustment
-                        //Boundary checks for f16
-                        rpp_pixel_check_0to1(p,1);
-                        rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);    // simd stores
+                        // Boundary checks for f16
+                        rpp_pixel_check_0to1(p, 1);
+                        rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);  // simd stores
 
                         srcPtrTemp += vectorIncrementPerChannel;
                         dstPtrTemp += vectorIncrementPerChannel;
                     }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
-                        *dstPtrTemp = (Rpp16f) RPPPIXELCHECKF32((Rpp32f)(*srcPtrTemp) * multiplyingFactor);
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                        *dstPtrTemp =
+                            (Rpp16f)RPPPIXELCHECKF32((Rpp32f)(*srcPtrTemp) * multiplyingFactor);
 
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -620,22 +594,15 @@ RppStatus exposure_f16_f16_host_tensor(Rpp16f *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                     RpptDescPtr srcDescPtr,
-                                     Rpp8s *dstPtr,
-                                     RpptDescPtr dstDescPtr,
-                                     Rpp32f *exposureFactorTensor,
-                                     RpptROIPtr roiTensorPtrSrc,
-                                     RpptRoiType roiType,
-                                     RppLayoutParams layoutParams,
-                                     rpp::Handle& handle)
-{
+RppStatus exposure_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                     RpptDescPtr dstDescPtr, Rpp32f* exposureFactorTensor,
+                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                     RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -650,7 +617,8 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         Rpp32u alignedLength = (bufferLength / 48) * 48;
@@ -661,16 +629,15 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
         pExposureParam = _mm256_set1_ps(multiplyingFactor);
 
         // Exposure with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -678,23 +645,25 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-                {
+                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                     __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);     // simd loads
+                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
                     compute_exposure_48_host(p, pExposureParam);  // exposure adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG, dstPtrTempB, p);    // simd stores
+                    rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                                   dstPtrTempB, p);  // simd stores
 
                     srcPtrTemp += vectorIncrement;
                     dstPtrTempR += vectorIncrementPerChannel;
                     dstPtrTempG += vectorIncrementPerChannel;
                     dstPtrTempB += vectorIncrementPerChannel;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
-                    *dstPtrTempR = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) (srcPtrTemp[0] + 128) * multiplyingFactor - 128);
-                    *dstPtrTempG = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) (srcPtrTemp[1] + 128) * multiplyingFactor - 128);
-                    *dstPtrTempB = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) (srcPtrTemp[2] + 128) * multiplyingFactor - 128);
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)(srcPtrTemp[0] + 128) * multiplyingFactor - 128);
+                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)(srcPtrTemp[1] + 128) * multiplyingFactor - 128);
+                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)(srcPtrTemp[2] + 128) * multiplyingFactor - 128);
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -710,16 +679,15 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // Exposure with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -727,23 +695,27 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                {
+                for (; vectorLoopCount < alignedLength;
+                     vectorLoopCount += vectorIncrementPerChannel) {
                     __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG, srcPtrTempB, p);    // simd loads
+                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                                  srcPtrTempB, p);                // simd loads
                     compute_exposure_48_host(p, pExposureParam);  // exposure adjustment
-                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp, p);    // simd stores
+                    rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
+                                   p);  // simd stores
 
                     srcPtrTempR += vectorIncrementPerChannel;
                     srcPtrTempG += vectorIncrementPerChannel;
                     srcPtrTempB += vectorIncrementPerChannel;
                     dstPtrTemp += vectorIncrement;
                 }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
-                    dstPtrTemp[0] = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) ((*srcPtrTempR) + 128) * multiplyingFactor - 128);
-                    dstPtrTemp[1] = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) ((*srcPtrTempG) + 128) * multiplyingFactor - 128);
-                    dstPtrTemp[2] = (Rpp8s) RPPPIXELCHECKI8((Rpp32f) ((*srcPtrTempB) + 128) * multiplyingFactor - 128);
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)((*srcPtrTempR) + 128) * multiplyingFactor - 128);
+                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)((*srcPtrTempG) + 128) * multiplyingFactor - 128);
+                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)((*srcPtrTempB) + 128) * multiplyingFactor - 128);
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -759,36 +731,33 @@ RppStatus exposure_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // Exposure without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
+        else {
             Rpp32u alignedLength = (bufferLength / 16) * 16;
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8s *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8s *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel)
-                    {
+                    for (; vectorLoopCount < alignedLength;
+                         vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[2];
 
-                        rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);    // simd loads
+                        rpp_simd_load(rpp_load16_i8_to_f32_avx, srcPtrTemp, p);  // simd loads
                         compute_exposure_16_host(p, pExposureParam);  // exposure adjustment
-                        rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);    // simd stores
+                        rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
 
                         srcPtrTemp += vectorIncrementPerChannel;
                         dstPtrTemp += vectorIncrementPerChannel;
                     }
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
-                        *dstPtrTemp = (Rpp8s) RPPPIXELCHECK((Rpp32f) ((*srcPtrTemp) + 128) * multiplyingFactor - 128);
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                        *dstPtrTemp = (Rpp8s)RPPPIXELCHECK(
+                            (Rpp32f)((*srcPtrTemp) + 128) * multiplyingFactor - 128);
 
                         srcPtrTemp++;
                         dstPtrTemp++;

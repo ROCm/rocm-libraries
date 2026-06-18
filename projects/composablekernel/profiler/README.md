@@ -303,24 +303,21 @@ cmake                                                                           
   ..
 ```
 
-### Dispatcher config sets: `tests` vs `profiler`
+The Dispatcher codegen selects which kernel instances to generate via the rule set chosen with the CMake
+flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. The following rule sets are available:
 
-The Dispatcher codegen ships two sets of JSON configuration files for each variant (forward, backward data, backward weight):
+| Rule set | Description |
+|---|---|
+| `profiler` (default) | The CK Builder profiler instance set, generated in memory directly from the `.conf` configurations in `experimental/grouped_convolution_tile_instances/configs` (no JSON conversion, nothing committed). This is the exact reference instance set. |
+| `tests` | The CK Builder tests instance set, generated in memory from the `tests` subset of the `.conf` configurations. |
+| `full` | The full rule-derived set (all per-(variant, ndim, datatype) instances), generated from the curated rule tables. |
+| `full-tests` | A smaller, stratified ~20% subset of the `full` rule set, for faster builds. |
+| `tiny` | A minimal subset of the `full-tests` rule set (at least 10 configs, with every feature category represented for both 2D and 3D), for quick development/iteration builds. |
+| `default` | The original heuristic rules (datatype-agnostic). |
 
-| Config set | Location | Description |
-|---|---|---|
-| `tests` (default) | `dispatcher/codegen/configs/grouped_conv/<variant>/tests/` | Smaller subset for CI and correctness validation. Faster build times. |
-| `profiler` | `dispatcher/codegen/configs/grouped_conv/<variant>/profiler/` | Full instance set for performance tuning. Includes all implicit-GEMM tile configurations. |
-
-Both sets include the same direct-conv kernel instances; the difference is in the number of implicit-GEMM configurations.
-
-Toggle between the two sets with the CMake flag `DISPATCHER_CONFIG_SET`:
+For example, to generate the full `profiler` set of kernels:
 ```bash
-# Default — tests set (smaller, faster build)
-cmake -D DISPATCHER_CONFIG_SET=tests ...
-
-# Full profiler set
-cmake -D DISPATCHER_CONFIG_SET=profiler ...
+cmake -D DISPATCHER_RULE_SET=profiler <other options> ..
 ```
 
 ### Building only direct-conv instances (Dispatcher codegen only)
@@ -329,10 +326,29 @@ To build only direct-conv kernel instances and skip all implicit-GEMM instances,
 ```bash
 cmake -D CK_TILE_DISPATCHER=ON -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON ...
 ```
-This filters at the codegen level: only instances with `"kind": "direct_conv"` are emitted from the JSON configs. Implicit-GEMM and depthwise instances are skipped entirely. The backward weight variant (which has no direct-conv kernels) emits an empty registration stub so the build still links.
+Implicit-GEMM and depthwise instances are skipped entirely. The backward weight variant (which has no direct-conv kernels) emits an empty registration stub so the build still links.
 
-Note: The CK Builder codegen path (`CK_TILE_DISPATCHER=OFF`) no longer includes direct convolution instances. Use the Dispatcher codegen for direct-conv profiling.
+Note: Use the Dispatcher codegen for direct-conv profiling, the CK Builder codegen doesn't generate direct conv instances.
 
 ### Building only CK Tile profiler targets
 
 To build only the CK Tile profiler, one can use an additional flag `-DCK_PROFILER_OP_FILTER="_tile"`.
+
+All together, we have a CMake configure command
+
+```bash
+cmake                                                                                             \
+  -D CMAKE_PREFIX_PATH=/opt/rocm                                                                  \
+  -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
+  -D CMAKE_BUILD_TYPE=Release                                                                     \
+  -D GPU_TARGETS="gfx942"                                                                         \
+  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
+  -D CK_TILE_DISPATCHER=ON                                                                        \
+  -D CMAKE_CXX_STANDARD=20                                                                        \
+  -D DISPATCHER_RULE_SET=full                                                                 \
+  -D CK_PROFILER_OP_FILTER="_tile"                                                                \
+  -G Ninja                                                                                        \
+  ..
+```
+
+to generate a full set of kernel instances for comprehensive benchmarking. Changing the the rule set allows increase/decrease the number of instances available for the profiler.

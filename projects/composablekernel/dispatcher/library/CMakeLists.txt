@@ -14,8 +14,7 @@
 # ---- Configuration (inherits from parent scope) ----
 
 set(DISPATCHER_DIR "${PROJECT_SOURCE_DIR}/dispatcher")
-set(DISPATCHER_CODEGEN "${DISPATCHER_DIR}/codegen/unified_grouped_conv_codegen.py")
-set(DISPATCHER_CONFIG_SET "tests" CACHE STRING "Dispatcher config set: tests or profiler")
+set(DISPATCHER_RULE_SET "tests" CACHE STRING "Dispatcher rule set: profiler, tests, full, full-tests, tiny, or default")
 
 # Extract first GPU target for codegen
 string(REPLACE ";" " " _GPU_TARGETS_SPACE "${GPU_TARGETS}")
@@ -32,10 +31,6 @@ option(DISABLE_IMPLICIT_GEMM_INSTANCES
        "Codegen filter: emit only direct-conv instances, skip implicit-GEMM" OFF)
 
 # ---- Variant-to-path mapping tables ----
-
-set(_DISP_CONFIG_SUBDIR_fwd "forward")
-set(_DISP_CONFIG_SUBDIR_bwd_weight "backward_weight")
-set(_DISP_CONFIG_SUBDIR_bwd_data "backward_data")
 
 set(_DISP_GEN_SCRIPT "generate_profiler_kernels.py")
 
@@ -59,21 +54,19 @@ set(_DISP_DIRECT_PREFIX_bwd_data "direct_conv_bwd_data_")
 # =============================================================================
 function(ck_add_dispatcher_conv_instances VARIANT)
   # Look up variant-specific paths
-  set(CONFIG_SUBDIR "${_DISP_CONFIG_SUBDIR_${VARIANT}}")
   set(HEADER_PREFIX "${_DISP_HEADER_PREFIX_${VARIANT}}")
   set(DIRECT_PREFIX "${_DISP_DIRECT_PREFIX_${VARIANT}}")
 
-  if(NOT CONFIG_SUBDIR)
+  if(NOT HEADER_PREFIX)
     message(FATAL_ERROR "Unknown dispatcher variant: ${VARIANT}")
   endif()
 
-  set(CONFIG_DIR "${DISPATCHER_DIR}/codegen/configs/grouped_conv/${CONFIG_SUBDIR}")
   set(SCRIPT_PATH "${DISPATCHER_DIR}/scripts/${_DISP_GEN_SCRIPT}")
   set(KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/dispatcher_${VARIANT}_kernels")
   set(TARGET_NAME "ck_dispatcher_grouped_conv_${VARIANT}")
 
   # --- Step 1: Run Python codegen at configure time ---
-  # Always regenerate: DISPATCHER_CONFIG_SET is a CACHE variable, so changing it
+  # Always regenerate: DISPATCHER_RULE_SET is a CACHE variable, so changing it
   # triggers a full reconfigure. Wipe the kernel dir first to remove stale files.
   file(REMOVE_RECURSE ${KERNEL_DIR})
   file(MAKE_DIRECTORY ${KERNEL_DIR})
@@ -86,11 +79,9 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   execute_process(
     COMMAND ${Python3_EXECUTABLE} ${SCRIPT_PATH}
             --variant ${VARIANT}
-            --config-dir ${CONFIG_DIR}
-            --codegen ${DISPATCHER_CODEGEN}
             --output-dir ${KERNEL_DIR}
             --arch ${_GPU_TARGET}
-            --config-set ${DISPATCHER_CONFIG_SET}
+            --rule-set ${DISPATCHER_RULE_SET}
             ${_DISP_DISABLE_FLAG}
     RESULT_VARIABLE ret
     OUTPUT_VARIABLE output
@@ -100,7 +91,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   if(NOT ret EQUAL 0)
     message(FATAL_ERROR "Dispatcher ${VARIANT} kernel generation failed.\nReturn: ${ret}\nOutput: ${output}\nError: ${error}")
   endif()
-  message(STATUS "Dispatcher ${VARIANT} kernels generated (config set: ${DISPATCHER_CONFIG_SET}): ${output}")
+  message(STATUS "Dispatcher ${VARIANT} kernels generated (rule set: ${DISPATCHER_RULE_SET}): ${output}")
 
   # --- Step 2: Create .cpp wrappers for each generated kernel header ---
   # Compile BOTH the implicit-GEMM (HEADER_PREFIX) and the direct-conv
@@ -149,6 +140,9 @@ function(ck_add_dispatcher_conv_instances VARIANT)
     -Wno-header-hygiene
     -Wno-unused-parameter
     -Wno-missing-variable-declarations
+    # New clang -Weverything suggestion firing on builder-pattern setters that
+    # return *this in the shared dispatcher headers; not a real defect.
+    -Wno-lifetime-safety-intra-tu-suggestions
   )
   if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
     target_compile_options(${TARGET_NAME} PRIVATE --offload-compress)

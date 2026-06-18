@@ -167,36 +167,48 @@ class TestCountMismatches:
 
     def test_no_mismatches(self):
         content = "    UseCustomMainLoopSchedule: 0\n    ExpandPointerSwap: true\n"
-        assert count_mismatches(content) == (0, 0, 0)
+        assert count_mismatches(content) == (0, 0, 0, 0)
 
     def test_group_a_counts(self):
         content = "    DirectToLds: false\n    DirectToLds: true\n"
-        a, b, c = count_mismatches(content)
+        a, b, c, d = count_mismatches(content)
         assert a == 2
         assert b == 0
         assert c == 0
+        assert d == 0
 
     def test_group_b_counts(self):
         content = "    ExpandPointerSwap: 0\n    SourceSwap: 1\n"
-        a, b, c = count_mismatches(content)
+        a, b, c, d = count_mismatches(content)
         assert a == 0
         assert b == 2
         assert c == 0
+        assert d == 0
 
     def test_group_c_counts(self):
         content = "    GlobalReadPerMfma: 1\n"
-        a, b, c = count_mismatches(content)
+        a, b, c, d = count_mismatches(content)
         assert a == 0
         assert b == 0
         assert c == 1
+        assert d == 0
+
+    def test_group_d_counts(self):
+        content = "    CodeObjectVersion: 4\n"
+        a, b, c, d = count_mismatches(content)
+        assert a == 0
+        assert b == 0
+        assert c == 0
+        assert d == 1
 
     def test_mixed_groups(self):
         content = textwrap.dedent("""\
             DirectToLds: false
             ExpandPointerSwap: 0
             GlobalReadPerMfma: 1
+            CodeObjectVersion: 4
         """)
-        assert count_mismatches(content) == (1, 1, 1)
+        assert count_mismatches(content) == (1, 1, 1, 1)
 
 
 # ── Tests for fix_file ───────────────────────────────────────────────────────
@@ -331,3 +343,66 @@ class TestCLI:
         assert "Group A (bool->int):   1" in result.stdout
         assert "Group B (int->bool):   1" in result.stdout
         assert "Group C (int->float):  1" in result.stdout
+
+    def test_mode_flag_input(self, tmp_path):
+        """--mode input is reported in the output."""
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "--mode", "input", str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "Mode: input" in result.stdout
+
+    def test_mode_flag_logic(self, tmp_path):
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "--mode", "logic", str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "Mode: logic" in result.stdout
+
+    def test_mode_defaults_to_both(self, tmp_path):
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "Mode: both" in result.stdout
+
+    def test_mode_invalid_rejected(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "--mode", "bogus", str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode != 0
+
+    def test_multiple_directories(self, tmp_path):
+        """Multiple directories on the CLI are all scanned."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        (a / "x.yaml").write_text("    DirectToLds: false\n")
+        (b / "y.yaml").write_text("    ExpandPointerSwap: 0\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, str(a), str(b)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert (a / "x.yaml").read_text() == "    DirectToLds: 0\n"
+        assert (b / "y.yaml").read_text() == "    ExpandPointerSwap: false\n"
+
+    def test_duplicate_directories_not_double_processed(self, tmp_path):
+        """Passing the same directory twice does not double-count files."""
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        (subdir / "test.yaml").write_text("    DirectToLds: false\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, str(tmp_path), str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "YAML files found: 1" in result.stdout
