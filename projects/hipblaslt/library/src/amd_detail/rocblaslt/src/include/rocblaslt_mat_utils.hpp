@@ -490,12 +490,8 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
         
         case HIP_R_16F:
-            return {static_cast<double>(*(reinterpret_cast<const hipblasLtHalf*>(ptr))), 0.0};
         case HIP_R_16BF:
-        {
-            hipblasLtBfloat16 bf16 = *(reinterpret_cast<const hipblasLtBfloat16*>(ptr));
-            return {static_cast<double>(static_cast<float>(bf16)), 0.0};
-        }
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
 
         case HIP_C_32F:
         {

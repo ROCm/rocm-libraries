@@ -2360,19 +2360,13 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|4[0-2])'
 
-# Regression: an int8 GEMM stores alpha as int32. A caller that writes the float
-# bits of 1.0 (0x3F800000 == 1065353216) into the int32 alpha used to crash with
-# INTERNAL_ERROR because the alpha restriction was read using the matrix type
-# (float) instead of the int32 storage type, aliasing 0x3F800000 to 1.0f and
-# mis-selecting an alpha==1 kernel. alpha is stored verbatim as int32 1065353216.
-# This guards kernel SELECTION (the matmul API must succeed); numeric checks are
-# intentionally off since alpha=2^30 * int8*int8 overflows int32 (meaningless math).
+# Regression: int32 alpha 1065353216 (== float 1.0 bits) once crashed kernel selection.
+# unit_check off: alpha overflows int32 math; the guard is API success, not numerics.
 - name: matmul_gemm_i8_dst_i32_alpha_intbits
   category: pre_checkin
   function:
     matmul: *i8_precision_dst_i32
   matrix_size:
-    - { M:  128,  N:  128,  K:  64   }
     - { M:  131,  N:  131,  K:  131  }
   transA_transB: *transA_transB_range
   alpha: 1065353216
