@@ -137,7 +137,7 @@ def _store_channel_tensor(
 def _channel_values(
     tensor: torch.Tensor,
     x: torch.Tensor,
-    dtype: Optional[torch.dtype] = torch.float32,
+    dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     values = tensor.reshape(-1)
     if dtype is not None:

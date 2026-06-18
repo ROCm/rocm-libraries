@@ -59,10 +59,10 @@ def handle_batchnorm_inference(
     x = _tensor(tensors, x_uid, node)
     y = _bn_affine(
         x,
-        _channel_values(_tensor(tensors, scale_uid, node), x),
-        _channel_values(_tensor(tensors, bias_uid, node), x),
-        _channel_values(_tensor(tensors, mean_uid, node), x),
-        _channel_values(_tensor(tensors, inv_uid, node), x),
+        _channel_values(_tensor(tensors, scale_uid, node), x, dtype=torch.float32),
+        _channel_values(_tensor(tensors, bias_uid, node), x, dtype=torch.float32),
+        _channel_values(_tensor(tensors, mean_uid, node), x, dtype=torch.float32),
+        _channel_values(_tensor(tensors, inv_uid, node), x, dtype=torch.float32),
     )
     _store_tensor(tensors, y_uid, y)
 
@@ -88,10 +88,10 @@ def handle_batchnorm_inference_variance(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x, dtype=None)
-    running_var = _channel_values(_tensor(tensors, variance_uid, node), x, dtype=None)
-    weight = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
-    bias = _channel_values(_tensor(tensors, bias_uid, node), x, dtype=None)
+    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x)
+    running_var = _channel_values(_tensor(tensors, variance_uid, node), x)
+    weight = _channel_values(_tensor(tensors, scale_uid, node), x)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
     # Native I/O dtype: F.batch_norm runs the graph-dtype kernel (matching the
@@ -123,8 +123,8 @@ def handle_batchnorm_training(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
-    bias = _channel_values(_tensor(tensors, bias_uid, node), x, dtype=None)
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
     # Fused batchnorm forward-training: a single op that dispatches to MIOpen on
@@ -163,8 +163,12 @@ def handle_batchnorm_training(
                 "Batchnorm running-stat update requires prev mean/var, next mean/var, and momentum"
             )
         momentum = _scalar_value(tensors, int(momentum_uid), node)
-        prev_mean = _channel_values(_tensor(tensors, int(prev_mean_uid), node), x)
-        prev_var = _channel_values(_tensor(tensors, int(prev_var_uid), node), x)
+        prev_mean = _channel_values(
+            _tensor(tensors, int(prev_mean_uid), node), x, dtype=torch.float32
+        )
+        prev_var = _channel_values(
+            _tensor(tensors, int(prev_var_uid), node), x, dtype=torch.float32
+        )
         # Recover biased batch variance from the fused save_invstd for the
         # running-stat update: inv_variance == rsqrt(var_biased + epsilon).
         variance = inv_variance.reciprocal().square() - epsilon
@@ -198,7 +202,7 @@ def handle_batchnorm_backward(
 
     dy = _tensor(tensors, dy_uid, node)
     x = _tensor(tensors, x_uid, node)
-    scale = _channel_values(_tensor(tensors, scale_uid, node), x, dtype=None)
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x)
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
     if (mean_uid is None) != (inv_uid is None):
@@ -209,8 +213,12 @@ def handle_batchnorm_backward(
         mean, variance = _bn_mean_var(x)
         inv_variance = torch.rsqrt(variance + 1e-5)
     else:
-        mean = _channel_values(_tensor(tensors, int(mean_uid), node), x)
-        inv_variance = _channel_values(_tensor(tensors, int(inv_uid), node), x)
+        mean = _channel_values(
+            _tensor(tensors, int(mean_uid), node), x, dtype=torch.float32
+        )
+        inv_variance = _channel_values(
+            _tensor(tensors, int(inv_uid), node), x, dtype=torch.float32
+        )
 
     # Fused batchnorm backward: a single op that dispatches to MIOpen on ROCm and
     # returns (dx, dscale, dbias), replacing the hand-rolled gradient reduction.
