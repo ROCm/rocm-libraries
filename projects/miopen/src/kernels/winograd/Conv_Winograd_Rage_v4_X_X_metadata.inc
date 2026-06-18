@@ -98,7 +98,7 @@ amdhsa.kernels:
 .endm
 
 .macro kernel_end kernel_name:req
-.if (.amdgcn.gfx_generation_number == 12)
+.if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
 .balignl 256, 0xBF9F0000
 .else
 .align 256
@@ -134,7 +134,7 @@ __fp16_overflow = 0
 
 .rodata
 .p2align 6
-.if (.amdgcn.gfx_generation_number == 12)
+.if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
 .amdhsa_kernel \arg_kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]

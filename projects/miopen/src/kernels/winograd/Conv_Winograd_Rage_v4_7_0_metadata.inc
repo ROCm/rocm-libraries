@@ -179,10 +179,6 @@ __fp16_overflow = 0
     .amdhsa_dx10_clamp                       __dx10_clamp
     .amdhsa_ieee_mode                        __ieee_mode
 	.amdhsa_fp16_overflow                    __fp16_overflow
-/* \todo add gfx12 support with these directives
-    .amdhsa_wavefront_size32                 0
-    .amdhsa_workgroup_processor_mode         0
-*/
 .end_amdhsa_kernel
 .endif
 

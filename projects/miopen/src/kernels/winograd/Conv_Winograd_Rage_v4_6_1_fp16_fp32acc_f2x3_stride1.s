@@ -3,7 +3,7 @@
 
 .include "Conv_Winograd_Rage_v4_X_X_metadata.inc"
 
-.if (.amdgcn.gfx_generation_number == 12)
+.if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
     KERNEL_PROLOG 4_6_1, _fp16_fp32acc_f2x3_stride1
     .noaltmacro
     .include "Conv_Winograd_Rage_v4_6_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc"

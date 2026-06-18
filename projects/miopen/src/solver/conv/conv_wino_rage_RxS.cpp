@@ -194,7 +194,7 @@ class ShaderModelFactory
 {
 public:
     // We keep two kernel versions because V4_6 delivers better performance
-    // on both gfx12x(+4%) and gfx942(+6%) for cases where input channels <= 16.
+    // on both gfx120x(+4%) and gfx942(+6%) for cases where input channels <= 16.
     enum class KernelVersion
     {
         V4_6, // 3x3 filters, FP16 only
@@ -211,8 +211,8 @@ public:
         static constexpr PerfModelParams GFX942_V4_9_fp32{128, {26044, 512, 2468, 2504}};
         static constexpr PerfModelParams GFX942_V4_6{1024, {22850, 244, 1396, 2244}};
 
-        static constexpr PerfModelParams GFX12_V4_9{512, {9740, 182, 1506, 1533}};
-        static constexpr PerfModelParams GFX12_V4_6{512, {9505, 79, 1522, 1533}};
+        static constexpr PerfModelParams GFX120_V4_9{512, {9740, 182, 1506, 1533}};
+        static constexpr PerfModelParams GFX120_V4_6{512, {9505, 79, 1522, 1533}};
         // clang-format on
     };
 
@@ -240,10 +240,10 @@ public:
                    : (problem.IsBfp16())                   ? PerfParams::GFX942_V4_9_bf16
                                                            : PerfParams::GFX942_V4_9_fp32;
         }
-        else if(StartsWith(dev_name, "gfx12"))
+        else if(StartsWith(dev_name, "gfx120"))
         {
-            return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX12_V4_6
-                                                           : PerfParams::GFX12_V4_9;
+            return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX120_V4_6
+                                                           : PerfParams::GFX120_V4_9;
         }
         else
         {
@@ -315,7 +315,7 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx12")))
+    if(!(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx120")))
     {
         return false;
     }
@@ -415,7 +415,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     // Kernel name and file
     const auto versionStr = [](ShaderModelFactory::KernelVersion kv,
                                const std::string& dn) -> std::string {
-        if(StartsWith(dn, "gfx12"))
+        if(StartsWith(dn, "gfx120"))
             return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_1" : "_v4_9_1";
         return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_0" : "_v4_7_0";
     }(kernelVersion, devName);
@@ -423,7 +423,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     const auto archStr = [](const std::string& dn) -> std::string {
         if(StartsWith(dn, "gfx942"))
             return "_gfx9";
-        if(StartsWith(dn, "gfx12"))
+        if(StartsWith(dn, "gfx120"))
             return "_gfx12";
         MIOPEN_THROW(miopenStatusInternalError);
     }(devName);
@@ -458,7 +458,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernelInfo.comp_options += std::string(" -mcumode");
 
     uint64_t wgSize = 768U; // value for gfx942
-    if(StartsWith(devName, "gfx12"))
+    if(StartsWith(devName, "gfx120"))
     {
         wgSize = 384U;
     }
