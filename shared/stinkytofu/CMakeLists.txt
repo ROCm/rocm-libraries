@@ -234,6 +234,13 @@ add_subdirectory(src)
 # tests/, which gate their plugin coverage on this same flag. New example tests
 # should hook in under STINKYTOFU_BUILD_EXAMPLES too.
 option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu example plugins (and their tests)" OFF)
+
+# Single source of truth for where plugins live relative to libstinkytofu's lib dir.
+# Shared by the install rule, the compiled-in runtime lookup (PassBuilder::examplePluginPath),
+# and consumers that vendor libstinkytofu (rocisa) so they install plugins to a matching path.
+set(STINKYTOFU_PLUGIN_INSTALL_RELDIR "stinkytofu/plugins"
+    CACHE STRING "Plugin directory relative to the libstinkytofu lib dir")
+
 if(STINKYTOFU_BUILD_EXAMPLES)
     add_subdirectory(examples/plugins)
 endif()
