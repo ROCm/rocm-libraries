@@ -69,9 +69,24 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         const int64_t bbEntryAccum = m_phase1.accumByte.at(bp);
         const bool allowIns =
             !m_skipSwPrefetchInNaturalLoopBodies || (findLoopForBB(m_loops, &bb) == nullptr);
-        const int inserted = insertSwPrefetchLabelsDynamic(
-            bb, blockGlobalStart, bbEntryAccum, 0, archId, m_debug ? m_debugStream : nullptr,
-            &m_asmSetSymbols, allowIns, getName());
+        int inserted = 0;
+        if (m_usePerBbAnchorPrefetchGrid) {
+            // Real first post-CP byte from Phase 1 (honors alignment gaps), shifted from pre-insert
+            // layout into Phase 2's post-insert coordinates (§12.3) so the per-BB grid stays
+            // aligned with this BB's actual emitted offsets.
+            const int64_t firstPostCp = m_phase1.firstPostCpLayoutByte.at(bp);
+            const int64_t anchor =
+                firstPostCp == kSwPrefetchNoPerBbGridAnchor
+                    ? kSwPrefetchNoPerBbGridAnchor
+                    : firstPostCp + (blockGlobalStart - m_phase1.layoutStart.at(bp));
+            inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
+                bb, blockGlobalStart, bbEntryAccum, anchor, 0, archId,
+                m_debug ? m_debugStream : nullptr, &m_asmSetSymbols, allowIns, getName());
+        } else {
+            inserted = insertSwPrefetchLabelsDynamic(bb, blockGlobalStart, bbEntryAccum, 0, archId,
+                                                     m_debug ? m_debugStream : nullptr,
+                                                     &m_asmSetSymbols, allowIns, getName());
+        }
         m_totalPrefetchInserted += inserted;
 
         int blockCount = 0;
@@ -107,7 +122,8 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         }
 
         computeSwPrefetchRelPhase1Accum(func, &m_asmSetSymbols, m_phase1,
-                                        m_debug ? m_debugStream : nullptr, getName());
+                                        m_debug ? m_debugStream : nullptr, getName(),
+                                        m_usePerBbAnchorPrefetchGrid);
 
         if (m_phase1.totalLayoutBytes <= kSwPrefetchFirstGlobalByte) {
             if (m_debug) {
@@ -129,9 +145,10 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         m_loops = detectLoops(func);
 
         if (m_debug) {
-            *m_debugStream << "[" << getName() << "] Phase 2 insert (CFG-gated), totalLayoutBytes="
-                           << m_phase1.totalLayoutBytes << " > P(0)=" << kSwPrefetchFirstGlobalByte
-                           << "\n";
+            *m_debugStream << "[" << getName() << "] Phase 2 insert (CFG-gated), grid="
+                           << (m_usePerBbAnchorPrefetchGrid ? "per-BB anchor" : "global P(k)")
+                           << ", totalLayoutBytes=" << m_phase1.totalLayoutBytes
+                           << " > P(0)=" << kSwPrefetchFirstGlobalByte << "\n";
         }
 
         for (BasicBlock& bb : func) runOnBasicBlock(bb, passCtx);
@@ -156,6 +173,13 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
         m_debugOutputPath = path;
     }
 
+    /// When true (default), Phase 2 uses `insertSwPrefetchLabelsDynamicPerBbAnchor` and Phase 1
+    /// debug preview matches. When false, uses global `32640 + k×4096` grid
+    /// (`insertSwPrefetchLabelsDynamic`).
+    void setUsePerBbAnchorPrefetchGrid(bool enable) {
+        m_usePerBbAnchorPrefetchGrid = enable;
+    }
+
    private:
     SwPrefetchRelPhase1Accum m_phase1;
     int64_t m_totalCycles = 0;
@@ -168,6 +192,8 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
     bool m_skipSwPrefetchInNaturalLoopBodies = false;
+    /// Default true: `P_bb(localK) = A(bb) + localK×4096` with `A` from phase 1 (§15).
+    bool m_usePerBbAnchorPrefetchGrid = true;
     std::string m_debugOutputPath;
     std::ofstream m_debugFile;
     std::ostream* m_debugStream = &std::cerr;
@@ -175,16 +201,19 @@ class SwInstructionPrefetchRelDynamicPass : public StinkyInstPass {
 
 char SwInstructionPrefetchRelDynamicPass::ID = 0;
 
-std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(
-    const std::string& debugOutputPath) {
+std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(const std::string& debugOutputPath,
+                                                                bool usePerBbAnchorPrefetchGrid) {
     auto p = std::make_unique<SwInstructionPrefetchRelDynamicPass>();
+    p->setUsePerBbAnchorPrefetchGrid(usePerBbAnchorPrefetchGrid);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
     return p;
 }
 
-std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(StinkyAsmModule& module) {
+std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(StinkyAsmModule& module,
+                                                                bool usePerBbAnchorPrefetchGrid) {
     auto p = std::make_unique<SwInstructionPrefetchRelDynamicPass>();
+    p->setUsePerBbAnchorPrefetchGrid(usePerBbAnchorPrefetchGrid);
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();

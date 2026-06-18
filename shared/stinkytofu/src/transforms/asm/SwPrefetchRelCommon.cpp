@@ -242,9 +242,11 @@ void walkBlockLayoutAndPostCp(BasicBlock& bb, int64_t blockGlobalByteOffset,
                               std::unordered_map<std::string, int64_t>& labelOff,
                               const std::unordered_map<std::string, int64_t>* asmSetSymbols,
                               std::unordered_map<StinkyInstruction*, int64_t>& layoutGlobal,
-                              int64_t& blockLocalBytes, int64_t& blockLocalBytesPostCp) {
+                              int64_t& blockLocalBytes, int64_t& blockLocalBytesPostCp,
+                              int64_t& firstPostCpLayoutByte) {
     blockLocalBytes = 0;
     blockLocalBytesPostCp = 0;
+    firstPostCpLayoutByte = kSwPrefetchNoPerBbGridAnchor;
     int64_t totalBytes = 0;
 
     for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
@@ -270,7 +272,14 @@ void walkBlockLayoutAndPostCp(BasicBlock& bb, int64_t blockGlobalByteOffset,
         const int instBytes = baseSize + literalExtra;
 
         layoutGlobal[&inst] = layoutBefore;
-        blockLocalBytesPostCp += postCpBytesForInstructionSpan(layoutBefore, instBytes);
+        const int64_t postCpInsn = postCpBytesForInstructionSpan(layoutBefore, instBytes);
+        if (postCpInsn > 0 && firstPostCpLayoutByte == kSwPrefetchNoPerBbGridAnchor) {
+            // First byte of this insn that lies in the post-CP zone (clamped to P(0)). This is the
+            // true per-BB anchor: it accounts for alignment gaps that move the real post-CP insn
+            // far past layoutStart, unlike the layoutStart-based contiguous estimate.
+            firstPostCpLayoutByte = std::max(layoutBefore, kSwPrefetchFirstGlobalByte);
+        }
+        blockLocalBytesPostCp += postCpInsn;
         totalBytes += instBytes;
     }
     blockLocalBytes = totalBytes;
@@ -367,6 +376,21 @@ bool cfgGateQualifies(int64_t P, int64_t layoutBefore, int64_t layoutAfter, int6
     cfgGateIntervalBounds(layoutBefore, layoutAfter, bbEntryAccum, postCpCumulBefore,
                           postCpCumulAfter, gateBefore, gateAfter);
     return cfgIntervalContainsP(P, gateBefore, gateAfter);
+}
+
+/// Per-BB anchored grid (`P_bb = bbGridAnchorGlobal + localK * step`): grid points are **layout**
+/// offsets, so match each candidate against the insn's **layout** span `(layoutBefore,
+/// layoutAfter]` (not the CFG-accum remap — that is only for the global grid). This keeps the 4 KiB
+/// steps landing on interior insns. When \p P equals both the BB anchor and this insn's
+/// `layoutBefore` (e.g. a fully post-CP BB with `A == layoutStart`), use a **closed** left bound so
+/// the prefetch emits
+/// **before** that first insn at the anchor.
+bool cfgGateQualifiesPerBbAnchor(int64_t P, int64_t layoutBefore, int64_t layoutAfter,
+                                 int64_t instBytes, int64_t bbGridAnchorGlobal) {
+    if (!cfgPathEnteredPostCp(layoutBefore, instBytes)) return false;
+    if (P == bbGridAnchorGlobal && P == layoutBefore)
+        return (layoutBefore <= P && P <= layoutAfter);
+    return cfgIntervalContainsP(P, layoutBefore, layoutAfter);
 }
 
 void debugPrintInsertSiteInsnContext(std::ostream& os, int64_t /*layoutBefore*/, int baseSize,
@@ -619,6 +643,248 @@ SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
     return result;
 }
 
+std::string swPrefetchPerBbRelLabelName(int64_t blockGlobalByteOffset, int64_t localK) {
+    return std::string("label_SWprefetch_bbrel_") + std::to_string(blockGlobalByteOffset) + "_" +
+           std::to_string(localK);
+}
+
+/// Same as `walkSwPrefetchRelGridInBlock`, but grid lines are
+/// `bbGridAnchorGlobal + localK * kSwPrefetchSpacingBytes` (per-BB post-CP anchor). Dual gate and
+/// getpc redirect unchanged. `result.kNext` is the **per-BB local** index (restart at 0 each BB).
+///
+/// **Anchor at BB start:** advance with `P < layoutStart` (not `<=`) so `P_bb(0)==A==layoutStart`
+/// is not skipped. **`cfgGateQualifiesPerBbAnchor`** uses a closed left bound when
+/// `P==A==layoutBefore` so the prefetch can insert **before** the first real insn at the anchor.
+SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlockPerBbAnchor(
+    BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
+    int64_t kLocalNextIn, std::unordered_map<std::string, int64_t>& labelOff,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, GfxArchID archId,
+    bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
+    std::ostream* insertDbgOut, const char* debugPassTag) {
+    SwPrefetchGridWalkResult result;
+    result.kNext = kLocalNextIn;
+    if (bbGridAnchorGlobal == kSwPrefetchNoPerBbGridAnchor) return result;
+
+    while (swPrefetchPerBbAnchorGridOffset(result.kNext, bbGridAnchorGlobal) <
+           blockGlobalByteOffset)
+        ++result.kNext;
+
+    std::unique_ptr<AsmIRBuilder> builder;
+    if (allowMutate) builder = std::make_unique<AsmIRBuilder>(bb, archId);
+
+    int64_t totalBytes = 0;
+    int64_t postCpCumul = 0;
+    unsigned getpcPcRelChainGuardRemaining = 0;
+    int64_t totalBytesAtGetpcStart = 0;
+    int64_t nextPrefetchBlockOffsetBeforeGetpc = 0;
+    std::vector<IRList::iterator> getpcWindowIters;
+
+    for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
+        IRBase* node = it.getNodePtr();
+        addAlignmentPaddingFromDirectiveNode(node, blockGlobalByteOffset, totalBytes, insertDbgOut);
+        if (node->getType() == IRBase::IRType::StinkyAsmDirective) continue;
+        if (node->getType() != IRBase::IRType::StinkyTofu) continue;
+
+        StinkyInstruction& inst = getStinkyInst(it);
+        if (inst.getUnifiedOpcode() == GFX::PHI) continue;
+        if (inst.getUnifiedOpcode() == GFX::LABEL) {
+            if (const LabelData* ld = inst.getModifier<LabelData>()) {
+                addAlignmentPaddingForLabelInstruction(inst, blockGlobalByteOffset, totalBytes,
+                                                       insertDbgOut);
+                labelOff[ld->label] = blockGlobalByteOffset + totalBytes;
+            }
+            continue;
+        }
+
+        const bool isGetpc = instructionIsSGetpcB64(inst);
+        if (isGetpc) {
+            getpcWindowIters.clear();
+            getpcWindowIters.push_back(it);
+            totalBytesAtGetpcStart = totalBytes;
+            nextPrefetchBlockOffsetBeforeGetpc = totalBytesAtGetpcStart;
+            getpcPcRelChainGuardRemaining = kSwPrefetchForwardWindowInsnsAfterGetpc;
+        } else if (!getpcWindowIters.empty() && getpcPcRelChainGuardRemaining > 0u) {
+            if (getpcWindowIters.size() <
+                static_cast<size_t>(kSwPrefetchForwardWindowRealInsnCount))
+                getpcWindowIters.push_back(it);
+        }
+
+        const int64_t walkOffsetAtInstStart = totalBytes;
+        const int64_t globalPcBefore = blockGlobalByteOffset + totalBytes;
+        const int baseSize = getEffectiveBaseSizeInBytes(inst);
+        const int literalExtra =
+            getLiteralExtraBytes(inst, &labelOff, globalPcBefore, asmSetSymbols);
+        const int instBytes = baseSize + literalExtra;
+        const int64_t globalPcAfter = globalPcBefore + instBytes;
+        const int64_t postCpInsn = postCpBytesForInstructionSpan(globalPcBefore, instBytes);
+        const int64_t postCpCumulBefore = postCpCumul;
+        const int64_t postCpCumulAfter = postCpCumul + postCpInsn;
+        // Per-BB anchor grid is in layout coordinates: gate each grid point against this insn's
+        // layout span so 4 KiB steps land on interior insns (no CFG-accum remap, §15).
+        const int64_t gateBefore = globalPcBefore;
+        const int64_t gateAfter = globalPcAfter;
+
+        bool redirectRewalkAbsorbedCurrentInstSizes = false;
+        for (;;) {
+            const int64_t P = swPrefetchPerBbAnchorGridOffset(result.kNext, bbGridAnchorGlobal);
+            if (P < blockGlobalByteOffset) {
+                ++result.kNext;
+                continue;
+            }
+            if (P > gateAfter) break;
+            if (P < gateBefore) {
+                ++result.kNext;
+                continue;
+            }
+
+            const bool layoutGate = P >= kSwPrefetchFirstGlobalByte;
+            const bool cfgGate = cfgGateQualifiesPerBbAnchor(P, globalPcBefore, globalPcAfter,
+                                                             instBytes, bbGridAnchorGlobal);
+            const bool wouldInsert = layoutGate && cfgGate;
+            const bool getpcRedirect =
+                getpcPcRelChainGuardRemaining > 0u && !getpcWindowIters.empty();
+            const bool pathEntered = cfgPathEnteredPostCp(globalPcBefore, instBytes);
+
+            if (planOs != nullptr) {
+                *planOs << "  [insert-site grid=per_bb_anchor bbAnchor=" << bbGridAnchorGlobal
+                        << " localK=" << result.kNext << " P=" << P << " label="
+                        << swPrefetchPerBbRelLabelName(blockGlobalByteOffset, result.kNext)
+                        << " BB=\"" << bb.getLabel() << "\" insertPoint="
+                        << (getpcRedirect ? "before_getpc_redirect" : "before_insn")
+                        << " layoutGate=" << (layoutGate ? "yes" : "no")
+                        << " cfgGate=" << (cfgGate ? "yes" : "no")
+                        << " pathEntered=" << (pathEntered ? "yes" : "no")
+                        << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
+                        << " gateBefore=" << gateBefore << " gateAfter=" << gateAfter
+                        << " layoutBefore=" << globalPcBefore << " layoutAfter=" << globalPcAfter
+                        << " ";
+                debugPrintCfgAccumGlobals(*planOs, bbEntryAccum, postCpCumulBefore,
+                                          postCpCumulAfter);
+                *planOs << " ";
+                debugPrintInsertSiteInsnContext(*planOs, globalPcBefore, baseSize, literalExtra,
+                                                instBytes, globalPcAfter, totalBytes + instBytes,
+                                                postCpInsn, postCpCumulAfter, bbEntryAccum);
+                *planOs << " ";
+                if (getpcRedirect) {
+                    *planOs << "insertBefore=";
+                    debugDumpInsnRef(*planOs, getStinkyInst(getpcWindowIters.front()));
+                } else {
+                    *planOs << "insertBefore=";
+                    debugDumpInsnRef(*planOs, inst);
+                }
+                *planOs << " anchor=";
+                debugDumpInsnRef(*planOs, inst);
+                *planOs << "\n";
+            }
+
+            if (wouldInsert) {
+                if (planOs != nullptr) ++result.planInsert;
+                if (allowMutate && allowSwPrefetchInsertion && builder != nullptr) {
+                    const std::string name =
+                        swPrefetchPerBbRelLabelName(blockGlobalByteOffset, result.kNext);
+                    if (!swPrefetchLabelNameExists(bb, name)) {
+                        labelOff[name] = globalPcAfter;
+                        if (getpcRedirect) {
+                            insertPrefetchBeforeGetpcAndRewalkWindow(
+                                bb, getpcWindowIters.front(), getpcWindowIters,
+                                totalBytesAtGetpcStart, nextPrefetchBlockOffsetBeforeGetpc,
+                                blockGlobalByteOffset, archId, *builder, labelOff, totalBytes,
+                                insertDbgOut, debugPassTag, asmSetSymbols);
+                            redirectRewalkAbsorbedCurrentInstSizes = true;
+                        } else {
+                            (void)insertSwPrefetchInstPcRelBefore(
+                                bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                        }
+                        ++result.insertCount;
+                    }
+                }
+            } else if (planOs != nullptr) {
+                ++result.skipCount;
+            }
+            ++result.kNext;
+        }
+
+        if (!redirectRewalkAbsorbedCurrentInstSizes) totalBytes += instBytes;
+        postCpCumul = postCpCumulAfter;
+
+        if (!isGetpc && getpcPcRelChainGuardRemaining > 0u) {
+            --getpcPcRelChainGuardRemaining;
+            if (getpcPcRelChainGuardRemaining == 0u) getpcWindowIters.clear();
+        }
+    }
+
+    getpcWindowIters.clear();
+    const int64_t blockEndGlobal = blockGlobalByteOffset + totalBytes;
+    // Per-BB grid is layout-based: interior insns already cover `(A, blockEnd]`, so the tail append
+    // only fires for a grid point strictly past the last insn's layout span (normally none).
+    const int64_t tailLowerLayout = blockEndGlobal;
+    for (;;) {
+        const int64_t P = swPrefetchPerBbAnchorGridOffset(result.kNext, bbGridAnchorGlobal);
+        if (P < blockGlobalByteOffset) {
+            ++result.kNext;
+            continue;
+        }
+        if (P > blockEndGlobal) break;
+
+        const bool layoutGate = P >= kSwPrefetchFirstGlobalByte;
+        const bool pathEntered = cfgPathEnteredPostCpAtBlockExit(bbEntryAccum, postCpCumul);
+        const bool tailInterval = tailLowerLayout < P && P <= blockEndGlobal;
+        const bool cfgGate = pathEntered && tailInterval;
+        const bool wouldInsert = layoutGate && cfgGate;
+
+        if (planOs != nullptr) {
+            *planOs << "  [insert-site grid=per_bb_anchor bbAnchor=" << bbGridAnchorGlobal
+                    << " localK=" << result.kNext << " P=" << P
+                    << " label=" << swPrefetchPerBbRelLabelName(blockGlobalByteOffset, result.kNext)
+                    << " BB=\"" << bb.getLabel() << "\" insertPoint=bb_end_append"
+                    << " layoutGate=" << (layoutGate ? "yes" : "no")
+                    << " cfgGate=" << (cfgGate ? "yes" : "no")
+                    << " pathEntered=" << (pathEntered ? "yes" : "no")
+                    << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
+                    << " gateBefore=" << tailLowerLayout << " gateAfter=" << blockEndGlobal
+                    << " layoutBefore=" << blockEndGlobal << " layoutAfter=" << blockEndGlobal
+                    << " ";
+            debugPrintCfgAccumGlobals(*planOs, bbEntryAccum, postCpCumul, postCpCumul);
+            *planOs << " anchorLayoutGlobal=" << blockEndGlobal << "]\n";
+        }
+
+        if (wouldInsert) {
+            if (planOs != nullptr) ++result.planInsert;
+            if (allowMutate && allowSwPrefetchInsertion && builder != nullptr) {
+                const std::string name =
+                    swPrefetchPerBbRelLabelName(blockGlobalByteOffset, result.kNext);
+                if (!swPrefetchLabelNameExists(bb, name)) {
+                    labelOff[name] = blockEndGlobal;
+                    appendSwPrefetchInstPcRel(bb, archId, *builder, &labelOff,
+                                              blockGlobalByteOffset, totalBytes, asmSetSymbols);
+                    ++result.insertCount;
+                }
+            }
+            ++result.kNext;
+            while (true) {
+                const int64_t Pcoalesced =
+                    swPrefetchPerBbAnchorGridOffset(result.kNext, bbGridAnchorGlobal);
+                if (Pcoalesced > blockEndGlobal) break;
+                if (Pcoalesced <= tailLowerLayout) break;
+                if (planOs != nullptr) {
+                    *planOs << "  [insert-site localK=" << result.kNext << " P=" << Pcoalesced
+                            << " BB=\"" << bb.getLabel()
+                            << "\" insertPoint=bb_end_append action=SKIP tail_coalesced"
+                            << " (first tail PLAN_INSERT at blockEnd=" << blockEndGlobal << ")]\n";
+                }
+                ++result.skipCount;
+                ++result.kNext;
+            }
+            break;
+        }
+        if (planOs != nullptr) ++result.skipCount;
+        ++result.kNext;
+    }
+
+    return result;
+}
+
 GfxArchID gfxArchFromBasicBlock(const BasicBlock& bb) {
     const Function* func = bb.getParentFunc();
     if (func == nullptr) return getGfxArchID(12, 5, 0);
@@ -642,13 +908,29 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
     return result.kNext;
 }
 
+int64_t debugPlanInsertSitesInBlockPerBbAnchor(
+    BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
+    const std::unordered_map<std::string, int64_t>& labelOff,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, std::ostream& os,
+    int& outPlanInsert, int& outSkip) {
+    if (bbGridAnchorGlobal == kSwPrefetchNoPerBbGridAnchor) return 0;
+    std::unordered_map<std::string, int64_t> localLabelOff = labelOff;
+    const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlockPerBbAnchor(
+        bb, blockGlobalByteOffset, bbEntryAccum, bbGridAnchorGlobal, 0, localLabelOff,
+        asmSetSymbols, gfxArchFromBasicBlock(bb), false, true, &os, nullptr, nullptr);
+    outPlanInsert += result.planInsert;
+    outSkip += result.skipCount;
+    return result.kNext;
+}
+
 void debugPrintPhase1PlannedInsertSites(
     Function& func, const SwPrefetchRelPhase1Accum& phase1,
     const std::unordered_map<std::string, int64_t>& labelOff,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols, std::ostream& os,
-    const char* tag) {
-    os << "[" << tag
-       << "] Phase 1 planned insert sites (phase 2 preview), P(0)=" << kSwPrefetchFirstGlobalByte
+    const char* tag, bool usePerBbAnchorPreview) {
+    os << "[" << tag << "] Phase 1 planned insert sites (phase 2 preview"
+       << (usePerBbAnchorPreview ? ", per-BB anchor grid" : ", global P(k) grid")
+       << "), P(0)=" << kSwPrefetchFirstGlobalByte
        << " totalLayoutBytes=" << phase1.totalLayoutBytes << "\n";
 
     if (phase1.totalLayoutBytes <= kSwPrefetchFirstGlobalByte) {
@@ -661,13 +943,26 @@ void debugPrintPhase1PlannedInsertSites(
     int skip = 0;
     for (BasicBlock& bb : func) {
         BasicBlock* bp = &bb;
-        // Per-BB kNextIn=0: same P(k) may PLAN_INSERT in multiple branch BBs (§4.3 / §4.6).
-        (void)debugPlanInsertSitesInBlock(bb, phase1.layoutStart.at(bp), phase1.accumByte.at(bp), 0,
-                                          labelOff, asmSetSymbols, os, planInsert, skip);
+        if (usePerBbAnchorPreview) {
+            // Preview walks pre-insert layout (blockGlobalByteOffset == layoutStart), so the
+            // recorded first post-CP byte is already in the right coordinate space (no drift
+            // adjustment).
+            const int64_t anchor = phase1.firstPostCpLayoutByte.at(bp);
+            (void)debugPlanInsertSitesInBlockPerBbAnchor(bb, phase1.layoutStart.at(bp),
+                                                         phase1.accumByte.at(bp), anchor, labelOff,
+                                                         asmSetSymbols, os, planInsert, skip);
+        } else {
+            // Per-BB kNextIn=0: same P(k) may PLAN_INSERT in multiple branch BBs (§4.3 / §4.6).
+            (void)debugPlanInsertSitesInBlock(bb, phase1.layoutStart.at(bp),
+                                              phase1.accumByte.at(bp), 0, labelOff, asmSetSymbols,
+                                              os, planInsert, skip);
+        }
     }
 
     os << "[" << tag << "] Phase 1 planned insert sites summary: PLAN_INSERT=" << planInsert
-       << " SKIP=" << skip << " (per-BB kNextIn=0 multi-arm sweep)\n";
+       << " SKIP=" << skip
+       << (usePerBbAnchorPreview ? " (per-BB anchor preview)\n"
+                                 : " (per-BB kNextIn=0 multi-arm sweep)\n");
 }
 
 void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
@@ -938,16 +1233,31 @@ int insertSwPrefetchLabelsDynamic(BasicBlock& bb, int64_t blockGlobalByteOffset,
     return result.insertCount;
 }
 
+int insertSwPrefetchLabelsDynamicPerBbAnchor(
+    BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t bbGridAnchorGlobal,
+    int64_t kLocalNextIn, GfxArchID archId, std::ostream* dbgOut,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, bool allowSwPrefetchInsertion,
+    const char* debugPassTag) {
+    std::unordered_map<std::string, int64_t> labelOff;
+    if (bbGridAnchorGlobal == kSwPrefetchNoPerBbGridAnchor) return 0;
+    const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlockPerBbAnchor(
+        bb, blockGlobalByteOffset, bbEntryAccum, bbGridAnchorGlobal, kLocalNextIn, labelOff,
+        asmSetSymbols, archId, allowSwPrefetchInsertion, allowSwPrefetchInsertion, nullptr, dbgOut,
+        debugPassTag);
+    return result.insertCount;
+}
+
 void computeSwPrefetchRelPhase1Accum(Function& func,
                                      const std::unordered_map<std::string, int64_t>* asmSetSymbols,
                                      SwPrefetchRelPhase1Accum& out, std::ostream* dbgOut,
-                                     const char* debugPassTag) {
+                                     const char* debugPassTag, bool phase2UsesPerBbAnchorGrid) {
     const char* tag =
         debugPassTag != nullptr ? debugPassTag : "SwInstructionPrefetchRelDynamicPass";
 
     out.layoutStart.clear();
     out.blockLocalBytes.clear();
     out.blockLocalBytesPostCp.clear();
+    out.firstPostCpLayoutByte.clear();
     out.accumByte.clear();
     out.accumExit.clear();
     out.layoutGlobal.clear();
@@ -960,10 +1270,12 @@ void computeSwPrefetchRelPhase1Accum(Function& func,
         out.layoutStart[&bb] = layoutBase;
         int64_t localBytes = 0;
         int64_t localPostCp = 0;
+        int64_t firstPostCp = kSwPrefetchNoPerBbGridAnchor;
         walkBlockLayoutAndPostCp(bb, layoutBase, labelOff, asmSetSymbols, out.layoutGlobal,
-                                 localBytes, localPostCp);
+                                 localBytes, localPostCp, firstPostCp);
         out.blockLocalBytes[&bb] = localBytes;
         out.blockLocalBytesPostCp[&bb] = localPostCp;
+        out.firstPostCpLayoutByte[&bb] = firstPostCp;
         // Default for unreachable BBs (RPO only visits entry-reachable blocks).
         out.accumByte[&bb] = 0;
         out.accumExit[&bb] = localPostCp;
@@ -1005,7 +1317,8 @@ void computeSwPrefetchRelPhase1Accum(Function& func,
 
     if (dbgOut == nullptr) return;
 
-    debugPrintPhase1PlannedInsertSites(func, out, labelOff, asmSetSymbols, *dbgOut, tag);
+    debugPrintPhase1PlannedInsertSites(func, out, labelOff, asmSetSymbols, *dbgOut, tag,
+                                       phase2UsesPerBbAnchorGrid);
 
     *dbgOut << "[" << tag << "] Phase 1 accumulate (no insert), P(0)=" << kSwPrefetchFirstGlobalByte
             << " totalLayoutBytes=" << out.totalLayoutBytes << "\n";
@@ -1018,6 +1331,7 @@ void computeSwPrefetchRelPhase1Accum(Function& func,
         *dbgOut << "  BB \"" << bb.getLabel() << "\" summary layoutStart=" << out.layoutStart[bp]
                 << " blockLocalBytes=" << out.blockLocalBytes[bp]
                 << " blockLocalBytesPostCp=" << out.blockLocalBytesPostCp[bp]
+                << " firstPostCpLayoutByte=" << out.firstPostCpLayoutByte[bp]
                 << " accumByte=" << out.accumByte[bp] << " accumExit=" << out.accumExit[bp] << "\n";
     }
 }
