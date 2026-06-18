@@ -87,7 +87,7 @@ QUICK_TESTS = [
 ]
 
 # Some platforms are less capable than others.
-ctest_parallel_count = 8
+ctest_parallel_count = 1
 if AMDGPU_FAMILIES == "gfx1152":
     ctest_parallel_count = 4
 elif AMDGPU_FAMILIES == "gfx1153":

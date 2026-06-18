@@ -109,8 +109,6 @@ cmd = [
     "--test-dir",
     f"{THEROCK_BIN_DIR}/rocprim",
     "--output-on-failure",
-    "--parallel",
-    "8",
     "--timeout",
     "900",
     "--repeat",

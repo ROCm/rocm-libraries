@@ -20,8 +20,6 @@ cmd = [
     "--test-dir",
     f"{THEROCK_BIN_DIR}/hipRAND",
     "--output-on-failure",
-    "--parallel",
-    "8",
     "--timeout",
     "60",
 ]

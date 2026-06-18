@@ -21,8 +21,6 @@ cmd = [
     "--test-dir",
     f"{THEROCK_BIN_DIR}/hipdnn",
     "--output-on-failure",
-    "--parallel",
-    "8",
     "--timeout",
     "60",
 ]

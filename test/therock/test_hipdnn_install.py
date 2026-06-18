@@ -95,8 +95,6 @@ def run_tests(build_dir: Path):
         "--test-dir",
         str(build_dir),
         "--output-on-failure",
-        "--parallel",
-        "8",
         "--timeout",
         "120",
     ]
