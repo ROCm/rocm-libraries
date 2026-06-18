@@ -366,8 +366,6 @@ void large_indices_reduce_by_key()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        test_utils::MemCheck memcheck;
-
         // values in range [1, size], mapped using log2(i) to ensure non-equal groups
         // in:  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16
         // out: 0  1  1  2  2  2  2  3  3  3  3  3  3  3  3  4
@@ -405,8 +403,6 @@ void large_indices_reduce_by_key()
                                                       debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
-
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;
@@ -521,8 +517,6 @@ void large_segment_count_reduce_by_key()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        test_utils::MemCheck memcheck;
-
         // ensure segments of size 1
         auto d_keys_input   = rocprim::make_counting_iterator(key_type(0));
         auto d_values_input = rocprim::constant_iterator<size_t>(1);
@@ -550,8 +544,6 @@ void large_segment_count_reduce_by_key()
                                                       debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
-
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;

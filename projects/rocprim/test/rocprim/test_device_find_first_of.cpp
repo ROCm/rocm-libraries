@@ -312,8 +312,6 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        test_utils::MemCheck memcheck;
-
         const size_t keys_size = 12;
 
         for(double starting_point : {0.0, 0.12, 0.78, 1.1})
@@ -349,7 +347,6 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
             common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             // Run

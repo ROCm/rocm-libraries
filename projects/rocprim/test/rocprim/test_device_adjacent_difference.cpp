@@ -578,8 +578,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                            debug_synchronous));
 
             ASSERT_GT(temp_storage_size, 0);
-
-            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size)
+            MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
             common::device_ptr<void> d_temp_storage(temp_storage_size);
 
             test_utils::GraphHelper gHelper;

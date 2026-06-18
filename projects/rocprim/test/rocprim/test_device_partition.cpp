@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_load.hpp>

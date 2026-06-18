@@ -353,8 +353,6 @@ void testLargeIndices()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        test_utils::MemCheck memcheck;
-
         // Generate data and calculate expected results
         const T large_segment_size = size_t{1} << 31;
         const T min_segment_length
@@ -414,7 +412,6 @@ void testLargeIndices()
                                             debug_synchronous));
 
         // Allocate temporary storage
-        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
