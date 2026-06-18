@@ -667,3 +667,39 @@ def get_configs(
         f"unknown direct_conv rule_set {rule_set!r}; expected one of "
         f"{sorted(list(_RULE_TABLE_BUILDERS) + list(_DERIVED_RULE_SETS))}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Uniform rule-set entry points
+# ---------------------------------------------------------------------------
+#
+# These mirror the per-rule-set entry points of develop's grouped_conv rule
+# modules so that the unified codegen can call direct-conv alongside the
+# implicit-GEMM rules with a single ``(arch, variants, ndims, datatypes)``
+# signature. Each simply selects the corresponding direct-conv rule_set. There
+# is intentionally no direct-conv entry point for the "default" rule set.
+
+
+def get_full_configs(arch, variants, ndims, datatypes):
+    """Direct-conv instances for the "full" rule set."""
+    return get_configs(arch, variants, ndims, datatypes, rule_set="full")
+
+
+def get_full_test_configs(arch, variants, ndims, datatypes):
+    """Direct-conv instances for the "full-tests" rule set."""
+    return get_configs(arch, variants, ndims, datatypes, rule_set="full-tests")
+
+
+def get_profiler_configs(arch, variants, ndims, datatypes):
+    """Direct-conv instances for the "profiler" rule set."""
+    return get_configs(arch, variants, ndims, datatypes, rule_set="profiler")
+
+
+def get_test_configs(arch, variants, ndims, datatypes):
+    """Direct-conv instances for the "tests" rule set."""
+    return get_configs(arch, variants, ndims, datatypes, rule_set="tests")
+
+
+def get_tiny_configs(arch, variants, ndims, datatypes):
+    """Direct-conv instances for the "tiny" rule set."""
+    return get_configs(arch, variants, ndims, datatypes, rule_set="tiny")

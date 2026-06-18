@@ -148,10 +148,17 @@ def main():
         ndims=[2, 3],
         datatypes=datatypes,
         rule_set=args.rule_set,
+        disable_implicit_gemm=args.disable_implicit_gemm,
     )
     print(f"Generated {len(configs)} configs from rules")
 
-    if not configs:
+    # A variant legitimately has zero configs when --disable-implicit-gemm is
+    # set and the variant has no direct-conv instances (e.g. bwd_weight). In
+    # that case we skip codegen and fall through to emitting an empty
+    # include-all header + registration stub (handled below). Only treat an
+    # empty config set as a hard error when implicit-GEMM instances are
+    # expected.
+    if not configs and not args.disable_implicit_gemm:
         print("ERROR: No configs generated from rules", file=sys.stderr)
         sys.exit(1)
 
@@ -159,10 +166,11 @@ def main():
     codegen = UnifiedGroupedConvCodegen(
         output_dir=output_dir, gpu_target=args.arch, enable_arch_filter=False,
     )
-    codegen.generate_all(configs, datatypes=datatypes)
+    if configs:
+        codegen.generate_all(configs, datatypes=datatypes)
 
     # --- Step 3: Collect headers and generate registration ---
-    headers = collect_kernel_headers(output_dir, cfg["glob_pattern"])
+    headers = collect_kernel_headers(output_dir, cfg["glob_patterns"])
     print(f"Found {len(headers)} generated kernel headers")
 
     if not headers and not args.disable_implicit_gemm:

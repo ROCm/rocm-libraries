@@ -2093,18 +2093,43 @@ using {launcher_alias} = {kernel_name}_Launcher;
 """
 
 
-# Each rule set maps to a (module, entry-point) pair with the uniform
-# get_configs(arch, variants, ndims, datatypes) signature; get_default_configs
-# imports the module and calls the named function, so no rule-set-specific logic
-# lives in the codegen. Builder-derived sets (profiler/tests) and subset sets
-# (tiny) reuse a shared module's entry points rather than thin wrapper modules.
+# Module that provides the direct-convolution rule sets. Its entry points are
+# emitted ALONGSIDE the implicit-GEMM rules for every rule set except "default"
+# (the original hand-curated heuristics carry no direct-conv instances). The
+# DISABLE_IMPLICIT_GEMM_INSTANCES codegen filter keeps ONLY this module's
+# instances (see get_default_configs).
+_DIRECT_CONV_MODULE = "grouped_conv.direct_conv_rules"
+
+# Each rule set maps to a LIST of (module, entry-point) pairs, each with the
+# uniform get_configs(arch, variants, ndims, datatypes) signature;
+# get_default_configs imports every module, calls the named function, and
+# concatenates the results, so no rule-set-specific logic lives in the codegen.
+# Builder-derived sets (profiler/tests) and subset sets (tiny) reuse a shared
+# module's entry points rather than thin wrapper modules.
 _RULE_SET_MODULES = {
-    "default":    ("grouped_conv.grouped_config_rules_default",    "get_configs"),
-    "full":       ("grouped_conv.grouped_config_rules_full",       "get_configs"),
-    "full-tests": ("grouped_conv.grouped_config_rules_full_tests", "get_configs"),
-    "profiler":   ("grouped_conv.grouped_config_rules_builder",    "get_configs_profiler"),
-    "tests":      ("grouped_conv.grouped_config_rules_builder",    "get_configs_tests"),
-    "tiny":       ("grouped_conv.grouped_config_rules_full_tests", "get_tiny_configs"),
+    "default": [
+        ("grouped_conv.grouped_config_rules_default", "get_configs"),
+    ],
+    "full": [
+        ("grouped_conv.grouped_config_rules_full", "get_configs"),
+        (_DIRECT_CONV_MODULE, "get_full_configs"),
+    ],
+    "full-tests": [
+        ("grouped_conv.grouped_config_rules_full_tests", "get_configs"),
+        (_DIRECT_CONV_MODULE, "get_full_test_configs"),
+    ],
+    "profiler": [
+        ("grouped_conv.grouped_config_rules_builder", "get_configs_profiler"),
+        (_DIRECT_CONV_MODULE, "get_profiler_configs"),
+    ],
+    "tests": [
+        ("grouped_conv.grouped_config_rules_builder", "get_configs_tests"),
+        (_DIRECT_CONV_MODULE, "get_test_configs"),
+    ],
+    "tiny": [
+        ("grouped_conv.grouped_config_rules_full_tests", "get_tiny_configs"),
+        (_DIRECT_CONV_MODULE, "get_tiny_configs"),
+    ],
 }
 
 
@@ -2154,18 +2179,18 @@ def direct_conv_supported_on_arch(
 
     return True
 
-
-
 def get_default_configs(
     arch: str = "gfx942",
     variants: Optional[List[GroupedConvVariant]] = None,
     ndims: Optional[List[int]] = None,
     datatypes: Optional[List[str]] = None,
     rule_set: str = "profiler",
-) -> List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig]]:
+    disable_implicit_gemm: bool = False,
+) -> List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig, DirectConvKernelConfig]]:
     """Get default grouped convolution configurations for target architecture.
 
-    Delegates to the selected rule set's uniform ``get_configs`` entry point.
+    Concatenates the configs from every (module, entry-point) registered for the
+    selected rule set: the implicit-GEMM rules plus the direct-conv rules.
 
     Args:
         arch: Target GPU architecture (e.g., "gfx942", "gfx950").
@@ -2178,6 +2203,9 @@ def get_default_configs(
                   "full-tests" (~20% stratified subset of "full"), "tiny"
                   (minimal >=10-config subset of "full-tests"), or "default"
                   (original heuristic rules).
+        disable_implicit_gemm: when True, emit ONLY the direct-conv instances and
+                  skip the implicit-GEMM ones (the DISABLE_IMPLICIT_GEMM_INSTANCES
+                  codegen filter).
     """
     if variants is None:
         variants = [GroupedConvVariant.FORWARD]
@@ -2186,16 +2214,21 @@ def get_default_configs(
     if datatypes is None:
         datatypes = ["fp16"]
 
-    entry = _RULE_SET_MODULES.get(rule_set)
-    if entry is None:
+    entries = _RULE_SET_MODULES.get(rule_set)
+    if entries is None:
         raise ValueError(
             f"Unknown rule_set: {rule_set!r} "
             f"(expected one of {sorted(_RULE_SET_MODULES)})"
         )
-    module_name, func_name = entry
-    rules_module = importlib.import_module(module_name)
-    get_configs = getattr(rules_module, func_name)
-    return get_configs(arch, variants, ndims, datatypes)
+
+    configs: List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig, DirectConvKernelConfig]] = []
+    for module_name, func_name in entries:
+        if disable_implicit_gemm and module_name != _DIRECT_CONV_MODULE:
+            continue
+        rules_module = importlib.import_module(module_name)
+        get_configs = getattr(rules_module, func_name)
+        configs.extend(get_configs(arch, variants, ndims, datatypes))
+    return configs
 
 
 def get_arch_filter():
@@ -2409,8 +2442,11 @@ namespace ck_tile {{ namespace generated {{
         for datatype in datatypes:
             for config in configs:
                 if isinstance(config, DirectConvKernelConfig):
-                    # Direct-conv configs are a fixed source-of-truth set;
-                    # skip implicit-GEMM arch filter validation.
+                    # Direct-conv configs carry their own dtype — only emit for
+                    # the matching datatype. 
+                    # They are a fixed source-of-truth set, so skip implicit-GEMM arch validation.
+                    if config.datatype != datatype:
+                        continue
                     valid_tasks.append((config, datatype, config.variant))
                 elif isinstance(config, DepthwiseConvKernelConfig):
                     # Depthwise configs carry their own dtype — only emit for match
@@ -2701,6 +2737,12 @@ def main():
         choices=["default", "full", "full-tests", "profiler", "tests", "tiny"],
         help="Rule-set used in the instance generation",
     )
+    parser.add_argument(
+        "--disable-implicit-gemm",
+        action="store_true",
+        help="Emit ONLY direct-conv instances and skip the implicit-GEMM ones "
+        "(the DISABLE_IMPLICIT_GEMM_INSTANCES codegen filter).",
+    )
 
     # Individual kernel configuration (when not using predefined configs)
     parser.add_argument("--tile-m", type=int, help="Block tile M dimension")
@@ -2864,7 +2906,7 @@ def main():
         # Get predefined configurations for target arch with requested variants and ndims
         filtered_configs = get_default_configs(
             arch=args.arch, variants=requested_variants, ndims=args.ndim, datatypes=args.datatype,
-            rule_set=args.rule_set,
+            rule_set=args.rule_set, disable_implicit_gemm=args.disable_implicit_gemm,
         )
 
     if args.list_configs:
