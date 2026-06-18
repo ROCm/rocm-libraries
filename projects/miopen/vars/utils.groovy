@@ -1000,18 +1000,56 @@ private def isStageMarkedFailed(def endNode) {
     return false
 }
 
-// Returns stage names that completed successfully in the given build.
+// Reads declarative's STAGE_STATUS tag off a node, or null. Declarative sets
+// this on the stage StepStartNode: 'SKIPPED_FOR_CONDITIONAL' (when{} false),
+// 'SKIPPED_FOR_FAILURE'/'SKIPPED_FOR_RESTART' (never ran), 'FAILED_AND_CONTINUED'
+// (catchError swallowed a failure). Read via reflection -- no import needed.
 @NonCPS
-def getPassedStagesFromBuild(def rawBuild) {
-    def passed = [] as Set
-    def execution = rawBuild?.execution
-    if (!execution) return passed
+private def getStageStatusTag(def node) {
+    if (node == null) return null
+    try {
+        def tagsAction = node.getActions().find { a ->
+            a.getClass().getSimpleName() == 'TagsAction'
+        }
+        if (tagsAction != null) {
+            def tags = tagsAction.getTags()
+            if (tags != null) return tags['STAGE_STATUS']
+        }
+    } catch (Exception e) {
+    }
+    return null
+}
 
-    def startNodes    = [:]
-    def endNodes      = [:]
-    // Ids of stage StepStartNodes that enclose a failed node. A catchError
-    // failure marks an inner step, not the stage end node, so propagate the
-    // failure up to every enclosing block.
+// Positive confirmation the stage's end node completed without error.
+// Uses getError() (documented FlowNode API: null == no error) rather than
+// getOutcome().toString(), whose form is 'normal[...]'/'abnormal[...]' and does
+// NOT contain the word 'SUCCESS'. Any exception -> treat as not-confirmed (re-run).
+@NonCPS
+private def isStageSucceeded(def endNode) {
+    if (endNode == null) return false
+    try {
+        return endNode.getError() == null
+    } catch (Exception e) {
+    }
+    return false
+}
+
+// Classifies every stage in a build as 'SUCCESS', 'FAILED', or 'NOTRUN'.
+// Inverted model: SUCCESS requires positive confirmation. Anything skipped,
+// interrupted before completion, or not positively-successful is NOTRUN (no
+// signal -> must re-run). FAILED stages are locked out so a newer failure
+// cannot be overridden by an older pass in the restart chain.
+@NonCPS
+def getStageOutcomesFromBuild(def rawBuild) {
+    def outcomes = [:]   // stageName -> 'SUCCESS' | 'FAILED' | 'NOTRUN'
+    def execution = rawBuild?.execution
+    if (!execution) return outcomes
+
+    def startObjs      = [:]    // startId -> StepStartNode
+    def startNames     = [:]    // startId -> stageName
+    def endNodes       = [:]    // startId -> StepEndNode
+    // Stage start ids that enclose a failed node. A catchError failure marks an
+    // inner step, not the stage end node, so propagate it up every enclosing block.
     def failedStageIds = [] as Set
 
     def walker = new FlowGraphWalker(execution)
@@ -1029,38 +1067,74 @@ def getPassedStagesFromBuild(def rawBuild) {
             def label  = flowNode.getAction(LabelAction)
             def thread = flowNode.getAction(ThreadNameAction)
             if (label && !thread) {
-                startNodes[flowNode.id] = label.displayName
+                startNames[flowNode.id] = label.displayName
+                startObjs[flowNode.id]  = flowNode
             }
         } else if (flowNode instanceof StepEndNode) {
             endNodes[flowNode.startNode?.id] = flowNode
         }
     }
 
-    for (def entry : startNodes.entrySet()) {
+    for (def entry : startNames.entrySet()) {
         def startId   = entry.key
         def stageName = entry.value
+        def startNode = startObjs[startId]
         def endNode   = endNodes[startId]
-        if (!endNode) continue
-        if (failedStageIds.contains(startId)) continue
-        if (isStageMarkedFailed(endNode)) continue
 
-        passed << stageName
+        def statusTag = getStageStatusTag(startNode)
+        statusTag = statusTag != null ? statusTag.toString() : null
+
+        // Skipped via when{}, prior failure, or restart -> never ran.
+        if (statusTag != null && statusTag.startsWith('SKIPPED')) {
+            outcomes[stageName] = 'NOTRUN'
+            continue
+        }
+        // Failure markers: catchError tag, ErrorAction/WarningAction on the
+        // stage or any descendant, or a non-SUCCESS end-node outcome.
+        if ((statusTag != null && statusTag.contains('FAILED')) ||
+            failedStageIds.contains(startId) ||
+            (endNode != null && isStageMarkedFailed(endNode))) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Started (has a start node) but never completed (no end node). We only
+        // analyze finished builds, so this means the stage was interrupted by a
+        // whole-build abort. Lock it as must-re-run so an older build's pass
+        // cannot resurrect it.
+        if (endNode == null) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Require positive confirmation of SUCCESS; otherwise re-run.
+        outcomes[stageName] = isStageSucceeded(endNode) ? 'SUCCESS' : 'NOTRUN'
     }
-    return passed
+    return outcomes
 }
 
-// Consolidates passed stages across a chain of restarts (same commit).
+// Consolidates outcomes across a chain of restarts (same commit), newest build
+// first. The most recent build with a definite SUCCESS or FAILED outcome for a
+// stage wins, so a newer failure/abort can never be overridden by an older
+// pass. Returns [passed: Set<String>, failed: Set<String>] where 'passed' are
+// stages safe to skip and 'failed' are reported for debugging.
 @NonCPS
 def getPassedStagesAcrossRestartChain(def startBuild) {
-    def consolidatedPassed = [] as Set
+    def decided = [:]    // stageName -> 'SUCCESS' | 'FAILED' (newest decision wins)
     def visited = [] as Set
     def currentBuild = startBuild
 
     while (currentBuild != null && !visited.contains(currentBuild.number)) {
         visited << currentBuild.number
 
-        def passedInThisBuild = getPassedStagesFromBuild(currentBuild)
-        consolidatedPassed.addAll(passedInThisBuild)
+        def outcomes = getStageOutcomesFromBuild(currentBuild)
+        for (def entry : outcomes.entrySet()) {
+            def name    = entry.key
+            def outcome = entry.value
+            if (decided.containsKey(name)) continue       // a newer build already decided
+            if (outcome == 'SUCCESS' || outcome == 'FAILED') {
+                decided[name] = outcome
+            }
+            // NOTRUN carries no signal -> leave undecided for an older build
+        }
 
         def restartCause = currentBuild?.getCauses()?.find { cause ->
             cause.getClass().getName().contains('RestartDeclarativePipeline')
@@ -1072,11 +1146,18 @@ def getPassedStagesAcrossRestartChain(def startBuild) {
         }
     }
 
-    return consolidatedPassed
+    def passed = [] as Set
+    def failed = [] as Set
+    for (def entry : decided.entrySet()) {
+        if (entry.value == 'SUCCESS') passed << entry.key
+        else if (entry.value == 'FAILED') failed << entry.key
+    }
+    return [passed: passed, failed: failed]
 }
 
 // Returns [passedStages: Set<String>, debugMsg: String]. Consolidates passed
-// stages across restart chains. Empty set on non-restart or error (fail-open).
+// stages across restart chains. Empty set on non-restart or error (fail-open:
+// when in doubt, run everything).
 @NonCPS
 def getPassedStagesFromPreviousBuild() {
     def passed = [] as Set
@@ -1100,8 +1181,10 @@ def getPassedStagesFromPreviousBuild() {
             return [passedStages: passed, debugMsg: debugMsg]
         }
 
-        debugMsg = "restarting from build #${prevRun.number}"
-        passed = getPassedStagesAcrossRestartChain(prevRun)
+        def chain = getPassedStagesAcrossRestartChain(prevRun)
+        passed = chain.passed
+        debugMsg = "restarting from build #${prevRun.number}; " +
+                   "will re-run failed/aborted: ${chain.failed}"
     } catch (Exception e) {
         debugMsg = "error (${e.message}), running all stages"
         return [passedStages: [] as Set, debugMsg: debugMsg]
