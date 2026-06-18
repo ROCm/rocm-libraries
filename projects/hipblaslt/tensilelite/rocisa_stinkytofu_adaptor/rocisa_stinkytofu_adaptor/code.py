@@ -1097,6 +1097,8 @@ class Module(Item):
         return module
 
     def addModuleAsFlatItems(self, module: "Module") -> "Module":
+        if module is None:
+            return module
         for it in module.flatitems():
             self.add(it)
         return module

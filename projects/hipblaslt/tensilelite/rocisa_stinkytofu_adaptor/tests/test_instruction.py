@@ -1228,7 +1228,6 @@ class TestDevelopInstructionExports(unittest.TestCase):
 
     _NAMES = (
         "BufferLoadB16",
-        "BufferLoadU16",
         "GlobalInv",
         "GlobalPrefetchB8",
         "GlobalWb",
