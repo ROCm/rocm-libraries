@@ -183,19 +183,24 @@ class GlobalWriteBatchWriter:
     These positions are only the same when no operations modify the data.
 
     Safe to skip rearrangement only when:
-    1. hasSequentialValuC is True (WMMA output is already sequential)
-    2. needsAccumToDestConversion is False (no pack module to do the rearrangement)
-    3. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
+    1. MIArchVgpr is True (MFMA/WMMA writes directly to arch VGPRs)
+    2. hasSequentialValuC is True (WMMA output is already sequential)
+    3. needsAccumToDestConversion is False (no pack module to do the rearrangement)
+    4. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
+    5. Not complex (real/imag are interleaved in acc VGPRs, so the relative
+       offset elementSumIdx[i]-elementSumIdx[0] does not locate the imag half)
     """
     if self.parentWriter.states.useBias == DataDirection.READ or \
        self.kernel.get("ActivationFuncCall", False) or \
        self.applyAlpha or \
        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
        self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
-       self.kernel["ProblemType"].get("UseScaleCD", False):
+       self.kernel["ProblemType"].get("UseScaleCD", False) or \
+       self.kernel["ProblemType"]["DataType"].isComplex():
       return False
 
-    return hasSequentialValuC(self.kernel) and \
+    return self.kernel["MIArchVgpr"] and \
+           hasSequentialValuC(self.kernel) and \
            not self.needsAccumToDestConversion and \
            not self.beta
 
