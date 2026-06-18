@@ -77,7 +77,7 @@ The golden reference pattern is already in production for batchnorm: six bundles
 2. **A tolerance lookup chain** that connects golden tests to the existing TOML override mechanism, falling back to the per-operation default. Dynamic tolerances stay future work.
 3. **Integrity checks** at generation, load, and pre-commit time. See [Data Integrity](#data-integrity).
 4. **A formalized folder convention** with the same tier cascade as the rest of the integration suite. See [Folder Convention](#folder-convention).
-5. **Relocation** of the existing batchnorm bundles from `projects/hipdnn/hipdnn_reference_data/` to `dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/`, so all integration test data lives together.
+5. **Relocation** of the existing batchnorm bundles from `projects/hipdnn/hipdnn_reference_data/` to `dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/`, so all integration test data lives together.
 
 ### Code map for implementers
 
@@ -94,7 +94,7 @@ The functional changes are described in the relevant Detailed Design subsections
 | [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | Kept as-is | Existing TOML overrides apply to golden tests unchanged |
 | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | Future | Wired in later as the per-operation default |
 | [`reference_data_scripts/utilities/`](../../reference_data_scripts/utilities/) | Kept, enhanced | Generators auto-derive output path from graph content |
-| [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) (6 batchnorm bundles) | Relocated | Moves to `golden_reference_data/quick/BatchnormFwdInference/` |
+| [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) (6 batchnorm bundles) | Relocated | Moves to `integration_test_bundles/quick/BatchnormFwdInference/` |
 | (new) `IntegrationGraphGoldenReferenceVerificationHarness` | New | Owns discovery, loading, tolerance lookup, comparison |
 
 ---
@@ -255,14 +255,14 @@ The file size in bytes equals `element_space x sizeof(element_type)`, where `ele
 The top-level directory is organized by **tier**. Below that, the runner recursively scans for `.json` files regardless of subfolder depth. The recommended convention is `{Operation}/{Layout}/{DataType}/`, but any structure works.
 
 ```
-golden_reference_data/
+integration_test_bundles/
   {Tier}/                           # required: quick, standard, comprehensive, full
     ... any folder structure ...
       {Name}/                       # one directory per bundle
         {Name}.json + {Name}.tensor{uid}.bin
 ```
 
-In the source tree, golden data lives with the integration test suite at `dnn-providers/integration-tests/golden_reference_data/`. At runtime, the test binary reads directly from the source tree location -- no CMake copy step. The default path is resolved relative to the executable, and `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
+In the source tree, bundle data lives with the integration test suite at `dnn-providers/integration-tests/integration_test_bundles/`. At runtime, the test binary reads directly from the source tree location -- no CMake copy step. The default path is resolved relative to the executable, and `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
 
 ##### Tier folders
 
@@ -295,7 +295,7 @@ This convention is **guidance for humans**, not enforced by the runner.
 ##### Example layout
 
 ```
-golden_reference_data/
+integration_test_bundles/
   quick/
     BatchnormFwdInference/
       nchw/
@@ -659,7 +659,7 @@ The **pre-commit bundle verifier** runs checks #1-#3 across a directory tree bef
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
 | `--vm, --verification-mode` | `auto`, `golden`, `gpu`, `cpu` | `auto` | Which reference source to use (see [Verification Modes](#verification-modes)) |
-| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/golden_reference_data` | Where to find golden data (only used when mode includes golden tests) |
+| `--gd, --golden-data-dir` | path | `<exe_dir>/../lib/integration_test_bundles` | Where to find bundle data (only used when mode includes golden tests) |
 
 Each flag has an environment variable fallback. The CLI flag takes precedence when both are set.
 
@@ -694,11 +694,11 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 **Add a test -- any operation, any data type** (developer):
 1. Write a generation script following the [`generate_batchnorm_reference.py`](../../reference_data_scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. Run the pre-commit bundle verifier to verify the bundle is well-formed
-3. Drop the bundle folder into the appropriate tier directory (e.g., `golden_reference_data/quick/ConvFwd/nhwc/fp16/MyTest/`) and commit (DVC for large tensors). No C++ changes, no recompile -- the generic runner discovers it automatically
+3. Drop the bundle folder into the appropriate tier directory (e.g., `integration_test_bundles/quick/ConvFwd/nhwc/fp16/MyTest/`) and commit (DVC for large tensors). No C++ changes, no recompile -- the generic runner discovers it automatically
 
 **Debug a customer issue** (support):
 1. Receive the customer's bundle folder -- no source code or NDA required
-2. Drop the folder into any tier directory (e.g., `golden_reference_data/quick/customer_issues/CustomerBundle/`)
+2. Drop the folder into any tier directory (e.g., `integration_test_bundles/quick/customer_issues/CustomerBundle/`)
 3. Run tests -- the runner picks it up, executes the engine, compares against golden output
 4. Inspect the diff: which tensors diverge, by how much, at which indices
 
@@ -719,7 +719,7 @@ The transition from per-operation test classes to the generic runner is incremen
 
 | Phase | What ships | Coexistence |
 |-------|-----------|-------------|
-| 1 | Generic runner (`IntegrationGraphGoldenReferenceVerificationHarness` + subclasses), discovery, tier folders. Migrate existing batchnorm bundles to `golden_reference_data/quick/`. | Old per-operation classes (`TestCpuFpReferenceBatchnorm`, etc.) remain, running the same bundles. Both suites run in CI. |
+| 1 | Generic runner (`IntegrationGraphGoldenReferenceVerificationHarness` + subclasses), discovery, tier folders. Migrate existing batchnorm bundles to `integration_test_bundles/quick/`. | Old per-operation classes (`TestCpuFpReferenceBatchnorm`, etc.) remain, running the same bundles. Both suites run in CI. |
 | 2 | Connect three-level tolerance chain (TOML override -> bundle metadata -> per-operation default). Add pre-commit bundle verifier. | Old classes still active. Golden tests now use the same tolerance path as computed tests. |
 | 3 | Generate bundles for conv, matmul, and pointwise. Validate generic runner covers these operations end-to-end. | Old batchnorm classes can be removed once the generic runner has run green for a full release cycle. |
 | 4 | CI integration: DVC pull, per-tier minimum test count baseline, `--verification-mode auto` as default. | Old computed-only CI jobs unchanged. Golden CI jobs added alongside. |
@@ -733,7 +733,7 @@ The transition from per-operation test classes to the generic runner is incremen
 
 Golden data lives in two places -- **source tree** and **runtime**:
 
-- **Source tree**: Golden data lives at `dnn-providers/integration-tests/golden_reference_data/`. The existing batchnorm data currently lives at `projects/hipdnn/hipdnn_reference_data/` and will be moved here.
+- **Source tree**: Bundle data lives at `dnn-providers/integration-tests/integration_test_bundles/`. The existing batchnorm data currently lives at `projects/hipdnn/hipdnn_reference_data/` and will be moved here.
 
 - **Runtime**: The test binary reads golden data directly from the source tree -- no CMake copy step. The default path is resolved relative to the executable. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
 
@@ -770,7 +770,7 @@ Tier placement is governed by **runtime budget**, not bundle size, following [Th
 
 ##### DVC pull at CI time
 
-DVC is already in the repo for other large binary assets, content-addressing provides integrity guarantees, and selective fetch by path avoids pulling data for operations not under test. CI jobs run `dvc pull golden_reference_data/{tier}/` before test execution to fetch only the data needed for the tier under test. Developers can fetch specific operations: `dvc pull golden_reference_data/quick/batchnorm*/` without pulling unrelated multi-MB bundles. Fallback: `--verification-mode cpu` (or `gpu`) runs without golden data if DVC is unavailable, so CI is never fully blocked by a storage outage.
+DVC is already in the repo for other large binary assets, content-addressing provides integrity guarantees, and selective fetch by path avoids pulling data for operations not under test. CI jobs run `dvc pull integration_test_bundles/{tier}/` before test execution to fetch only the data needed for the tier under test. Developers can fetch specific operations: `dvc pull integration_test_bundles/quick/batchnorm*/` without pulling unrelated multi-MB bundles. Fallback: `--verification-mode cpu` (or `gpu`) runs without bundle data if DVC is unavailable, so CI is never fully blocked by a storage outage.
 
 ---
 

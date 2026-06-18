@@ -2323,12 +2323,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &sm,
                     sizeof(sm)));
             }
-            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-            if(dyn != 0)
+            int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+            if(dyn >= 0)
             {
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[0][i],
-                    HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                    HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                     &dyn,
                     sizeof(dyn)));
             }
@@ -3840,12 +3840,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &sm,
                         sizeof(sm)));
                 }
-                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-                if(dyn != 0)
+                int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+                if(dyn >= 0)
                 {
                     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                         matmul[b][i],
-                        HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                         &dyn,
                         sizeof(dyn)));
                 }

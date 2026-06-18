@@ -90,8 +90,8 @@ _FLOP_HANDLERS = {
     "BatchnormFwdAttributes": batchnorm_training_flops,
     "BatchnormBackwardAttributes": batchnorm_backward_flops,
     "BatchnormBwdAttributes": batchnorm_backward_flops,
-    "LayerNormAttributes": layernorm_flops,
-    "RmsNormAttributes": layernorm_flops,
+    "LayernormAttributes": layernorm_flops,
+    "RMSNormAttributes": layernorm_flops,
     "SoftmaxAttributes": softmax_flops,
     "ReductionAttributes": reduction_flops,
     "RngAttributes": rng_flops,
@@ -105,12 +105,14 @@ def compute_flops(graph_json: Dict[str, Any]) -> Tuple[Optional[int], bool]:
         graph_json: Parsed hipDNN graph dictionary.
 
     Returns:
-        ``(total_flops, partial)``. ``total_flops`` is ``None`` only
-        when the graph has no nodes at all; otherwise it is the sum of
-        the per-handler counts (``0`` is possible for a graph whose
-        only nodes had unknown types). ``partial`` is True when at
-        least one node was unrecognised or had missing tensor data — the
-        returned sum then reflects only the recognised nodes.
+        ``(total_flops, partial)``. ``total_flops`` is ``None`` when the
+        graph has no nodes at all, or when no node could be modelled
+        analytically (every node was unrecognised or lacked tensor
+        data) — a count of ``0`` in that case would be indistinguishable
+        from a genuine zero-FLOP graph, so ``None`` ("unknown") is
+        returned instead. ``partial`` is True when at least one node was
+        unrecognised or had missing tensor data; the returned sum then
+        reflects only the recognised nodes.
 
     Unrecognised node types also surface a one-shot warning via
     :func:`warn_once` so the user notices during a run; the structured
@@ -124,6 +126,7 @@ def compute_flops(graph_json: Dict[str, Any]) -> Tuple[Optional[int], bool]:
 
     total = 0
     partial = False
+    modelled_any = False
     for node in nodes:
         node_type = node.get("type", "")
         handler = _FLOP_HANDLERS.get(node_type)
@@ -139,6 +142,12 @@ def compute_flops(graph_json: Dict[str, Any]) -> Tuple[Optional[int], bool]:
             partial = True
             continue
         total += flops
+        modelled_any = True
+
+    if not modelled_any:
+        # Nothing could be modelled analytically: report unknown (None)
+        # rather than a misleading 0 that reads as a real FLOP count.
+        return None, partial
 
     return total, partial
 
