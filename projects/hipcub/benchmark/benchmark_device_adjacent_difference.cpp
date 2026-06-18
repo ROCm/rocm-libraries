@@ -25,8 +25,6 @@
 
 #include "benchmark_utils.hpp"
 
-#include <benchmark/benchmark.h>
-
 #include <hipcub/device/device_adjacent_difference.hpp>
 
 #include <hip/hip_runtime_api.h>

@@ -20,6 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Force CMake to find Git immediately so ${GIT_EXECUTABLE} is populated
+find_package(Git REQUIRED)
+
+# Get the current branch, or fall back to DETACHED
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE BRANCH_NAME
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(BRANCH_NAME STREQUAL "")
+  set(BRANCH_NAME "DETACHED")
+endif()
+
+# Get the short commit hash
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
 
@@ -30,9 +52,8 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   target_link_libraries(${BENCHMARK_TARGET} PRIVATE hipcub)
 
-  if(WIN32)
-    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_STATIC_DEFINE)
-  endif()
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
 
