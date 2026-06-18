@@ -32,6 +32,11 @@ __forceinline__ __device__ unsigned int next_power_of_2(unsigned int n)
 
 } // namespace detail
 
+// This function is currently not in use, as more performant variants exist in the form of
+// reduce2_welford, which selects either doing shuffles or doing DPP assembly for GFX9.
+// Theoretically, this function can be used on cards before GCN3 that do not support
+// cross-lane operations. But the main reason this function is left in the code is
+// to further performance comparisons when applying it in different kernels.
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2_welford(FloatAccum& mean,
                                                     FloatAccum& variance,
