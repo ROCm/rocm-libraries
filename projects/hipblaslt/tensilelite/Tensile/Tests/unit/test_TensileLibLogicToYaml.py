@@ -31,7 +31,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -43,21 +43,6 @@ from Tensile.Common.GlobalParameters import globalParameters
 _TEST_DATA_DIR = Path(__file__).resolve().parent / "test_data"
 _LIBLOGIC_FIXTURE_PATH = _TEST_DATA_DIR / "TensileLibLogicToYaml_liblogic.yaml"
 _EXPECTED_CONFIG_FIXTURE_PATH = _TEST_DATA_DIR / "TensileLibLogicToYaml_expected_config.yaml"
-
-
-@pytest.fixture(autouse=True)
-def clear_fork_comment_cache() -> Generator[None, None, None]:
-    """Reset fork-parameter metadata cache between tests.
-
-    Yields:
-        None.
-
-    Raises:
-        None.
-    """
-    M.buildForkParameterCommentMetadata.cache_clear()
-    yield
-    M.buildForkParameterCommentMetadata.cache_clear()
 
 
 def _read_liblogic_fixture() -> str:
@@ -86,7 +71,7 @@ def _read_expected_config_fixture() -> str:
     return _EXPECTED_CONFIG_FIXTURE_PATH.read_text(encoding="utf-8")
 
 
-def test_formatCompactRange_non_list() -> None:
+def test_format_compact_range_non_list() -> None:
     """Non-list *rng* is stringified.
 
     Returns:
@@ -98,7 +83,7 @@ def test_formatCompactRange_non_list() -> None:
     assert M._formatCompactRange((1, 2, 3)) == "(1, 2, 3)"
 
 
-def test_formatCompactRange_short_list() -> None:
+def test_format_compact_range_short_list() -> None:
     """Short lists are emitted in full.
 
     Returns:
@@ -110,7 +95,7 @@ def test_formatCompactRange_short_list() -> None:
     assert M._formatCompactRange([1, 2, 3]) == "[1, 2, 3]"
 
 
-def test_formatCompactRange_long_list() -> None:
+def test_format_compact_range_long_list() -> None:
     """Long lists use leading and trailing segments with ellipsis.
 
     Returns:
@@ -124,7 +109,7 @@ def test_formatCompactRange_long_list() -> None:
     assert out == "[0, 1, ..., 18, 19]"
 
 
-def test_buildForkParameterCommentMetadata_stable() -> None:
+def test_build_fork_parameter_comment_metadata_stable() -> None:
     """Metadata keys are a non-empty subset of merged defaults.
 
     Returns:
@@ -153,7 +138,7 @@ def test_buildForkParameterCommentMetadata_stable() -> None:
         (": [1, 2, 3]", [1, 2, 3]),
     ],
 )
-def test_parseMatrixInstructionListFromColonRest(
+def test_parse_matrix_instruction_list_from_colon_rest(
     rest: str, expected: Any
 ) -> None:
     """Parser handles invalid tails and a valid int list.
@@ -195,7 +180,7 @@ def test_parse_matrix_instruction_literal_eval_syntax_error() -> None:
     assert M.parseMatrixInstructionListFromColonRest(": [1,,2]") is None
 
 
-def test_formatMatrixInstructionCmsComment_short() -> None:
+def test_format_matrix_instruction_cms_comment_short() -> None:
     """Fewer than nine MI components yields no CMS suffix.
 
     Returns:
@@ -207,7 +192,7 @@ def test_formatMatrixInstructionCmsComment_short() -> None:
     assert M.formatMatrixInstructionCmsComment([1] * 8) is None
 
 
-def test_formatMatrixInstructionCmsComment_full() -> None:
+def test_format_matrix_instruction_cms_comment_full() -> None:
     """Nine MI components produce a CMS comment string.
 
     Returns:
@@ -509,7 +494,7 @@ def test_inject_fork_skips_groups_key() -> None:
     assert "should-not-apply" not in out
 
 
-def test_inject_default_commentByKey() -> None:
+def test_inject_default_comment_by_key() -> None:
     """Passing ``commentByKey=None`` uses built-in metadata.
 
     Returns:
@@ -618,7 +603,7 @@ def test_form_groups_empty_and_nonempty() -> None:
     assert g["Groups"][0][0]["MatrixInstruction"] == M.FlowList([1])
 
 
-def test_form9_bit_mi_inst_errors_and_ok() -> None:
+def test_form_9_bit_mi_inst_errors_and_ok() -> None:
     """``form9BitMIInst`` validates MI vectors and returns a group row dict.
 
     Returns:
@@ -661,7 +646,7 @@ def test_form_fork_params_without_enable_matrix_instruction_key() -> None:
     assert r["ForkParameters"][-1]["Groups"][0][0] == {}
 
 
-def test_form_fork_params_skipMI_and_enable_branches() -> None:
+def test_form_fork_params_skip_mi_and_enable_branches() -> None:
     """Fork params respect ``skipMI`` and ``EnableMatrixInstruction`` logic.
 
     Returns:
@@ -754,7 +739,7 @@ def test_form_library_logic() -> None:
     assert isinstance(d["DeviceNames"], M.FlowList)
 
 
-def test_write_to_tensileYamlFile_basename_only(
+def test_write_to_tensile_yaml_file_basename_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Writing with no directory component skips ``os.makedirs``.
@@ -775,7 +760,7 @@ def test_write_to_tensileYamlFile_basename_only(
     assert (tmp_path / "bare_out.yaml").is_file()
 
 
-def test_write_to_tensileYamlFile_success(tmp_path: Path) -> None:
+def test_write_to_tensile_yaml_file_success(tmp_path: Path) -> None:
     """Successful write returns the output path.
 
     Returns:
@@ -790,7 +775,7 @@ def test_write_to_tensileYamlFile_success(tmp_path: Path) -> None:
     assert outp.is_file()
 
 
-def test_write_to_tensileYamlFile_oserror() -> None:
+def test_write_to_tensile_yaml_file_oserror() -> None:
     """I/O errors return ``None`` and do not raise.
 
     Returns:
@@ -814,7 +799,7 @@ def test_write_to_tensileYamlFile_oserror() -> None:
         )
 
 
-def test_TensileLibLogicToYaml_golden_matches_fixture() -> None:
+def test_tensile_lib_logic_to_yaml_golden_matches_fixture() -> None:
     """End-to-end conversion matches ``test_data/TensileLibLogicToYaml_expected_config.yaml``.
 
     Uses ``test_data/TensileLibLogicToYaml_liblogic.yaml`` as library logic input.
@@ -851,7 +836,7 @@ def test_TensileLibLogicToYaml_golden_matches_fixture() -> None:
         os.unlink(lib_path)
 
 
-def test_TensileLibLogicToYaml_read_empty_raises() -> None:
+def test_tensile_lib_logic_to_yaml_read_empty_raises() -> None:
     """Empty read result raises ``RuntimeError``.
 
     Returns:
@@ -865,7 +850,7 @@ def test_TensileLibLogicToYaml_read_empty_raises() -> None:
             M.TensileLibLogicToYaml("/fake/path.yaml", 0, "/tmp/x.yaml", False)
 
 
-def test_TensileLibLogicToYaml_bad_solution_index_and_entry(
+def test_tensile_lib_logic_to_yaml_bad_solution_index_and_entry(
     tmp_path: Path,
 ) -> None:
     """Invalid ``solutionIndex`` and empty solution entry raise ``RuntimeError``.
