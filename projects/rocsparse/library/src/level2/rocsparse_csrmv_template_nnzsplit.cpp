@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -227,14 +227,14 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
             &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (requiredBlocks + 1), stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (requiredBlocks + 1), stream));
     }
     else
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
             &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (2 * requiredBlocks + 2), stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (2 * requiredBlocks + 2), stream));
     }
     J* temp_buffer_j = reinterpret_cast<J*>(csrmv_info->nnzsplit.starting_ids);

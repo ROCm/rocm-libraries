@@ -67,6 +67,7 @@
     X(PassOrderSnapshotJson, std::string) \
     X(EnableRemarks, bool)                \
     X(EnableWaitCntInsertion, bool)       \
+    X(EnableLoopCarriedTokenDeps, bool)   \
     X(EnableESM2, bool)                   \
     X(VgprMsbMode, int)                   \
     X(EnableSwPrefetchInsertion, bool)    \
