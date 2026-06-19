@@ -6,17 +6,17 @@
 #include "gtest/gtest.h"
 
 template <typename T>
-class TestCkTileMxGemmPipelineCompAsync
-    : public TestCkTileMxGemmPipeline<T, TestCkTileMxGemmPipelineCompAsync<T>>
+class TestCkTileMxGemmPipelineCompAsyncCCR
+    : public TestCkTileMxGemmPipeline<T, TestCkTileMxGemmPipelineCompAsyncCCR<T>>
 {
     public:
     static constexpr bool check_data_type() { return true; }
 };
 
-#define TEST_SUITE_NAME TestCkTileMxGemmPipelineCompAsync
+#define TEST_SUITE_NAME TestCkTileMxGemmPipelineCompAsyncCCR
 
-TYPED_TEST_SUITE(TestCkTileMxGemmPipelineCompAsync, KernelTypesMxGemmCompAsync);
+TYPED_TEST_SUITE(TestCkTileMxGemmPipelineCompAsyncCCR, KernelTypesMxGemmCompAsyncCCR);
 
-#include "test_mx_gemm_pipeline_ut_cases.inc"
+#include "test_mx_gemm_pipeline_tr_cases.inc"
 
 #undef TEST_SUITE_NAME

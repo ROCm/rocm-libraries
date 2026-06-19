@@ -82,7 +82,7 @@ using KernelTypesMxGemmCompTDMWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I128,       I32,        I32,        CompTDMV2,  I32, std::false_type, ClusterEnable>
 >;
 
-using KernelTypesMxGemmCompAsync = ::testing::Types<
+using KernelTypesMxGemmCompAsyncRCR = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I256,       I16,        I16, CompAsync, I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I256,       I16,        I16, CompAsync, I32>,
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I256,          I128,       I16,        I16, CompEightWaves, I32>,
@@ -90,6 +90,32 @@ using KernelTypesMxGemmCompAsync = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I256,          I256,       I16,        I16, WeightPreshuffle, I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I512,          I256,       I16,        I16, WeightPreshuffle, I32>,
     std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I256,          I256,       I16,        I16, WeightPreshuffle, I32, std::true_type>,
-    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I256,          I256,       I16,        I16, WeightPreshuffle, I32, std::true_type>
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I256,          I256,       I16,        I16, WeightPreshuffle, I32, std::true_type>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Col,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Col,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>
 >;
+
+using KernelTypesMxGemmCompAsyncRRR = ::testing::Types<
+    std::tuple<    Row,     Row,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Row,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Row,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Row,     Row,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>
+>;
+
+using KernelTypesMxGemmCompAsyncCRR = ::testing::Types<
+    std::tuple<    Col,     Row,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Row,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Row,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Row,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>
+>;
+
+using KernelTypesMxGemmCompAsyncCCR = ::testing::Types<
+    std::tuple<    Col,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Col,     Row,      BF8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
+    std::tuple<    Col,     Col,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>
+>;
+
 // clang-format on

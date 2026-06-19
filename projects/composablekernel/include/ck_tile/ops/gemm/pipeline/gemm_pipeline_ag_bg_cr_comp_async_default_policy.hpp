@@ -28,10 +28,15 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
     using Base::is_b_load_tr;
 
     // Async copy supports 32-bit, 96-bit, or 128-bit transfers (4, 12, 16 bytes)
+    // Take PackedSize into consideration (for example for FP4 support)
+    template <typename DataType, index_t KPack>
+    static constexpr index_t AsyncVectorBytes =
+        sizeof(DataType) * KPack / numeric_traits<remove_cvref_t<DataType>>::PackedSize;
+
     template <typename DataType, index_t KPack>
     static constexpr bool IsSupportedAsyncVectorWidth =
-        sizeof(DataType) * KPack == 4 || sizeof(DataType) * KPack == 12 ||
-        sizeof(DataType) * KPack == 16;
+        AsyncVectorBytes<DataType, KPack> == 4 || AsyncVectorBytes<DataType, KPack> == 12 ||
+        AsyncVectorBytes<DataType, KPack> == 16;
 
     // XOR Swizzle: support FP8 / BF8
     template <typename Problem>
@@ -57,10 +62,10 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
 
     // Compute the number of LDS read accesses for A or B
     // IsLoadTr=true if ds_read_tr is used
-    template <bool IsLoadTr, typename DataType, index_t ThreadElements>
+    template <bool IsLoadTr, typename DataType, index_t ThreadElements, bool IsScale>
     CK_TILE_HOST_DEVICE static constexpr auto CalculateWGAttrNumAccess()
     {
-        if constexpr(IsLoadTr)
+        if constexpr(IsLoadTr && !IsScale)
         {
             // Transpose-load path: ds_read_tr reads DS_READ_TR_SIZE bytes per instruction.
             constexpr index_t vector_size =
@@ -91,32 +96,34 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
     }
 
-    template <typename Problem>
+    template <typename Problem, bool IsScale>
     CK_TILE_HOST_DEVICE static constexpr auto GetAWGAttrNumAccess()
     {
         using WarpTile                    = typename Problem::BlockGemmShape::WarpTile;
         constexpr index_t thread_elements = WarpTile::at(I0) * WarpTile::at(I2) / get_warp_size();
         return CalculateWGAttrNumAccess<Base::template is_a_load_tr<Problem>,
                                         typename Problem::ADataType,
-                                        thread_elements>();
+                                        thread_elements,
+                                        IsScale>();
     }
 
-    template <typename Problem>
+    template <typename Problem, bool IsScale>
     CK_TILE_HOST_DEVICE static constexpr auto GetBWGAttrNumAccess()
     {
         using WarpTile                    = typename Problem::BlockGemmShape::WarpTile;
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
         return CalculateWGAttrNumAccess<Base::template is_b_load_tr<Problem>,
                                         typename Problem::BDataType,
-                                        thread_elements>();
+                                        thread_elements,
+                                        IsScale>();
     }
 
     // Get number of accesses
-    template <typename Problem>
+    template <typename Problem, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr auto GetWGAttrNumAccess()
     {
-        constexpr auto num_access_a = GetAWGAttrNumAccess<Problem>();
-        constexpr auto num_access_b = GetBWGAttrNumAccess<Problem>();
+        constexpr auto num_access_a = GetAWGAttrNumAccess<Problem, IsScale>();
+        constexpr auto num_access_b = GetBWGAttrNumAccess<Problem, IsScale>();
 
         if constexpr(num_access_a == WGAttrNumAccessEnum::Invalid ||
                      num_access_b == WGAttrNumAccessEnum::Invalid)
@@ -638,7 +645,7 @@ struct GemmPipelineAgBgCrCompAsyncDefaultPolicy
         using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
-        constexpr auto wg_attr_num_access = GetWGAttrNumAccess<Problem>();
+        constexpr auto wg_attr_num_access = GetWGAttrNumAccess<Problem, PackMNIter>();
 
         constexpr auto pipeline_tune_params = GetPipelineSubTileNum<Problem>();
         constexpr index_t sub_tile_num      = EnableSubTile ? pipeline_tune_params.value : 1;

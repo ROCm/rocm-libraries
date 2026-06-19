@@ -409,7 +409,9 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
         // for TDM it's used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == MxGemmPipelineType::CompTDMV1 ||
-                     PipelineType == MxGemmPipelineType::CompTDMV2)
+                     PipelineType == MxGemmPipelineType::CompTDMV2 ||
+                     std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::ColumnMajor> ||
+                     std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>)
         {
             // Only do k_batch = 1
             k_batches_ = {1};

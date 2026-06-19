@@ -141,7 +141,7 @@ struct MxGemmKernel
     static constexpr bool kSplitKAtomicAddSupported =
         EpiloguePipeline::GetVectorSizeC() % 2 == 0 || !is_any_of<EDataType, fp16_t, bf16_t>::value;
 
-#ifdef __gfx950__
+#if defined(__gfx950__)
     static_assert(BlockScaleSize == 32, "unsupported BlockScaleSize");
     // Effective pack sizes: fall back to 1 when dimension is too small
     using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
@@ -165,7 +165,7 @@ struct MxGemmKernel
         (NIterPerWarp_ >= NXdlPack && NIterPerWarp_ % NXdlPack == 0) ? NXdlPack : 1;
     static constexpr index_t KXdlPackEff =
         (KIterPerWarp_ >= KXdlPack && KIterPerWarp_ % KXdlPack == 0) ? KXdlPack : 1;
-#else
+#elif defined(__gfx125__)
     static_assert(BlockScaleSize == 16 || BlockScaleSize == 32, "unsupported BlockScaleSize");
     // Scale tensor element type is always int32_t (4 packed e8m0 bytes).
     // For scale16, each thread needs 8 bytes = 2 int32_t elements.
@@ -175,6 +175,11 @@ struct MxGemmKernel
     static constexpr index_t KXdlPackEff = 4; // 4 is because scale tensor is
                                               // int32_t data type, each int32_t
                                               // exists 4 fp8 scale values
+#else
+    // host
+    static constexpr index_t MXdlPackEff = 1;
+    static constexpr index_t NXdlPackEff = 1;
+    static constexpr index_t KXdlPackEff = 1;
 #endif
 
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
