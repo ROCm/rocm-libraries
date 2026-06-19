@@ -1427,17 +1427,29 @@ struct UniversalGemmPipelineAgBgCrPolicy
         using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
 
 #if defined(__gfx950__)
-        constexpr index_t vector_size =
-            DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);
         constexpr index_t thread_elements = WarpTile::at(I1) * WarpTile::at(I2) / get_warp_size();
-        constexpr auto wg_attr_num_access =
-            !(is_a_load_tr<Problem> || is_b_load_tr<Problem>) ? WGAttrNumAccessEnum::Single
-            : vector_size == thread_elements                  ? WGAttrNumAccessEnum::Single
-            : vector_size * 2 == thread_elements              ? WGAttrNumAccessEnum::Double
-            : vector_size * 4 == thread_elements              ? WGAttrNumAccessEnum::Quad
-                                                              : WGAttrNumAccessEnum::Invalid;
+
+        // Compute NumAccess for A based on A's LDS element size
+        constexpr index_t vector_size_a =
+            DS_READ_TR_SIZE() / sizeof(typename Problem::AComputeDataType);
+        constexpr auto wg_attr_num_access_a =
+            !is_a_load_tr<Problem>                 ? WGAttrNumAccessEnum::Single
+            : vector_size_a == thread_elements     ? WGAttrNumAccessEnum::Single
+            : vector_size_a * 2 == thread_elements ? WGAttrNumAccessEnum::Double
+            : vector_size_a * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
+                                                   : WGAttrNumAccessEnum::Invalid;
+
+        // Compute NumAccess for B based on B's LDS element size
+        constexpr index_t vector_size_b = DS_READ_TR_SIZE() / sizeof(BLdsDataType_<Problem>);
+        constexpr auto wg_attr_num_access_b =
+            !is_b_load_tr<Problem>                 ? WGAttrNumAccessEnum::Single
+            : vector_size_b == thread_elements     ? WGAttrNumAccessEnum::Single
+            : vector_size_b * 2 == thread_elements ? WGAttrNumAccessEnum::Double
+            : vector_size_b * 4 == thread_elements ? WGAttrNumAccessEnum::Quad
+                                                   : WGAttrNumAccessEnum::Invalid;
 #else
-        constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
+        constexpr auto wg_attr_num_access_a = WGAttrNumAccessEnum::Default;
+        constexpr auto wg_attr_num_access_b = WGAttrNumAccessEnum::Default;
 #endif
 
         using ATypeToUse = typename Problem::AComputeDataType;
@@ -1452,7 +1464,8 @@ struct UniversalGemmPipelineAgBgCrPolicy
                                             Problem::TransposeC,
                                             false,
                                             Problem::UseStructuredSparsity,
-                                            wg_attr_num_access>;
+                                            wg_attr_num_access_a,
+                                            wg_attr_num_access_b>;
 
         using BlockGemmPolicy = BlockGemmASmemBSmemCRegV1CustomPolicy<ATypeToUse,
                                                                       BTypeToUse,
