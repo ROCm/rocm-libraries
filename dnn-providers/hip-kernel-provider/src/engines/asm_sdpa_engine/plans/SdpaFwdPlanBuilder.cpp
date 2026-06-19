@@ -357,12 +357,23 @@ void SdpaFwdPlanBuilder::buildPlan(
         attnScale = scaleValue.value();
     }
 
+    // Extract optional LSE output metadata
+    int64_t lseUid = -1;
+    unsigned int lseStrideHead = 0;
+    if(sdpaAttrs.generate_stats().value_or(false))
+    {
+        lseUid = sdpaAttrs.stats_tensor_uid().value();
+        auto* lseTensor = tensorMap.at(lseUid);
+        lseStrideHead = static_cast<unsigned int>(lseTensor->strides()->Get(1));
+    }
+
     // Create params struct with all metadata
     SdpaFwdParams params{};
     params.qUid = qUid;
     params.kUid = kUid;
     params.vUid = vUid;
     params.oUid = oUid;
+    params.lseUid = lseUid;
     params.batchSize = batchSize;
     params.numHeadsQ = numHeadsQ;
     params.numHeadsKv = numHeadsKv;
@@ -383,6 +394,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideSeq = oStrideSeq;
     params.oStrideHead = oStrideHead;
     params.oStrideBatch = oStrideBatch;
+    params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
     const plan_utils::MaskType maskType = plan_utils::getMaskType(sdpaAttrs);
