@@ -133,8 +133,11 @@ jobs:
           if [[ -d "${DIST}/lib/llvm/lib" ]]; then
             find "${DIST}/lib/llvm/lib" -maxdepth 1 -name '*.so*' -exec cp -av {} "${STAGE}/bin/" \;
           fi
-          find "${DIST}" -type f -name 'libLLVM.so*' -exec cp -av {} "${STAGE}/bin/" \;
-          find "${DIST}" -type f -name 'librocm_sysdeps_*.so*' -exec cp -av {} "${STAGE}/bin/" \;
+          # Note: do NOT use -type f here, otherwise the SONAME symlinks (e.g.
+          # librocm_sysdeps_z.so.1 -> librocm_sysdeps_z.so.1.3.2) are skipped and
+          # the loader cannot resolve the dependency.
+          find "${DIST}" -name 'libLLVM.so*' -exec cp -av {} "${STAGE}/bin/" \;
+          find "${DIST}" -name 'librocm_sysdeps_*.so*' -exec cp -av {} "${STAGE}/bin/" \;
           echo "Staged coverage objects:"
           ls -lR "${STAGE}"
           echo "llvm-profdata dependencies (in build env):"
