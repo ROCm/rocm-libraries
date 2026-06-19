@@ -82,7 +82,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
   auto num_timesteps =
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
-  auto split_factor = math::safe_ceil_div(skGrid, numMTs);
+  auto split_factor = math::safe_ceil_div(skGrid, numMTs * batch);
 
   // Stream-K fixup deadlock prevention:
   // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
