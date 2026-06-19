@@ -1112,6 +1112,71 @@ namespace TensileLite
             return plan;
         }
 
+        DataInitialization::OutputResetPlan DataInitialization::planNormalWarmOutputReset(
+            ContractionProblemGemm const& problem) const
+        {
+            OutputResetPlan plan;
+
+            bool const needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
+            bool const needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+            bool const warmReuseAllowed = m_gpuInit
+                                          && m_curBoundsCheck == BoundsCheckMode::Disable
+                                          && !m_problemDependentData && !needSwizzle
+                                          && !needMXSwizzle;
+
+            if(!warmReuseAllowed)
+            {
+                plan.action = OutputResetAction::FullFill;
+                plan.reason = OutputResetReason::ColdSlotFill;
+                return plan;
+            }
+
+            plan.reason = OutputResetReason::NormalWarmValidation;
+            if(m_elementsToValidate != 0)
+            {
+                plan.action                  = OutputResetAction::ResetFromValid;
+                plan.requiresPristineGpuCopy = m_keepPristineCopyOnGPU;
+                plan.usesExistingSlotContents = false;
+            }
+            else
+            {
+                plan.action                 = OutputResetAction::NoReset;
+                plan.usesExistingSlotContents = true;
+            }
+
+            return plan;
+        }
+
+        DataInitialization::OutputResetPlan DataInitialization::planRingSlotOutputReset(
+            size_t targetSlot, bool altSlotsReady) const
+        {
+            OutputResetPlan plan;
+            plan.targetIsRingSlot = true;
+            plan.targetSlot       = targetSlot;
+
+            if(!altSlotsReady)
+            {
+                plan.action = OutputResetAction::FullFill;
+                plan.reason = OutputResetReason::ColdSlotFill;
+                return plan;
+            }
+
+            plan.reason = OutputResetReason::RingWarmValidation;
+            if(m_warmOutputResetRequired)
+            {
+                plan.action                  = OutputResetAction::ResetFromValid;
+                plan.requiresPristineGpuCopy = true;
+                plan.usesExistingSlotContents = false;
+            }
+            else
+            {
+                plan.action                 = OutputResetAction::NoReset;
+                plan.usesExistingSlotContents = true;
+            }
+
+            return plan;
+        }
+
         std::vector<void*> DataInitialization::executeTensorCopyPlan(TensorCopyPlan const& plan,
                                                                      hipStream_t d2dStream) const
         {
@@ -4101,9 +4166,6 @@ namespace TensileLite
         {
             hipMemcpyKind kind;
 
-            bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
-            bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
-
             if(!cpuInputsAlreadyCurrent)
                 ensureCPUInputsCurrent(problem);
 
@@ -4123,10 +4185,10 @@ namespace TensileLite
                 markBatchPointersCurrent(problem);
             }
 
-            if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-               && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
+            auto const outputPlan = planNormalWarmOutputReset(problem);
+            if(outputPlan.action != OutputResetAction::FullFill)
             {
-                if(m_elementsToValidate)
+                if(outputPlan.action == OutputResetAction::ResetFromValid)
                 {
                     ScopedTimer t("async_reset_resetoutput");
                     resetOutput(m_gpuPtrs,
@@ -4351,6 +4413,7 @@ namespace TensileLite
             if(!targetIdx)
                 return; // all non-active slots already have pending DMA
             size_t const targetSlot = *targetIdx;
+            auto const   outputPlan = planRingSlotOutputReset(targetSlot, m_altSlotsReady);
 
             // Warm path: this target slot's input tensors have already
             // been prepared for the current problem, either by the
@@ -4364,19 +4427,12 @@ namespace TensileLite
             // validation-sensitive reuse must reset output tensors before
             // recording copy completion. Record a no-op event as a sync
             // marker.
-            if(m_altSlotsReady)
+            if(outputPlan.action == OutputResetAction::ResetFromValid)
             {
-                if(m_warmOutputResetRequired)
-                {
-                    ScopedTimer resetTimer("async_reset_warm_resetoutput");
-                    resetOutputsForRingSlot(targetSlot, problem);
-                }
-                HIP_CHECK_EXC(hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
-                m_ring.markSlotPrimed();
-                return;
+                ScopedTimer resetTimer("async_reset_warm_resetoutput");
+                resetOutputsForRingSlot(targetSlot, problem);
             }
-
-            // Fill target slot directly — no save/restore of working state.
+            else if(outputPlan.action == OutputResetAction::FullFill)
             {
                 ScopedTimer prepTimer("async_reset_prepare");
                 if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))

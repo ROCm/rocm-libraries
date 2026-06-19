@@ -977,6 +977,31 @@ namespace TensileLite
                 bool                                     replaceDestinationViews = false;
             };
 
+            enum class OutputResetAction
+            {
+                NoReset,
+                ResetFromValid,
+                FullFill
+            };
+
+            enum class OutputResetReason
+            {
+                None,
+                NormalWarmValidation,
+                RingWarmValidation,
+                ColdSlotFill
+            };
+
+            struct OutputResetPlan
+            {
+                OutputResetAction action                    = OutputResetAction::NoReset;
+                OutputResetReason reason                    = OutputResetReason::None;
+                bool              requiresPristineGpuCopy   = false;
+                bool              usesExistingSlotContents  = false;
+                bool              targetIsRingSlot          = false;
+                size_t            targetSlot                = 0;
+            };
+
             // Properties for each tensor (arranged in index)
             struct VectorDataInitProperties
             {
@@ -1270,6 +1295,9 @@ namespace TensileLite
                     && !m_problemDependentData
                     && (!m_warmOutputResetRequired || m_keepPristineCopyOnGPU);
             }
+
+            OutputResetPlan planNormalWarmOutputReset(ContractionProblemGemm const& problem) const;
+            OutputResetPlan planRingSlotOutputReset(size_t targetSlot, bool altSlotsReady) const;
 
             void resetOutputsForRingSlot(size_t targetSlot, ContractionProblem const* problem);
 
