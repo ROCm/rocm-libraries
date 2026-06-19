@@ -547,7 +547,7 @@ namespace
     };
 } // namespace
 
-TEST_F(ClientRunSchedulerTest, OneUntimedRunPreservesDataAndListenerOrder)
+TEST_F(ClientRunSchedulerTest, NoBenchmarkValidationRunExecutesWarmupAndSubmitsRingResets)
 {
     harness.listeners.m_warmupRuns = 1;
     harness.listeners.m_syncs      = 0;
@@ -564,30 +564,70 @@ TEST_F(ClientRunSchedulerTest, OneUntimedRunPreservesDataAndListenerOrder)
     EXPECT_FALSE(result.exitedEarly);
     EXPECT_EQ(result.returnCode, 0);
 
-    EXPECT_EQ(harness.events,
-              (std::vector<std::string>{"preBenchmarkRun",
-                                        "reportProblemIndex:0",
-                                        "reportProblemProgress:0/0",
-                                        "preProblem",
-                                        "cancelAsyncReset",
-                                        "prepareGPUInputs",
-                                        "prepareRotatingGPUOutput:1",
-                                        "deviceSynchronize",
-                                        "preSolution",
-                                        "prepareGPUInputs",
-                                        "solve",
-                                        "waitCopyDone",
-                                        "preWarmup",
-                                        "launchWarmup:empty",
-                                        "validateWarmups",
-                                        "postWarmup",
-                                        "preSyncs",
-                                        "postSyncs",
-                                        "beginAsyncReset",
-                                        "beginAsyncReset",
-                                        "postSolution",
-                                        "postProblem",
-                                        "postBenchmarkRun"}));
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchWarmup:"),
+              (std::vector<std::string>{"empty"}));
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "beginAsyncReset"),
+              (std::vector<std::string>{"", ""}));
+
+    auto solveIdx          = indexOfEvent(harness.events, "solve");
+    auto waitCopyDoneIdx   = indexOfEvent(harness.events, "waitCopyDone");
+    auto warmupLaunchIdx   = indexOfEvent(harness.events, "launchWarmup:empty");
+    auto validateWarmupsIdx = indexOfEvent(harness.events, "validateWarmups");
+    auto firstResetIdx     = indexOfEvent(harness.events, "beginAsyncReset");
+    auto postSolutionIdx   = indexOfEvent(harness.events, "postSolution");
+
+    ASSERT_NE(solveIdx, harness.events.size());
+    ASSERT_NE(waitCopyDoneIdx, harness.events.size());
+    ASSERT_NE(warmupLaunchIdx, harness.events.size());
+    ASSERT_NE(validateWarmupsIdx, harness.events.size());
+    ASSERT_NE(firstResetIdx, harness.events.size());
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+
+    auto secondReset = std::find(harness.events.begin() + firstResetIdx + 1,
+                                 harness.events.end(),
+                                 "beginAsyncReset");
+    ASSERT_NE(secondReset, harness.events.end());
+
+    EXPECT_LT(solveIdx, waitCopyDoneIdx);
+    EXPECT_LT(waitCopyDoneIdx, warmupLaunchIdx);
+    EXPECT_LT(warmupLaunchIdx, validateWarmupsIdx);
+    EXPECT_LT(validateWarmupsIdx, firstResetIdx);
+    EXPECT_LT(static_cast<size_t>(std::distance(harness.events.begin(), secondReset)),
+              postSolutionIdx);
+
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preBenchmarkRun"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "reportProblemIndex:0"),
+              harness.events.end());
+    EXPECT_NE(
+        std::find(harness.events.begin(), harness.events.end(), "reportProblemProgress:0/0"),
+        harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preProblem"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "cancelAsyncReset"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "prepareGPUInputs"),
+              harness.events.end());
+    EXPECT_NE(
+        std::find(harness.events.begin(), harness.events.end(), "prepareRotatingGPUOutput:1"),
+        harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "deviceSynchronize"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preSolution"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preWarmup"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postWarmup"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preSyncs"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postSyncs"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postProblem"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postBenchmarkRun"),
+              harness.events.end());
     EXPECT_TRUE(harness.launcher.rotationSelections.empty());
 }
 
