@@ -34,6 +34,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientRunScheduler.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
@@ -41,7 +42,6 @@
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
 #include "SolutionIterator.hpp"
-#include "TimingEvents.hpp"
 #include "TimingInstrumentation.hpp"
 
 #include "LibraryUpdateReporter.hpp"
@@ -64,18 +64,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#if defined(__linux__)
-// Used by getMinKernelSizeToGwEnd() to parse .co ELF symbol tables. <elf.h>
-// is glibc-only, so the whole ELF code path is Linux-gated.
-#include <cstring> // std::memcmp / std::strcmp
-#include <elf.h>
-#include <limits> // std::numeric_limits<> sentinel
-#endif
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 namespace TensileLite
 {
@@ -897,118 +891,168 @@ namespace TensileLite
             return args;
         }
 
-#if defined(__linux__)
-        // Parse the AMDGPU ELF code object at `coPath` and return the smallest
-        // distance (in bytes) from any FUNC/GLOBAL kernel-entry symbol to its
-        // corresponding `label_GW_End` LOCAL symbol. This is a Tensile-specific
-        // proxy for "I-cache hot-path size of the smallest kernel": label_GW_End
-        // marks the first global-write-epilogue exit, which roughly bounds the
-        // code that a launch executes through during the main compute path.
-        //
-        // Returns 0 when the file can't be opened, isn't ELF64, parsing fails,
-        // or no FUNC+GLOBAL / label_GW_End symbol pairing is found.
-        //
-        // Linux-only (uses <elf.h>). Non-Linux build paths use the raw
-        // --icache-rotate-size value instead.
-        std::uintmax_t getMinKernelSizeToGwEnd(std::string const& coPath)
+        class SchedulerReporterAdapter final : public RunReporter
         {
-            std::ifstream f(coPath, std::ios::binary);
-            if(!f)
-                return 0;
-
-            Elf64_Ehdr eh{};
-            f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
-            if(!f
-               || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
-               || eh.e_ident[EI_CLASS] != ELFCLASS64)
-                return 0;
-
-            // Read all section headers.
-            std::vector<Elf64_Shdr> shdrs(eh.e_shnum);
-            f.seekg(eh.e_shoff);
-            f.read(reinterpret_cast<char*>(shdrs.data()),
-                   static_cast<std::streamsize>(eh.e_shnum * sizeof(Elf64_Shdr)));
-            if(!f)
-                return 0;
-
-            // Find .symtab and its linked string table (sh_link).
-            Elf64_Shdr const* symSh = nullptr;
-            for(auto const& sh : shdrs)
-                if(sh.sh_type == SHT_SYMTAB)
-                {
-                    symSh = &sh;
-                    break;
-                }
-            if(!symSh
-               || symSh->sh_link >= shdrs.size()
-               || symSh->sh_size == 0
-               || symSh->sh_size % sizeof(Elf64_Sym) != 0)
-                return 0;
-
-            auto const& strSh = shdrs[symSh->sh_link];
-
-            // Read string table.
-            std::vector<char> strs(strSh.sh_size);
-            f.seekg(strSh.sh_offset);
-            f.read(strs.data(), static_cast<std::streamsize>(strSh.sh_size));
-            if(!f)
-                return 0;
-
-            // Read symbol table.
-            auto const             symCount = symSh->sh_size / sizeof(Elf64_Sym);
-            std::vector<Elf64_Sym> syms(symCount);
-            f.seekg(symSh->sh_offset);
-            f.read(reinterpret_cast<char*>(syms.data()),
-                   static_cast<std::streamsize>(symSh->sh_size));
-            if(!f)
-                return 0;
-
-            // Collect kernel entry addresses (FUNC + GLOBAL) and label_GW_End
-            // addresses (we match by name; some toolchains emit different binds).
-            std::vector<std::uint64_t> kernelStarts;
-            std::vector<std::uint64_t> gwEndAddrs;
-            for(auto const& s : syms)
+        public:
+            explicit SchedulerReporterAdapter(std::shared_ptr<MetaResultReporter> reporters)
+                : m_reporters(std::move(reporters))
             {
-                if(s.st_name >= strs.size())
-                    continue;
-                char const*   name = &strs[s.st_name];
-                unsigned char type = ELF64_ST_TYPE(s.st_info);
-                unsigned char bind = ELF64_ST_BIND(s.st_info);
-
-                if(type == STT_FUNC && bind == STB_GLOBAL)
-                    kernelStarts.push_back(s.st_value);
-                else if(std::strcmp(name, "label_GW_End") == 0)
-                    gwEndAddrs.push_back(s.st_value);
             }
 
-            if(kernelStarts.empty() || gwEndAddrs.empty())
-                return 0;
-
-            std::sort(kernelStarts.begin(), kernelStarts.end());
-
-            // For each label_GW_End, the owning kernel is the one with the
-            // largest start address <= this end address.
-            std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
-            for(auto end : gwEndAddrs)
+            void reportProblemIndex(int idx) override
             {
-                auto it = std::upper_bound(kernelStarts.begin(),
-                                           kernelStarts.end(),
-                                           end);
-                if(it == kernelStarts.begin())
-                    continue;
-                std::uint64_t start = *(it - 1);
-                if(end <= start)
-                    continue;
-                auto sz = static_cast<std::uintmax_t>(end - start);
-                if(sz < minSize)
-                    minSize = sz;
+                m_reporters->report(ResultKey::ProblemIndex, idx);
             }
 
-            return (minSize == std::numeric_limits<std::uintmax_t>::max())
-                       ? std::uintmax_t{0}
-                       : minSize;
+            void reportProblemProgress(std::string const& text) override
+            {
+                m_reporters->report(ResultKey::ProblemProgress, text);
+            }
+
+            void reportInvalid() override
+            {
+                m_reporters->report(ResultKey::Validation, "INVALID");
+            }
+
+            void logError(std::string const& message) override
+            {
+                m_reporters->log(LogLevel::Error, message);
+            }
+
+        private:
+            std::shared_ptr<MetaResultReporter> m_reporters;
+        };
+
+        class SchedulerDataCoordinatorAdapter final : public RunDataCoordinator
+        {
+        public:
+            explicit SchedulerDataCoordinatorAdapter(std::shared_ptr<DataInitialization> dataInit)
+                : m_dataInit(std::move(dataInit))
+            {
+            }
+
+            void cancelAsyncReset() override
+            {
+                m_dataInit->cancelAsyncReset();
+            }
+
+            std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem) override
+            {
+                return m_dataInit->prepareGPUInputs(problem);
+            }
+
+            std::vector<std::shared_ptr<ProblemInputs>> prepareRotatingGPUOutput(
+                int32_t                        maxRotatingBufferNum,
+                ContractionProblem const*      problem,
+                std::shared_ptr<ProblemInputs> inputs,
+                hipStream_t                   stream) override
+            {
+                return m_dataInit->prepareRotatingGPUOutput(
+                    maxRotatingBufferNum, problem, std::move(inputs), stream);
+            }
+
+            void waitCopyDone(hipStream_t stream) override
+            {
+                m_dataInit->waitCopyDone(stream);
+            }
+
+            void beginAsyncReset(ContractionProblem const* problem) override
+            {
+                m_dataInit->beginAsyncReset(problem);
+            }
+
+        private:
+            std::shared_ptr<DataInitialization> m_dataInit;
+        };
+
+        class SchedulerSolutionSourceAdapter final : public RunSolutionSource
+        {
+        public:
+            explicit SchedulerSolutionSourceAdapter(std::shared_ptr<SolutionIterator> solutionIterator)
+                : m_solutionIterator(std::move(solutionIterator))
+            {
+            }
+
+            bool moreSolutionsInProblem() const override
+            {
+                return m_solutionIterator->moreSolutionsInProblem();
+            }
+
+            std::shared_ptr<ContractionSolution> getSolution() override
+            {
+                return m_solutionIterator->getSolution();
+            }
+
+            bool runCurrentSolution() override
+            {
+                return m_solutionIterator->runCurrentSolution();
+            }
+
+        private:
+            std::shared_ptr<SolutionIterator> m_solutionIterator;
+        };
+
+        class SchedulerKernelLauncherAdapter final : public RunKernelLauncher
+        {
+        public:
+            explicit SchedulerKernelLauncherAdapter(TensileLite::hip::SolutionAdapter& adapter)
+                : m_adapter(adapter)
+            {
+            }
+
+            int numRotationModules() override
+            {
+                return m_adapter.numRotationModules();
+            }
+
+            void selectRotationCopy(int idx) override
+            {
+                m_adapter.selectRotationCopy(idx);
+            }
+
+            hipError_t loadCodeObjectFileExtraCopies(std::string const& path,
+                                                     int               extraCopies) override
+            {
+                return m_adapter.loadCodeObjectFileExtraCopies(path, extraCopies);
+            }
+
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                        stream,
+                                     std::vector<hipEvent_t> const&     startEvents,
+                                     std::vector<hipEvent_t> const&     stopEvents) override
+            {
+                return m_adapter.launchKernels(kernels, stream, startEvents, stopEvents);
+            }
+
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                        stream,
+                                     hipEvent_t                         startEvent,
+                                     hipEvent_t                         stopEvent) override
+            {
+                return m_adapter.launchKernels(kernels, stream, startEvent, stopEvent);
+            }
+
+        private:
+            TensileLite::hip::SolutionAdapter& m_adapter;
+        };
+
+        ClientRunSchedulerCallbacks makeSchedulerCallbacks(
+            std::shared_ptr<BenchmarkTimer> const& benchmarkTimer)
+        {
+            ClientRunSchedulerCallbacks callbacks;
+            callbacks.flushGridSizeFn = [] { return flush_grid_size(); };
+            callbacks.flushIcacheFn = [](uint32_t flushGridSize, hipStream_t stream) {
+                hipLaunchKernelGGL(flush_icache, flushGridSize, 64, 0, stream);
+            };
+            callbacks.deviceSynchronizeFn = [] { static_cast<void>(hipDeviceSynchronize()); };
+            if(benchmarkTimer)
+            {
+                callbacks.setIcacheFlushTimeUsFn = [benchmarkTimer](float timeUs) {
+                    benchmarkTimer->setIFlushTimeUs(timeUs);
+                };
+            }
+            return callbacks;
         }
-#endif // defined(__linux__)
 
     } // namespace Client
 } // namespace TensileLite
@@ -1113,7 +1157,6 @@ int main(int argc, const char* argv[])
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
-    bool        groupedGemm      = args["grouped-gemm"].as<bool>();
     const auto& icacheFlushArgs  = args["icache-flush-args"].as<std::vector<bool>>();
 
     float skip_slow_solution_ratio = args["skip-slow-solution-ratio"].as<float>();
@@ -1200,10 +1243,6 @@ int main(int argc, const char* argv[])
 
     reporters->report(ResultKey::ProblemCount, problemFactory.problems().size());
 
-    bool  useUserArgs = args["use-user-args"].as<bool>();
-    void* dUA         = nullptr;
-    void* dUAHost     = nullptr;
-
     if(Debug::Instance().getBenchmark())
     {
         std::stringstream ss;
@@ -1211,352 +1250,44 @@ int main(int argc, const char* argv[])
         std::cout << ss.str();
     }
 
-    while(listeners.needMoreBenchmarkRuns())
+    SchedulerReporterAdapter        schedulerReporter(reporters);
+    SchedulerDataCoordinatorAdapter schedulerDataCoordinator(dataInit);
+    SchedulerSolutionSourceAdapter   schedulerSolutionSource(solutionIterator);
+    SchedulerKernelLauncherAdapter   schedulerKernelLauncher(adapter);
+
+    ClientRunSchedulerConfig schedulerConfig;
+    schedulerConfig.firstProblemIdx      = firstProblemIdx;
+    schedulerConfig.lastProblemIdx       = lastProblemIdx;
+    schedulerConfig.runKernels           = runKernels;
+    schedulerConfig.exitOnError          = exitOnError;
+    schedulerConfig.gpuTimer             = gpuTimer;
+    schedulerConfig.useUserArgs          = args["use-user-args"].as<bool>();
+    schedulerConfig.icacheFlushArgs      = icacheFlushArgs;
+    schedulerConfig.icacheFlushTimeUs    = flushTimeMs * 1000;
+    schedulerConfig.icacheRotateCopies   = args["icache-rotate-copies"].as<int>();
+    schedulerConfig.icacheRotateSizeKB   = args["icache-rotate-size"].as<int>();
+    schedulerConfig.codeObjectFilenames   = args["code-object"].as<std::vector<std::string>>();
+
+    void* dUA     = nullptr;
+    void* dUAHost = nullptr;
+
+    ClientRunScheduler scheduler(std::move(schedulerConfig),
+                                 ClientRunSchedulerDependencies{
+                                     &problems,
+                                     &listeners,
+                                     &schedulerReporter,
+                                     &schedulerDataCoordinator,
+                                     &schedulerSolutionSource,
+                                     &schedulerKernelLauncher,
+                                     hardware.get(),
+                                     stream,
+                                     makeSchedulerCallbacks(benchmarkTimer)});
+
+    auto schedulerResult = scheduler.run(dUA, dUAHost);
+    if(schedulerResult.exitedEarly)
     {
-        listeners.preBenchmarkRun();
-        const auto flushGridSize = flush_grid_size();
-        for(auto icacheFlush : icacheFlushArgs)
-        {
-            benchmarkTimer->setIFlushTimeUs(icacheFlush ? flushTimeMs * 1000 : 0.f);
-
-            // I-cache rotation counter: rotationLaunchIdx
-            // for scope across all problem / iterations, accumulate continuously
-            // to avoid starting from copy 0 for each problem
-            size_t rotationLaunchIdx = 0;
-            for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
-            {
-                auto problem = problems[problemIdx].get();
-
-                reporters->report(ResultKey::ProblemIndex, problemIdx);
-                reporters->report(ResultKey::ProblemProgress,
-                                  concatenate(problemIdx, "/", lastProblemIdx));
-
-                {
-                    ScopedTimer timer("pre_problem");
-                    listeners.preProblem(problem);
-                }
-                // Discard any pending async reset from the previous problem —
-                // it prepared buffers for a different problem's data.
-                {
-                    ScopedTimer timer("cancel_async_reset");
-                    dataInit->cancelAsyncReset();
-                }
-                std::shared_ptr<ProblemInputs> inputs;
-                {
-                    ScopedTimer timer("gpu_input_preparation");
-                    inputs = dataInit->prepareGPUInputs(problem);
-                }
-
-                size_t warmupInvocations    = listeners.numWarmupRuns();
-                size_t syncs                = listeners.numSyncs();
-                size_t enq                  = listeners.numEnqueuesPerSync();
-                size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
-
-                std::vector<std::shared_ptr<ProblemInputs>> inputArr;
-                {
-                    ScopedTimer timer("rotating_buffer_preparation");
-                    inputArr = dataInit->prepareRotatingGPUOutput(
-                        maxRotatingBufferNum, problem, inputs, stream);
-                    static_cast<void>(hipDeviceSynchronize());
-                }
-
-                // I-cache rotation auto-load: when --icache-rotate-copies=-1,
-                // pick the larger of two extra-copy counts:
-                //   1) inputArr.size() - 1
-                //      Aligns the code rotation cycle with DataInit's actual
-                //      data buffer rotation cycle (inputArr.size() = 1 original
-                //      + rotatingNum extras).
-                //   2) Cache-overflow term targeting ~128KB of L1 I-cache.
-                //      On Linux: parse each .co's ELF symbol table to find the
-                //      smallest kernel hot-path size K (kernel_start ->
-                //      label_GW_End), then load (128KB / K) - 1 extras so the
-                //      total rotated code (~128KB) overflows typical L1 I-cache.
-                //      On non-Linux: <elf.h> is unavailable; fall back to
-                //      args["icache-rotate-size"] as the raw extras count.
-                // Use adapter.numRotationModules()==1 as the "not yet loaded"
-                // guard so the load only fires on the first problem; subsequent
-                // problems reuse the same N.
-                {
-                    int icacheArg = args["icache-rotate-copies"].as<int>();
-                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
-                    {
-                        auto const& filenames
-                            = args["code-object"].as<std::vector<std::string>>();
-
-                        // Term 1: align with data rotation cycle.
-                        int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
-
-                        // Term 2: cache-overflow term.
-#if defined(__linux__)
-                        // K = min(kernel_start -> label_GW_End) across all .co.
-                        std::uintmax_t K = 0;
-                        for(auto const& filename : filenames)
-                        {
-                            std::uintmax_t sz = getMinKernelSizeToGwEnd(filename);
-                            if(sz > 0 && (K == 0 || sz < K))
-                                K = sz;
-                        }
-                        // kCacheBudgetBytes = icache-rotate-size * 2 * 1024.
-                        // Default icache-rotate-size=64 -> 128 KB
-                        // Loosely targets ~2x typical L1 I-cache.
-                        int rotateSizeKB = args["icache-rotate-size"].as<int>();
-                        if(rotateSizeKB < 0)
-                            rotateSizeKB = 0;
-                        std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
-                        int extrasFromCache = 0;
-                        if(K == 0)
-                        {
-                            std::cerr << "[icache-rotate] warning: no label_GW_End "
-                                    << "found in any --code-object; cache-based "
-                                    << "term contributes 0" << std::endl;
-                        }
-                        else if(kCacheBudgetBytes > K)
-                        {
-                            extrasFromCache = static_cast<int>(kCacheBudgetBytes / K - 1);
-                        }
-#else
-                        // <elf.h> unavailable on this platform; use the raw
-                        // --icache-rotate-size value as the extras count.
-                        int extrasFromCache
-                            = static_cast<int>(args["icache-rotate-size"].as<int>());
-#endif
-
-                        int extras = std::max(extrasFromDataInit, extrasFromCache);
-                        if(extras > 0)
-                        {
-                            ScopedTimer timer("icache_rotate_extra_copies_loading");
-                            for(auto const& filename : filenames)
-                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
-                                    filename, extras));
-                        }
-#if defined(__linux__)
-                        std::cout << "[icache-rotate] auto extras = max("
-                                  << extrasFromDataInit << " from inputArr.size()-1, "
-                                  << extrasFromCache << " from "
-                                  << kCacheBudgetBytes << "/" << K << ") = "
-                                  << extras
-                                  << " (total = " << (extras + 1) << " modules)"
-                                  << std::endl;
-#else
-                        std::cout << "[icache-rotate] auto extras = max("
-                                  << extrasFromDataInit << " from inputArr.size()-1, "
-                                  << extrasFromCache << " from --icache-rotate-size) = "
-                                  << extras
-                                  << " (total = " << (extras + 1) << " modules)"
-                                  << std::endl;
-#endif
-                    }
-                }
-
-                // The first per-solution iteration must re-upload inputs so that
-                // the upload happens after preSolution() and can read the picked
-                // solution's problemType.mxScaleFormat to pick the correct host
-                // upload layout for MX scale tensors. The extra upload is a no-op
-                // cost on non-MX problems.
-                bool resetInput = true;
-                while(solutionIterator->moreSolutionsInProblem())
-                {
-                    std::shared_ptr<ContractionSolution> solution;
-                    {
-                        ScopedTimer timer("solution_selection");
-                        solution = solutionIterator->getSolution();
-                    }
-                    if(solution == nullptr)
-                        throw std::runtime_error("Could not find a solution");
-
-                    {
-                        ScopedTimer timer("pre_solution");
-                        listeners.preSolution(solution.get());
-                    }
-                    if(solutionIterator->runCurrentSolution() && runKernels)
-                    {
-                        try
-                        {
-                            while(listeners.needMoreRunsInSolution())
-                            {
-                                if(resetInput)
-                                {
-                                    ScopedTimer timer("gpu_input_reset");
-                                    inputs = dataInit->prepareGPUInputs(problem);
-                                    inputArr[0] = inputs;
-                                }
-                                resetInput = true;
-
-                                std::vector<std::vector<KernelInvocation>> kernels;
-                                {
-                                    ScopedTimer timer("kernel_solving");
-                                    for(size_t r = 0; r < inputArr.size(); r++)
-                                    {
-                                        auto kernel = useUserArgs
-                                                          ? solution->solveTensileGPU((*problem),
-                                                                                      *inputArr[r],
-                                                                                      *hardware,
-                                                                                      &dUA,
-                                                                                      &dUAHost,
-                                                                                      nullptr,
-                                                                                      0,
-                                                                                      stream)
-                                                          : solution->solve((*problem),
-                                                                            *inputArr[r],
-                                                                            *hardware,
-                                                                            nullptr,
-                                                                            0,
-                                                                            stream);
-                                        kernels.push_back(kernel);
-                                    }
-                                }
-
-                                size_t       warmupInvocations = listeners.numWarmupRuns();
-                                size_t       warmupEventCount  = kernels[0].size();
-                                TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
-                                TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
-
-                                // I-cache rotation counter: increments per launchKernels call
-                                // and selects which hipModule_t copy services the next launch.
-                                // numRotationModules()==1 → no rotation (always copy 0).
-                                int  nRotationModules = adapter.numRotationModules();
-                                auto rotateAndSelect  = [&]() {
-                                    adapter.selectRotationCopy(
-                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
-                                };
-
-                                // Ensure any pending async reset is complete
-                                // before the first kernel launch (warmup or benchmark).
-                                {
-                                    ScopedTimer timer("wait_copy_done");
-                                    dataInit->waitCopyDone(stream);
-                                }
-
-                                if(warmupInvocations > 0)
-                                {
-                                    {
-                                        ScopedTimer timer("warmup_runs");
-                                        listeners.preWarmup();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
-                                                                            stream,
-                                                                            warmupStartEvents[0],
-                                                                            warmupStopEvents[0]));
-                                    }
-
-                                    {
-                                        ScopedTimer timer("validate_warmups");
-                                        listeners.validateWarmups(
-                                            inputs, warmupStartEvents, warmupStopEvents);
-                                    }
-
-                                    {
-                                        ScopedTimer timer("warmup_runs");
-                                        for(int i = 1; i < warmupInvocations; i++)
-                                        {
-                                            size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
-                                        }
-                                        listeners.postWarmup(
-                                            warmupStartEvents, warmupStopEvents, stream);
-                                    }
-                                }
-
-#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-                                TimingEvents ProfilerStartEvents(1, warmupEventCount);
-                                TimingEvents ProfilerStopEvents(1, warmupEventCount);
-                                listeners.preProfiler();
-                                rotateAndSelect();
-                                HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
-                                                                    stream,
-                                                                    ProfilerStartEvents[0],
-                                                                    ProfilerStopEvents[0]));
-                                listeners.postProfiler();
-#endif
-
-                                size_t syncs      = listeners.numSyncs();
-                                size_t enq        = listeners.numEnqueuesPerSync();
-                                size_t eventCount = gpuTimer ? kernels[0].size() : 0;
-
-                                {
-                                    ScopedTimer timer("benchmark_runs");
-                                    listeners.preSyncs();
-                                    if(enq)
-                                        for(int i = 0; i < syncs; i++)
-                                        {
-                                            TimingEvents startEvents(enq, eventCount);
-                                            TimingEvents stopEvents(enq, eventCount);
-
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
-                                            {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                rotateAndSelect();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
-
-                                                if(icacheFlush)
-                                                {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
-
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
-                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
-                                        }
-
-                                    listeners.postSyncs();
-                                }
-
-                                if(useUserArgs)
-                                {
-                                    solution->relaseDeviceUserArgs(dUA, dUAHost);
-                                }
-
-                                // Kick off async reset after benchmark completes.
-                                // DMA on m_copyStream overlaps with the next
-                                // iteration's prepareGPUInputs, kernel_solving,
-                                // and warmup — synced before the next benchmark_runs.
-                                // Submit enough resets to prime every non-active ring
-                                // slot. The second call is the extra slot in a
-                                // triple-buffer setup and is otherwise harmless;
-                                // ring-disabled or ineligible configurations return
-                                // early inside beginAsyncReset().
-                                {
-                                    ScopedTimer timer("async_reset_submit");
-                                    dataInit->beginAsyncReset(problem);
-                                    dataInit->beginAsyncReset(problem);
-                                }
-                            }
-                        }
-                        catch(std::runtime_error const& err)
-                        {
-                            reporters->report(ResultKey::Validation, "INVALID");
-                            reporters->log(LogLevel::Error,
-                                           concatenate("Exception occurred: ", err.what(), "\n"));
-                        }
-                    }
-
-                    {
-                        ScopedTimer timer("post_solution");
-                        listeners.postSolution();
-                    }
-
-                    if(exitOnError && listeners.error() > 0)
-                    {
-                        flushTimingBuffer();
-                        // error range in shell is [0-255]
-                        return std::min(listeners.error(), 255);
-                    }
-                }
-
-                {
-                    ScopedTimer timer("post_problem");
-                    listeners.postProblem();
-                }
-            }
-        }
-
-        listeners.postBenchmarkRun();
+        flushTimingBuffer();
+        return schedulerResult.returnCode;
     }
 
     {

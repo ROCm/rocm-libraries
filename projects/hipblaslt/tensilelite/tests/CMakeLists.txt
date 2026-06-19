@@ -144,6 +144,26 @@ set_target_properties(batch-pointer-test PROPERTIES
 
 gtest_discover_tests(batch-pointer-test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
 
+if(TARGET tensilelite::client-common)
+    add_executable(client-run-scheduler-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunScheduler_test.cpp"
+    )
+
+    target_link_libraries(client-run-scheduler-test
+        PRIVATE
+            tensilelite::client-common
+            GTest::gtest
+            GTest::gtest_main
+    )
+
+    gtest_discover_tests(client-run-scheduler-test
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 60
+    )
+else()
+    message(STATUS "Skipping client-run-scheduler-test because tensilelite::client-common is not enabled.")
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################
