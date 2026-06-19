@@ -92,6 +92,17 @@ repos:
         files: ^projects/hipdnn/(data_sdk|flatbuffers_sdk)/schemas/.*\.fbs$
         pass_filenames: true
 
+      # Refuse to commit ck_dsl engine / ck-dsl-provider build artifacts
+      # (*.a/*.o/*.so, build*/, CMakeCache.txt, _deps/, __pycache__/, ...).
+      # A stale checked-in artifact silently shadows a fresh build. Shipped
+      # kernel bundles under ck-dsl-provider/kernels/<arch>/ are exempt.
+      - id: ck-dsl-reject-build-artifacts
+        name: Reject ck_dsl build artifacts
+        entry: dnn-providers/ck-dsl-provider/tools/reject_build_artifacts.sh
+        language: script
+        files: ^dnn-providers/ck-dsl-provider/
+        pass_filenames: true
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

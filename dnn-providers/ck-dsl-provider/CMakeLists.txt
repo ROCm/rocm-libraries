@@ -30,28 +30,72 @@ if(CK_DSL_PROVIDER_C_JIT)
         set(CKC_INCLUDE_DIR
             "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/composablekernel/python/ck_dsl_c/include")
     endif()
-    # libckc_core.a: prefer an explicit -DCKC_LIB=..., else a hint file written
-    # by the ck_dsl_c build, else a probe of common build dirs.
-    if(NOT DEFINED CKC_LIB)
-        if(EXISTS "/tmp/ckc_libdir.txt")
-            file(READ "/tmp/ckc_libdir.txt" _ckc_libdir)
-            string(STRIP "${_ckc_libdir}" _ckc_libdir)
-            find_library(CKC_LIB NAMES ckc_core HINTS "${_ckc_libdir}")
+    # libckc_core: the engine static archive linked --whole-archive below.
+    #
+    # We DO NOT silently fall back to a checked-in build directory. A stale
+    # archive shadowing a fresh build was a recurring source of phantom
+    # failures ("Conv C-JIT broken"). There are exactly two supported sources,
+    # and the one chosen is always reported:
+    #
+    #   (1) explicit  -DCKC_LIB=/path/to/libckc_core.a
+    #       Use a specific archive (e.g. one the canonical build.sh just built).
+    #       The file MUST exist or configuration fails immediately.
+    #
+    #   (2) default (no -DCKC_LIB)
+    #       Build the engine FRESH from source as a sub-build of this configure,
+    #       so the linked archive is always in lockstep with the engine source.
+    #       `CKC_LINK_TARGET` then resolves to the freshly-built archive path.
+    set(CKC_ENGINE_SRC
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/composablekernel/python/ck_dsl_c"
+        CACHE PATH "ck_dsl C engine source dir")
+    if(DEFINED CKC_LIB)
+        if(NOT EXISTS "${CKC_LIB}")
+            message(FATAL_ERROR
+                "CKC_LIB was set to '${CKC_LIB}' but no such file exists. "
+                "Point -DCKC_LIB at a freshly-built libckc_core.a (see the "
+                "canonical build script tools/build.sh in the engine tree), or "
+                "omit -DCKC_LIB to build the engine fresh as part of this build.")
         endif()
-    endif()
-    if(NOT CKC_LIB)
-        find_library(CKC_LIB NAMES ckc_core
-            HINTS ${CKC_LIB_DIR}
-                  "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/composablekernel/python/ck_dsl_c/build")
-    endif()
-    if(NOT CKC_LIB)
-        message(FATAL_ERROR
-            "CK_DSL_PROVIDER_C_JIT=ON but libckc_core not found. "
-            "Pass -DCKC_LIB=/path/to/libckc_core.a (build via "
-            "cmake .../ck_dsl_c) or set CK_DSL_PROVIDER_C_JIT=OFF.")
+        set(CKC_LINK_TARGET "${CKC_LIB}")
+        message(STATUS "ck-dsl-provider C-JIT: using explicit CKC_LIB=${CKC_LIB}")
+    else()
+        if(NOT EXISTS "${CKC_ENGINE_SRC}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "CK_DSL_PROVIDER_C_JIT=ON and no -DCKC_LIB given, but the engine "
+                "source was not found at '${CKC_ENGINE_SRC}'. Set -DCKC_ENGINE_SRC "
+                "to the ck_dsl_c source dir, pass -DCKC_LIB=/path/to/libckc_core.a, "
+                "or set CK_DSL_PROVIDER_C_JIT=OFF.")
+        endif()
+        # Build the engine fresh as a fully isolated sub-build. ExternalProject
+        # runs the engine's own cmake/compiler/language configuration verbatim
+        # (the engine compiles its .c through the C++ frontend with custom flags
+        # that must not be mixed with this project's flags) and yields a fresh
+        # libckc_core.a that the provider then links. This guarantees the linked
+        # archive is always in lockstep with the engine source, with zero chance
+        # of a stale checked-in archive being used.
+        include(ExternalProject)
+        set(_CKC_EP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/_ckc_engine")
+        set(_CKC_EP_BUILD  "${_CKC_EP_PREFIX}/build")
+        set(_CKC_FRESH_LIB "${_CKC_EP_BUILD}/libckc_core.a")
+        if(NOT TARGET ckc_engine_ep)
+            ExternalProject_Add(ckc_engine_ep
+                SOURCE_DIR        "${CKC_ENGINE_SRC}"
+                PREFIX            "${_CKC_EP_PREFIX}"
+                BINARY_DIR        "${_CKC_EP_BUILD}"
+                CMAKE_ARGS        -DCMAKE_BUILD_TYPE=Release
+                BUILD_COMMAND     ${CMAKE_COMMAND} --build <BINARY_DIR>
+                                  --target ckc_core --config Release
+                BUILD_ALWAYS      TRUE       # always rebuild -> never stale
+                INSTALL_COMMAND   ""
+                BUILD_BYPRODUCTS  "${_CKC_FRESH_LIB}")
+        endif()
+        set(CKC_LINK_TARGET "${_CKC_FRESH_LIB}")
+        message(STATUS
+            "ck-dsl-provider C-JIT: building engine fresh (ExternalProject) from "
+            "${CKC_ENGINE_SRC} (no -DCKC_LIB given)")
     endif()
     find_library(AMD_COMGR_LIB NAMES amd_comgr HINTS /opt/rocm/lib /opt/rocm-*/lib)
-    message(STATUS "ck-dsl-provider C-JIT: lib=${CKC_LIB} comgr=${AMD_COMGR_LIB} inc=${CKC_INCLUDE_DIR}")
+    message(STATUS "ck-dsl-provider C-JIT: comgr=${AMD_COMGR_LIB} inc=${CKC_INCLUDE_DIR}")
 endif()
 
 # LightGBM for the trained-model heuristic (mirrors CK Tile's ML heuristic).
@@ -101,9 +145,15 @@ set_target_properties(ck_dsl_plugin_impl PROPERTIES POSITION_INDEPENDENT_CODE ON
 add_library(ck_dsl_plugin SHARED $<TARGET_OBJECTS:ck_dsl_plugin_impl>)
 target_link_libraries(ck_dsl_plugin PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk ck_dsl_runtime hip::host)
 if(CK_DSL_PROVIDER_C_JIT)
-    # Whole-archive so the comgr-from-.ll lowering TUs are retained.
+    # Whole-archive so the comgr-from-.ll lowering TUs are retained. The link
+    # target is either an explicit -DCKC_LIB path or the freshly-built engine
+    # archive ($<TARGET_FILE:ckc_core>); never a stale checked-in archive.
     target_link_libraries(ck_dsl_plugin PRIVATE
-        -Wl,--whole-archive ${CKC_LIB} -Wl,--no-whole-archive)
+        -Wl,--whole-archive ${CKC_LINK_TARGET} -Wl,--no-whole-archive)
+    # When the engine is built fresh (ExternalProject), build it before linking.
+    if(TARGET ckc_engine_ep)
+        add_dependencies(ck_dsl_plugin ckc_engine_ep)
+    endif()
     if(AMD_COMGR_LIB)
         target_link_libraries(ck_dsl_plugin PRIVATE ${AMD_COMGR_LIB})
     endif()

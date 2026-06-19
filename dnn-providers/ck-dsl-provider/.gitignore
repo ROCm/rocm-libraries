@@ -1,0 +1,58 @@
+# Build directories (in-source or named build*/, cmake-build*/)
+build/
+build*/
+cmake-build*/
+_build/
+
+# CMake configure output
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+_deps/
+cmake_install.cmake
+compile_commands.json
+
+# Compiled objects / libraries / executables
+*.o
+*.obj
+*.slo
+*.lo
+*.a
+*.lai
+*.la
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# Precompiled headers
+*.gch
+*.pch
+*.ipch
+
+# Python cache / compiled extensions
+__pycache__/
+*.pyc
+*.pyo
+*.cpython-*.so
+*.egg-info/
+
+# Editors / misc
+.vscode/
+.idea/
+.clangd
+*.swp
+*~
+.gdb_history
+
+# Intentionally-committed kernel bundles (regeneratable, but versioned):
+#   kernels/<arch>/**/*.hsaco  prebuilt kernels
+#   kernels/<arch>/**/*.ll     comgr-JIT source
+#   kernels/<arch>/**/*.json   manifests
+#   kernels/<arch>/**/*.lgbm   trained selection models
+# These match some patterns above (e.g. *.so via .co siblings); re-include them.
+!kernels/
+!kernels/**
