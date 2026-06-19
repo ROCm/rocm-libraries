@@ -111,62 +111,84 @@ constexpr size_t next_power2(size_t x)
 // Occupancy helper for kernel workload increase
 // uses heuristics for threads/blocks
 // to request the highest possible kernel occupancy
-namespace occupancy_helper {
-    struct config {
-        int block_size;
-        int grid_size;
-        int occupancy; 
-    };
+namespace occupancy_helper
+{
+struct config
+{
+    int block_size;
+    int grid_size;
+    int occupancy;
+};
 
-    template<typename K>
-    config get_config(K kernel_func, int max_threads, int user_blocks = 0, int user_threads = 0) {
-        config best_cfg{0, 0, 0};
-        int dev_id, mp_count;
-        
-        PRIMBENCH_CHECK(hipGetDevice(&dev_id));
-        PRIMBENCH_CHECK(hipDeviceGetAttribute(&mp_count, hipDeviceAttributeMultiprocessorCount, dev_id));
+template<typename K>
+config get_config(K kernel_func, int max_threads, int user_blocks = 0, int user_threads = 0)
+{
+    config best_cfg{0, 0, 0};
+    int    dev_id, mp_count;
 
-        if (user_threads > 0) {
-            // Respect user input if provided via cmd
-            int occ = 0;
-            hipError_t err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ, (const void*)kernel_func, user_threads, 0);
-            best_cfg.block_size = user_threads;
-            best_cfg.occupancy  = (err == hipSuccess) ? occ : 1;
-        } else {
-            // Otherwise, sweep options to find the best occupancy configuration
-            const std::vector<int> thread_options = {64, 128, 256, 512, 1024};
+    PRIMBENCH_CHECK(hipGetDevice(&dev_id));
+    PRIMBENCH_CHECK(
+        hipDeviceGetAttribute(&mp_count, hipDeviceAttributeMultiprocessorCount, dev_id));
 
-            for(int t : thread_options) {
-                
-                if (t > max_threads) continue;
+    if(user_threads > 0)
+    {
+        // Respect user input if provided via cmd
+        int        occ      = 0;
+        hipError_t err      = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ,
+                                                                      (const void*)kernel_func,
+                                                                      user_threads,
+                                                                      0);
+        best_cfg.block_size = user_threads;
+        best_cfg.occupancy  = (err == hipSuccess) ? occ : 1;
+    }
+    else
+    {
+        // Otherwise, sweep options to find the best occupancy configuration
+        const std::vector<int> thread_options = {64, 128, 256, 512, 1024};
 
-                int occ = 0;
-                hipError_t err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ, (const void*)kernel_func, t, 0);
-                
-                if (err != hipSuccess) continue;
+        for(int t : thread_options)
+        {
 
-                // Higher threads are preferred if occupancy stays the same
-                if(occ > best_cfg.occupancy || (occ == best_cfg.occupancy && t > best_cfg.block_size)) {
-                    best_cfg.block_size = t;
-                    best_cfg.occupancy  = occ;
-                }
+            if(t > max_threads)
+                continue;
+
+            int        occ = 0;
+            hipError_t err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ,
+                                                                          (const void*)kernel_func,
+                                                                          t,
+                                                                          0);
+
+            if(err != hipSuccess)
+                continue;
+
+            // Higher threads are preferred if occupancy stays the same
+            if(occ > best_cfg.occupancy || (occ == best_cfg.occupancy && t > best_cfg.block_size))
+            {
+                best_cfg.block_size = t;
+                best_cfg.occupancy  = occ;
             }
         }
-        
-        if (user_blocks > 0) {
-            // Respect user input if provided via cmd
-            best_cfg.grid_size = user_blocks;
-        } else {
-            best_cfg.grid_size = best_cfg.occupancy * mp_count;
-        }
-
-        // Fallback safety guards to avoid zero-sized kernel grid launches
-        if (best_cfg.grid_size <= 0)  best_cfg.grid_size = 1;
-        if (best_cfg.block_size <= 0) best_cfg.block_size = 256;
-
-        return best_cfg;
     }
+
+    if(user_blocks > 0)
+    {
+        // Respect user input if provided via cmd
+        best_cfg.grid_size = user_blocks;
+    }
+    else
+    {
+        best_cfg.grid_size = best_cfg.occupancy * mp_count;
+    }
+
+    // Fallback safety guards to avoid zero-sized kernel grid launches
+    if(best_cfg.grid_size <= 0)
+        best_cfg.grid_size = 1;
+    if(best_cfg.block_size <= 0)
+        best_cfg.block_size = 256;
+
+    return best_cfg;
 }
+} // namespace occupancy_helper
 #endif
 
 // Helper to provide a block size with respect to generator type
@@ -176,9 +198,9 @@ constexpr int get_max_block_size()
 {
 #ifdef __HIP__
     constexpr bool is_threefry = std::is_same_v<EngineState, rocrand_state_threefry2x32_20>
-                              || std::is_same_v<EngineState, rocrand_state_threefry2x64_20>
-                              || std::is_same_v<EngineState, rocrand_state_threefry4x32_20>
-                              || std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
+                                 || std::is_same_v<EngineState, rocrand_state_threefry2x64_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x32_20>
+                                 || std::is_same_v<EngineState, rocrand_state_threefry4x64_20>;
     if constexpr(is_threefry)
     {
         return RAND_THREEFRY_DEFAULT_MAX_BLOCK_SIZE;
@@ -586,13 +608,14 @@ struct runner<rand_state_sobol32_t>
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
-           const unsigned long long offset): dimensions(dimensions)
+           const unsigned long long offset)
+        : dimensions(dimensions)
     {
 
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions, RAND_DIRECTION_VECTORS_32_JOEKUO6));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
         const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol32_t)));
 
@@ -644,7 +667,8 @@ struct runner<rand_state_scrambled_sobol32_t>
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
-           const unsigned long long offset): dimensions(dimensions)
+           const unsigned long long offset)
+        : dimensions(dimensions)
     {
         direction_vectors32_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors32(&h_directions,
@@ -653,7 +677,7 @@ struct runner<rand_state_scrambled_sobol32_t>
         const unsigned int* h_constants;
         RAND_CHECK(rand_get_scramble_constants32(&h_constants));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
         const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol32_t)));
 
@@ -714,12 +738,13 @@ struct runner<rand_state_sobol64_t>
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
-           const unsigned long long offset): dimensions(dimensions)
+           const unsigned long long offset)
+        : dimensions(dimensions)
     {
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions, RAND_DIRECTION_VECTORS_64_JOEKUO6));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
         const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_sobol64_t)));
 
@@ -770,7 +795,8 @@ struct runner<rand_state_scrambled_sobol64_t>
            const size_t blocks,
            const size_t threads,
            const unsigned long long /* seed */,
-           const unsigned long long offset): dimensions(dimensions)
+           const unsigned long long offset)
+        : dimensions(dimensions)
     {
         direction_vectors64_t* h_directions;
         RAND_CHECK(rand_get_direction_vectors64(&h_directions,
@@ -779,7 +805,7 @@ struct runner<rand_state_scrambled_sobol64_t>
         const unsigned long long* h_constants;
         RAND_CHECK(rand_get_scramble_constants64(&h_constants));
 
-        const size_t blocks_x = next_power2((blocks + dimensions - 1) / dimensions);
+        const size_t blocks_x    = next_power2((blocks + dimensions - 1) / dimensions);
         const size_t states_size = blocks_x * dimensions * threads;
         PRIMBENCH_CHECK(gpu_malloc(&states, states_size * sizeof(rand_state_scrambled_sobol64_t)));
 
@@ -964,22 +990,23 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
     {
-        #ifdef __HIP__
+#ifdef __HIP__
         // Calculate and overwrite block/grid configs if not provided by the user, using occupancy helper.
-        auto cfg = occupancy_helper::get_config(
-            generate_kernel<State, T, Generator>,
-            get_max_block_size<State>(), // max threads per block
-            static_cast<int>(blocks),
-            static_cast<int>(threads)
-        );
+        auto cfg
+            = occupancy_helper::get_config(generate_kernel<State, T, Generator>,
+                                           get_max_block_size<State>(), // max threads per block
+                                           static_cast<int>(blocks),
+                                           static_cast<int>(threads));
 
         m_blocks  = cfg.grid_size;
         m_threads = cfg.block_size;
-        #else
+#else
         // Fallback defaults for environment architectures without HIP.
-        if (m_blocks == 0)  m_blocks = 256;
-        if (m_threads == 0) m_threads = 256;
-        #endif
+        if(m_blocks == 0)
+            m_blocks = 256;
+        if(m_threads == 0)
+            m_threads = 256;
+#endif
     }
 
     primbench::json meta() const override
