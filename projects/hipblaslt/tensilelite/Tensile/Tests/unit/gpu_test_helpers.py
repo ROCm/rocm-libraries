@@ -10,22 +10,32 @@
 #   - Prologue builder (generate_load_params) and export epilogue (generate_export_epilogue)
 #   - Assembly & GPU execution (assemble_kernel, assemble_and_run)
 #   - Debug utilities (print_offset_grid)
+#   - Roundtrip kernel helpers (generate_srd_setup, setup_roundtrip_writer, build_roundtrip_inner_asm)
 ################################################################################
 
 import ctypes
 import os
 import re
+import shutil
 import sys
 import struct
 import subprocess
 import tempfile
 
+import pytest
+
+hip = None
+try:
+    from hip import hip
+except ImportError:
+    pass
+
+requires_hip = pytest.mark.skipif(hip is None, reason="hip module not installed")
+
 # Add tensilelite to path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
-
-from hip import hip, hiprtc  # type: ignore
 
 from unittest.mock import MagicMock
 from types import SimpleNamespace
@@ -33,10 +43,12 @@ from dataclasses import dataclass
 
 from rocisa.code import Module, TextBlock
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SWaitCnt, VLShiftLeftB32, VMovB32
+from rocisa.instruction import SLoadB32, SLoadB64, SLoadB128, SMovB32, SMovB64, SWaitCnt, SBarrier, VLShiftLeftB32, VMovB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
-from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16
+from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
+from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
+from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
 
 # ---- GPU target detection ----
 def _detect_gfx_target():
@@ -75,6 +87,10 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
+requires_gpu = pytest.mark.skipif(
+    hip is None or not HAS_GFX950,
+    reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+)
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256
@@ -122,9 +138,9 @@ def _mock_dtype(num_bytes=2):
     return mock
 
 
-def _create_kernel(cfg, mi_wave_group=None):
+def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
     """Create a minimal kernel dict matching the given tile config."""
-    dtype = _mock_dtype(BPE)
+    dtype = _mock_dtype(bpe)
     if mi_wave_group is not None:
         MIWaveGroup = mi_wave_group
     elif ((cfg.mt_a//16) % 2 == 0) and ((cfg.mt_b//16) % 2 == 0):
@@ -135,7 +151,6 @@ def _create_kernel(cfg, mi_wave_group=None):
         MIWaveGroup = [4,1]
     else:
         raise ValueError(f"Unsupported tile config for wave grouping: mt_a={cfg.mt_a}, mt_b={cfg.mt_b}")
-
 
     return {
         "DepthU": cfg.depth_u,
@@ -148,12 +163,16 @@ def _create_kernel(cfg, mi_wave_group=None):
         "MacroTile1": cfg.mt_b,
         "MatrixInstM": 16,
         "MatrixInstN": 16,
-        "MatrixInstK": 32,
+        "MatrixInstK": inst_k,
         "MIWaveGroup": MIWaveGroup,
         "WavefrontSize": WAVESIZE,
         "UseSubtileImpl": True,
+        "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,
+        "enableTDMA": False,
+        "enableTDMB": False,
+        "enableTDMMetadata": False,
         "ProblemType": {
             "DataTypeA": dtype,
             "DataTypeB": dtype,
@@ -162,7 +181,14 @@ def _create_kernel(cfg, mi_wave_group=None):
     }
 
 
-def create_writer(cfg, mi_wave_group=None):
+def compute_lds_start_offset_b(tileInfoA):
+    """Compute LDS start offset for B (A subtiles followed by B, aligned to readSize)."""
+    readSize = 2 * tileInfoA.subtileSize
+    numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
+    return int(((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize)
+
+
+def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
     """Create a minimal mock writer with register pools, kernel dict, and TileInfo.
 
     Sets up the base writer that all tests need:
@@ -172,12 +198,22 @@ def create_writer(cfg, mi_wave_group=None):
       - TileInfo A/B
       - writer.states with tileInfo refs and register caps
 
+    Args:
+        cfg:           TileConfig with macro tile / depthU / stride parameters.
+        mi_wave_group: Override MIWaveGroup; auto-detected from cfg if None.
+        geometry:      ABTilePair geometry (e.g. AB_B16, AB_B8). Defaults to AB_B16.
+        inst_k:        MatrixInstK value (32 for FP16, 128 for FP8).
+        bpe:           Bytes per element for A/B data type (2 for FP16, 1 for FP8).
+
     Each test is responsible for reserving sgprs, defining named sgprs
     (writer.sgprs), and calling allocOffsetRegisters etc.
 
     Returns:
         (writer, kernel, tileInfoA, tileInfoB)
     """
+    if geometry is None:
+        geometry = AB_B16
+
     writer = SimpleNamespace()
 
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr,
@@ -187,13 +223,13 @@ def create_writer(cfg, mi_wave_group=None):
     writer.sgprs = {}
 
     # Reserve v0 for Serial (hardware workitem_id)
-    writer.vgprPool.checkOut(1)
+    writer.vgprPool.checkOut(1, tag="create_writer_vgprSerial")
 
     # Build kernel and TileInfo
-    kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group)
+    kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group, inst_k=inst_k, bpe=bpe)
 
-    tileInfoA = TileInfo(AB_B16, 'A', writer, kernel)
-    tileInfoB = TileInfo(AB_B16, 'B', writer, kernel)
+    tileInfoA = TileInfo(geometry, 'A', writer, kernel)
+    tileInfoB = TileInfo(geometry, 'B', writer, kernel)
 
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr,
                                     defaultPreventOverflow=False, printRP=False)
@@ -203,14 +239,88 @@ def create_writer(cfg, mi_wave_group=None):
         b=SimpleNamespace(tileInfo=tileInfoB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
+        subtileLdsSwizzle=True,
     )
     # LDS layout: A subtiles followed by B subtiles, aligned to readSize
-    readSize = 2 * tileInfoA.subtileSize
-    numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
     writer.ldsStartOffsetA = 0
-    writer.ldsStartOffsetB = int(((numASubtiles * tileInfoA.subtileSize + readSize-1) // readSize) * readSize)
+    writer.ldsStartOffsetB = compute_lds_start_offset_b(tileInfoA)
 
     return writer, kernel, tileInfoA, tileInfoB
+
+
+def _generate_tile_asm(cfg, emitter, geometry=None, inst_k=32, bpe=2):
+    """Common setup for GR/LR tile assignment asm generation.
+
+    Args:
+        cfg:     TileConfig with tile geometry and stride parameters.
+        emitter: Callable (writer, kernel) -> module that generates the tile asm.
+        geometry, inst_k, bpe: passed to create_writer.
+
+    Returns:
+        (asm, writer, tileInfoA, tileInfoB, kernel)
+    """
+    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg, geometry=geometry, inst_k=inst_k, bpe=bpe)
+    init_rocisa()
+    # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
+    # s[4:5]=output ptr, s[6:9]=padding, s10=StrideA0I, s11=StrideB1J
+    writer.sgprPool.checkOut(12, tag="_generate_tile_asm_sgprs")
+    writer.sgprs["StrideA0I"] = 10
+    writer.sgprs["StrideB1J"] = 11
+    tileInfoA.allocOffsetRegisters(writer, kernel)
+    tileInfoB.allocOffsetRegisters(writer, kernel)
+    # Kernarg layout (same for all data types — strides are always u32, ptr is u64):
+    # (dst_sgpr, count_dwords, byte_offset, comment)
+    load_params = (
+        (4,           2, 0x00, "output_ptr"),  # s[4:5] = 64-bit output buffer pointer
+        ("StrideA0I", 1, 0x08, "strideA"),    # s10    = stride for A (elements)
+        ("StrideB1J", 1, 0x0c, "strideB"),    # s11    = stride for B (elements)
+    )
+    prologue = generate_load_params(load_params)
+    module = emitter(writer, kernel)
+    asm = f"{prologue}\n{module}"
+    return asm, writer, tileInfoA, tileInfoB, kernel
+
+
+def generate_gra_asm(cfg, geometry=None, inst_k=32, bpe=2):
+    """Run graTileAssignment and return (gra_asm, writer, tileInfoA, tileInfoB, kernel)."""
+    return _generate_tile_asm(
+        cfg,
+        lambda w, k: graTileAssignment(w, k, useSwizzling=cfg.use_swizzling),
+        geometry=geometry, inst_k=inst_k, bpe=bpe,
+    )
+
+
+def generate_lra_asm(cfg, geometry=None, inst_k=32, bpe=2):
+    """Run lraTileAssignment and return (lra_asm, writer, tileInfoA, tileInfoB, kernel)."""
+    return _generate_tile_asm(cfg, lraTileAssignment, geometry=geometry, inst_k=inst_k, bpe=bpe)
+
+
+def compute_expected_subtile(regId, stride, tileInfo, bpe):
+    """Expected subtile soffset register value: rowOffset * bpe * regId * stride.
+
+    rowOffset is 2*subtileSize when loadRatioGR==2.0 (two subtiles per GR), else subtileSize.
+    """
+    subtileSize = tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0]
+    rowOffset = 2 * subtileSize if tileInfo.loadRatioGR == 2.0 else subtileSize
+    return rowOffset * bpe * regId * stride
+
+
+def export_register(writer, test_asm, export_reg, is_sgpr, cfg, tmp_path, label):
+    """Generate export kernel, assemble, run, return per-thread u32 results."""
+    # Must match load_params layout in generate_gra_asm (same for all data types)
+    # (name, size_bytes, value_kind, value_type)
+    export_args = (
+        ("output_ptr", 8, "global_buffer", "u32"),  # 64-bit pointer to output buffer
+        ("strideA",    4, "by_value",      "u32"),  # stride for A in elements
+        ("strideB",    4, "by_value",      "u32"),  # stride for B in elements
+    )
+    epilogue, allocated = generate_export_epilogue(writer, export_reg, is_sgpr)
+    kernel_asm = generate_kernel_asm(f"{test_asm}\n{epilogue}", writer, export_args)
+    for v in allocated:
+        writer.vgprPool.checkIn(v)
+    raw = assemble_and_run(kernel_asm, tmp_path, label, NUM_THREADS * 4,
+                           scalars=(cfg.stride_a, cfg.stride_b))
+    return struct.unpack(f"{NUM_THREADS}I", raw)
 
 
 def generate_set_directives(sgprs):
@@ -222,9 +332,16 @@ def generate_set_directives(sgprs):
     return "\n".join(f".set sgpr{name}, {idx}" for name, idx in sgprs.items())
 
 
-def init_rocisa():
+def init_rocisa(target=None, wavesize=None):
     """Initialize rocIsa singleton for the detected GPU target.
-
+    Args:
+        target: Optional gfx string (e.g. 'gfx950'). When None (default), we
+                use GFX_TARGET as detected from the host via
+                rocm_agent_enumerator. Passing an explicit target is required
+                only by tests whose assertions are tied to a specific ISA's
+                opcode mnemonics (mfma vs wmma).
+        wavesize: Optional wavefront size for ri.setKernel. Defaults to WAVESIZE
+                (wave64); wave32 targets (e.g. gfx1250) pass 32.
     Always calls ri.init() because other module imports (e.g. KernelWriter)
     may have already initialized the singleton with a different target.
     """
@@ -232,12 +349,13 @@ def init_rocisa():
     from rocisa import rocIsa
     from Tensile.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
-    if not GFX_TARGET:
-        raise ValueError(f"Invalid GPU target: '{GFX_TARGET}'")
-    isa = gfxToIsa(GFX_TARGET)
+    gfx_target = target if target is not None else GFX_TARGET
+    if not gfx_target:
+        raise ValueError(f"Invalid GPU target: '{gfx_target}'")
+    isa = gfxToIsa(gfx_target)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
-    ri.setKernel(isa, WAVESIZE)
+    ri.setKernel(isa, wavesize if wavesize is not None else WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
@@ -445,25 +563,35 @@ def generate_export_epilogue(writer, export_reg, is_sgpr=False):
 
 # ---- Assemble / run ----
 
-def assemble_kernel(asm_source, output_path):
-    """Assemble .s source to .co code object."""
+def assemble_kernel(asm_source, output_path, wavefront_size=64):
+    """Assemble .s source to .co code object.
+
+    Args:
+        wavefront_size: wave size to pass via -mwavefrontsize. 64 (default) for
+            wave64 targets. Pass None to omit the flag entirely and let the
+            target's native default apply (e.g. gfx1250, which is wave32 and
+            whose assembler does not accept -mwavefrontsize32).
+    """
     with tempfile.NamedTemporaryFile(suffix=".s", mode="w", delete=False) as f:
         f.write(asm_source)
         asm_path = f.name
 
     obj_path = asm_path.replace(".s", ".o")
 
+    cmd = [
+        "amdclang++", "-x", "assembler",
+        "--target=amdgcn-amd-amdhsa",
+        f"-mcpu={GFX_TARGET}",
+    ]
+    if wavefront_size is not None:
+        cmd.append(f"-mwavefrontsize{wavefront_size}")
+    cmd += ["-mcode-object-version=5", "-o", obj_path, asm_path]
+
     try:
-        subprocess.check_call([
-            "amdclang++", "-x", "assembler",
-            "--target=amdgcn-amd-amdhsa",
-            f"-mcpu={GFX_TARGET}",
-            "-mwavefrontsize64",
-            "-mcode-object-version=5",
-            "-o", obj_path,
-            asm_path
-        ])
-        os.rename(obj_path, output_path)
+        subprocess.check_call(cmd)
+        # shutil.move (not os.rename) so the temp .o in /tmp can land on a
+        # different filesystem than output_path without Errno 18 (EXDEV).
+        shutil.move(obj_path, output_path)
     finally:
         if os.path.exists(asm_path):
             os.unlink(asm_path)
@@ -471,7 +599,7 @@ def assemble_kernel(asm_source, output_path):
             os.unlink(obj_path)
 
 
-def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None):
+def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None, grid=1):
     """Load code object, launch kernel, read output buffer.
 
     Builds the kernarg struct dynamically: one u64 per input buffer pointer,
@@ -528,9 +656,15 @@ def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_thre
         ctypes.c_void_p(0x03),  # HIP_LAUNCH_PARAM_END
     )
 
+    if isinstance(grid, (tuple, list)):
+        gx = grid[0] if len(grid) > 0 else 1
+        gy = grid[1] if len(grid) > 1 else 1
+        gz = grid[2] if len(grid) > 2 else 1
+    else:
+        gx, gy, gz = grid, 1, 1
     hip_check(hip.hipModuleLaunchKernel(
         kernel,
-        1, 1, 1,
+        gx, gy, gz,
         num_threads, 1, 1,
         lds_size,
         None,
@@ -559,6 +693,155 @@ def assemble_and_run(asm, tmp_path, label, output_size, inputs=(), scalars=(), l
     assemble_kernel(asm, co_path)
     return run_on_gpu(co_path, output_size, inputs=inputs, scalars=scalars, lds_size=lds_size, num_threads=num_threads)
 
+
+
+# ---- Roundtrip kernel helpers ----
+
+def generate_srd_setup():
+    """Generate SRD buffer descriptor setup for A and B.
+
+    Kernarg layout (set by build_roundtrip_inner_asm prologue):
+      s[4:5] = input_A_ptr, s[6:7] = input_B_ptr, s[8:9] = output_ptr
+    SRD descriptor fields (4 dwords):
+      [0:1] = base address (64-bit), [2] = NumRecords, [3] = descriptor flags
+    """
+    module = Module("SRD setup")
+    module.add(SMovB64(dst=sgpr("SrdA+0", 2), src=sgpr(4, 2), comment="SrdA base = s[4:5] = input_A_ptr"))
+    module.add(SMovB32(dst=sgpr("SrdA+2"), src="0xFFFFFFFF",   comment="SrdA NumRecords = max (no bounds check)"))
+    module.add(SMovB32(dst=sgpr("SrdA+3"), src="0x20000",      comment="SrdA OOB_SELECT=2 (raw buffer)"))
+    module.add(SMovB64(dst=sgpr("SrdB+0", 2), src=sgpr(6, 2), comment="SrdB base = s[6:7] = input_B_ptr"))
+    module.add(SMovB32(dst=sgpr("SrdB+2"), src="0xFFFFFFFF",   comment="SrdB NumRecords = max (no bounds check)"))
+    module.add(SMovB32(dst=sgpr("SrdB+3"), src="0x20000",      comment="SrdB OOB_SELECT=2 (raw buffer)"))
+    return module
+
+
+def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2):
+    """Create and configure a writer for roundtrip kernel tests.
+
+    Calls create_writer, reserves sgprs for HW regs + strides + SRD + DTL + swap,
+    computes LDS size, and allocates vgprTile registers.
+
+    Returns:
+        (writer, kernel, tileInfoA, tileInfoB, lds_size)
+    """
+    init_rocisa()
+    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg, geometry=geometry, inst_k=inst_k, bpe=bpe)
+
+    # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
+    # s[4:5]=input_A_ptr, s[6:7]=input_B_ptr, s[8:9]=output_ptr,
+    # s10=StrideA0I, s11=StrideB1J
+    writer.sgprPool.checkOut(12, tag="_setup_roundtrip_writer_sgprs")
+    writer.sgprs["StrideA0I"] = 10
+    writer.sgprs["StrideB1J"] = 11
+    tileInfoA.allocOffsetRegisters(writer, kernel)
+    tileInfoB.allocOffsetRegisters(writer, kernel)
+
+    # SRD descriptors: 4 dwords each, aligned to 4-dword boundary
+    writer.sgprs["SrdA"] = writer.sgprPool.checkOutAligned(4, 4, "SrdA", preventOverflow=False)
+    writer.sgprs["SrdB"] = writer.sgprPool.checkOutAligned(4, 4, "SrdB", preventOverflow=False)
+    writer.sgprs["LocalWriteBaseAddrA"]  = writer.sgprPool.checkOut(1, "LocalWriteBaseAddrA",  preventOverflow=False)
+    writer.sgprs["LocalWriteDTLOffsetA"] = writer.sgprPool.checkOut(1, "LocalWriteDTLOffsetA", preventOverflow=False)
+    writer.sgprs["LocalWriteBaseAddrB"]  = writer.sgprPool.checkOut(1, "LocalWriteBaseAddrB",  preventOverflow=False)
+    writer.sgprs["LocalWriteDTLOffsetB"] = writer.sgprPool.checkOut(1, "LocalWriteDTLOffsetB", preventOverflow=False)
+    writer.sgprs["SwapA"] = writer.sgprPool.checkOut(1, "SwapA", preventOverflow=False)
+    writer.sgprs["SwapB"] = writer.sgprPool.checkOut(1, "SwapB", preventOverflow=False)
+
+    # LDS layout: align A and B to readSize = 2*subtileSize (DTL reads 2 subtiles at once).
+    # Matches production formula in KernelWriter.py.
+    readSize     = 2 * tileInfoA.subtileSize
+    numASubtiles = tileInfoA.globalSubtileGrid[0] * tileInfoA.globalSubtileGrid[1]
+    numBSubtiles = tileInfoB.globalSubtileGrid[0] * tileInfoB.globalSubtileGrid[1]
+    sizeA = ((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize
+    sizeB = ((numBSubtiles * tileInfoB.subtileSize + readSize - 1) // readSize) * readSize
+    lds_size = int(sizeA + sizeB)
+    writer.ldsTotalSize = lds_size
+
+    tileInfoA.allocVgprTileRegisters_legacy(writer, kernel)
+    tileInfoB.allocVgprTileRegisters_legacy(writer, kernel)
+
+    return writer, kernel, tileInfoA, tileInfoB, lds_size
+
+
+def collect_tile_vgprs(tileInfoA, tileInfoB):
+    """Return the set of all vgpr indices used by tile and offset registers."""
+    used = set()
+    for tileInfo in (tileInfoA, tileInfoB):
+        for t in tileInfo.vgprTiles:
+            used.update(t.regList.indices)
+        used.update(tileInfo.sharedVgprGROffset)
+        used.update(tileInfo.sharedVgprLROffset)
+    return used
+
+
+def alloc_export_vgprs(tileInfoA, tileInfoB):
+    """Find free vgpr temporaries for export assembly (tmp, addr_lo, addr_hi).
+
+    Scans all vgprTile registers plus GR/LR offset registers to find the
+    next free vgpr, then allocates tmp (any), addr_lo (even-aligned), addr_hi.
+
+    Returns:
+        (tmp, addr_lo, addr_hi, next_v)
+    """
+    all_used = collect_tile_vgprs(tileInfoA, tileInfoB)
+
+    next_v = max(all_used | {0}) + 1
+    tmp = next_v; next_v += 1
+    if next_v % 2 != 0:
+        next_v += 1
+    addr_lo = next_v; next_v += 1
+    addr_hi = next_v; next_v += 1
+    return tmp, addr_lo, addr_hi, next_v
+
+
+def build_roundtrip_inner_asm(writer, kernel, export_asm):
+    """Generate the inner assembly for a GR->LDS->LR roundtrip kernel.
+
+    Emits: prologue, SRD setup, GRA, LRA, DTL init, global reads (A+B),
+    wait, barrier, local reads (A+B), wait, then the provided export_asm.
+
+    Args:
+        writer:     Configured writer (from setup_roundtrip_writer).
+        kernel:     Kernel dict.
+        export_asm: Assembly string for exporting tile registers.
+
+    Returns:
+        inner_asm string.
+    """
+    gra_module  = graTileAssignment(writer, kernel, useSwizzling=True)
+    lra_module  = lraTileAssignment(writer, kernel)
+    dtl_module  = globalReadDTLInitCommonSgpr(writer, kernel)
+    gr_a_module = globalReadDoSubtile('A', writer, kernel)
+    gr_b_module = globalReadDoSubtile('B', writer, kernel)
+    wait_gr     = SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1)   # wait for global reads
+    barrier     = SBarrier()
+    lr_a_module = localReadDoSubtile('A', writer, kernel)
+    lr_b_module = localReadDoSubtile('B', writer, kernel)
+    wait_lr     = SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1)   # wait for local reads
+
+    # Kernarg layout (two s_load_dwordx4 covering all 5 args):
+    #   offset 0x00: s[4:5]=input_A_ptr (8B), s[6:7]=input_B_ptr (8B)
+    #   offset 0x10: s[8:9]=output_ptr (8B), s10=strideA (4B), s11=strideB (4B)
+    prologue   = generate_load_params([
+        (4, 4, 0x00, "input_A_ptr + input_B_ptr"),
+        (8, 4, 0x10, "output_ptr + strideA + strideB"),
+    ])
+    srd_module = generate_srd_setup()
+
+    return "\n".join([
+        str(prologue),
+        str(srd_module),
+        str(gra_module),
+        str(lra_module),
+        str(dtl_module),
+        str(gr_a_module),
+        str(gr_b_module),
+        str(wait_gr),
+        str(barrier),
+        str(lr_a_module),
+        str(lr_b_module),
+        str(wait_lr),
+        str(export_asm),
+    ])
 
 
 # ---- Utilities ----

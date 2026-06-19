@@ -111,6 +111,19 @@ fetch_gtest_dependency()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+# Copy integration test bundles into the build tree so tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
+# NOTE: file(COPY) runs at configure time only. If you add or modify files
+# under integration_test_bundles/, re-run cmake to pick up the changes.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration_test_bundles/"
+     DESTINATION "${CMAKE_BINARY_DIR}/lib/integration_test_bundles")
+
+# Install integration test bundles so installed tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration_test_bundles"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
 set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}

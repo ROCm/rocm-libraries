@@ -9,7 +9,11 @@
 
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/host/device_prop.hpp"
+#ifdef CK_TILE_DISPATCHER
+#include "profiler/grouped_convolution_backward_weight_tile_dispatcher_algs.hpp"
+#else
 #include "profiler/grouped_convolution_backward_weight_tile_algs.hpp"
+#endif
 
 static ck::index_t args_mask      = 0xffff;
 static ck::index_t instance_index = -1;
@@ -48,7 +52,7 @@ class TestGroupedConvndBwdWeightTile : public ::testing::Test
                            .output = {.config = {.layout = SignatureDetailsType::out_layout}}};
 
     std::vector<ckt::Args<SIGNATURE>> conv_args;
-    std::vector<std::string> split_ks{"-1", "1", "2"};
+    std::vector<std::string> split_ks{"-1", "1", "2", "64"};
 
     template <ck::index_t NDimSpatial>
     void Run()

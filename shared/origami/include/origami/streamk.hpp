@@ -28,6 +28,7 @@
 
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 #include <vector>
 
@@ -43,7 +44,7 @@ namespace streamk {
  * @param batch Number of batches.
  * @return size_t Total number of output tiles.
  */
-size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
+ORIGAMI_EXPORT size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
 
 /**
  * @brief Sweep fractional denominators to find an SK grid that fits in workspace.
@@ -66,11 +67,11 @@ size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t
  *                         Conventional default is {0.0, 0.5, 0.125, 0.2, 0.25, 1.0/3.0}.
  * @return size_t The chosen sk_grid, or 0 if no candidate satisfies the constraints.
  */
-size_t pick_fractional_grid(size_t tiles,
-                            size_t cu_count,
-                            size_t tile_size,
-                            size_t workspace_limit,
-                            const std::vector<double>& tile_fractions);
+ORIGAMI_EXPORT size_t pick_fractional_grid(size_t tiles,
+                                           size_t cu_count,
+                                           size_t tile_size,
+                                           size_t workspace_limit,
+                                           const std::vector<double>& tile_fractions);
 
 /**
  * @brief Pick a K-split factor when there are fewer tiles than CUs.
@@ -89,11 +90,11 @@ size_t pick_fractional_grid(size_t tiles,
  * @param min_iters_per_cu  Lower bound on iterations per CU (default 8).
  * @return size_t `tiles * f` for the first satisfying `f`, or 0 if none.
  */
-size_t pick_k_split(size_t tiles,
-                    size_t cu_count,
-                    size_t iters_per_tile,
-                    const std::vector<size_t>& k_split_factors,
-                    int min_iters_per_cu = 8);
+ORIGAMI_EXPORT size_t pick_k_split(size_t tiles,
+                                   size_t cu_count,
+                                   size_t iters_per_tile,
+                                   const std::vector<size_t>& k_split_factors,
+                                   int min_iters_per_cu = 8);
 
 /**
  * @brief Select the best reduction strategy for StreamK.
@@ -104,7 +105,7 @@ size_t pick_k_split(size_t tiles,
  * @param algorithm Grid selection algorithm
  * @return reduction_t Selected reduction strategy
  */
-reduction_t select_reduction(const problem_t& problem,
+ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              grid_selection_t algorithm);
@@ -119,11 +120,31 @@ reduction_t select_reduction(const problem_t& problem,
  * @param max_cus Maximum number of CUs to use.
  * @return size_t Dimensions of the grid launched.
  */
-size_t select_grid_size(const problem_t& problem,
+ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm,
                         size_t max_cus = 0);
+
+/**
+ * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
+ *
+ * Calibrated table-driven heuristic. Thresholds were tuned on MI350
+ * (gfx950, f16) in June 2026; problems whose macro-tile shape is not
+ * in the table fall through to a safe default of 2.0 tiles/CU.
+ *
+ * @param problem            Problem description (M, N, K, batch).
+ * @param hardware           Hardware characteristics (@see origami::hardware_t).
+ * @param config             Kernel configuration (provides MT shape).
+ * @param sm_count_target    Caller's effective CU budget (0 = use all
+ *                           CUs the device exposes). When non-zero,
+ *                           clamps hardware.N_CU from above.
+ * @return hybrid_mode_t::static_ for SK3, hybrid_mode_t::dynamic for SK4.
+ */
+ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+                                 const hardware_t& hardware,
+                                 const config_t& config,
+                                 size_t sm_count_target);
 
 }  // namespace streamk
 }  // namespace origami

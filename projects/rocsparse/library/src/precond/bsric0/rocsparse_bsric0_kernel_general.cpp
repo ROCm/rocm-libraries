@@ -191,7 +191,7 @@ namespace rocsparse
                                     }
 
                                     // If a match has been found, do linear combination
-                                    local_sum = rocsparse::fma(vp, rocsparse::conj(vj), local_sum);
+                                    local_sum = rocsparse::fma(vj, rocsparse::conj(vp), local_sum);
                                 }
                             }
                         }
@@ -279,7 +279,7 @@ namespace rocsparse
                             }
 
                             // If a match has been found, do linear combination
-                            local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                            local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                         }
                     }
 
@@ -301,7 +301,7 @@ namespace rocsparse
                         }
 
                         // If a match has been found, do linear combination
-                        local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                        local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                     }
 
                     val     = (val - local_sum) / diag_val;
@@ -413,7 +413,7 @@ namespace rocsparse
             return rocsparse::
                 bsric0_kernel_general_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -438,7 +438,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

@@ -26,6 +26,7 @@
 
 #include "program_options.hpp"
 
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_parse_data.hpp"
@@ -516,6 +517,10 @@ try
          bool_switch(&arg.bias_vector)->default_value(false),
          "Apply bias vector")
 
+        ("bias_stride",
+         value<int32_t>(&arg.bias_stride)->default_value(0),
+         "Stride within bias vector for strided batch cases where each batch has unique bias value.")
+
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
          "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
@@ -627,6 +632,19 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("sm_count_target",
+         value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
+         "Target compute-unit (CU) count for the matmul kernel selection and "
+         "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
+         "Negative values are rejected by the library.")
+
+        ("streamk_tile_scheduling",
+         value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
+         "Select the StreamK=5 tile scheduling sub-path via the "
+         "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
+         "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
+         "leaves the attribute unset so the library default (auto) applies.")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");
@@ -731,6 +749,38 @@ try
         hipblaslt_cerr << "Currently workgroup mapping only supports api_method mix or cpp."
                        << std::endl;
         return 1;
+    }
+
+    if(hipblaslt_bench_options::sm_count_target() < 0)
+    {
+        hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
+        return 1;
+    }
+
+    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
+    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
+    // means "unset": leave the attribute untouched so the library default applies.
+    {
+        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        int32_t resolved = -1;
+        if(mode.empty())
+            resolved = -1;
+        else if(mode == "off" || mode == "0")
+            resolved = 0;
+        else if(mode == "on" || mode == "1")
+            resolved = 1;
+        else if(mode == "auto" || mode == "2")
+            resolved = 2;
+        else
+        {
+            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
+                           << std::endl;
+            return 1;
+        }
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
     }
 
     // transfer local variable state
@@ -881,11 +931,27 @@ try
     if(arg.initialization == static_cast<hipblaslt_initialization>(0))
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
 
+    if(vm["initialization"].defaulted()
+       && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
+    {
+        arg.initialization = hipblaslt_initialization::uniform_low_precision;
+        hipblaslt_cerr << "Note: 'hpl' init produces ~50% zero rate for FP4. "
+                       << "Using 'uniform_low_precision' for FP4 by default. "
+                       << "Use '--initialization hpl' to override." << std::endl;
+    }
+
     arg.activation_type = string_to_hipblaslt_activation_type(activation_type);
     if(arg.activation_type == static_cast<hipblaslt_activation_type>(-1))
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N when bias source is B and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is D and batch_mode is 0.");
 
     if(!(aux_type == "" || aux_type == "default" || arg.use_e))
         hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;

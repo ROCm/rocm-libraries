@@ -34,6 +34,7 @@
 #include "origami/hardware.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 /**
@@ -91,12 +92,29 @@ struct heuristic_defaults_t {
 };
 
 /**
+ * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
+ *
+ * tiles_per_cu thresholds for MI350X (gfx950), derived from a regression over a
+ * random sample of problem sizes. When tiles_per_cu >= the per-macrotile
+ * threshold the dynamic (SK4) sub-path is selected, otherwise the static (SK3)
+ * sub-path is used. Macrotiles not listed here always use the static sub-path.
+ * Thresholds for other architectures will be added in a follow-up PR.
+ */
+struct streamk_hybrid_defaults_t {
+  static constexpr double THRESHOLD_MT_64X64   = 7.22;
+  static constexpr double THRESHOLD_MT_128X128 = 2.08;
+  static constexpr double THRESHOLD_MT_128X256 = 2.58;
+  static constexpr double THRESHOLD_MT_256X128 = 0.87;
+  static constexpr double THRESHOLD_DEFAULT    = 2.0;
+};
+
+/**
  * @brief Structure containing all trainable heuristic parameters.
  *
  * This structure consolidates all empirical constants and weights used in
  * the latency model, making them trainable and configuration-driven.
  */
-struct heuristic_params_t {
+struct ORIGAMI_EXPORT heuristic_params_t {
   // === Latency Component Weights ===
   double weight_mem_l2        = heuristic_defaults_t::WEIGHT_MEM_L2;
   double weight_mem_mall      = heuristic_defaults_t::WEIGHT_MEM_MALL;
@@ -144,25 +162,43 @@ struct heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
+  // === Kernel Rejection ===
+  /// When true, the kernel is rejected: its predicted latency is forced to the
+  /// maximum so that rank_configs() drops it from selection entirely.
+  bool reject = false;
+
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
    *
-   * Default-aware overlay: a field in `other` overrides the corresponding
-   * field in `*this` only if it has been changed away from the
-   * default-constructed value. Fields that `other` left at default are
-   * treated as "no opinion" and leave `*this` unchanged.
+   * Overwrite-everything composition: every field of `*this` is replaced by
+   * the corresponding field of `other`, regardless of whether `other` left it
+   * at the default. Used by origami::heuristics_database_t::lookup to fold the
+   * matching entries together in increasing-specificity order, so the
+   * most-specific matching entry wins outright. This is the established
+   * Tensile/hipBLASLt selection behavior and must stay byte-for-byte stable.
    *
-   * This is what makes hierarchical lookup compose cleanly: a more-specific
-   * entry that touches one knob does not silently clobber tuning that a
-   * broader entry contributed to other knobs, and a target-specific overlay
-   * (e.g. Triton) can be merged onto a tuned base without erasing it.
+   * For delta-style overlays that should only touch the fields the overlay
+   * explicitly opines on (e.g. the Triton tuning), use overlay_with instead.
+   */
+  void merge_with(const heuristic_params_t& other);
+
+  /**
+   * @brief Overlay another parameter set on top of this one (default-aware).
+   *
+   * A field in `other` overrides the corresponding field in `*this` only if it
+   * has been changed away from the default-constructed value. Fields that
+   * `other` left at default are treated as "no opinion" and leave `*this`
+   * unchanged. This lets a target-specific overlay (e.g. Triton) be applied on
+   * top of a base heuristic without clobbering the fields it does not touch,
+   * and is used to compose the Triton heuristics database without disturbing
+   * the Tensile/hipBLASLt path (which uses merge_with).
    *
    * @note Caveat: a field whose default is exactly 0 cannot currently be
    * driven back to 0 by an overlay. None exist today; if one is added, pick
    * a sentinel default or extend this struct with explicit "is_set"
    * bookkeeping.
    */
-  void merge_with(const heuristic_params_t& other);
+  void overlay_with(const heuristic_params_t& other);
 };
 
 /**
@@ -171,7 +207,7 @@ struct heuristic_params_t {
  * This key captures all relevant characteristics that might affect
  * heuristic parameter selection. Fields can be wildcards (using optional).
  */
-struct heuristic_key_t {
+struct ORIGAMI_EXPORT heuristic_key_t {
   std::optional<hardware_t::architecture_t> arch;
   std::optional<data_type_t> a_dtype;
   std::optional<data_type_t> b_dtype;
@@ -182,6 +218,7 @@ struct heuristic_key_t {
   std::optional<size_t> mt_n;
   std::optional<size_t> mt_k;
   std::optional<bool> hand_optimized_main_loop;
+  std::optional<bool> subtile;
 
   // For problem-size dependent heuristics
   std::optional<size_t> min_m;
@@ -262,7 +299,7 @@ struct hand_optimized_kernel_key_hash {
  * - Do NOT call add_entry() after the singleton is initialized and
  *   multiple threads may be accessing the database
  */
-class heuristics_database_t {
+class ORIGAMI_EXPORT heuristics_database_t {
  public:
   /**
    * @brief Lookup heuristic parameters for given problem/hardware/config.
@@ -334,7 +371,7 @@ inline heuristic_params_t get_heuristic_params(const problem_t& problem,
 /**
  * @brief Helper to create a key for hand-optimized kernels
  */
-heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
+ORIGAMI_EXPORT heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
                                                data_type_t mi_dtype,
                                                transpose_t transA,
                                                transpose_t transB,
@@ -345,7 +382,7 @@ heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
 /**
  * @brief Helper to create a key for tile configuration.
  */
-heuristic_key_t make_tile_key(size_t MT_M,
+ORIGAMI_EXPORT heuristic_key_t make_tile_key(size_t MT_M,
                               size_t MT_N,
                               size_t MT_K,
                               std::optional<transpose_t> transA = std::nullopt,
@@ -354,6 +391,6 @@ heuristic_key_t make_tile_key(size_t MT_M,
 /**
  * @brief Helper to create a key for architecture/datatype combination.
  */
-heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
+ORIGAMI_EXPORT heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
 
 }  // namespace origami

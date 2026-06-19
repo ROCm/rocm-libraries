@@ -82,15 +82,18 @@ protected:
         auto& oTensor = bundle.getTensor(_oUid);
         auto& statsTensor = bundle.getTensor(_statsUid);
 
-        ShallowTensor<DataType> shallowQ(qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
-        ShallowTensor<DataType> shallowK(kTensor.rawHostData(), kTensor.dims(), kTensor.strides());
-        ShallowTensor<DataType> shallowV(vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
+        const ShallowTensor<DataType> shallowQ(
+            qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
+        const ShallowTensor<DataType> shallowK(
+            kTensor.rawHostData(), kTensor.dims(), kTensor.strides());
+        const ShallowTensor<DataType> shallowV(
+            vTensor.rawHostData(), vTensor.dims(), vTensor.strides());
         ShallowTensor<DataType> shallowO(oTensor.rawHostData(), oTensor.dims(), oTensor.strides());
         // Stats (LSE) is [B, H_q, S_q] for the CPU reference, but the graph may
         // lower it as 4D. Use the correct 3D dims with contiguous strides.
-        std::vector<int64_t> statsDims3d
+        const std::vector<int64_t> statsDims3d
             = {qTensor.dims()[0], qTensor.dims()[1], qTensor.dims()[2]};
-        std::vector<int64_t> statsStrides3d = generateStrides(statsDims3d);
+        const std::vector<int64_t> statsStrides3d = generateStrides(statsDims3d);
         ShallowTensor<float> shallowStats(statsTensor.rawHostData(), statsDims3d, statsStrides3d);
 
         CpuFpReferenceSdpa::forward<DataType, DataType, DataType, DataType, float>(
@@ -126,7 +129,8 @@ protected:
         const auto& doStrides = oStrides;
 
         // Stats (LSE) dims: [B, H_q, S_q] with contiguous strides
-        std::vector<int64_t> statsDims = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
+        const std::vector<int64_t> statsDims
+            = {testCase.qDims[0], testCase.qDims[1], testCase.qDims[2]};
         auto statsStrides = generateStrides(statsDims);
 
         Graph graph;
@@ -208,23 +212,49 @@ private:
 
 using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;
 
+using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 {
-    // BF16 backward accumulates significant rounding error through softmax
-    // recomputation (exp/log with 7-bit mantissa). Flash Attention uses a
-    // relative-to-reference approach (3x baseline error), and PyTorch's own
-    // BF16 backward SDPA test is disabled on MI350 CI. Use generous tolerance
-    // for this smoke test; most values match within 5-15%. Outliers occur at
-    // positions where |ref| ≈ 0 and softmax probability differences amplify.
-    // Tolerance: 2e0 (atol=2.0, rtol=2.0)
+    // BF16 backward error comes from two sources:
+    // 1. Softmax recomputation divergence: GPU ASM kernel and CPU FP32 reference
+    //    compute exp(score - lse) with different rounding (BF16 hw vs FP32 scalar).
+    //    At positions where softmax probability is near-zero, small probability
+    //    differences produce large absolute gradient errors.
+    // 2. Inherent BF16 precision: 7-bit mantissa causes rounding at each
+    //    arithmetic step. The backward pass compounds this through softmax
+    //    recomputation, dS = P*(dP-D) catastrophic cancellation, and gradient
+    //    matmuls.
+    //
+    // The CPU reference accumulates dQ/dK/dV in FP32 and converts to BF16 once
+    // at the end, matching the GPU kernel's A32 accumulator + dq_convert path.
+    //
+    // Measured error floor (worst seed across 8 seeds): between 0.3 and 0.5.
+    // Use 5e-1 — same as FP16 backward, with ~2x margin over the measured floor
+    // of 0.3. Verified stable across seeds {0,42,123,456,789,1024,2048,31415}.
 
-    auto tolerance = 2e0f;
+    auto tolerance = 5e-1f;
 
     runGraphTest(tolerance);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdBf16,
+                         testing::ValuesIn(getSdpaBwdTestCases()));
+
+TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
+{
+    // FP16 backward has the same error sources as BF16 but the 10-bit mantissa
+    // (vs BF16's 7) yields tighter results. Worst-case element lands under 0.25.
+    // Use 5e-1 — ~2x margin over that measured floor.
+
+    auto tolerance = 5e-1f;
+
+    runGraphTest(tolerance);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaBwdFp16,
                          testing::ValuesIn(getSdpaBwdTestCases()));

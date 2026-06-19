@@ -32,8 +32,10 @@ heuristic_params_t heuristics_database_t::lookup(
   std::sort(matches.begin(), matches.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
 
+  // Triton entries are delta overlays (each opines on a few fields), so
+  // compose them with the default-aware overlay rather than overwrite-all.
   for (const auto& [spec, params] : matches)
-    result.merge_with(*params);
+    result.overlay_with(*params);
 
   return result;
 }

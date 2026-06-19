@@ -9,15 +9,13 @@
 
 # ubuntu-20.04 = focal
 # ubuntu-22.04 = jammy
-FROM mcr.microsoft.com/devcontainers/base:jammy
+# ubuntu-24.04 = noble
+FROM mcr.microsoft.com/devcontainers/base:noble
 
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Propagate the environment variable HTTP_PROXY into the apt config if it's set.
 RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/proxy)
-
-# Add PPA with g++-13
-RUN apt-get update && apt-get reinstall -y software-properties-common && add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 RUN apt-get update && apt-get install -y \
    bc \

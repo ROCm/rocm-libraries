@@ -16,6 +16,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Sanitizer support for Address Sanitizer when enabled in the enviornment.
+option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+if(BUILD_ADDRESS_SANITIZER AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+        OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address -fno-omit-frame-pointer -shared-libasan)
+    add_compile_definitions(ADDRESS_SANITIZER)
+endif()
+
+# Optional test environment variables. Pass -DTEST_ENVIRONMENT="VAR1=val1;VAR2=val2".
+set(TEST_ENVIRONMENT "" CACHE STRING "Environment variables to set when running tests")
+
 # =============================================================================
 # Output directories
 # =============================================================================
@@ -34,9 +51,10 @@ option(EXAMPLEPROVIDER_BUILD_SAMPLE "Build sample application (requires hipdnn_f
 # then configure with -DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY=ON.
 option(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY "Enable clang-tidy checks during compilation" OFF)
 if(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY AND NOT DEFINED CMAKE_CXX_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
         set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+        message(STATUS "Found clang-tidy: ${CMAKE_CXX_CLANG_TIDY}")
     else()
         message(FATAL_ERROR "EXAMPLEPROVIDER_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
     endif()

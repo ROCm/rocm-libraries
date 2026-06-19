@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "origami/hardware.hpp"
+#include "origami/origami_export.h"
 #include "origami/types.hpp"
 
 namespace origami::triton {
@@ -27,9 +28,9 @@ namespace origami::triton {
  * @param hardware Hardware description (uses `N_CU`).
  * @return std::size_t StreamK grid size.
  */
-std::size_t compute_sk_grid(const problem_t&  problem,
-                            const config_t&   config,
-                            const hardware_t& hardware);
+ORIGAMI_EXPORT std::size_t compute_sk_grid(const problem_t&  problem,
+                                           const config_t&   config,
+                                           const hardware_t& hardware);
 
 /**
  * @brief Default tile candidate configs for a Triton kernel on this hardware.
@@ -55,7 +56,7 @@ std::size_t compute_sk_grid(const problem_t&  problem,
  * @param hardware Hardware description (uses `arch`).
  * @return std::vector<config_t> Flat list of candidate tile configs.
  */
-std::vector<config_t> get_default_configs(const problem_t&  problem,
-                                          const hardware_t& hardware);
+ORIGAMI_EXPORT std::vector<config_t> get_default_configs(const problem_t&  problem,
+                                                         const hardware_t& hardware);
 
 }  // namespace origami::triton
