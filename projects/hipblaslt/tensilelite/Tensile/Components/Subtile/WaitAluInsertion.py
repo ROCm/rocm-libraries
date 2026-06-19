@@ -49,7 +49,7 @@ def setMatrixAReuse(module, writer, kernel):
   return module
 
 
-def insertLRSwapWaitAlu(module, writer, kernel):
+def insertLRSwapRawWaitAlu(module, writer, kernel):
   """Guard the LR offset-swap -> ds_read RAW hazard.
 
   For each swap window, if fewer than MIN_MMA_BEFORE_LR_READ WMMAs separate the
