@@ -24,8 +24,15 @@
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.AsmRegisterPool import RegisterPool
+from Tensile.KernelWriter import KernelWriter
+from Tensile.Common import globalParameters
 import collections
+import inspect
 from types import SimpleNamespace
+
+class KernelDict(dict):
+    def __getattr__(self, name):
+        return self[name]
 
 def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
     kw = KernelWriterAssembly("","")
@@ -46,6 +53,36 @@ def test_gfx9_barrier_assembly_stays_plain_s_barrier():
 
     assert kw.syncStr == "s_barrier"
     assert kw.defineBarrierMacros() == ""
+
+def test_gfx9_sync_threads_emits_plain_s_barrier():
+    isa = (9, 0, 0)
+    oldArchCaps = globalParameters.get("ArchCaps")
+    globalParameters["ArchCaps"] = {isa: {"SeparateVscnt": False, "Waitcnt0Disabled": False}}
+    kw = KernelWriterAssembly("","")
+    kw.version = isa
+    kw.kernel = {"WavefrontSize": 32}
+    kw.do = {"Sync": True}
+    kw.prefetchAcrossPersistent = False
+    kernel = KernelDict(
+        NumThreads=64,
+        ScheduleIterAlg=0,
+        PrefetchGlobalRead=0,
+        enabledSplitLDS=False,
+    )
+
+    try:
+        assert kw.syncThreads(kernel, "gfx9 sync") == "s_barrier //gfx9 sync\n"
+    finally:
+        if oldArchCaps is None:
+            del globalParameters["ArchCaps"]
+        else:
+            globalParameters["ArchCaps"] = oldArchCaps
+
+def test_kernel_writer_direct_barrier_sites_use_syncstr():
+    source = inspect.getsource(KernelWriter)
+
+    assert source.count('barrier.addInst(self.syncStr,"")') == 2
+    assert "syncCode.addCode(self.syncStr + self.endLine)" in source
 
 def test_gfx12_barrier_assembly_uses_macro():
     kw = KernelWriterAssembly("","")

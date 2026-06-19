@@ -1093,7 +1093,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         barrier = Code.Module()
         barrier.addComment0("1 LDS buffer: read-sync-write")
         barrier.addInst("s_waitcnt lgkmcnt(0)","")
-        barrier.addCode(self.syncThreads(kernel))
+        barrier.addInst(self.syncStr,"")
         iterCode.addCode(barrier)
       iterCode.addCode(localWriteCode)
       iterCode.addCode(pointerLWCode)
@@ -1343,7 +1343,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           barrier = Code.Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
           barrier.addInst("s_waitcnt lgkmcnt(0)","")
-          barrier.addCode(self.syncThreads(kernel))
+          barrier.addInst(self.syncStr,"")
           iterCode.addCode(barrier)
 
         if kernel["StorePriorityOpt"]:
@@ -2765,7 +2765,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not (kernel["DirectToVgprA"] and kernel["DirectToVgprB"]):
                 # put only barrier for DirectToVgpr (to avoid generating waitcnt for global read)
                 # barrier is not necessary if both DirectToVgprA and B are enabled
-                syncCode.addCode(self.syncThreads(kernel))
+                syncCode.addCode(self.syncStr + self.endLine)
             else:
               syncCode.addCode(self.syncThreads(kernel))
 
