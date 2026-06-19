@@ -51,10 +51,9 @@ elif test_type == "regression":
     test_subdir = "/regression"
     timeout = "720"
 
-# Make per-device adjustments
+# Make per-device adjustments; per-GPU overrides can be added below.
+# Example: if AMDGPU_FAMILIES == "gfx1153": ctest_parallelism = "2"
 ctest_parallelism = "1"
-if AMDGPU_FAMILIES == "gfx1153":
-    ctest_parallelism = "1"
 
 cmd = [
     "ctest",
