@@ -575,7 +575,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     int                         batchMode  = 0; // General Batched GEMM support in hipBLASLt
     int                         batchCount = prob.batch_count > 0 ? prob.batch_count
                                                                   : 1; // Default to batch count of 1 if not specified
-    hipblasLtMatrixLayout_t     matA, matB, matC, matD;
+    hipblasLtMatrixLayout_t     matA{}, matB{}, matC{}, matD{};
     const int                   requestedAlgoCount = 1;
     int                         returnedAlgoCount  = 0;
     size_t                      max_workspace_size = prob.handle->get_available_workspace();
@@ -585,8 +585,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     hipblasOperation_t          transB           = (hipblasOperation_t)prob.trans_b;
     Ti *                        devicePtrArray_A = nullptr, *devicePtrArray_B = nullptr;
     To *                        devicePtrArray_C = nullptr, *devicePtrArray_D = nullptr;
-    hipblasLtMatmulDesc_t       matmulDesc;
-    hipblasLtMatmulPreference_t pref;
+    hipblasLtMatmulDesc_t       matmulDesc{};
+    hipblasLtMatmulPreference_t pref{};
     size_t                      workspaceSize = 0;
     rocblas_status              status        = rocblas_status_success;
     try
@@ -883,12 +883,18 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
     if(workspaceSize > 0)
         HANDLE_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB), status);
-    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA), status);
+    if(pref)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
+    if(matmulDesc)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc), status);
+    if(matD)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD), status);
+    if(matC)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC), status);
+    if(matB)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB), status);
+    if(matA)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA), status);
     return status;
 #else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
