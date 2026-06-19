@@ -63,6 +63,10 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
 
     static constexpr index_t kflatKPerWarp = BlockGemmShape::flatKPerWarp;
 
+    static constexpr index_t MXdlPackEff = Policy::template GetMXdlPackEff<Problem>();
+    static constexpr index_t NXdlPackEff = Policy::template GetNXdlPackEff<Problem>();
+    static constexpr index_t KXdlPackEff = Policy::template GetKXdlPackEff<Problem>();
+
     static constexpr bool Async = true;
 
     template <bool IsWave32Host = false>

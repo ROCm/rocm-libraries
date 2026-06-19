@@ -412,6 +412,10 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 
     static constexpr index_t KPerBlockScale = KPerBlock / BlockScaleSize / KXdlPackEff;
 
+    CK_TILE_HOST_DEVICE static constexpr auto GetMXdlPackEff() { return MXdlPackEff; }
+    CK_TILE_HOST_DEVICE static constexpr auto GetNXdlPackEff() { return NXdlPackEff; }
+    CK_TILE_HOST_DEVICE static constexpr auto GetKXdlPackEff() { return KXdlPackEff; }
+
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepAQ() { return KPerBlockScale; }
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepBQ() { return KPerBlockScale; }
 
@@ -505,6 +509,9 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     FORWARD_METHOD_(GetKStepBQ);
     FORWARD_METHOD_(GetInstCountAQ);
     FORWARD_METHOD_(GetInstCountBQ);
+    FORWARD_METHOD_(GetMXdlPackEff);
+    FORWARD_METHOD_(GetNXdlPackEff);
+    FORWARD_METHOD_(GetKXdlPackEff);
 
 #undef FORWARD_METHOD_
 

@@ -141,46 +141,9 @@ struct MxGemmKernel
     static constexpr bool kSplitKAtomicAddSupported =
         EpiloguePipeline::GetVectorSizeC() % 2 == 0 || !is_any_of<EDataType, fp16_t, bf16_t>::value;
 
-#if defined(__gfx950__)
-    static_assert(BlockScaleSize == 32, "unsupported BlockScaleSize");
-    // Effective pack sizes: fall back to 1 when dimension is too small
-    using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
-    static constexpr index_t MPerBlock_    = BlockGemmShape::kM;
-    static constexpr index_t NPerBlock_    = BlockGemmShape::kN;
-    static constexpr index_t KPerBlock_    = BlockGemmShape::kK;
-    static constexpr index_t MWarp_        = BlockWarps_::at(number<0>{});
-    static constexpr index_t NWarp_        = BlockWarps_::at(number<1>{});
-    static constexpr index_t KPerXdl_      = BlockGemmShape::WarpTile::at(number<2>{});
-    static constexpr index_t MIterPerWarp_ = MPerBlock_ / (MWarp_ * MThreadPerXdl);
-    static constexpr index_t NIterPerWarp_ = NPerBlock_ / (NWarp_ * NThreadPerXdl);
-    static constexpr index_t KIterPerWarp_ = KPerBlock_ / KPerXdl_;
-
-    static constexpr index_t MXdlPack = 2;
-    static constexpr index_t NXdlPack = 2;
-    static constexpr index_t KXdlPack = 2;
-
-    static constexpr index_t MXdlPackEff =
-        (MIterPerWarp_ >= MXdlPack && MIterPerWarp_ % MXdlPack == 0) ? MXdlPack : 1;
-    static constexpr index_t NXdlPackEff =
-        (NIterPerWarp_ >= NXdlPack && NIterPerWarp_ % NXdlPack == 0) ? NXdlPack : 1;
-    static constexpr index_t KXdlPackEff =
-        (KIterPerWarp_ >= KXdlPack && KIterPerWarp_ % KXdlPack == 0) ? KXdlPack : 1;
-#elif defined(__gfx125__)
-    static_assert(BlockScaleSize == 16 || BlockScaleSize == 32, "unsupported BlockScaleSize");
-    // Scale tensor element type is always int32_t (4 packed e8m0 bytes).
-    // For scale16, each thread needs 8 bytes = 2 int32_t elements.
-    // For scale32, each thread needs 4 bytes = 1 int32_t element.
-    static constexpr index_t MXdlPackEff = 1;
-    static constexpr index_t NXdlPackEff = 1;
-    static constexpr index_t KXdlPackEff = 4; // 4 is because scale tensor is
-                                              // int32_t data type, each int32_t
-                                              // exists 4 fp8 scale values
-#else
-    // host
-    static constexpr index_t MXdlPackEff = 1;
-    static constexpr index_t NXdlPackEff = 1;
-    static constexpr index_t KXdlPackEff = 1;
-#endif
+    static constexpr index_t MXdlPackEff = MxGemmPipeline::MXdlPackEff;
+    static constexpr index_t NXdlPackEff = MxGemmPipeline::NXdlPackEff;
+    static constexpr index_t KXdlPackEff = MxGemmPipeline::KXdlPackEff;
 
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
