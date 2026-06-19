@@ -1981,7 +1981,9 @@ class SWaitTensorcnt(Instruction):
 
     __slots__ = ("cnt",)
 
-    def __init__(self, cnt: int = 0, comment: str = ""):
+    def __init__(self, cnt: int = 0, tensorcnt: int = None, comment: str = ""):
+        if tensorcnt is not None:
+            cnt = tensorcnt
         super().__init__(InstType.INST_NOTYPE, comment)
         self.cnt = int(cnt)
         self.setInst("s_wait_tensorcnt")
@@ -2560,11 +2562,15 @@ DSStoreInstruction = CommonInstruction
 
 # --- Buffer Load (MUBUF): rocisa(dst, vaddr, saddr, soffset, mubuf, comment) ---
 BufferLoadU8 = _make_buffer_load_class("BufferLoadU8", "buffer_load_u8")
+BufferLoadI8 = _make_buffer_load_class("BufferLoadI8", "buffer_load_i8")
 BufferLoadD16HIU8 = _make_buffer_load_class("BufferLoadD16HIU8", "buffer_load_d16_hi_u8")
 BufferLoadD16U8 = _make_buffer_load_class("BufferLoadD16U8", "buffer_load_d16_u8")
+BufferLoadD16I8 = _make_buffer_load_class("BufferLoadD16I8", "buffer_load_d16_i8")
+BufferLoadD16HII8 = _make_buffer_load_class("BufferLoadD16HII8", "buffer_load_d16_hi_i8")
 BufferLoadD16HIB16 = _make_buffer_load_class("BufferLoadD16HIB16", "buffer_load_d16_hi_b16")
 BufferLoadD16B16 = _make_buffer_load_class("BufferLoadD16B16", "buffer_load_d16_b16")
 BufferLoadB16 = make_dummy_class(f"{_P}.BufferLoadB16")
+BufferLoadI16 = _make_buffer_load_class("BufferLoadI16", "buffer_load_i16")
 BufferLoadU16 = _make_buffer_load_class("BufferLoadU16", "buffer_load_u16")
 BufferLoadB32 = _make_buffer_load_class("BufferLoadB32", "buffer_load_b32")
 BufferLoadB64 = _make_buffer_load_class("BufferLoadB64", "buffer_load_b64")
@@ -2573,12 +2579,19 @@ BufferLoadB128 = _make_buffer_load_class("BufferLoadB128", "buffer_load_b128")
 BufferLoadB192 = make_dummy_class(f"{_P}.BufferLoadB192")
 
 # --- Flat Load: rocisa(dst, vaddr, flat, comment) ---
+FlatLoadU8 = _make_flat_load_class("FlatLoadU8", "flat_load_u8")
+FlatLoadI8 = _make_flat_load_class("FlatLoadI8", "flat_load_i8")
 FlatLoadD16HIU8 = _make_flat_load_class("FlatLoadD16HIU8", "flat_load_d16_hi_u8")
 FlatLoadD16U8 = _make_flat_load_class("FlatLoadD16U8", "flat_load_d16_u8")
+FlatLoadD16I8 = _make_flat_load_class("FlatLoadD16I8", "flat_load_d16_i8")
+FlatLoadD16HII8 = _make_flat_load_class("FlatLoadD16HII8", "flat_load_d16_hi_i8")
 FlatLoadD16HIB16 = _make_flat_load_class("FlatLoadD16HIB16", "flat_load_d16_hi_b16")
 FlatLoadD16B16 = _make_flat_load_class("FlatLoadD16B16", "flat_load_d16_b16")
+FlatLoadU16 = _make_flat_load_class("FlatLoadU16", "flat_load_u16")
+FlatLoadI16 = _make_flat_load_class("FlatLoadI16", "flat_load_i16")
 FlatLoadB32 = _make_flat_load_class("FlatLoadB32", "flat_load_b32")
 FlatLoadB64 = _make_flat_load_class("FlatLoadB64", "flat_load_b64")
+FlatLoadB96 = _make_flat_load_class("FlatLoadB96", "flat_load_b96")
 FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
 FlatLoadB192 = make_dummy_class(f"{_P}.FlatLoadB192")
 GlobalLoadTR8B64 = make_dummy_class(f"{_P}.GlobalLoadTR8B64")
@@ -2593,16 +2606,21 @@ BufferStoreD16B16 = make_dummy_class(f"{_P}.BufferStoreD16B16")
 BufferStoreB16 = _make_buffer_store_class("BufferStoreB16", "buffer_store_b16")
 BufferStoreB32 = _make_buffer_store_class("BufferStoreB32", "buffer_store_b32")
 BufferStoreB64 = _make_buffer_store_class("BufferStoreB64", "buffer_store_b64")
+BufferStoreB96 = _make_buffer_store_class("BufferStoreB96", "buffer_store_b96")
 BufferStoreB128 = _make_buffer_store_class("BufferStoreB128", "buffer_store_b128")
 BufferAtomicAddF32 = _make_buffer_load_class("BufferAtomicAddF32", "buffer_atomic_add_f32")
 BufferAtomicCmpswapB32 = _make_buffer_store_class("BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32")
 BufferAtomicCmpswapB64 = _make_buffer_store_class("BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64")
 
 # --- Flat Store: rocisa(src, vaddr, flat, comment) ---
+FlatStoreB8 = _make_flat_store_class("FlatStoreB8", "flat_store_b8")
+FlatStoreD16HIB8 = _make_flat_store_class("FlatStoreD16HIB8", "flat_store_d16_hi_b8")
+FlatStoreB16 = _make_flat_store_class("FlatStoreB16", "flat_store_b16")
 FlatStoreD16HIB16 = _make_flat_store_class("FlatStoreD16HIB16", "flat_store_d16_hi_b16")
 FlatStoreD16B16 = make_dummy_class(f"{_P}.FlatStoreD16B16")
 FlatStoreB32 = _make_flat_store_class("FlatStoreB32", "flat_store_b32")
 FlatStoreB64 = _make_flat_store_class("FlatStoreB64", "flat_store_b64")
+FlatStoreB96 = _make_flat_store_class("FlatStoreB96", "flat_store_b96")
 FlatStoreB128 = _make_flat_store_class("FlatStoreB128", "flat_store_b128")
 
 # --- Flat Atomic: rocisa(vaddr, tmp, src, flat, comment) ---
@@ -2610,12 +2628,15 @@ FlatAtomicCmpswapB32 = _make_flat_atomic_class("FlatAtomicCmpswapB32", "flat_ato
 
 # --- DS Load: rocisa(dst, src, ds, comment) ---
 DSLoadU8 = _make_ds_load_class("DSLoadU8", "ds_load_u8")
+DSLoadI8 = _make_ds_load_class("DSLoadI8", "ds_load_i8")
 DSLoadD16HIU8 = make_dummy_class(f"{_P}.DSLoadD16HIU8")
 DSLoadU16 = _make_ds_load_class("DSLoadU16", "ds_load_u16")
+DSLoadI16 = _make_ds_load_class("DSLoadI16", "ds_load_i16")
 DSLoadD16HIU16 = make_dummy_class(f"{_P}.DSLoadD16HIU16")
 DSLoadB16 = make_dummy_class(f"{_P}.DSLoadB16")
 DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32")
 DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
+DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
 DSLoadB96TrB6 = make_dummy_class(f"{_P}.DSLoadB96TrB6")
 DSLoadB64TrB4 = make_dummy_class(f"{_P}.DSLoadB64TrB4")
 DSLoadB64TrB16 = make_dummy_class(f"{_P}.DSLoadB64TrB16")
