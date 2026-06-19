@@ -121,20 +121,20 @@ def test_collector_merge_new_and_existing(isolated_collector, snapshot):
 def test_validate_clean(isolated_collector, snapshot):
     with isolated_collector() as collector:
         # BufferLoad is a real bool Solution param; a bool -> no mismatch.
-        S.validateParameterTypes({"BufferLoad": True}, srcFile="f.yaml")
+        S.mergeMismatchRecords(S.validateParameterTypes({"BufferLoad": True}, srcFile="f.yaml"))
         assert _render_collector(collector) == snapshot
 
 
 def test_validate_mismatch_with_srcfile(isolated_collector, snapshot):
     with isolated_collector() as collector:
         # bool param given an int -> mismatch recorded with the file.
-        S.validateParameterTypes({"BufferLoad": 1}, srcFile="f.yaml")
+        S.mergeMismatchRecords(S.validateParameterTypes({"BufferLoad": 1}, srcFile="f.yaml"))
         assert _render_collector(collector) == snapshot
 
 
 def test_validate_mismatch_no_srcfile(isolated_collector, snapshot):
     with isolated_collector() as collector:
-        S.validateParameterTypes({"BufferLoad": 1}, srcFile="")
+        S.mergeMismatchRecords(S.validateParameterTypes({"BufferLoad": 1}, srcFile=""))
         assert _render_collector(collector) == snapshot
 
 
@@ -142,15 +142,15 @@ def test_validate_mismatch_accumulates(isolated_collector, snapshot):
     with isolated_collector() as collector:
         # Same (param, actual, expected) twice -> the existing-key branch;
         # count accumulates and both values are recorded.
-        S.validateParameterTypes({"BufferLoad": 1}, srcFile="a.yaml")
-        S.validateParameterTypes({"BufferLoad": 2}, srcFile="b.yaml")
+        S.mergeMismatchRecords(S.validateParameterTypes({"BufferLoad": 1}, srcFile="a.yaml"))
+        S.mergeMismatchRecords(S.validateParameterTypes({"BufferLoad": 2}, srcFile="b.yaml"))
         assert _render_collector(collector) == snapshot
 
 
 def test_validate_skips_unknown_and_skiplist(isolated_collector, snapshot):
     with isolated_collector() as collector:
         # Unknown key + a _skipTypeCheck key (DataType) -> both ignored.
-        S.validateParameterTypes({"NotARealParam": 1, "DataType": "wrong-type-but-skipped"})
+        S.mergeMismatchRecords(S.validateParameterTypes({"NotARealParam": 1, "DataType": "wrong-type-but-skipped"}))
         assert _render_collector(collector) == snapshot
 
 

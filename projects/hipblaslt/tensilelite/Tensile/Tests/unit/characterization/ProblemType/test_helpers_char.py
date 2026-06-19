@@ -143,7 +143,7 @@ def _run_validate_capture(state, srcFile="fixture.yaml"):
     saved = {k: dict(v) for k, v in _typeMismatchCollector.items()}
     _typeMismatchCollector.clear()
     try:
-        validateProblemTypeParameterTypes(state, srcFile=srcFile)
+        validateProblemTypeParameterTypes(state, srcFile=srcFile, raiseOnMismatch=False)
         delta = {
             "|".join(k): {
                 "count": v["count"],
