@@ -75,10 +75,10 @@ def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
             changed_projects="", run_all_tests=False, skip_tests=True
         )
 
-    # If CI workflow/script files changed, run all tests (use "ALL" sentinel value)
+    # If CI workflow/script files changed, run all tests
     if should_run_all_tests(modified_paths):
         return ChangedProjectsResult(
-            changed_projects="ALL", run_all_tests=True, skip_tests=False
+            changed_projects="", run_all_tests=True, skip_tests=False
         )
 
     # If only skippable files changed, skip tests
