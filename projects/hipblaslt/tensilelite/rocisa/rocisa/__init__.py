@@ -57,7 +57,7 @@ if _bi is not None:
         raise ImportError(
             "rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.\n"
             f"  Modified: {', '.join(_preview)}\n"
-            "  Rebuild:  cmake --build <build_dir> --target _rocisa"
+            "  Rebuild:  invoke rocisa"
         )
     del _bi, _so, _so_mtime, _stale, _roots, _build_dir, Path
 
