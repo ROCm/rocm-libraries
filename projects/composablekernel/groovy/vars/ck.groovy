@@ -464,11 +464,13 @@ def gpuUsable(String image) { sh(returnStatus:true, script:"docker run --rm --de
 // Fail fast with a NodeFault if this agent is unfit to build. Host-only — no image
 // required. Image/registry/container faults are classified in the body by pullImage
 // and the in-container GPU check, where the correct conf is available.
-def preflight() {
+def preflight(boolean requireGpu) {
     echo "Preflight: starting node health checks on ${env.NODE_NAME}"
     if (!daemonUp())  throw new org.ck.NodeFault('docker-daemon-down')
-    if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
-    if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
+    if (requireGpu) {
+        if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
+        if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
+    }
     if (!diskOk())    throw new org.ck.NodeFault('disk-space-low')
     echo "Preflight: all checks passed on ${env.NODE_NAME}"
     // sccache cache-dir writability is not checked here: sccache runs inside
@@ -543,7 +545,10 @@ def runOnHealthyNode(String label, Closure body) {
             node(exclude(label, excluded)) {
                 attemptNode = env.NODE_NAME
                 echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                preflight()
+                // Derive GPU requirement from the node label: only "nogpu" stages
+                // skip the driver/device checks. A new non-GPU label would need
+                // adding here (otherwise preflight would wrongly demand a GPU).
+                preflight(!label.contains('nogpu'))
                 runInPlace(body, transientRetries)
             }
             return
