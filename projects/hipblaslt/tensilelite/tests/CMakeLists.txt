@@ -96,6 +96,7 @@ set(CLIENT_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
 
 add_executable(batch-pointer-test
     "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerReset_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationAltAllocation_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationAsyncReset_test.cpp"
     "${CLIENT_SRC_DIR}/ClientProblemFactory.cpp"
     "${CLIENT_SRC_DIR}/DataInitialization.cpp"
@@ -126,7 +127,10 @@ if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(batch-pointer-test PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-target_compile_definitions(batch-pointer-test PRIVATE TENSILE_DEFAULT_SERIALIZATION)
+target_compile_definitions(batch-pointer-test PRIVATE
+    TENSILE_DEFAULT_SERIALIZATION
+    TENSILELITE_DATAINIT_TEST_HOOKS
+)
 
 set_target_properties(batch-pointer-test PROPERTIES
     CXX_STANDARD 17

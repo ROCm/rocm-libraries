@@ -1098,6 +1098,8 @@ namespace TensileLite
 
             void allocNewGPUInputs();
 
+            void rollbackAltGPUInputs() noexcept;
+
             // callerStream: when non-null, copies enqueue on callerStream and the caller
             //   manages synchronization; otherwise m_copyStream is used when available.
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,

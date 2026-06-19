@@ -35,6 +35,10 @@
 #include "Utility.hpp"
 // #include "DataInitializationTyped.hpp"
 
+#ifdef TENSILELITE_DATAINIT_TEST_HOOKS
+#include "DataInitializationTestHooks.hpp"
+#endif
+
 #include <Tensile/Utils.hpp>
 
 #include <hip/hip_runtime.h>
@@ -44,6 +48,41 @@
 #include <list>
 #include <map>
 #include <tuple>
+
+#ifdef TENSILELITE_DATAINIT_TEST_HOOKS
+namespace TensileLite::testing::detail
+{
+    namespace
+    {
+        thread_local size_t optionalAltAllocationCallsRemaining = 0;
+        thread_local bool   optionalAltAllocationFailureArmed    = false;
+    } // namespace
+
+    void setOptionalAltAllocationFailureCountdown(size_t callsBeforeFailure)
+    {
+        optionalAltAllocationCallsRemaining = callsBeforeFailure;
+        optionalAltAllocationFailureArmed    = true;
+    }
+
+    void clearOptionalAltAllocationFailure()
+    {
+        optionalAltAllocationCallsRemaining = 0;
+        optionalAltAllocationFailureArmed    = false;
+    }
+
+    bool shouldFailOptionalAltAllocation()
+    {
+        if(!optionalAltAllocationFailureArmed)
+            return false;
+
+        if(optionalAltAllocationCallsRemaining == 0)
+            return true;
+
+        --optionalAltAllocationCallsRemaining;
+        return false;
+    }
+} // namespace TensileLite::testing::detail
+#endif
 
 namespace
 {
@@ -427,6 +466,27 @@ namespace TensileLite
             static const int sizew = 10;
             T*               ptr   = nullptr;
             HIP_CHECK_EXC(hipMalloc(&ptr, size));
+            auto p = std::shared_ptr<T>(ptr, hipFree);
+            if(Debug::Instance().printTensorInfo())
+                std::cout << "info: allocate " << title << " " << std::setw(sizew) << size
+                          << " bytes at " << static_cast<void*>(ptr) << "\n";
+            return p;
+        }
+
+        template <typename T>
+        std::shared_ptr<T> tryAllocNewGPUBuffer(const char* title, size_t size)
+        {
+            static const int sizew = 10;
+
+#ifdef TENSILELITE_DATAINIT_TEST_HOOKS
+            if(TensileLite::testing::detail::shouldFailOptionalAltAllocation())
+                return nullptr;
+#endif
+
+            T* ptr = nullptr;
+            if(hipMalloc(&ptr, size) != hipSuccess)
+                return nullptr;
+
             auto p = std::shared_ptr<T>(ptr, hipFree);
             if(Debug::Instance().printTensorInfo())
                 std::cout << "info: allocate " << title << " " << std::setw(sizew) << size
@@ -1552,6 +1612,29 @@ namespace TensileLite
             return;
         }
 
+        void DataInitialization::rollbackAltGPUInputs() noexcept
+        {
+            for(auto& vd : m_vdata)
+            {
+                for(auto& [_, pUnit] : vd.pristine)
+                {
+                    for(size_t slot = 1; slot < MAX_BUFFER_SETS; ++slot)
+                    {
+                        pUnit.gpuInput.buffers[slot].reset();
+                        pUnit.gpuInput.batchBufs[slot].reset();
+                    }
+                }
+            }
+
+            for(size_t slot = 1; slot < MAX_BUFFER_SETS; ++slot)
+            {
+                m_gpuPtrsRing[slot].clear();
+                m_gpuBatchPtrsRing[slot].clear();
+                m_cachedInputsRing[slot].reset();
+            }
+            m_altSlotsFilled = false;
+        }
+
         void DataInitialization::allocNewGPUInputs()
         {
             m_hasAltBuffers = m_ringPolicy.allocatesAltBuffers();
@@ -1584,6 +1667,47 @@ namespace TensileLite
                 HIP_CHECK_EXC(
                     hipHostMalloc(&m_pinnedBatchStaging, bytes, 0));
             }
+
+            auto disableAltBuffersAndRollback = [this]() noexcept {
+                m_hasAltBuffers = false;
+                rollbackAltGPUInputs();
+            };
+
+            struct AltAllocationRollback
+            {
+                decltype(disableAltBuffersAndRollback)& rollback;
+                bool                                    active;
+
+                AltAllocationRollback(
+                    decltype(disableAltBuffersAndRollback)& rollbackFn, bool enabled) noexcept
+                    : rollback(rollbackFn)
+                    , active(enabled)
+                {
+                }
+
+                ~AltAllocationRollback() noexcept
+                {
+                    if(active)
+                        rollback();
+                }
+
+                void release() noexcept
+                {
+                    active = false;
+                }
+
+                void rollbackNow() noexcept
+                {
+                    if(active)
+                    {
+                        rollback();
+                        active = false;
+                    }
+                }
+            };
+
+            AltAllocationRollback altAllocationGuard(
+                disableAltBuffersAndRollback, m_hasAltBuffers);
 
             std::vector<std::shared_ptr<void>> guardPage;
             void*                              guardPagePtr;
@@ -1654,19 +1778,26 @@ namespace TensileLite
                             if(!pUnit.gpuInput.buffers[slot])
                             {
                                 auto altSuffix = "_alt" + std::to_string(slot);
-                                auto altPtr    = allocNewGPUBuffer<void>(
+                                auto altPtr    = tryAllocNewGPUBuffer<void>(
                                     (it.name + altSuffix).c_str(), size);
-                                auto altBatch = allocNewGPUBuffer<void*>(
-                                    (n + altSuffix).c_str(),
-                                    sizeof(uint8_t*) * m_maxBatch);
-                                if(altPtr && altBatch)
+                                if(!altPtr)
                                 {
-                                    pUnit.gpuInput.buffers[slot]   = altPtr;
-                                    pUnit.gpuInput.batchBufs[slot] = altBatch;
+                                    altAllocationGuard.rollbackNow();
                                 }
                                 else
                                 {
-                                    m_hasAltBuffers = false;
+                                    auto altBatch = tryAllocNewGPUBuffer<void*>(
+                                        (n + altSuffix).c_str(),
+                                        sizeof(uint8_t*) * m_maxBatch);
+                                    if(altBatch)
+                                    {
+                                        pUnit.gpuInput.buffers[slot]   = altPtr;
+                                        pUnit.gpuInput.batchBufs[slot] = altBatch;
+                                    }
+                                    else
+                                    {
+                                        altAllocationGuard.rollbackNow();
+                                    }
                                 }
                             }
                         }
@@ -1719,6 +1850,8 @@ namespace TensileLite
                 }
                 m_workspacePristine = ptr;
             }
+
+            altAllocationGuard.release();
         }
 
         void DataInitialization::initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
