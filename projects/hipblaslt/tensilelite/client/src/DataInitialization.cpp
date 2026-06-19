@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "DataInitialization.hpp"
+#include "BatchPointerLayout.hpp"
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGen.hpp>
@@ -818,36 +819,21 @@ namespace TensileLite
             }
         }
 
-        void initGPUBatchedInput(void*                      base,
-                                 void**                     array,
-                                 TensorDescriptor const&    tensor,
-                                 const std::vector<size_t>& batchIdx,
-                                 uint8_t**                  pinnedStaging,
-                                 size_t                     pinnedStagingCapacity,
-                                 hipStream_t                stream = nullptr)
+        void uploadBatchPointerLayout(void*                      base,
+                                      void**                     array,
+                                      BatchPointerLayout const&  layout,
+                                      uint8_t**                  pinnedStaging,
+                                      size_t                     pinnedStagingCapacity,
+                                      hipStream_t                stream = nullptr)
         {
-            std::vector<size_t> batchSizes;
-            std::vector<size_t> batchStrides;
-            for(auto& idx : batchIdx)
-            {
-                batchSizes.push_back(tensor.sizes().at(idx));
-                batchStrides.push_back(tensor.strides().at(idx));
-            }
-            std::vector<size_t> coord(batchSizes.size(), 0);
-
-            auto count = CoordCount(batchSizes.begin(), batchSizes.end());
+            size_t const count = layout.count();
             if(count > pinnedStagingCapacity)
                 throw std::runtime_error("Batch pointer staging capacity is too small.");
 
-            for(size_t idx = 0; idx < count; idx++)
+            auto* baseBytes = static_cast<uint8_t*>(base);
+            for(size_t idx = 0; idx < count; ++idx)
             {
-                CoordNumbered(
-                    idx, coord.begin(), coord.end(), batchSizes.begin(), batchSizes.end());
-                pinnedStaging[idx] = (uint8_t*)base;
-                for(size_t i = 0; i < batchSizes.size(); i++)
-                {
-                    pinnedStaging[idx] += coord[i] * batchStrides[i];
-                }
+                pinnedStaging[idx] = baseBytes + layout.offsets[idx];
             }
 
             if(stream)
@@ -1920,42 +1906,27 @@ namespace TensileLite
                                                             hipStream_t                   targetStream,
                                                             size_t                        stagingBufferSlot)
         {
-            auto batchIdxs = problem.batchIndices();
+            auto const& batchIdxs = problem.batchIndices();
             // FIXME: batch not supported for bias
             for(size_t i = 0; i < 4 /*m_vdata.size()*/; i++)
             {
-                auto it = m_vdata[i].pristine.find(problem.tensors()[i].dataType());
+                auto const& tensor = problem.tensors()[i];
+                auto        it     = m_vdata[i].pristine.find(tensor.dataType());
                 if(it == m_vdata[i].pristine.end())
                     continue;
-                auto&               pUnit = m_vdata[i].pristine[problem.tensors()[i].dataType()];
-                std::vector<size_t> batchIdx(batchIdxs.size(), 0);
-                ptrdiff_t           padding = 0;
-                for(size_t j = 0; j < batchIdxs.size(); j++)
-                {
-                    switch(i)
-                    {
-                    case 0:
-                        batchIdx[j] = batchIdxs[j].a;
-                        break;
-                    case 1:
-                        batchIdx[j] = batchIdxs[j].b;
-                        break;
-                    case 2:
-                        batchIdx[j] = batchIdxs[j].c;
-                        break;
-                    case 3:
-                        batchIdx[j] = batchIdxs[j].d;
-                        break;
-                    }
-                }
+                auto&               pUnit     = it->second;
+                auto const          batchIdx  = batchPointerTensorBatchIndices(
+                    batchIdxs, static_cast<ContractionProblemGemm::TENSOR>(i));
+                ptrdiff_t           padding   = 0;
+                auto const          layout    = makeBatchPointerLayout(tensor, batchIdx);
+                auto*               offsetBase = static_cast<uint8_t*>(pUnit.gpuInput.current.get());
                 if(m_curBoundsCheck == BoundsCheckMode::NaN)
                 {
-                    padding
-                        = (pUnit.maxElements - problem.tensors()[i].totalAllocatedElements()) / 2;
+                    padding = (pUnit.maxElements - tensor.totalAllocatedElements()) / 2;
                 }
                 else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
                 {
-                    padding = pUnit.maxElements - problem.tensors()[i].totalAllocatedElements();
+                    padding = pUnit.maxElements - tensor.totalAllocatedElements();
 
                     if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
                        || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
@@ -1963,50 +1934,47 @@ namespace TensileLite
                         //TODO: support more swizzle types,
                         //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                         size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
+                        calculateKforSwizzling(tensor.dataType(), MiK, MiKv, PackK);
                         padding = pUnit.maxElements
-                                  - getSwizzledTensorNumAllocatedElements(
-                                      problem.tensors()[i], MiM_N, MiK, PackK);
+                                  - getSwizzledTensorNumAllocatedElements(tensor,
+                                                                           MiM_N,
+                                                                           MiK,
+                                                                           PackK);
                     }
                 }
                 padding = multiplyElementSize(
-                    padding, DataTypeInfo::Get(problem.tensors()[i].dataType()).elementSize);
-                uint8_t* offset = (uint8_t*)pUnit.gpuInput.current.get();
-                initGPUBatchedInput((void*)(offset + padding),
-                                    pUnit.gpuInput.batch.get(),
-                                    problem.tensors()[i],
-                                    batchIdx,
-                                    pinnedBatchStagingSlice(stagingBufferSlot, i),
-                                    m_maxBatch,
-                                    targetStream);
+                    padding, DataTypeInfo::Get(tensor.dataType()).elementSize);
+                uploadBatchPointerLayout(static_cast<void*>(offsetBase + padding),
+                                         pUnit.gpuInput.batch.get(),
+                                         layout,
+                                         pinnedBatchStagingSlice(stagingBufferSlot, i),
+                                         m_maxBatch,
+                                         targetStream);
 
                 if(problem.useBias() && problem.biasSrc() == i)
                 {
+                    auto const& biasTensor = problem.tensors()[ContractionProblemGemm::TENSOR::BIAS];
                     auto& pUnitBias = m_vdata[ContractionProblemGemm::TENSOR::BIAS]
                                           .pristine[problem.bias().dataType()];
                     if(m_curBoundsCheck == BoundsCheckMode::NaN)
                     {
                         padding = (pUnitBias.maxElements
-                                   - problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
-                                         .totalAllocatedElements())
+                                   - biasTensor.totalAllocatedElements())
                                   / 2;
                     }
                     else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
                     {
                         padding = pUnitBias.maxElements
-                                  - problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
-                                        .totalAllocatedElements();
+                                  - biasTensor.totalAllocatedElements();
                     }
                     padding = multiplyElementSize(
-                        padding,
-                        DataTypeInfo::Get(
-                            problem.tensors()[ContractionProblemGemm::TENSOR::BIAS].dataType())
-                            .elementSize);
-                    uint8_t* offset = (uint8_t*)pUnitBias.gpuInput.current.get();
-                    initGPUBatchedInput((void*)(offset + padding),
+                        padding, DataTypeInfo::Get(biasTensor.dataType()).elementSize);
+                    auto const biasLayout = makeBatchPointerLayout(biasTensor, batchIdx);
+                    uploadBatchPointerLayout(static_cast<void*>(
+                                                 static_cast<uint8_t*>(pUnitBias.gpuInput.current.get())
+                                                 + padding),
                                         pUnitBias.gpuInput.batch.get(),
-                                        problem.tensors()[ContractionProblemGemm::TENSOR::BIAS],
-                                        batchIdx,
+                                        biasLayout,
                                         pinnedBatchStagingSlice(
                                             stagingBufferSlot,
                                             ContractionProblemGemm::TENSOR::BIAS),
@@ -2032,36 +2000,40 @@ namespace TensileLite
                         return padding;
                     };
 
+                    auto const& metadataTensor = problem.tensors()[ContractionProblemGemm::TENSOR::METADATA];
                     auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
                                        .pristine[problem.metadata().dataType()];
 
                     padding = caculate_padding(
                         m_curBoundsCheck,
                         pUnitM,
-                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]);
-                    offset = (uint8_t*)pUnitM.gpuInput.current.get();
-                    initGPUBatchedInput((void*)(offset + padding),
+                        metadataTensor);
+                    auto const metadataLayout = makeBatchPointerLayout(metadataTensor, batchIdx);
+                    uploadBatchPointerLayout(static_cast<void*>(
+                                                 static_cast<uint8_t*>(pUnitM.gpuInput.current.get())
+                                                 + padding),
                                         pUnitM.gpuInput.batch.get(),
-                                        problem.tensors()[ContractionProblemGemm::TENSOR::METADATA],
-                                        batchIdx,
+                                        metadataLayout,
                                         pinnedBatchStagingSlice(
                                             stagingBufferSlot,
                                             ContractionProblemGemm::TENSOR::METADATA),
                                         m_maxBatch,
                                         targetStream);
 
+                    auto const& compressedTensor
+                        = problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED];
                     auto& pUnitCp = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
                                         .pristine[problem.compressed().dataType()];
                     padding = caculate_padding(
                         m_curBoundsCheck,
                         pUnitCp,
-                        problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED]);
-                    offset = (uint8_t*)pUnitCp.gpuInput.current.get();
-                    initGPUBatchedInput(
-                        (void*)(offset + padding),
+                        compressedTensor);
+                    auto const compressedLayout = makeBatchPointerLayout(compressedTensor, batchIdx);
+                    uploadBatchPointerLayout(
+                        static_cast<void*>(static_cast<uint8_t*>(pUnitCp.gpuInput.current.get())
+                                           + padding),
                         pUnitCp.gpuInput.batch.get(),
-                        problem.tensors()[ContractionProblemGemm::TENSOR::COMPRESSED],
-                        batchIdx,
+                        compressedLayout,
                         pinnedBatchStagingSlice(stagingBufferSlot,
                                                 ContractionProblemGemm::TENSOR::COMPRESSED),
                         m_maxBatch,

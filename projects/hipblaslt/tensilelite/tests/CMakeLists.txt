@@ -26,6 +26,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationTestUtils_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerLayout_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HipStreamGuard_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RingPolicy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RingSlotController_test.cpp"
