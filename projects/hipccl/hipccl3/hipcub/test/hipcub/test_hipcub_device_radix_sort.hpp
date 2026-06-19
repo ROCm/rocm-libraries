@@ -1245,15 +1245,15 @@ inline void sort_keys_over_4g()
     constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     assert(std::is_unsigned<key_type>::value);
 
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
-	int device_id = test_common_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     // Radix sort requires 2 buffers of `size`, so a minimum of 8 GB of vram for this test.
     // This is more than some cards provide.
-	hipDeviceProp_t dev_prop;
+    hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
     if(static_cast<size_t>(dev_prop.totalGlobalMem * 0.9) < size * 2 * sizeof(key_type))
     {
@@ -1351,13 +1351,13 @@ inline void sort_keys_large_sizes()
     constexpr unsigned int end_bit    = 8;
 
     const std::vector<size_t> sizes = CHECK_SIZE_FILTERS(test_utils::get_large_sizes(seeds[0]));
-	
-	int device_id = test_common_utils::obtain_device_from_ctest();
+    
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-	hipStream_t stream = 0;
-	
+    hipStream_t stream = 0;
+    
     for(const size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);

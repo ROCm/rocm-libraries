@@ -45,7 +45,7 @@
 #endif
 
 #if   HIPCUB_TEST_SLICE == 0
-    TEST_F(HipcubDeviceRadixSortLargeInput, SortKeysOver4G) { 	sort_keys_over_4g(); }
+    TEST_F(HipcubDeviceRadixSortLargeInput, SortKeysOver4G) {     sort_keys_over_4g(); }
     TEST_F(HipcubDeviceRadixSortLargeInput, SortKeysLargeSizes) { sort_keys_large_sizes(); }
 #endif
 

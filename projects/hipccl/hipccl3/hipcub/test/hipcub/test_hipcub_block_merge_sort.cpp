@@ -115,7 +115,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
 
     const size_t size      = items_per_block * 1134;
     const size_t grid_size = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -244,7 +244,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
     }
 
     constexpr size_t size = grid_size * items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     // minus|plus two to prevent overflow weirdness
     const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
@@ -375,7 +375,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
 
     const size_t size      = items_per_block * 1134;
     const size_t grid_size = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -511,7 +511,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSort)
     constexpr size_t grid_size        = 113;
     const size_t     size             = grid_size * items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     auto compare_op = compare_function();
     if(block_size > test_utils::get_max_block_size())
@@ -618,7 +618,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
 
     const size_t size      = items_per_block * 1134;
     const size_t grid_size = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -790,7 +790,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     }
 
     constexpr size_t size = grid_size * items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     // minus|plus two to prevent overflow weirdness
     const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
@@ -966,7 +966,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     };
 
     constexpr size_t size = grid_size * items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     // minus|plus two to prevent overflow weirdness
     const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
