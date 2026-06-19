@@ -40,6 +40,23 @@ def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
     assert "gfx12 buffer atomic soffset must be SGPR" not in kw.chooseAtomicCmpswap(
         {"BufferStore": True}, SimpleNamespace(globalOffset=0, addrDVgpr=0), 0, 0, 1, "glc")
 
+def test_gfx9_barrier_assembly_stays_plain_s_barrier():
+    kw = KernelWriterAssembly("","")
+    kw.version = (9, 0, 0)
+
+    assert kw.syncStr == "s_barrier"
+    assert kw.defineBarrierMacros() == ""
+
+def test_gfx12_barrier_assembly_uses_macro():
+    kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
+
+    barrierMacro = kw.defineBarrierMacros()
+
+    assert kw.syncStr == "_s_barrier"
+    assert "s_barrier_signal" in barrierMacro
+    assert "s_barrier_wait" in barrierMacro
+
 def test_gfx12_atomic_cmpswap_modifier_preserves_extra_modifiers():
     kw = KernelWriterAssembly("","")
     kw.version = (12, 0, 1)
