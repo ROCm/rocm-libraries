@@ -33,16 +33,22 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
         auto meta = ai::common::LoadJSON(meta_path);
         for(auto it = meta.begin(); it != meta.end(); ++it)
         {
-            const auto& block        = it.value();
-            const std::size_t n_feat = block.at("feat_order").size();
-            const std::size_t n_prob = block.at("prob_feat_cols").size();
-            const std::size_t n_arg  = block.at("arg_cols").size();
+            const auto& block          = it.value();
+            const std::size_t n_feat   = block.at("feat_order").size();
+            const auto& prob_cols      = block.at("prob_feat_cols");
+            const std::size_t n_prob   = prob_cols.size();
+            const std::size_t n_arg    = block.at("arg_cols").size();
 
-            // Every solver shares the same problem+GPU prefix; reject anything
-            // that does not match so a schema drift fails loudly here rather than
+            // The prefix is the base set, optionally with a trailing gfx_code
+            // categorical (PCFG_GFXID solvers). Detect it from the last column so
+            // the C++ feature builder knows whether to append gfx_code. Reject
+            // anything else so a real schema drift fails loudly here rather than
             // silently corrupting predictions downstream.
-            if(n_prob != static_cast<std::size_t>(kNumProbFeatures) ||
-               n_feat != n_prob + n_arg)
+            const bool has_gfx_code =
+                n_prob == static_cast<std::size_t>(kNumBaseProbFeatures) + 1 &&
+                prob_cols.back().get<std::string>() == "gfx_code";
+            const bool base_ok = n_prob == static_cast<std::size_t>(kNumBaseProbFeatures);
+            if(!(base_ok || has_gfx_code) || n_feat != n_prob + n_arg)
             {
                 MIOPEN_LOG_W("lgbm_pcfg: skipping " << it.key() << " (feat schema mismatch: prob="
                                                     << n_prob << " arg=" << n_arg
@@ -54,6 +60,7 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
             m.feat_count      = static_cast<int>(n_feat);
             m.prob_feat_count = static_cast<int>(n_prob);
             m.arg_count       = static_cast<int>(n_arg);
+            m.has_gfx_code    = has_gfx_code;
             models.emplace(it.key(), std::move(m));
         }
 

@@ -13,7 +13,7 @@ void get_num_class(int32_t* out) {
   }
 }
 int32_t get_num_feature(void) {
-  return 44;
+  return 46;
 }
 const char* get_threshold_type(void) {
   return "float64";

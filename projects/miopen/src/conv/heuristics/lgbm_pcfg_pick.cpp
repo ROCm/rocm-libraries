@@ -13,6 +13,7 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -125,14 +126,38 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
+// Fixed gfx_code vocabulary, matching model_fields.build_X gfx_order. Unknown
+// arch -> -1 (the model's missing-category sentinel). Only used by solvers
+// trained with PCFG_GFXID (SolverModel::has_gfx_code).
+int GfxCode(const std::string& gfx_id)
+{
+    static const std::array<const char*, 10> kGfxOrder = {"gfx906",
+                                                          "gfx90a",
+                                                          "gfx942",
+                                                          "gfx950",
+                                                          "gfx1100",
+                                                          "gfx1101",
+                                                          "gfx1102",
+                                                          "gfx1105",
+                                                          "gfx1151",
+                                                          "gfx1201"};
+    for(int i = 0; i < static_cast<int>(kGfxOrder.size()); ++i)
+        if(gfx_id == kGfxOrder[static_cast<std::size_t>(i)])
+            return i;
+    return -1;
+}
+
 inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 
-// Build the 27-element problem+GPU prefix, matching model_fields.build_X exactly:
-// 14 log1p(|geom|) + 5 log1p(|derived|) + 6 raw GPU numerics + direction +
-// dtype_code. Order must match prob_feat_cols in the metadata.
+// Build the problem+GPU prefix, matching model_fields.build_X exactly: 14
+// log1p(|geom|) + 5 log1p(|derived|) + 6 raw GPU numerics + direction +
+// dtype_code, then (only when with_gfx_code) a trailing gfx_code categorical.
+// Order must match prob_feat_cols in the metadata.
 void FillProblemPrefix(std::vector<double>& prefix,
                        const conv::ProblemDescription& p,
-                       const Handle& handle)
+                       const Handle& handle,
+                       const std::string& gfx_id,
+                       bool with_gfx_code)
 {
     const double channels   = static_cast<double>(p.GetInChannels());
     const double height     = static_cast<double>(p.GetInHeight());
@@ -157,7 +182,7 @@ void FillProblemPrefix(std::vector<double>& prefix,
     const double bxs     = batch * height * width;
 
     prefix.clear();
-    prefix.reserve(kNumProbFeatures);
+    prefix.reserve(kNumBaseProbFeatures + 1);
     // 14 log geometry (order: channels,height,width,output_channels,fil_y,fil_x,
     // pad_h,pad_w,stride_h,stride_w,dil_h,dil_w,groups,n_mini_batch_size)
     prefix.push_back(Log1pAbs(channels));
@@ -191,6 +216,9 @@ void FillProblemPrefix(std::vector<double>& prefix,
     // direction, dtype_code (raw integer codes, not log)
     prefix.push_back(static_cast<double>(DirectionPerfDbCode(p.GetDirection())));
     prefix.push_back(static_cast<double>(DataTypeCode(p.GetInDataType())));
+    // optional trailing gfx_code categorical (PCFG_GFXID solvers)
+    if(with_gfx_code)
+        prefix.push_back(static_cast<double>(GfxCode(gfx_id)));
 }
 
 // Score the bucket's candidates and return the argmax descriptor (lambdarank:
@@ -260,7 +288,7 @@ std::string PickConfig(const std::string& solver_name,
     }
 
     std::vector<double> prefix;
-    FillProblemPrefix(prefix, problem, handle);
+    FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
 
     std::string desc = ArgmaxOverBucket(pit->second, *model, prefix, bit->second);
     if(desc.empty())

@@ -25,22 +25,26 @@ struct Candidate
 };
 
 // Per-solver model metadata + candidate catalog. The compiled Treelite predict()
-// for a solver indexes features by position over [prob_feat (27) | arg_cols (N)];
-// prob_feat_count is the constant problem+GPU prefix shared by every solver, and
-// feat_count == prob_feat_count + arg_count.
+// for a solver indexes features by position over [prob_feat | arg_cols (N)];
+// prob_feat_count is the problem+GPU prefix length and feat_count ==
+// prob_feat_count + arg_count. The base prefix is kNumBaseProbFeatures; some
+// solvers append a trailing gfx_code categorical (has_gfx_code), making the
+// prefix one longer.
 struct SolverModel
 {
-    int feat_count      = 0; // total columns the predict() consumes
-    int prob_feat_count = 0; // constant problem+GPU prefix length (27)
-    int arg_count       = 0; // per-solver candidate arg columns
+    int feat_count      = 0;     // total columns the predict() consumes
+    int prob_feat_count = 0;     // problem+GPU prefix length (base, or base+1)
+    int arg_count       = 0;     // per-solver candidate arg columns
+    bool has_gfx_code   = false; // prefix ends with the gfx_code categorical
 
     // bucket key "<gfx_id>|<direction>|<data_type>" -> candidate list
     std::unordered_map<std::string, std::vector<Candidate>> buckets;
 };
 
-// Number of problem+GPU prefix features, identical across all solvers. Asserted
-// against the loaded metadata at construction.
-inline constexpr int kNumProbFeatures = 27;
+// Base problem+GPU prefix length (14 log-geom + 5 log-derived + 6 GPU numerics +
+// direction + dtype_code). Solvers trained with PCFG_GFXID add a trailing
+// gfx_code categorical, giving a prefix of kNumBaseProbFeatures + 1.
+inline constexpr int kNumBaseProbFeatures = 27;
 
 // Singleton bundling all per-solver perf-config models. Lazily constructed,
 // thread-safe via the Meyers idiom. Loaded from GetSystemDbPath():

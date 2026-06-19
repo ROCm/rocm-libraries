@@ -49,6 +49,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -58,15 +59,39 @@
 
 namespace {
 
-using miopen::ai::lgbm::pcfg::kNumProbFeatures;
+using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
 using miopen::ai::lgbm::pcfg::LgbmPcfgMetadata;
 using miopen::ai::lgbm::pcfg::ScorePickForTest;
 
 inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 
-// Rebuild the 27-element prefix from a vector's raw problem_inputs + gpu_inputs,
-// matching FillProblemPrefix in lgbm_pcfg_pick.cpp (and model_fields.build_X).
-std::vector<double> BuildPrefix(const nlohmann::json& pin, const nlohmann::json& gin)
+// Fixed gfx_code vocabulary, matching GfxCode in lgbm_pcfg_pick.cpp /
+// model_fields.build_X gfx_order. Unknown -> -1.
+int GfxCode(const std::string& gfx_id)
+{
+    static const std::array<const char*, 10> kGfxOrder = {"gfx906",
+                                                          "gfx90a",
+                                                          "gfx942",
+                                                          "gfx950",
+                                                          "gfx1100",
+                                                          "gfx1101",
+                                                          "gfx1102",
+                                                          "gfx1105",
+                                                          "gfx1151",
+                                                          "gfx1201"};
+    for(int i = 0; i < static_cast<int>(kGfxOrder.size()); ++i)
+        if(gfx_id == kGfxOrder[static_cast<std::size_t>(i)])
+            return i;
+    return -1;
+}
+
+// Rebuild the prefix from a vector's raw problem_inputs + gpu_inputs, matching
+// FillProblemPrefix in lgbm_pcfg_pick.cpp (and model_fields.build_X). When
+// with_gfx_code, append the trailing gfx_code derived from llvm_target.
+std::vector<double> BuildPrefix(const nlohmann::json& pin,
+                                const nlohmann::json& gin,
+                                const std::string& llvm_target,
+                                bool with_gfx_code)
 {
     auto P = [&](const char* k) { return pin.at(k).get<double>(); };
 
@@ -98,7 +123,7 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin, const nlohmann::json&
     const double bxs     = batch * height * width;
 
     std::vector<double> f;
-    f.reserve(kNumProbFeatures);
+    f.reserve(kNumBaseProbFeatures + 1);
     f.push_back(Log1pAbs(channels));
     f.push_back(Log1pAbs(height));
     f.push_back(Log1pAbs(width));
@@ -126,6 +151,8 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin, const nlohmann::json&
     f.push_back(gin.at("vram_bytes").get<double>());
     f.push_back(dir);
     f.push_back(dtype_code);
+    if(with_gfx_code)
+        f.push_back(static_cast<double>(GfxCode(llvm_target)));
     return f;
 }
 
@@ -163,6 +190,11 @@ TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedPick)
             continue;
         const auto& sbuckets = cat_it->at("buckets");
 
+        // Whether this solver's prefix carries the trailing gfx_code (the loaded
+        // model knows; BuildPrefix must match its length exactly).
+        const auto* model        = meta.Find(solver);
+        const bool with_gfx_code = (model != nullptr) && model->has_gfx_code;
+
         for(const auto& v : sit.value())
         {
             const std::string bucket = v.at("bucket").get<std::string>();
@@ -182,7 +214,9 @@ TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedPick)
                 args.push_back(std::move(a));
             }
 
-            const auto prefix = BuildPrefix(v.at("problem_inputs"), v.at("gpu_inputs"));
+            const std::string llvm_target = v.at("llvm_target").get<std::string>();
+            const auto prefix =
+                BuildPrefix(v.at("problem_inputs"), v.at("gpu_inputs"), llvm_target, with_gfx_code);
             const std::string picked   = ScorePickForTest(solver, prefix, descs, args);
             const std::string expected = v.at("expected_desc").get<std::string>();
             ++total;
