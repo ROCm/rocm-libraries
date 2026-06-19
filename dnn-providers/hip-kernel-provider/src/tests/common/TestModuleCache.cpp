@@ -38,7 +38,7 @@ public:
 
 TEST(TestModuleCache, EmptyOnConstruction)
 {
-    MockModuleCache cache;
+    const MockModuleCache cache;
     EXPECT_EQ(cache.size(), 0u);
 }
 
@@ -92,7 +92,7 @@ TEST(TestModuleCache, ContainsAndSizeTracking)
 TEST(TestModuleCache, SeparateInstancesAreIsolated)
 {
     MockModuleCache cacheA;
-    MockModuleCache cacheB;
+    const MockModuleCache cacheB;
 
     cacheA.getOrLoad("shared_key");
 
