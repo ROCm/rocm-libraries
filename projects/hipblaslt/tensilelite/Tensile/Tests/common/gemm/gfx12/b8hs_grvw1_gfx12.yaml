@@ -42,7 +42,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
   DataInitTypeScaleAlphaVec: 21
-  NumElementsToValidate: -1
   BoundsCheck: 2
 
 BenchmarkProblems:

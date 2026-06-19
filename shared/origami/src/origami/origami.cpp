@@ -7,7 +7,9 @@
 #include <iomanip>
 #include <iostream>
 
+#include "origami/attention.hpp"
 #include "origami/gemm.hpp"
+#include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
@@ -19,9 +21,10 @@ namespace origami {
 std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
                                                      const std::vector<config_t>& configs,
-                                                     std::size_t topk) {
+                                                     std::size_t topk,
+                                                     model_t model) {
   // Use rank_configs to get configurations with latencies ranked by performance
-  auto ranked_configs = rank_configs(problem, hardware, configs);
+  auto ranked_configs = rank_configs(problem, hardware, configs, model);
 
   // Return only the top K configurations
   std::vector<prediction_result_t> topk_configs;
@@ -542,7 +545,8 @@ staggerU_t select_staggerU(const problem_t& problem,
 
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
-                                              const std::vector<config_t>& configs) {
+                                              const std::vector<config_t>& configs,
+                                              model_t model) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
   struct prediction_result_wrapper_t {
@@ -554,11 +558,42 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   latencies_configs.reserve(configs.size());
 
   for (auto& config : configs) {
-    // Unified LDS check; Triton's pipeline-buffer multiplier comes from
-    // config.triton().num_stages when target is triton (see estimate_lds_bytes).
-    if (!check_lds_capacity(hardware, problem, config)) continue;
+    // Use appropriate capacity checks and latency computation based on model type
+    bool fits_in_rf;
+    bool fits_in_lds;
+    double latency;
 
-    double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
+    if (model == model_t::attention) {
+      fits_in_rf = attention::check_rf_capacity(hardware, config.mt, problem.a_dtype);
+      if (!fits_in_rf) {
+        OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
+                   << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
+                   << ") REJECTED: Register File (RF) capacity exceeded");
+        continue;
+      }
+      fits_in_lds = attention::check_lds_capacity(hardware, config.mt, problem.a_dtype);
+      if (!fits_in_lds) {
+        OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
+                   << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
+                   << ") REJECTED: LDS capacity exceeded");
+        continue;
+      }
+      latency = attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+    } else {
+      // Default to GEMM model.
+      // Unified LDS check; Triton's pipeline-buffer multiplier comes from
+      // config.triton().num_stages when target is triton (see estimate_lds_bytes).
+      fits_in_lds = gemm::check_lds_capacity(hardware, problem, config);
+      if (!fits_in_lds) {
+        OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
+                   << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
+                   << ") REJECTED: LDS capacity exceeded");
+        continue;
+      }
+      latency = gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+    }
+
+
     if (latency != std::numeric_limits<double>::max())
       latencies_configs.push_back({latency, std::cref(config)});
   }
@@ -579,6 +614,14 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                  [&](const auto& r) -> prediction_result_t {
                    return {r.latency, r.config.get()};
                  });
+
+  OLOG_DEBUG("Initial ranking (by latency, top 10):");
+  for (size_t i = 0; i < std::min(size_t(10), results.size()); i++) {
+    OLOG_DEBUG("  Rank " << i << ": MT=(" << results[i].config.mt.m << ","
+               << results[i].config.mt.n << "," << results[i].config.mt.k << ")"
+               << " MI=(" << results[i].config.mi.m << "," << results[i].config.mi.n << "," << results[i].config.mi.k << ")"
+               << " latency=" << results[i].latency);
+  }
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
@@ -603,6 +646,10 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
   // Use runtime_options from first config if available, otherwise global singleton
   const double top_N_heuristic = origami::runtime_options::get().heuristics_variance;
+
+  OLOG_DEBUG("Tie-breaking: best_latency=" << best_latency
+             << " heuristics_variance=" << top_N_heuristic);
+
   for (const auto& res : results) {
     bool within_top;
     const double diff = std::abs(res.latency - best_latency);
@@ -617,14 +664,22 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       within_top = (diff / denom) < top_N_heuristic;
     }
 
-    if (within_top)
+    if (within_top) {
       ++num_the_same;
-    else
+      OLOG_DEBUG("  Config within threshold: MT=(" << res.config.mt.m << ","
+                 << res.config.mt.n << "," << res.config.mt.k << ")"
+                 << " latency=" << res.latency << " diff=" << diff);
+    } else {
       break;
+    }
   }
+
+  OLOG_DEBUG("Found " << num_the_same << " configs within variance threshold");
 
   // Sort top candidates by arithmetic intensity (descending - highest first)
   if (num_the_same > 1) {
+    OLOG_DEBUG("Applying arithmetic intensity tie-breaker for " << num_the_same << " configs");
+
     std::stable_sort(results.begin(),
                      results.begin() + num_the_same,
                      [&compute_arithmetic_intensity](const prediction_result_t& a,
@@ -632,6 +687,14 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                        return compute_arithmetic_intensity(a.config) >
                               compute_arithmetic_intensity(b.config);
                      });
+
+    OLOG_DEBUG("After arithmetic intensity sort (top configs):");
+    for (size_t i = 0; i < std::min(num_the_same, size_t(5)); i++) {
+      double ai = compute_arithmetic_intensity(results[i].config);
+      OLOG_DEBUG("  Rank " << i << ": MT=(" << results[i].config.mt.m << ","
+                 << results[i].config.mt.n << "," << results[i].config.mt.k << ")"
+                 << " AI=" << ai << " latency=" << results[i].latency);
+    }
 
     // After arithmetic intensity tie-breaking, check if we still have ties
     // among the top results (those with same latency and arithmetic intensity)
@@ -691,6 +754,12 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
+  OLOG_DEBUG("=== rank_configs FINAL RESULT ===");
+  OLOG_DEBUG("Selected config: MT=(" << results[0].config.mt.m << ","
+             << results[0].config.mt.n << "," << results[0].config.mt.k << ")"
+             << " MI=(" << results[0].config.mi.m << "," << results[0].config.mi.n << "," << results[0].config.mi.k << ")"
+             << " latency=" << results[0].latency);
+
   return results;
 }
 
@@ -721,8 +790,11 @@ prediction_result_t select_config_mnk(size_t M,
 
 prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
-                                  const std::vector<config_t>& configs) {
-  auto ranked_configs = rank_configs(problem, hardware, configs);
+                                  const std::vector<config_t>& configs,
+                                  model_t model) {
+  auto ranked_configs = rank_configs(problem, hardware, configs, model);
+
+  // Return the top configuration
   return ranked_configs[0];
 }
 

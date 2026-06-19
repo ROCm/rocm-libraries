@@ -264,6 +264,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_A_SCALE_MODE";
     case ROCBLASLT_MATMUL_DESC_B_SCALE_MODE:
         return "MATMUL_DESC_B_SCALE_MODE";
+    case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+        return "MATMUL_DESC_SM_COUNT_TARGET";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
         return "MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT:
@@ -272,8 +274,12 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT";
     case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
         return "MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT";
+    case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
+        return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
+    case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+        return "MATMUL_DESC_BIAS_BATCH_STRIDE";
     default:
         return "Invalid";
     }

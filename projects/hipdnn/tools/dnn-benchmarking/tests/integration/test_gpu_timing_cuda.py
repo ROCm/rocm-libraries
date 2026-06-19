@@ -1,8 +1,16 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for PyTorch GPU timing on NVIDIA devices."""
+"""Integration tests for PyTorch executor timing on NVIDIA CUDA devices.
 
+CUDA-specific counterpart of test_gpu_timing_pytorch.py: asserts the
+executor selects torch.cuda event timing (not HIP), that the
+ROCm-specific environment metadata carries its non-ROCm sentinels, and
+that the suite header shows CUDA/cuDNN labels (not ROCm) on a CUDA host.
+"""
+
+import io
+import re
 from pathlib import Path
 
 import pytest
@@ -11,26 +19,16 @@ from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import PyTorchCudaExecutor
 from dnn_benchmarking.graph.loader import GraphLoader
+from dnn_benchmarking.reporting.reporter import Reporter
+from dnn_benchmarking.reporting.suite_results import collect_environment_info
+from tests.conftest import skip_if_no_cuda_torch
 
-pytestmark = [pytest.mark.gpu, pytest.mark.nvidia]
-
-
-def _skip_if_no_cuda() -> None:
-    try:
-        import torch
-    except ImportError:
-        pytest.skip("PyTorch not available")
-
-    if not torch.cuda.is_available():
-        pytest.skip("PyTorch GPU not available")
-
-    if torch.version.hip is not None:
-        pytest.skip("ROCm build detected; skipping NVIDIA-only test")
+pytestmark = [pytest.mark.gpu, pytest.mark.cuda]
 
 
 def test_pytorch_gpu_timing_cuda() -> None:
-    """Validate E2E and kernel timings on NVIDIA GPUs."""
-    _skip_if_no_cuda()
+    """Validate PyTorch executor E2E and kernel timings with torch.cuda events."""
+    skip_if_no_cuda_torch()
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
     if not graph_path.exists():
@@ -51,7 +49,7 @@ def test_pytorch_gpu_timing_cuda() -> None:
 
         tensors = buffer_manager.get_tensors()
         executor.warmup(tensors)
-        result = executor.benchmark(tensors, graph_name="cuda_timing")
+        result = executor.benchmark(tensors, graph_name="pytorch_cuda_timing")
 
     assert result.kernel_timings is not None
     assert len(result.kernel_timings) == 3
@@ -65,4 +63,36 @@ def test_pytorch_gpu_timing_cuda() -> None:
 
     assert result.metadata is not None
     assert result.metadata.execution_backend == "pytorch"
-    assert result.metadata.gpu_backend == "torch"
+    # CUDA uses torch.cuda events, never direct HIP events.
+    assert result.metadata.timing_backend == "torch"
+
+
+def test_cuda_environment_metadata_sentinels() -> None:
+    """ROCm-specific metadata carries its non-ROCm sentinels on a CUDA host."""
+    skip_if_no_cuda_torch()
+
+    info = collect_environment_info()
+
+    # No ROCm runtime present on a CUDA host.
+    assert info["rocm_version"] is None
+    # detect_arch() yields the "unknown" sentinel when no gfx target is found.
+    assert info["gpu_arch"] == "unknown"
+
+    # The CUDA-side version probes are populated instead. cuda_version is a
+    # plain string from torch; cudnn_version is decoded to major.minor.patch.
+    assert isinstance(info["cuda_version"], str) and info["cuda_version"]
+    assert info["cudnn_version"] is None or re.fullmatch(
+        r"\d+\.\d+\.\d+", info["cudnn_version"]
+    )
+
+
+def test_cuda_suite_header_shows_cuda_label_not_rocm() -> None:
+    """On a CUDA host the suite header prints CUDA (and cuDNN), never ROCm."""
+    skip_if_no_cuda_torch()
+
+    output = io.StringIO()
+    Reporter(output=output).print_suite_header(1)
+    out = output.getvalue()
+
+    assert "ROCm:" not in out
+    assert re.search(r"^CUDA:\s+\S+", out, re.MULTILINE)

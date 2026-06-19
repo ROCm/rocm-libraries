@@ -25,18 +25,27 @@ struct SdpaFwdParams
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
                   std::optional<float> attnScaleValue,
-                  bool causalMask,
+                  int64_t leftBound,
+                  int64_t rightBound,
+                  bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
+                  = nullptr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
         , oTensor(unpackTensorAttributes(oAttributes))
         , attnScaleValue(attnScaleValue)
-        , causalMask(causalMask)
+        , leftBound(leftBound)
+        , rightBound(rightBound)
+        , topLeftAlignment(topLeftAlignment)
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
+        , lseTensor(lseAttributes != nullptr
+                        ? std::make_optional(unpackTensorAttributes(*lseAttributes))
+                        : std::nullopt)
     {
     }
 
@@ -45,8 +54,11 @@ struct SdpaFwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT vTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT oTensor;
     std::optional<float> attnScaleValue;
-    bool causalMask;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -60,7 +72,12 @@ public:
 
     std::vector<int64_t> getOutputTensorIds() const override
     {
-        return {_params.oTensor.uid};
+        std::vector<int64_t> ids = {_params.oTensor.uid};
+        if(_params.lseTensor.has_value())
+        {
+            ids.push_back(_params.lseTensor->uid);
+        }
+        return ids;
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -81,6 +98,13 @@ public:
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowLseTensor;
+        if(_params.lseTensor.has_value())
+        {
+            shallowLseTensor = createShallowTensor<float>(*_params.lseTensor,
+                                                          variantPack.at(_params.lseTensor->uid));
+        }
+
         utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
             *shallowQTensor,
             *shallowKTensor,
@@ -88,7 +112,10 @@ public:
             *shallowOTensor,
             _params.attnScaleValue,
             shallowAttnMaskTensor.get(),
-            _params.causalMask);
+            _params.leftBound,
+            _params.rightBound,
+            _params.topLeftAlignment,
+            shallowLseTensor.get());
     }
 
 private:
@@ -130,8 +157,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
 
         // Unsupported mask modes
-        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask()
-           || nodeAttributes->causal_mask_bottom_right())
+        if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
         {
             return false;
         }
@@ -181,9 +207,8 @@ public:
             return false;
         }
 
-        // Unsupported: softmax stats outputs
-        if(nodeAttributes->stats_tensor_uid().has_value()
-           || nodeAttributes->max_tensor_uid().has_value()
+        // Unsupported: max/sum_exp stats outputs (LSE is supported)
+        if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
@@ -214,14 +239,61 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
+                                 : nullptr;
+
+        int64_t leftBound = (nodeAttributes->left_bound().has_value())
+                                ? nodeAttributes->left_bound().value()
+                                : -1;
+        int64_t rightBound = (nodeAttributes->right_bound().has_value())
+                                 ? nodeAttributes->right_bound().value()
+                                 : -1;
+
+        if(leftBound < -1 || rightBound < -1)
+        {
+            throw std::invalid_argument("SdpaFwdPlan: left_bound and right_bound must be >= -1 "
+                                        "(got left_bound="
+                                        + std::to_string(leftBound)
+                                        + ", right_bound=" + std::to_string(rightBound) + ")");
+        }
+
+        bool isTopLeft = nodeAttributes->diagonal_alignment()
+                         == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+
+        // Validate mutually exclusive deprecated attributes
+        if(nodeAttributes->causal_mask() && nodeAttributes->causal_mask_bottom_right())
+        {
+            throw std::invalid_argument("Cannot set both causal_mask and causal_mask_bottom_right. "
+                                        "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
+                                        "left_bound=-1, right_bound=0 instead.");
+        }
+
+        // Check deprecated attributes
+        if(nodeAttributes->causal_mask())
+        {
+            leftBound = -1;
+            rightBound = 0;
+            isTopLeft = true;
+        }
+        if(nodeAttributes->causal_mask_bottom_right())
+        {
+            leftBound = -1;
+            rightBound = 0;
+            isTopLeft = false;
+        }
+
         return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType>>(
             SdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                           *tensorMap.at(nodeAttributes->k_tensor_uid()),
                           *tensorMap.at(nodeAttributes->v_tensor_uid()),
                           *tensorMap.at(nodeAttributes->o_tensor_uid()),
                           attnScaleValue,
-                          nodeAttributes->causal_mask(),
-                          attnMaskPtr));
+                          leftBound,
+                          rightBound,
+                          isTopLeft,
+                          attnMaskPtr,
+                          lsePtr));
     }
 };
 

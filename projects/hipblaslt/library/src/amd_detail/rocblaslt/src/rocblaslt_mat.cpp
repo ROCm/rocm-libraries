@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -220,9 +221,32 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
 
-    return runContractionProblem(handle, algo, problem, gemmData);
+    rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    if(st == rocblaslt_status_success)
+    {
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
+        if(call_id != 0)
+        {
+            st = hipblaslt_check_numerics_scan_D(handle,
+                                                 stream,
+                                                 call_id,
+                                                 m, n,
+                                                 matD->batch_count,
+                                                 type_d,
+                                                 D,
+                                                 ldd,
+                                                 batch_stride_d,
+                                                 (matD->order == HIPBLASLT_ORDER_ROW));
+        }
+    }
+
+    return st;
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,
@@ -381,7 +405,10 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -672,7 +699,10 @@ rocblaslt_status
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        matmul_descr[i]->bias_stride,
+                                        matmul_descr[i]->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr[i], nullptr)});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1014,7 +1044,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         handle->Synchronizer,
         swizzleA,
         swizzleB,
-        HIPBLASLT_BATCH_MODE_STRIDED};
+        HIPBLASLT_BATCH_MODE_STRIDED,
+        0,
+        0}; // streamk_tile_scheduling_ext: OFF (matches struct default)
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1334,7 +1366,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        0,
+                                        0}); // streamk_tile_scheduling_ext: OFF (matches struct default)
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

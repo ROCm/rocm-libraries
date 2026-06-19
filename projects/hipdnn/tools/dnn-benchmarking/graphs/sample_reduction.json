@@ -1,0 +1,57 @@
+{
+    "name": "sample_reduction_add_2x3x4_to_2x3x1",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "output_y",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "reduction_add_node",
+            "type": "ReductionAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "in_tensor_uid": 1
+            },
+            "outputs": {
+                "out_tensor_uid": 2
+            },
+            "in_tensor_uid": 1,
+            "out_tensor_uid": 2,
+            "mode": "add",
+            "is_deterministic": true
+        }
+    ]
+}

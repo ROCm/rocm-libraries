@@ -18,6 +18,17 @@
 #include <utility>
 #include <variant>
 
+// Function pointer type for workspace packing (no captures, points to code segment)
+using PrepareWorkspaceHostFunc = size_t (*)(void*,                   // host_ws
+                                            ck_tile::index_t,        // batch
+                                            ck_tile::index_t,        // hdim_q
+                                            ck_tile::index_t,        // nhead_q
+                                            ck_tile::index_t,        // seqlen_q
+                                            ck_tile::index_t,        // seqlen_k
+                                            const ck_tile::index_t*, // seqstart_q
+                                            const ck_tile::index_t*  // seqstart_k
+);
+
 struct FmhaBwdFp32
 {
 };
@@ -469,6 +480,15 @@ int fmha_bwd_dq_dk_dv_maxq_();
 struct fmha_bwd_traits;
 template <typename Traits_, typename Arch = void>
 size_t fmha_bwd_dq_dk_dv_dq_ws_host_size_(int batch_size);
+// `total_seqlen_q_padded` is total q tokens across all batches (incl. per-batch padding):
+//   - batch mode: max_batch * seqlen_q
+//   - group mode: seqstart_q[batch] (== varlen q tensor's first dim)
+template <typename Traits_, typename Arch = void>
+size_t fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_(ck_tile::index_t max_batch,
+                                                   ck_tile::index_t hdim_q,
+                                                   ck_tile::index_t nhead_q,
+                                                   ck_tile::index_t total_seqlen_q_padded,
+                                                   ck_tile::index_t max_seqlen_k);
 template <typename Traits_, typename Arch = void>
 size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_(void* cpu_ws,
                                              ck_tile::index_t batch_size,
@@ -539,11 +559,6 @@ struct fmha_bwd_traits
     bool has_dropout;
     bool is_store_randval;
     bool is_deterministic;
-    // Raw pointers for group mode: cumulative physical seqlen arrays of length batch+1.
-    // Only need to remain valid during fmha_bwd_launcher construction (i.e. through
-    // PrepareWorkspaceHost); they are not retained afterward.
-    const int* seqstart_qs = nullptr;
-    const int* seqstart_ks = nullptr;
     // TODO: padding check is inside this api
 };
 
@@ -584,58 +599,272 @@ float fmha_bwd(const fmha_bwd_traits&, fmha_bwd_args, const ck_tile::stream_conf
 
 struct fmha_bwd_launcher
 {
+    // POD closure for graph capture (trivially destructible, no heap allocation)
+    struct GraphClosure
+    {
+        PrepareWorkspaceHostFunc func_ptr;
+        void* pin_w_ptr;
+        const ck_tile::index_t* seqstart_q_ptr;
+        const ck_tile::index_t* seqstart_k_ptr;
+        ck_tile::index_t batch;
+        ck_tile::index_t hdim_q;
+        ck_tile::index_t nhead_q;
+        ck_tile::index_t seqlen_q;
+        ck_tile::index_t seqlen_k;
+
+        static void invoke(void* ud)
+        {
+            auto* closure = static_cast<GraphClosure*>(ud);
+            if(closure->func_ptr)
+            {
+                // Callback runs on the HIP driver helper thread across a C ABI boundary;
+                // any exception escaping it would call std::terminate.
+                try
+                {
+                    closure->func_ptr(closure->pin_w_ptr,
+                                      closure->batch,
+                                      closure->hdim_q,
+                                      closure->nhead_q,
+                                      closure->seqlen_q,
+                                      closure->seqlen_k,
+                                      closure->seqstart_q_ptr,
+                                      closure->seqstart_k_ptr);
+                }
+                catch(const std::exception& e)
+                {
+                    // The H2D queued after this callback will copy indeterminate
+                    // metadata to device and the kernel will produce wrong results;
+                    // unlikely in practice since pack_workspace_host only throws on
+                    // precondition violations.
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
+                              << '\n';
+                }
+                catch(...)
+                {
+                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
+                }
+            }
+        }
+    };
+    static_assert(std::is_trivially_destructible_v<GraphClosure>,
+                  "GraphClosure must be trivially destructible for placement-new without dtor");
+
     std::function<float(fmha_bwd_args, const ck_tile::stream_config&)> run{
         [](fmha_bwd_args, const ck_tile::stream_config&) {
             std::cerr << "fmha_bwd: no kernel found for given traits, skipping run\n";
             return -1.0f;
         }};
+    // Layout: [host_ws_size_ bytes (host-prepared metadata)][dq_acc region]
     size_t workspace_size = 0;
-    std::function<void(void*)> prepare_workspace{[](void*) {
-        std::cerr << "fmha_bwd: no kernel found for given traits, skipping prepare_workspace\n";
-    }};
 
     fmha_bwd_launcher(const fmha_bwd_traits&);
     fmha_bwd_launcher(fmha_bwd_launcher&&)            = delete;
     fmha_bwd_launcher& operator=(fmha_bwd_launcher&&) = delete;
 
+    ~fmha_bwd_launcher() noexcept { schedule_pin_staging_release(); }
+
+    // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
+    //
+    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer.
+    //
+    // **Deleter behavior differs by mode**:
+    // - Normal mode: deleter is invoked on the stream tail after H2D completes.
+    // - Graph capture mode: deleter is NOT invoked; caller must keep buffer alive
+    //   until hipGraphDestroy (see precondition #2 below).
+    //
+    // REQUIRED PRECONDITIONS for `pinned_host_alloc`:
+    //
+    // 1. **Capture-safe allocation**: The allocator must NOT call synchronizing APIs
+    //    (e.g., bare hipHostMalloc) during active stream capture, as these invalidate
+    //    the capture and cause hipStreamEndCapture to fail. Use a caching allocator
+    //    that serves from cache during capture (e.g., PyTorch CachingHostAllocator).
+    //
+    // 2. **Buffer lifetime in graph mode**: In graph capture mode (detected via
+    //    hipStreamIsCapturing), the returned buffer is NOT freed automatically after
+    //    the H2D completes. The caller MUST keep the buffer alive for the graph's
+    //    entire lifetime (until hipGraphDestroy), otherwise graph replay will read
+    //    from freed memory. In normal (non-graph) mode, the buffer is automatically
+    //    freed on the stream tail after the H2D.
+    //
+    void prepare_workspace_async( //
+        void* device_ws_ptr,
+        const int* seqstart_q_dev,
+        const int* seqstart_k_dev,
+        const ck_tile::stream_config& s,
+        const std::function<std::shared_ptr<void>(size_t)>& pinned_host_alloc)
+    {
+        hipStream_t stream = s.stream_id_;
+
+        // Fast path: no host-side metadata to stage; just zero dq_acc if needed.
+        if(host_ws_size_ == 0)
+        {
+            if(needs_zero_dq_acc_ && workspace_size > 0)
+                HIP_CHECK_ERROR(hipMemsetAsync(device_ws_ptr, 0, workspace_size, stream));
+            return;
+        }
+
+        if(!pinned_host_alloc)
+            throw std::runtime_error(
+                "fmha_bwd_launcher::prepare_workspace_async: pinned_host_alloc is required");
+
+        // Allocate pinned host staging first: if it throws we haven't issued any
+        // stream work yet, leaving the workspace cleanly un-prepared.
+        // 16-align each section: pin_w stores alignas(16) FmhaBwdGroupPersistentCuState
+        // written via x86 SIMD; misaligned destinations fault.
+        const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
+        const size_t seqstart_stride =
+            ck_tile::integer_least_multiple(seqstart_bytes, static_cast<size_t>(16));
+        const size_t pin_w_offset = 2 * seqstart_stride;
+        const size_t data_size    = pin_w_offset + host_ws_size_;
+
+        // Check if we're in graph capture mode
+        hipStreamCaptureStatus capture_status;
+        HIP_CHECK_ERROR(hipStreamIsCapturing(stream, &capture_status));
+        const bool is_graph_capture = (capture_status == hipStreamCaptureStatusActive);
+
+        // Allocate pinned buffer with extra aligned space for closure
+        // Both modes use placement new for closure (POD, trivially destructible)
+        constexpr size_t closure_align = alignof(GraphClosure);
+        constexpr size_t closure_size  = sizeof(GraphClosure);
+        const size_t aligned_data      = (data_size + closure_align - 1) & ~(closure_align - 1);
+        const size_t total_bytes       = aligned_data + closure_size;
+        auto pin_base                  = pinned_host_alloc(total_bytes);
+
+        if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
+            HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
+                                           0,
+                                           workspace_size - host_ws_size_,
+                                           stream));
+
+        char* base  = static_cast<char*>(pin_base.get());
+        int* pin_q  = reinterpret_cast<int*>(base);
+        int* pin_k  = reinterpret_cast<int*>(base + seqstart_stride);
+        void* pin_w = base + pin_w_offset;
+        const ck_tile::index_t* seqstart_q_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_q) : nullptr;
+        const ck_tile::index_t* seqstart_k_pinned =
+            traits_.is_group_mode ? reinterpret_cast<const ck_tile::index_t*>(pin_k) : nullptr;
+
+        if(traits_.is_group_mode)
+        {
+            if(!seqstart_q_dev || !seqstart_k_dev)
+                throw std::runtime_error("fmha_bwd_launcher::prepare_workspace_async: "
+                                         "seqstart_q_dev and seqstart_k_dev are required in "
+                                         "group mode");
+            HIP_CHECK_ERROR(hipMemcpyAsync(
+                pin_q, seqstart_q_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
+            HIP_CHECK_ERROR(hipMemcpyAsync(
+                pin_k, seqstart_k_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
+        }
+
+        // === UNIFIED PATH: Both modes use placement new for POD closure ===
+        // Construct closure in aligned location within pinned buffer (all POD, trivially
+        // destructible)
+        void* closure_addr = base + aligned_data;
+        auto* closure      = new(closure_addr) GraphClosure{
+            prepare_ws_func_, // Function pointer (points to code segment, always valid)
+            pin_w,
+            seqstart_q_pinned,
+            seqstart_k_pinned,
+            batch_, // Copy captured data (independent of launcher lifetime)
+            hdim_q_,
+            nhead_q_,
+            seqlen_q_,
+            seqlen_k_};
+
+        HIP_CHECK_ERROR(hipLaunchHostFunc(stream, GraphClosure::invoke, closure));
+
+        HIP_CHECK_ERROR(
+            hipMemcpyAsync(device_ws_ptr, pin_w, host_ws_size_, hipMemcpyHostToDevice, stream));
+
+        if(!is_graph_capture)
+        {
+            // Normal mode: transfer ownership of pinned buffer and schedule release.
+            // The H2D memcpy above copies host-prepared metadata to device workspace.
+            // Pinned buffer must stay alive until H2D completes, so we schedule its
+            // release on the stream tail (via hipLaunchHostFunc callback).
+            schedule_pin_staging_release(); // Release any previous in-flight buffer first
+            pin_staging_    = std::move(pin_base);
+            release_stream_ = stream;
+        }
+        // Graph mode: pin_base stays owned by caller (via shared_ptr ref-count).
+        // Caller must keep it alive for the graph's lifetime. Closure and data pointers
+        // within pin_base remain valid as long as caller holds pin_base.
+    }
+
     private:
-    size_t host_ws_size   = 0;
-    size_t device_ws_size = 0;
-    std::unique_ptr<char[]> ws_host;
+    fmha_bwd_traits traits_{};
+    size_t host_ws_size_    = 0;
+    bool needs_zero_dq_acc_ = false;
+
+    // Function pointer (points to code segment, survives launcher destruction)
+    PrepareWorkspaceHostFunc prepare_ws_func_ = nullptr;
+
+    // Captured data (copied to closure in graph mode)
+    ck_tile::index_t batch_    = 0;
+    ck_tile::index_t hdim_q_   = 0;
+    ck_tile::index_t nhead_q_  = 0;
+    ck_tile::index_t seqlen_q_ = 0;
+    ck_tile::index_t seqlen_k_ = 0;
+
+    std::shared_ptr<void> pin_staging_;
+    hipStream_t release_stream_ = nullptr;
+
+    // The pin_staging_ deleter MUST NOT call any HIP API: it fires from the
+    // hipLaunchHostFunc callback on the driver helper thread, which holds
+    // runtime locks (would deadlock against main-thread hipFree). PyTorch's
+    // CachingHostAllocator is safe; bare hipHostMalloc users should defer
+    // hipHostFree via ck_tile::pinned_host_releaser.
+    void schedule_pin_staging_release() noexcept
+    {
+        if(!pin_staging_)
+            return;
+        auto* heap_ref       = new std::shared_ptr<void>(std::move(pin_staging_));
+        const hipError_t err = hipLaunchHostFunc(
+            release_stream_,
+            [](void* ud) { delete static_cast<std::shared_ptr<void>*>(ud); },
+            heap_ref);
+        if(err != hipSuccess)
+        {
+            std::cerr << "fmha_bwd_launcher: hipLaunchHostFunc failed: " << hipGetErrorString(err)
+                      << "; releasing eagerly\n";
+            delete heap_ref;
+        }
+    }
 
     template <typename T0 /*dot_do_o_trait*/,
               typename T1 /*dq_dk_dv_trait*/,
               typename T2 /*convert_dq_trait*/,
               typename Arch>
-    void init(const fmha_bwd_traits& traits)
+    void init(const fmha_bwd_traits& t)
     {
-        run = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
+        traits_ = t;
+        run     = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
             return fmha_bwd_<T0, T1, T2, Arch>(s, a);
         };
-        host_ws_size = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(traits.batch);
-        if(host_ws_size > 0)
+        host_ws_size_         = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);
+        size_t device_ws_size = 0;
+        if(host_ws_size_ > 0)
         {
-            ws_host = std::make_unique<char[]>(host_ws_size); // TODO: support host mem allocator
-            device_ws_size = fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>( //
-                ws_host.get(),
-                traits.batch,
-                traits.hdim_q,
-                traits.nhead_q,
-                traits.seqlen_q,
-                traits.seqlen_k,
-                traits.seqstart_qs,
-                traits.seqstart_ks);
+            // In group mode t.seqlen_q is already the padded total (== seqstart_q[batch]);
+            // in batch mode it's per-batch and the total is batch * seqlen_q.
+            const ck_tile::index_t total_seqlen_q_padded =
+                t.is_group_mode ? t.seqlen_q : t.batch * t.seqlen_q;
+            device_ws_size = fmha_bwd_dq_dk_dv_dq_ws_device_upper_bound_<T1, Arch>(
+                t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
+
+            // Store function pointer (directly assign template-instantiated function)
+            prepare_ws_func_ = &fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<T1, Arch>;
+
+            // Store captured data as member variables
+            batch_    = t.batch;
+            hdim_q_   = t.hdim_q;
+            nhead_q_  = t.nhead_q;
+            seqlen_q_ = t.seqlen_q;
+            seqlen_k_ = t.seqlen_k;
         }
-        workspace_size               = host_ws_size + device_ws_size;
-        const bool needs_zero_dq_acc = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
-        prepare_workspace            = [this, needs_zero_dq_acc](void* device_ws) {
-            if(host_ws_size > 0)
-                HIP_CHECK_ERROR(
-                    hipMemcpy(device_ws, ws_host.get(), host_ws_size, hipMemcpyHostToDevice));
-            if(needs_zero_dq_acc)
-                HIP_CHECK_ERROR(
-                    hipMemset(static_cast<char*>(device_ws) + host_ws_size, 0, device_ws_size));
-        };
+        workspace_size     = host_ws_size_ + device_ws_size;
+        needs_zero_dq_acc_ = fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<T1, Arch>();
     }
 
     public:
