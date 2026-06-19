@@ -523,6 +523,11 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const int block_size = k.threads_per_block > 0 ? k.threads_per_block : 256;
     const int tile_m = k.tile_m, tile_n = k.tile_n;
     const int tile_k = k.tile_k > 0 ? k.tile_k : 64;  // gemm_k_per_block: K-dim tile (32/64/128)
+    // NOTE: misnamed -- this is block_size/4, not the true wavefront count
+    // (block_size/wavefront_size). Kept as-is so it matches the trained models'
+    // feature; the divisor is a linear rescale that LightGBM is invariant to, so
+    // fixing the name would require retraining all conv models for no gain. Must
+    // stay identical to feature_engine_grouped_conv.py. Revisit on next retrain.
     const double num_warps = (double)block_size / 4.0;
     const double tile_vol = (double)tile_m * tile_n * tile_k;
     const double tile_mn = (double)tile_m * tile_n;

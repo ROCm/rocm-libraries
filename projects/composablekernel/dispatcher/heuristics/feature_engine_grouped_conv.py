@@ -263,7 +263,11 @@ class GroupedConvFeatureEngine(FeatureEngine):
         pipeline_str = str(kernel.get("pipeline", "compv3"))
         pipeline_code = PIPELINE_MAP.get(pipeline_str, 0)
 
-        # Estimate warps (assuming 256 thread block)
+        # NOTE: misnamed -- this is block_size/4, not the true wavefront count
+        # (block_size/wavefront_size). Kept as-is so it matches the trained models'
+        # feature; the divisor is a linear rescale that LightGBM is invariant to, so
+        # fixing the name would require retraining all conv models for no gain. Must
+        # stay identical to the C++ extractor in ml_heuristic.hpp. Revisit on next retrain.
         num_warps = block_size / 4.0
 
         tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
@@ -566,6 +570,9 @@ class GroupedConvFeatureEngine(FeatureEngine):
             df["pipeline"].map(PIPELINE_MAP).fillna(0).values.astype(np.float64)
         )
 
+        # NOTE: misnamed -- block_size/4, not the true wavefront count. See the
+        # scalar extract() above; kept for trained-model parity, LightGBM-invariant,
+        # must match ml_heuristic.hpp. Revisit on next retrain.
         num_warps = block_size / 4.0
         tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
         tile_mn = gemm_m_per_block * gemm_n_per_block

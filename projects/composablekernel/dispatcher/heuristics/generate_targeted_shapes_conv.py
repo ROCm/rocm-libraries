@@ -40,6 +40,7 @@ import argparse
 import csv
 import math
 import random
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -101,9 +102,12 @@ def _filter_bucket(Y: int, X: int) -> str:
 # OOF analysis
 # ---------------------------------------------------------------------------
 
-def _efficiency(pred_tflops, actual_tflops):
-    """Per-candidate tflops efficiency (pred/oracle, clipped to [0,1])."""
-    return np.clip(pred_tflops / np.maximum(actual_tflops, 1e-6), 0.0, 1.0)
+def _efficiency(actual_tflops_of_pred_best, oracle_tflops):
+    """Per-shape tflops efficiency: realized tflops of the model's top-1 pick
+    divided by the oracle (best-candidate) tflops, clipped to [0, 1]."""
+    return np.clip(
+        actual_tflops_of_pred_best / np.maximum(oracle_tflops, 1e-6), 0.0, 1.0
+    )
 
 
 def _build_per_shape(oof_df: pd.DataFrame) -> pd.DataFrame:
@@ -467,8 +471,16 @@ def main():
     write_csv(shapes, args.out)
     print(f"Wrote {len(shapes):,} shapes to {args.out}", file=sys.stderr)
 
-    n_shards = write_shards(shapes, args.shards, args.out.parent)  # type: ignore[union-attr]
-    print(f"Wrote {n_shards} shards to {args.out.parent}/", file=sys.stderr)
+    # If --out is itself shard-named (the single-shard top-up workflow writes
+    # directly to shard_00.csv), the per-shard writer would target that same path
+    # and clobber the complete file just written -- partially, when --shards > 1.
+    # Skip sharding in that case; --out already holds the full set.
+    if re.fullmatch(r"shard_\d+\.csv", args.out.name):  # type: ignore[union-attr]
+        print(f"--out {args.out.name} is already shard-named; skipping shard split.",
+              file=sys.stderr)
+    else:
+        n_shards = write_shards(shapes, args.shards, args.out.parent)  # type: ignore[union-attr]
+        print(f"Wrote {n_shards} shards to {args.out.parent}/", file=sys.stderr)
 
     n_by_N: dict[int, int] = defaultdict(int)
     n_by_gt: dict[str, int] = defaultdict(int)
