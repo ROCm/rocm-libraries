@@ -31,11 +31,6 @@ class ModuleCache
     friend Derived;
 
 public:
-    ModuleCache(const ModuleCache&) = delete;
-    ModuleCache& operator=(const ModuleCache&) = delete;
-    ModuleCache(ModuleCache&&) = delete;
-    ModuleCache& operator=(ModuleCache&&) = delete;
-
     /// Look up or create a cached entry.  On cache miss, calls
     /// Derived::load(args...) and caches the result only if it is truthy.
     Value getOrLoad(Args... args)
@@ -76,6 +71,10 @@ public:
 private:
     ModuleCache() = default;
     ~ModuleCache() = default;
+    ModuleCache(const ModuleCache&) = delete;
+    ModuleCache& operator=(const ModuleCache&) = delete;
+    ModuleCache(ModuleCache&&) = delete;
+    ModuleCache& operator=(ModuleCache&&) = delete;
 
     mutable std::mutex _mutex;
     std::unordered_map<std::string, Value> _entries;
