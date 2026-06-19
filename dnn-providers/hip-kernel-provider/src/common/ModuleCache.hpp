@@ -28,10 +28,9 @@ namespace hip_kernel_provider_common
 template <typename Derived, typename Value, typename... Args>
 class ModuleCache
 {
-public:
-    ModuleCache() = default;
-    ~ModuleCache() = default;
+    friend Derived;
 
+public:
     ModuleCache(const ModuleCache&) = delete;
     ModuleCache& operator=(const ModuleCache&) = delete;
     ModuleCache(ModuleCache&&) = delete;
@@ -75,6 +74,9 @@ public:
     }
 
 private:
+    ModuleCache() = default;
+    ~ModuleCache() = default;
+
     mutable std::mutex _mutex;
     std::unordered_map<std::string, Value> _entries;
 };
