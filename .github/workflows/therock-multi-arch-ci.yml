@@ -121,8 +121,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # "ALL" = run full suite, "" = skip, "projects/foo,..." = run specific projects
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
@@ -146,8 +146,8 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # "ALL" = run full suite, "" = skip, "projects/foo,..." = run specific projects
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
       ref: rocm-libraries/multi-arch-ci-custom # TheRock@rocm-libraries/multi-arch-ci-custom
     permissions:
