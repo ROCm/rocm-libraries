@@ -66,7 +66,7 @@ enum WaitEventType : uint8_t {
     // VM_VSRC events
     EV_VGPR_LDS_READ,   // ds_read / ds_write reading a VGPR source
     EV_VGPR_FLAT_READ,  // FLAT reading a VGPR source
-    EV_VGPR_VMEM_READ,  // buffer / global / image / tensor reading a VGPR source
+    EV_VGPR_VMEM_READ,  // buffer / global / image reading a VGPR source
     EV_NUM,
 };
 
@@ -188,7 +188,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
     if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALLoad(inst) ||
-        isGLOBALStore(inst) || isTensorLoad(inst))
+        isGLOBALStore(inst))
         return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
