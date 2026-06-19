@@ -126,15 +126,15 @@ struct params1
 
 struct TupleTransformer
 {
-	using size_type = std::tuple<size_t, size_t, size_t>;
-	size_t operator()(const size_type& size) const
-	{
-		const size_t rows = std::get<0>(size);
+    using size_type = std::tuple<size_t, size_t, size_t>;
+    size_t operator()(const size_type& size) const
+    {
+        const size_t rows = std::get<0>(size);
         const size_t columns = std::get<1>(size);
         const size_t row_stride = columns + std::get<2>(size);
         const size_t input_size = std::max<size_t>(1, rows * row_stride);
-		return input_size;
-	}
+        return input_size;
+    }
 };
 
 template<class Params>
@@ -717,17 +717,17 @@ struct params3
 
 struct TupleTransformerWithChannels
 {
-	using size_type = std::tuple<size_t, size_t, size_t>;
-	size_t operator()(const size_type& size) const
-	{
-		const size_t rows = std::get<0>(size);
+    using size_type = std::tuple<size_t, size_t, size_t>;
+    size_t operator()(const size_type& size) const
+    {
+        const size_t rows = std::get<0>(size);
         const size_t columns = std::get<1>(size);
         const size_t row_stride = columns * TupleTransformerWithChannels::channels + std::get<2>(size);
         const size_t input_size = std::max<size_t>(1, rows * row_stride);
-		return input_size;
-	}
+        return input_size;
+    }
 
-	inline static unsigned int channels = 1;
+    inline static unsigned int channels = 1;
 };
 
 template<class Params>
@@ -806,7 +806,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-	TupleTransformerWithChannels::channels = channels;
+    TupleTransformerWithChannels::channels = channels;
     for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
@@ -1110,7 +1110,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-	TupleTransformerWithChannels::channels = channels;
+    TupleTransformerWithChannels::channels = channels;
     for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(

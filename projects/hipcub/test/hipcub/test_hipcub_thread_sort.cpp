@@ -123,7 +123,7 @@ TYPED_TEST(HipcubThreadSort, SortKeys)
     constexpr auto num_blocks  = 337;
     constexpr auto num_threads = num_blocks * block_size;
     constexpr auto size = num_blocks * items_per_block;
-	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
+    CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -205,7 +205,7 @@ TYPED_TEST(HipcubThreadSort, SortKeysValues)
     constexpr auto num_blocks  = 269;
     constexpr auto num_threads = num_blocks * block_size;
     constexpr auto size = num_blocks * items_per_block;
-	CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
+    CHECK_SIZE_ENABLEMENT(static_cast<size_t>(size));
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {

@@ -392,7 +392,7 @@ inline void test_radix_rank()
 
     const size_t grid_size = 42;
     const size_t size      = items_per_block * grid_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     SCOPED_TRACE(testing::Message()
                  << "with items_per_block= " << items_per_block << " size=" << size);
@@ -655,7 +655,7 @@ inline void test_radix_rank_with_prefix_sum_output()
         const size_t pfs_items_per_block = (1 << radix_bits);
         const size_t pfs_size            = pfs_items_per_block * grid_size;
         const size_t size                = items_per_block * grid_size;
-		CHECK_SIZE_ENABLEMENT(size);
+        CHECK_SIZE_ENABLEMENT(size);
 
         SCOPED_TRACE(testing::Message()
                      << "with items_per_block= " << items_per_block << " size=" << size);

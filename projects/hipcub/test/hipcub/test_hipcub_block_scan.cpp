@@ -125,7 +125,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScan)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -234,7 +234,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanInitialValue)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -338,7 +338,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduce)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -478,7 +478,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -616,7 +616,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -731,7 +731,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScan)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -832,7 +832,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanReduce)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -972,7 +972,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1085,7 +1085,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, CustomStruct)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1189,7 +1189,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveSum)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1289,7 +1289,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveSumReduce)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1416,7 +1416,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveSumPrefixCallback)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1531,7 +1531,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveSum)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1631,7 +1631,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveSumReduce)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1770,7 +1770,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveSumPrefixCallback)
 
     const size_t size      = block_size * 113;
     const size_t grid_size = size / block_size;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1957,7 +1957,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2076,7 +2076,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2228,7 +2228,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2372,7 +2372,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScan)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2499,7 +2499,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2668,7 +2668,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2815,7 +2815,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveSum)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -2933,7 +2933,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveSumReduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -3085,7 +3085,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveSumPrefixCallback)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -3229,7 +3229,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveSum)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -3352,7 +3352,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveSumReduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -3518,7 +3518,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveSumPrefixCallback)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = items_per_block * 37;
     const size_t grid_size       = size / items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {

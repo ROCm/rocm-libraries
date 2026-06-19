@@ -41,14 +41,14 @@ struct params
 
 struct PairTransformer
 {
-	using size_type = std::tuple<size_t, size_t>;
-	size_t operator()(const size_type& size) const
-	{
-		// We're allocating buffers of both sizes in the pair.
-		// To ensure we don't run out of memory, we want to make sure
-		// the sum of the two doesn't exceed the threshold.
-		return std::get<0>(size) + std::get<1>(size);
-	}
+    using size_type = std::tuple<size_t, size_t>;
+    size_t operator()(const size_type& size) const
+    {
+        // We're allocating buffers of both sizes in the pair.
+        // To ensure we don't run out of memory, we want to make sure
+        // the sum of the two doesn't exceed the threshold.
+        return std::get<0>(size) + std::get<1>(size);
+    }
 };
 
 template<class Params>

@@ -92,7 +92,7 @@
 // - either in your own code, before including this header, or here.
 namespace
 {
-	
+    
 template <typename T, typename U>
 std::ostream& operator<<(std::ostream& os, const std::pair<T, U>& p)
 {
@@ -110,7 +110,7 @@ std::ostream& operator<<(std::ostream& os, const std::tuple<T, U, V>& p)
 {
     return os << "(" << std::get<0>(p) << ", " << std::get<1>(p) << ", " << std::get<2>(p) << ")";
 }
-	
+    
 }
 
 namespace test_controller
@@ -120,17 +120,17 @@ namespace test_controller
 // it's given without performing any transformation.
 struct IdentityTransformer
 {
-	using size_type = size_t;
-	size_t operator()(const size_type& size) const
-	{
-		return size;
-	}
+    using size_type = size_t;
+    size_t operator()(const size_type& size) const
+    {
+        return size;
+    }
 };
 
-// Thesestructs are used by the file parsing classes, and should not be visible outside this file.
+// These structs are used by the file parsing classes, and should not be visible outside this file.
 namespace
 {
-	// Convenience struct to encapsulate all of the information from a single line from the control file.
+    // Convenience struct to encapsulate all of the information from a single line from the control file.
     struct ControlInfo
     {
         // This regex is applied to the fully-qualified test name (<TestSuite.TestName>).
@@ -151,7 +151,7 @@ namespace
         size_t line_num = 0;
     };
 
-	// Represents a single token (operator or numeric value) in an arithmetic size expression.
+    // Represents a single token (operator or numeric value) in an arithmetic size expression.
     // Eg. the expression "1 << 2" contains tokens: "1", "<<", "2".
     struct Token
     {
@@ -162,20 +162,20 @@ namespace
         bool is_val = false;
 
         Token(size_t val) : op(""), val(val), is_val(true)
-		{}
+        {}
 
         Token(std::string op) : op(op), val(0), is_val(false)
-		{}
+        {}
     };
 }
 
 // These functions are used to query information about the environment the test is running in.
 namespace env
 {
-	// Checks if the HIPCUB_EXTRA_TC_INFO exists and is set to 1. If so,
+    // Checks if the HIPCUB_EXTRA_TC_INFO exists and is set to 1. If so,
     // individual skipped sizes and the control file line numbers that caused them to
-	// be skipped will be appended to msgs in the filtering functions.
-	// Information about the path to the control file will also be displayed.
+    // be skipped will be appended to msgs in the filtering functions.
+    // Information about the path to the control file will also be displayed.
     // This can be useful for debugging when adding new size constraints.
     inline bool should_print_extra_info()
     {
@@ -185,7 +185,7 @@ namespace env
         return result;
     }
 
-	inline bool is_running_valgrind()
+    inline bool is_running_valgrind()
     {
         bool result = false;
 #if HAS_VALGRIND_H
@@ -213,7 +213,7 @@ namespace env
         return !is_windows();
     }
 
-	// Uses system calls to get the path to the currently running test binary.
+    // Uses system calls to get the path to the currently running test binary.
     inline bool get_running_binary_path(std::filesystem::path& path)
     {
         char path_buf[256];
@@ -232,12 +232,12 @@ namespace env
         // Linux does not add a '\0' at the end of the path, so we must do that manually.
         // If truncate if the path exceeds max_len chars.
         const int bytes_read = readlink("/proc/self/exe", path_buf, max_len);
-		
+        
         if (bytes_read <= 0 || bytes_read >= max_len)
-		{
-			std::cerr << "Error: Unable to determine path of running binary." << std::endl;
+        {
+            std::cerr << "Error: Unable to determine path of running binary." << std::endl;
             return false;
-		}
+        }
         
         path_buf[bytes_read] = '\0';
 #endif
@@ -246,7 +246,7 @@ namespace env
         // We want the path to the directory it's in.
         path = std::filesystem::path(path_buf).parent_path();
 
-		// Make sure it exists.
+        // Make sure it exists.
         if (!std::filesystem::exists(path))
         {
             std::cerr << "Could not determine path to running binary." << std::endl;
@@ -256,15 +256,15 @@ namespace env
         return true;
     }
 
-	// Attempt to locate the control file.
+    // Attempt to locate the control file.
     // If we're running from the install location, it will be in a different place than if
     // we're running from the build directory.
     // So we locate it relative to the current test binary.
     // If multiple control files are found, the most recently modified one will be used.
     inline bool get_control_file_path(std::filesystem::path& path)
     {
-		// Note: if you change either of these, you'll also need to update the CMake rule that copies
-		// it to the build folder. See hipcub/test_CMakeLists.txt.
+        // Note: if you change either of these, you'll also need to update the CMake rule that copies
+        // it to the build folder. See hipcub/test_CMakeLists.txt.
         const static std::filesystem::path control_file_name("control.txt");
         const static std::filesystem::path project_dir("hipcub");
 
@@ -285,15 +285,15 @@ namespace env
         };
         path.clear();
 
-		// Filter out any paths that don't exist.
+        // Filter out any paths that don't exist.
         std::vector<std::filesystem::path> existing_paths(possible_paths);
         auto it = std::remove_if(existing_paths.begin(), existing_paths.end(), [](const std::filesystem::path& path) {
             return !std::filesystem::exists(path);
         });
         existing_paths.erase(it, existing_paths.end());
 
-		// If nothing was found, let the user know which paths were searched.
-		// We'll return false below.
+        // If nothing was found, let the user know which paths were searched.
+        // We'll return false below.
         if (existing_paths.empty())
         {
             std::cerr << "Error: unable to locate control file." << std::endl
@@ -309,7 +309,7 @@ namespace env
         // Multiple paths exist - choose the one that was created most recently.
         else
         {
-	        if (env::should_print_extra_info())
+            if (env::should_print_extra_info())
             {
                 std::cout << "Multiple matches, selecting path with last write time from these candidates:" << std::endl;
                 for (auto p : existing_paths)
@@ -332,15 +332,15 @@ namespace env
 class TokenParser
 {
 public:
-	// Parses and reduces the given size expression down to a single size_t value.
-	static size_t parse_and_simplify(const std::string& size_expr)
-	{
-		std::vector<Token> postfix_tokens = TokenParser::parse_size_expr(size_expr);
-		return TokenParser::reduce_postfix_tokens(postfix_tokens);
-	}
+    // Parses and reduces the given size expression down to a single size_t value.
+    static size_t parse_and_simplify(const std::string& size_expr)
+    {
+        std::vector<Token> postfix_tokens = TokenParser::parse_size_expr(size_expr);
+        return TokenParser::reduce_postfix_tokens(postfix_tokens);
+    }
 
 private:
-	// Converts the size expression string (the size part of the control line) from infix
+    // Converts the size expression string (the size part of the control line) from infix
     // to postfix notation. Postfix is useful because it does not require any parenthesis
     // (order of operations is fully specified), and is easy to evaluate/simplify down
     // into a single value.
@@ -459,8 +459,8 @@ private:
 
         return output;
     }
-	
-	// Given a vector of tokens in postfix order, evaluate/simplify them down until we are left with a single value.
+    
+    // Given a vector of tokens in postfix order, evaluate/simplify them down until we are left with a single value.
     // Return that value.
     // Note that this operates using intermediate (and result) type size_t. This means negative values are not supported.
     // Because of the way unsigned ints roll over, in some cases it is possible to have an intermediate value that is negative,
@@ -545,16 +545,16 @@ private:
         return operands.top();
     }
 
-	// To enforce the correct order of operations, define operator precedences.
-	// Here, a higher value means higher precedence.
-	const inline static std::unordered_map<std::string, size_t> op_precedence = {
-		{"*",  2},
-		{"/",  2},
-		{"+",  1},
-		{"-",  1},
-		{"<<", 0},
-		{">>", 0}
-	};
+    // To enforce the correct order of operations, define operator precedences.
+    // Here, a higher value means higher precedence.
+    const inline static std::unordered_map<std::string, size_t> op_precedence = {
+        {"*",  2},
+        {"/",  2},
+        {"+",  1},
+        {"-",  1},
+        {"<<", 0},
+        {">>", 0}
+    };
 };
 
 // Extracts information from each line of the control file.
@@ -563,18 +563,18 @@ private:
 class ControlFileParser
 {
 public:
-	// If init is set to true, initializes the parser by reading from
-	// the control file.
-	// If it's false, then the parser remains uninitialized, and you
-	// should call ControlFileParser::reset to provide control data
-	// before using it.
-	ControlFileParser(const bool init=true)
-	{
-		if (init)
-			this->reset();
-	}
+    // If init is set to true, initializes the parser by reading from
+    // the control file.
+    // If it's false, then the parser remains uninitialized, and you
+    // should call ControlFileParser::reset to provide control data
+    // before using it.
+    ControlFileParser(const bool init=true)
+    {
+        if (init)
+            this->reset();
+    }
 
-	// Resets the internal state of the controller (i.e. the control data)
+    // Resets the internal state of the controller (i.e. the control data)
     // and reparses it from the (optional) string it's passed. If no string is passed,
     // re-reads from the control file.
     // This is useful in the TestController unit tests, where we need to set
@@ -593,27 +593,27 @@ public:
         }
     }
 
-	// Returns an interator to the start of the vector of ControlInfo objects
-	// that were parsed.
-	inline std::vector<ControlInfo>::const_iterator begin() const
-	{
-		return this->control_info.begin();
-	}
+    // Returns an interator to the start of the vector of ControlInfo objects
+    // that were parsed.
+    inline std::vector<ControlInfo>::const_iterator begin() const
+    {
+        return this->control_info.begin();
+    }
 
-	// As above, but returns an iterator to the end.
-	inline std::vector<ControlInfo>::const_iterator end() const
-	{
-		return this->control_info.end();
-	}
-	
+    // As above, but returns an iterator to the end.
+    inline std::vector<ControlInfo>::const_iterator end() const
+    {
+        return this->control_info.end();
+    }
+    
 private:
-	// Maps <keyword> => <regex string for all gfx ids that keyword represents>
+    // Maps <keyword> => <regex string for all gfx ids that keyword represents>
     // Store the regexes as strings since they will be substituted into user-provided strings.
     // Note: these should be enclosed in parenthesis to ensure correctness.
     const inline static std::unordered_map<std::string, std::string> keywords = {
-		{"all",           "(.+)"},
+        {"all",           "(.+)"},
         {"amd",           "(gfx[0-9a-f]+)"},
-		{"nvidia",        "(nvidia)"}, // see TestController::get_arch
+        {"nvidia",        "(nvidia)"}, // see TestController::get_arch
         {"apus",          "(gfx1103|gfx1150|gfx1151|gfx1152)"},
         {"navi2x-family", "(gfx1030|gfx1031|gfx1032)"},
         {"navi3x-family", "(gfx1100|gfx1101|gfx1102)"},
@@ -623,29 +623,29 @@ private:
         {"mi300-family",  "(gfx942|gfx950)"}
     };
 
-	// Maps build types to functions that check if they match the type of the currently running build.
-	const inline static std::unordered_map<std::string, std::function<bool()>> str_to_build_type = {
-			{"*",        []() { return true; }},
-			{"asan",     env::is_running_asan},
-			{"valgrind", env::is_running_valgrind},
-			{"windows",  env::is_windows},
-			{"linux",    env::is_linux},
-	};
+    // Maps build types to functions that check if they match the type of the currently running build.
+    const inline static std::unordered_map<std::string, std::function<bool()>> str_to_build_type = {
+            {"*",        []() { return true; }},
+            {"asan",     env::is_running_asan},
+            {"valgrind", env::is_running_valgrind},
+            {"windows",  env::is_windows},
+            {"linux",    env::is_linux},
+    };
 
-	// Maps operators to functions that implement them.
-	// Note: Treat empty operator as ==
-	const inline static std::unordered_map<std::string, std::function<bool(size_t, size_t)>> str_to_op_fn = {
-	 	{"",   std::equal_to<size_t>()},
-		{"<",  std::less<size_t>()},
-		{">",  std::greater<size_t>()},
-		{"<=", std::less_equal<size_t>()},
-		{">=", std::greater_equal<size_t>()}
-	};
+    // Maps operators to functions that implement them.
+    // Note: Treat empty operator as ==
+    const inline static std::unordered_map<std::string, std::function<bool(size_t, size_t)>> str_to_op_fn = {
+        {"",   std::equal_to<size_t>()},
+        {"<",  std::less<size_t>()},
+        {">",  std::greater<size_t>()},
+        {"<=", std::less_equal<size_t>()},
+        {">=", std::greater_equal<size_t>()}
+    };
 
-	// Each entry represents the parsed information from one line of the control file.
+    // Each entry represents the parsed information from one line of the control file.
     std::vector<ControlInfo> control_info;
-	
-	// Parses the control data from the given stream, populating this->control data with the results.
+    
+    // Parses the control data from the given stream, populating this->control data with the results.
     template<class T>
     inline void parse_control_info(std::basic_istream<T>& istream)
     {
@@ -677,8 +677,8 @@ private:
             return;
         }
 
-		if (env::should_print_extra_info())
-			std::cout << "Using test control file at: " << control_path << std::endl;
+        if (env::should_print_extra_info())
+            std::cout << "Using test control file at: " << control_path << std::endl;
         
         std::ifstream control_file(control_path.c_str());
         if (!control_file)
@@ -691,20 +691,20 @@ private:
         control_file.close();
     }
 
-	// Splits a given line using a vector or regexes.
+    // Splits a given line using a vector or regexes.
     // Expects consecutive matches for each of parts_regexes, optionally followed by a delimiter and then another set of matches, etc.
     // Returns a vector of vectors (of strings). Each inner vector represents on set of matches (with parts_regexes.size() elements).
     std::vector<std::vector<std::string>> regex_split(const std::string line,
-													  const size_t line_num,
-													  const std::vector<std::regex>& parts_regexes,
-													  const std::optional<std::regex> delim_regex=std::nullopt)
+                                                      const size_t line_num,
+                                                      const std::vector<std::regex>& parts_regexes,
+                                                      const std::optional<std::regex> delim_regex=std::nullopt)
     {
-		const std::vector<std::string> part_descriptions = {"test name regex", "arch regex", "sizes", "build types", "skip message"};
+        const std::vector<std::string> part_descriptions = {"test name regex", "arch regex", "sizes", "build types", "skip message"};
         std::vector<std::vector<std::string>> results;
 
-		const auto print_parse_error = [&part_descriptions, &line_num](const size_t part_index, const std::string& remaining) {
-			std::cerr << "Error matching regex on control file line " << line_num << ", in " << part_descriptions[part_index] << " part of rule, beginning at: \"" << remaining << "\"" << std::endl;
-		};
+        const auto print_parse_error = [&part_descriptions, &line_num](const size_t part_index, const std::string& remaining) {
+            std::cerr << "Error matching regex on control file line " << line_num << ", in " << part_descriptions[part_index] << " part of rule, beginning at: \"" << remaining << "\"" << std::endl;
+        };
         
         std::string remaining = line;
         bool done = false;
@@ -761,7 +761,7 @@ private:
         return results;
     }
 
-	// Parse a single line of the control file.
+    // Parse a single line of the control file.
     // Parameters:
     // - line - the control line to parse
     // - line_num - the line number this line is at in the control file
@@ -905,8 +905,8 @@ private:
             else
             {
                 // Parse and simplify the size expression.
-				const size_t size = TokenParser::parse_and_simplify(size_expr);
-				
+                const size_t size = TokenParser::parse_and_simplify(size_expr);
+                
                 auto it = ControlFileParser::str_to_op_fn.find(op);
                 if (it == ControlFileParser::str_to_op_fn.end())
                 {
@@ -916,10 +916,10 @@ private:
                 }
                 else
                 {
-					// Grab the comparison function from the map and create a lambda function that calls it to compare the runtime size with the size
-					// obtained from the control file expression.
-					const std::function<bool(size_t, size_t)> compare_fn = it->second;
-					const std::function<bool(size_t)> test_fn = [size, compare_fn](const size_t test_size) {return compare_fn(test_size, size);};
+                    // Grab the comparison function from the map and create a lambda function that calls it to compare the runtime size with the size
+                    // obtained from the control file expression.
+                    const std::function<bool(size_t, size_t)> compare_fn = it->second;
+                    const std::function<bool(size_t)> test_fn = [size, compare_fn](const size_t test_size) {return compare_fn(test_size, size);};
                     info.size_test_fns.push_back(test_fn);
                 }
             }
@@ -962,7 +962,7 @@ private:
         return true;
     }
 };
-	
+    
 // TestController is a singleton that can be used to check if a
 // test case or test size is disabled on a given architecture.
 // It can also filter a given vector of sizes down to just those
@@ -971,15 +971,15 @@ private:
 // ** How to write a test that uses TestController: **
 // 1. Create a test fixture class for your test. Make that test fixture inherit from ControlledTest.
 //   - ControlledTest inherits from GTest's ::testing::Test, so it inherits all of the regular functionality
-//	 - of a normal test fixture.
+//   - of a normal test fixture.
 //   - Inheriting from ControlledTest ensures that the main test disablement check is performed automatically before
-//	   each test in the suite. Tests will be skipped if they are completely (i.e. for all sizes) disabled.
+//     each test in the suite. Tests will be skipped if they are completely (i.e. for all sizes) disabled.
 //   - If using a type other than size_t for your sizes, define a "transformer" functor and pass it to ControlledTest
 //     as a template argument (within your test fixture definition, eg. class MyTestFixture : public ControlledTest<MyTransformer>).
 //     See the documentation for TestController::set_transformer for more information on the functor requirements and how it's used.
 //
 // 2. Call a maco to filter the input sizes your test uses.
-//	 - If your test uses a single input size, call:
+//   - If your test uses a single input size, call:
 //     CHECK_SIZE_ENABLEMENT(size);
 //     This will cause the test to be skipped if the size matches any of the rules in the control file.
 //   - If your test iterates through a vector of sizes, use CHECK_SIZE_FILTERS(sizes) to filter out any sizes
@@ -1081,19 +1081,19 @@ public:
         return sizes_copy;
     }
 
-	// Some tests specify sizes using types other than size_t. For example, the device merge
+    // Some tests specify sizes using types other than size_t. For example, the device merge
     // algorithm requires two input sizes - one for each of the chunks of data being merged.
     // Because of this, sizes in the device merge tests are stored in a std::tuple<size_t, size_t>.
     //
     // The test control file limits you to using scalar values (size_t) when specifying size limits.
     // However, when performing size filtering, you can pass more complex types to TestController's
     // filtering functions. If you do this, you must also provide a "transformer" functor that converts
-	// your complex size type into a scalar size_t.
+    // your complex size type into a scalar size_t.
     // When performing size filtering, TestController will call your functor on each provided input size, and
-	// compare the resulting scalar size_t against the rules in the control file.
+    // compare the resulting scalar size_t against the rules in the control file.
     // For example, device merge tests can provide a functor that converts
     // tuple<size_t, size_t> to a single size_t by summing the two tuple values to obtain a single, total size.
-	//
+    //
     // Transform functions functors must provide:
     // - a type called size_type (usually defined with `using size_type = ...`) that indicates the (complex)
     //   size type that will be transformed.
@@ -1109,36 +1109,36 @@ public:
     // This pattern is automated by the ControlledTest class at the bottom of this file.
     // When defining your test fixture class, just inherit from ControlledTests and pass
     // your Functor type as a template argument.
-	// For example:
-	//
+    // For example:
+    //
     // struct PairTransformer
     // {
     //   using size_type = std::tuple<size_t, size_t>;
-    //	 size_t operator()(const size_type& size) const
-    //	 {
+    //   size_t operator()(const size_type& size) const
+    //   {
     //      return std::get<0>(size) + std::get<1>(size);
-    //	 }
+    //   }
     // };
     //
     // class MyTestFixture : public ControlledTest<PairTransformer>
     // {
     //   ...
     // }
-	//
+    //
     // For each test using MyTestFixture, the ControlledTest parent class ensures that
     // TestController::set_transformer(PairTransformer()) is called
     // beforehand, and TestController::reset_transformer() is called afterwards.
-	template<class F>
-	inline void set_size_transformer(F size_transformer)
-	{
-		this->size_transformer = TestController::package_transformer(size_transformer);
-	}
+    template<class F>
+    inline void set_size_transformer(F size_transformer)
+    {
+        this->size_transformer = TestController::package_transformer(size_transformer);
+    }
 
-	// Resets the size transformer to the identity functor - this is equivalent to not using a transformer.
-	inline void reset_size_transformer()
-	{
-		this->size_transformer = TestController::package_transformer(IdentityTransformer());
-	}
+    // Resets the size transformer to the identity functor - this is equivalent to not using a transformer.
+    inline void reset_size_transformer()
+    {
+        this->size_transformer = TestController::package_transformer(IdentityTransformer());
+    }
 
     // Disallow copy construction and copy assignment,
     // since this is a singleton.
@@ -1155,7 +1155,7 @@ private:
     FRIEND_TEST(HipcubTestControllerTests, CheckTestEnablement);
     FRIEND_TEST(HipcubTestControllerTests, FilterSizes);
     FRIEND_TEST(HipcubTestControllerTests, CheckSizeEnablement);
-	FRIEND_TEST(HipcubTestControllerTests, test_filter);
+    FRIEND_TEST(HipcubTestControllerTests, test_filter);
 
     // Private constructor accepting a flag that indicates whether it
     // should read from the control file. If not, the object is left
@@ -1166,12 +1166,12 @@ private:
             this->reset();
     }
 
-	// Resets the parser's state and reinitializes it by parsing the provided (optional) text.
-	// If std::nullopt is passed, reinitializes by reading from the control file.
-	inline void reset(const std::optional<std::string> text=std::nullopt)
-	{
-		parser.reset(text);
-	}
+    // Resets the parser's state and reinitializes it by parsing the provided (optional) text.
+    // If std::nullopt is passed, reinitializes by reading from the control file.
+    inline void reset(const std::optional<std::string> text=std::nullopt)
+    {
+        parser.reset(text);
+    }
 
     // This private version of get_instance accepts a bool indicating whether
     // it should read from the control file.
@@ -1188,10 +1188,10 @@ private:
         return instance;
     }
 
-	// We need a way to store a user-provided custom transformer as a data member.
-	// To do this, we'll "package" it using a lambda function that has a fixed signature,
-	// then store that in a data member of type std::any.
-	template<class F>
+    // We need a way to store a user-provided custom transformer as a data member.
+    // To do this, we'll "package" it using a lambda function that has a fixed signature,
+    // then store that in a data member of type std::any.
+    template<class F>
     static constexpr std::function<size_t(const typename F::size_type&)> package_transformer(F transformer)
     {
         return std::function<size_t(const typename F::size_type&)>(
@@ -1199,9 +1199,9 @@ private:
         );
     }
 
-	// When we need to use the transformer, we need to extract it from the std::any type data member.
-	// Use std::any_cast to cast it back to the fixed signature we set up in TestController::package_transformer, above.
-	// Note that here we don't need the functor's type, only the size type it operates on.
+    // When we need to use the transformer, we need to extract it from the std::any type data member.
+    // Use std::any_cast to cast it back to the fixed signature we set up in TestController::package_transformer, above.
+    // Note that here we don't need the functor's type, only the size type it operates on.
     template<class SizeType>
     static std::function<size_t(const SizeType&)> unpackage_transformer(std::any transformer)
     {
@@ -1211,7 +1211,7 @@ private:
     // Returns the gfx id of the device that's currently in use.
     inline static std::string get_arch()
     {
-		std::string arch;
+        std::string arch;
 #ifdef __HIP_PLATFORM_AMD__
         // Make sure we get the device ID from ctest, in case we're running tests in
         // parallel on multiple devices.
@@ -1221,21 +1221,21 @@ private:
         std::string gcn_arch_name(dev_prop.gcnArchName);
 
         // The name may contain extra bits we don't need - eg. the xnack portion of "gfx942:xnack+".
-		std::regex arch_regex(R"(^([^:\0]+).*)");
-		std::smatch match;
-		if (std::regex_match(gcn_arch_name, match, arch_regex))
-		{
-			arch = match[1].str();
-		}
-		else
-		{
-			std::cerr << "Warning: unable to parse architecture identifier " << "\"" << gcn_arch_name << "\"" << std::endl
-				      << "Architecture-based test control file rules may not be applied correctly." << std::endl;
-		}
+        std::regex arch_regex(R"(^([^:\0]+).*)");
+        std::smatch match;
+        if (std::regex_match(gcn_arch_name, match, arch_regex))
+        {
+            arch = match[1].str();
+        }
+        else
+        {
+            std::cerr << "Warning: unable to parse architecture identifier " << "\"" << gcn_arch_name << "\"" << std::endl
+                      << "Architecture-based test control file rules may not be applied correctly." << std::endl;
+        }
 #else
-		arch = "nvidia";
+        arch = "nvidia";
 #endif
-		return arch;
+        return arch;
     }
 
     // Filters out disabled sizes (in-place) using the data parsed from the control file.
@@ -1245,13 +1245,13 @@ private:
         // Gather data required for filtering
         const std::string gfx_id = TestController::get_arch();
         const std::string qualified_name = TestController::get_qualified_test_name();
-		const auto size_transformer = TestController::unpackage_transformer<T>(this->size_transformer);
+        const auto size_transformer = TestController::unpackage_transformer<T>(this->size_transformer);
         
         // Maps control file line numbers to the sizes that they caused to be skipped.
         std::map<size_t, std::set<T>> skipped_sources;
-		// Each time a size is skipped, we'll generate a message saying which control line
-		// is responsible. It's possible for multiple sizes to be skipped by the same control file line.
-		// Store the skip messages in a set to prevent duplicates (but preserve ordering).
+        // Each time a size is skipped, we'll generate a message saying which control line
+        // is responsible. It's possible for multiple sizes to be skipped by the same control file line.
+        // Store the skip messages in a set to prevent duplicates (but preserve ordering).
         std::set<std::string> skip_msgs;
         // Remember this so we can figure out how many sizes were removed later.
         const size_t num_unfiltered_sizes = sizes.size();
@@ -1277,7 +1277,7 @@ private:
                 {
                     skipped_sources[it->line_num] = std::set<T>(sizes.begin(), sizes.end());
                     sizes.clear();
-					skip_msgs.clear();
+                    skip_msgs.clear();
                     skip_msgs.insert(it->skip_msg);
                 }
 
@@ -1287,16 +1287,16 @@ private:
                     // Each ControlInfo (line of the control file) generates one or more "test functions"
                     // that accept a size as an argument and return true if that size should be disabled.
                     // This lambda function returns true if any of the info's individual test functions return true.
-					const auto is_skipped = [&it, &size_transformer](const T& size) {
-						return std::any_of(
-							it->size_test_fns.begin(),
-							it->size_test_fns.end(),
-							// Before calling the test function, transform the size from the user-provided type
-							// to size_t using the transformer that's been set.
-							[&size, &size_transformer](const auto fn) {
-								return fn(size_transformer(size));
-							});
-					};
+                    const auto is_skipped = [&it, &size_transformer](const T& size) {
+                        return std::any_of(
+                            it->size_test_fns.begin(),
+                            it->size_test_fns.end(),
+                            // Before calling the test function, transform the size from the user-provided type
+                            // to size_t using the transformer that's been set.
+                            [&size, &size_transformer](const auto fn) {
+                                return fn(size_transformer(size));
+                            });
+                    };
 
                     // std::remove_if moves all sizes that satisfy the condition to the end, preserving the
                     // order of other sizes. It returns an iterator pointing past the end of the last non-removed size.
@@ -1308,7 +1308,7 @@ private:
                             skipped_sources[it->line_num] = std::set<T>();
 
                         skipped_sources[it->line_num].insert(new_end, sizes.end());
-						// Erase the sizes that were pushed past the new end
+                        // Erase the sizes that were pushed past the new end
                         sizes.erase(new_end, sizes.end());
                         skip_msgs.insert(it->skip_msg);
                     }
@@ -1366,9 +1366,9 @@ private:
         const std::regex par_prefix_regex(R"(^(Id\d+\/)(.+)$)");
         std::smatch match;
         if (std::regex_match(qualified_name, match, par_prefix_regex))
-		{
+        {
             qualified_name = match[2].str();
-		}
+        }
         
         return qualified_name;
     }
@@ -1396,8 +1396,8 @@ private:
         ControlInfo info;
         std::smatch test_match;
         std::smatch arch_match;
-		std::vector<ControlInfo>::const_iterator it = this->parser.begin();
-		while (!is_disabled && it != this->parser.end())
+        std::vector<ControlInfo>::const_iterator it = this->parser.begin();
+        while (!is_disabled && it != this->parser.end())
         {
             // info.disable_all_sizes records whether the "*" is present in the size part of
             // the control line.
@@ -1407,8 +1407,8 @@ private:
                            it->disable_all_sizes
             );
 
-			if (!is_disabled)
-				it++;
+            if (!is_disabled)
+                it++;
         }
 
         if (is_disabled)
@@ -1426,10 +1426,10 @@ private:
         return is_disabled;
     }
 
-	ControlFileParser parser;
-	// Note: when filtering, a transformer is always applied - when no user-provided transformer has been set, we set it to IdentityTransformer,
-	// which just returns exactly what it's passed.
-	std::any size_transformer = TestController::package_transformer(IdentityTransformer());
+    ControlFileParser parser;
+    // Note: when filtering, a transformer is always applied - when no user-provided transformer has been set, we set it to IdentityTransformer,
+    // which just returns exactly what it's passed.
+    std::any size_transformer = TestController::package_transformer(IdentityTransformer());
 };
 
 // -- Macros to use in unit tests --
@@ -1467,7 +1467,7 @@ private:
       std::cout << msg; \
       continue; \
   } \
-}	
+}   
 
 // Filters a vector of sizes down to those that are enabled.
 // Prints a message indicating the number of sizes that were skipped.
@@ -1486,18 +1486,18 @@ template<class SizeTransformer=test_controller::IdentityTransformer>
 class ControlledTest : public ::testing::Test
 {
 protected:
-	// Called before each individual test is run.
+    // Called before each individual test is run.
     void SetUp() override
     {
-		TestController::get_instance().set_size_transformer(SizeTransformer());
+        TestController::get_instance().set_size_transformer(SizeTransformer());
         CHECK_TEST_ENABLEMENT();
     }
 
-	// Called after each individual test completes.
-	void TearDown() override
-	{
-		TestController::get_instance().reset_size_transformer();
-	}
+    // Called after each individual test completes.
+    void TearDown() override
+    {
+        TestController::get_instance().reset_size_transformer();
+    }
 };
     
 } // namespace test_controller
