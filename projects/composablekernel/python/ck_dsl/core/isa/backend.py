@@ -161,16 +161,23 @@ class ISABackend:
         instructions do not exist, so ``s_wait_asynccnt`` lowers to nothing."""
         return False
 
-    @property
-    def ds_tr16_b128_spec(self):
+    def ds_tr16_b128_spec(self, elem_type: str = "f16"):
         """``(need_key, intrinsic, llvm_ret_ty)`` for the wide 16-bit
-        transpose-LDS read used to feed the MFMA/WMMA B operand.
+        transpose-LDS read (logical element ``elem_type``) used to feed the
+        MFMA/WMMA B operand.
 
-        Default is the gfx950 ``ds_read_b128_tr_b16`` (returns ``<8 x i16>``).
-        gfx1250 (gfx1250) overrides with its wave32 ``ds_load_tr16_b128`` opcode,
-        which returns ``<8 x bfloat>`` directly. NOTE: the two have different
-        wave widths, so the per-lane data distribution differs — kernels must
-        use the layout appropriate to the target."""
+        Default is the gfx950 ``ds_read_b128_tr_b16`` whose intrinsic returns a
+        type-agnostic ``<8 x i16>``; the lowerer bitcasts those raw 16-bit lanes
+        to the requested ``half`` / ``bfloat`` element, so a single spec serves
+        both f16 and bf16. gfx1250 (gfx1250) overrides with an
+        element-type-specific ``ds_load_tr16_b128`` intrinsic (its wave32
+        per-lane data distribution also differs — kernels must use the layout
+        appropriate to the target). Fail fast for any unsupported element."""
+        if elem_type not in ("f16", "fp16", "bf16"):
+            raise NotImplementedError(
+                f"ds_read_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
+                f"got elem_type={elem_type!r}"
+            )
         return ("ds.read.tr16.b128", "llvm.amdgcn.ds.read.tr16.b128", "<8 x i16>")
 
     def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
@@ -505,13 +512,26 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         # dedicated ``ASYNCcnt`` drained via ``s_wait_asynccnt``.
         return True
 
-    @property
-    def ds_tr16_b128_spec(self):
-        # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` -> <8 x bfloat>.
-        return (
-            "ds.load.tr16.b128.v8bf16",
-            "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
-            "<8 x bfloat>",
+    def ds_tr16_b128_spec(self, elem_type: str = "f16"):
+        # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` is overloaded on the
+        # result element type. Select the intrinsic matching the op's element
+        # type so an f16 read does not reinterpret a bf16 payload (and vice
+        # versa); fail fast for anything the opcode cannot carry.
+        if elem_type == "bf16":
+            return (
+                "ds.load.tr16.b128.v8bf16",
+                "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
+                "<8 x bfloat>",
+            )
+        if elem_type in ("f16", "fp16"):
+            return (
+                "ds.load.tr16.b128.v8f16",
+                "llvm.amdgcn.ds.load.tr16.b128.v8f16",
+                "<8 x half>",
+            )
+        raise NotImplementedError(
+            f"ds_load_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
+            f"got elem_type={elem_type!r}"
         )
 
     def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:

@@ -735,7 +735,6 @@ def build_moe_gate_up_silu_gemm(
     """
 
     _require_mfma_expert_gemm(arch, "fused gate/up/silu GEMM")
-    _require_mfma_expert_gemm(arch, "interleaved gate/up/silu GEMM")
     u = spec.to_universal_spec()
     ok, why = is_valid_gemm_spec(u, arch=arch)
     if not ok:
@@ -1169,7 +1168,7 @@ def build_moe_interleaved_gate_up_silu_gemm(
     error before comgr.
     """
 
-    _require_mfma_expert_gemm(arch, "fused down/reduce GEMM")
+    _require_mfma_expert_gemm(arch, "interleaved gate/up/silu GEMM")
     u = spec.to_universal_spec()
     ok, why = is_valid_gemm_spec(u, arch=arch)
     if not ok:

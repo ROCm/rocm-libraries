@@ -471,6 +471,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "ds.load.tr16.b128.v8bf16": (
         "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"
     ),
+    # f16 sibling of the above: ``ds_load_tr16_b128`` is overloaded on its
+    # result element type, so an f16 transpose-read selects the ``.v8f16`` form
+    # (returns ``<8 x half>``) rather than reinterpreting a bf16 payload.
+    "ds.load.tr16.b128.v8f16": (
+        "declare <8 x half> @llvm.amdgcn.ds.load.tr16.b128.v8f16(ptr addrspace(3))"
+    ),
     "iglp.opt": ("declare void @llvm.amdgcn.iglp.opt(i32 immarg)"),
     "sched.barrier": ("declare void @llvm.amdgcn.sched.barrier(i32 immarg)"),
     "sched.group.barrier": (
@@ -2714,16 +2720,27 @@ class _Lowerer:
             f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
             f"{', '.join(idx_strs)}"
         )
-        need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec
+        elem_name = op.attrs.get("elem_type", "f16")
+        need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec(elem_name)
         self._need(need_key)
-        raw = self._fresh("trw.raw")
-        self._current().emit(
-            f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
-        )
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        self._current().emit(
-            f"  {op.result.name} = bitcast {ret_ty} {raw} to <8 x {elem_ty}>"
-        )
+        want_ty = f"<8 x {elem_ty}>"
+        if ret_ty == want_ty:
+            # Element-type-specific intrinsic (gfx1250 selects ``.v8f16`` /
+            # ``.v8bf16`` to match the op): no reinterpret needed.
+            self._current().emit(
+                f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+            )
+        else:
+            # gfx950 returns a type-agnostic ``<8 x i16>``; reinterpret the raw
+            # 16-bit lanes as the requested half/bfloat element.
+            raw = self._fresh("trw.raw")
+            self._current().emit(
+                f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast {ret_ty} {raw} to {want_ty}"
+            )
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline-asm lowering (ADDITIVE).
