@@ -439,6 +439,12 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
         checkConstraints(opGraph, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
+        // Constructing the plan runs hipblasLtMatmulAlgoGetHeuristic, the
+        // authoritative check that this GPU + hipBLASLt build actually has an MX
+        // GEMM kernel for this problem. MX support is arch/library-dependent, so
+        // (unlike plain GEMM) the constraint checks above cannot confirm it. No
+        // algorithm -> the constructor throws -> the graph is reported unsupported
+        // here rather than failing later in buildPlan()/execute().
         MxMatmulParams params(deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
         MxMatmulPlan const plan(handle, std::move(params));
         return true;
