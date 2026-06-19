@@ -3053,7 +3053,10 @@ class LogicalScheduler:
                     seen_lr.add(lr_key)
                     lr = LRPlacement(tensor=tensor, mtIteration=0,
                                      tiles=tiles,
-                                     subIterK_slot=k, partition=pi)
+                                     subIterK_slot=k, partition=pi,
+                                     # S2: per-uid LDS read region for the tail
+                                     # loop (matches the explicit GR write).
+                                     uid=tiles.subIterK_start // self._per_uid_k(tensor))
                     lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
                     ops.append(lr)
             ops.append(WaitLROp())
@@ -3127,7 +3130,11 @@ class LogicalScheduler:
             lr = LRPlacement(
                 tensor=tensor, mtIteration=0,
                 tiles=tiles[tensor],
-                subIterK_slot=0, partition=0)
+                subIterK_slot=0, partition=0,
+                # S2: uid is load-bearing for LDS read addressing. Set it from
+                # the K range (== mainloop's subIterK_start // per_uid_k) so
+                # multi-DU preloop LRs read the correct per-uid LDS region.
+                uid=tiles[tensor].subIterK_start // self._per_uid_k(tensor))
             if tensor in first_mfma.vgpr_tile_maps:
                 lr.vgpr_tile_map = copy.deepcopy(first_mfma.vgpr_tile_maps[tensor])
             placements.append(lr)

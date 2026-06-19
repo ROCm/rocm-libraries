@@ -862,7 +862,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -872,6 +872,11 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tileInfo: TileInfo or TileInfo for the tensor component
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
+      uidLdsOffset: explicit per-uid LDS byte offset (u * perUidLdsBytes) added
+                to the DTL write target m0. Default 0 keeps the legacy single-DU
+                and swap-driven paths byte-identical. S2 multi-DU sets this so
+                uid u lands in the LDS region the XOR swap used to select, with
+                the swap then neutralized to avoid double-counting.
   """
   module = Module()
 
@@ -908,7 +913,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   for i in range(tileInfo.numGRPerSubtile):
     m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
-    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
+    m0Imm = m0Offset - offsetK + int(uidLdsOffset)
+    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=m0Imm))
     mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
     soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0

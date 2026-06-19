@@ -82,6 +82,17 @@ class InstructionEmitter:
         self.hasScale = scaleTileInfoA is not None and scaleTileInfoB is not None
         self.subtileShapeK = tileInfoA.subtileShape[1]
         self.tileInfoMap = {'A': tileInfoA, 'B': tileInfoB}
+
+        # S2: explicit per-uid LDS addressing replaces the XOR buffer swap as
+        # the uid selector for multi-DU under PGR<=1, where the swap is spent
+        # entirely on the uid dimension (NumLdsBlk == uid_range, no MT double
+        # buffer; the wait_gr drain serializes the prefetched MT). uid u of A/B
+        # is addressed at base + u*perUidLdsBytes (GR write m0 and LR read), and
+        # the now-redundant A/B swaps are neutralized so the offset is not
+        # double-counted. PGR>=2 (genuine extra LDS buffering) and single-DU
+        # keep the legacy swap path byte-identical.
+        self._explicit_uid_lds = (config.uid_range > 1 and config.pgr <= 1)
+        self._per_uid_lds_bytes = int(getattr(writer, "perUidLdsBytes", 0))
         if self.hasScale:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
@@ -174,6 +185,17 @@ class InstructionEmitter:
             # offset. Skip the modulo in that case.
             nUnroll = self.config.numUnroll.get(tensor, 1)
             per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
+            # S2: select the explicit per-uid LDS read region. uid 0 reads the
+            # base offset VGPRs; uid>0 reads sharedVgprLROffsetSwap, primed to
+            # base + uid*perUidLdsBytes by localReadDTLInitCommonSwapVgpr. The
+            # 2-way swap register set supports uid_range==2 (all current multi-DU
+            # configs); a larger uid_range would need more register sets.
+            lrOffsetRegs = None
+            if self._explicit_uid_lds and placement.uid > 0:
+                assert self.config.uid_range == 2, (
+                    f"explicit per-uid LDS read supports uid_range==2, got "
+                    f"{self.config.uid_range}")
+                lrOffsetRegs = ti.sharedVgprLROffsetSwap
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
                     local_k = (k % per_uid_k) if per_uid_k is not None else k
@@ -182,7 +204,8 @@ class InstructionEmitter:
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled,
+                        lrOffsetRegs=lrOffsetRegs))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -217,10 +240,15 @@ class InstructionEmitter:
                 f"GR {tensor} stored uid={placement.uid} != unrollId="
                 f"{placement.unrollId}")
             uid_k_base = placement.unrollId * grGran.k
+            # S2: bake the explicit per-uid LDS write offset into m0 so uid u
+            # lands in the region the swap used to toggle to (base + u*perUid).
+            uidLdsOffset = (placement.uid * self._per_uid_lds_bytes
+                            if self._explicit_uid_lds else 0)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
+                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
+                                                    uidLdsOffset=uidLdsOffset))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -280,6 +308,12 @@ class InstructionEmitter:
     def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
+        # S2: in explicit per-uid LDS mode the A/B LR read region is selected by
+        # placement.uid, so the per-uid XOR swap is redundant and must be skipped
+        # to avoid double-counting the uid offset. Scale (SA/SB) is not the uid
+        # carrier and keeps its (double-buffer) swap.
+        if self._explicit_uid_lds and tensor in ('A', 'B'):
+            return []
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
@@ -292,9 +326,14 @@ class InstructionEmitter:
         module = Module()
         if tensor in ('SA', 'SB'):
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         else:
+            # SRD pointer advance stays per-uid here (the GR *global* side is
+            # re-expressed in S3). S2 only neutralizes the A/B *LDS* swap when
+            # uid is carried by the explicit m0 offset (multi-DU, PGR<=1).
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-        module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+            if not self._explicit_uid_lds:
+                module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_skip(self, source):

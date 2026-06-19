@@ -644,7 +644,8 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True,
+                     lrOffsetRegs=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -656,11 +657,18 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
       dstTile:   RegisterTileInfo \u2014 destination vgpr tile for the load
       swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
+      lrOffsetRegs: per-lane LDS read-address VGPR list to index. Default None uses
+                tileInfo.sharedVgprLROffset (uid 0 / legacy swap-driven path). S2
+                multi-DU passes tileInfo.sharedVgprLROffsetSwap for uid>0, which
+                localReadDTLInitCommonSwapVgpr has primed to base + perUidLdsBytes
+                (the explicit per-uid LDS region the swap used to toggle to).
 
   Returns a Module. For tiles with numRegs > 4 (e.g. FP8 8-VGPR tiles), emits
   multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
   sharedVgprLROffset entry.
   """
+  if lrOffsetRegs is None:
+    lrOffsetRegs = tileInfo.sharedVgprLROffset
   REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
 
   # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
@@ -691,7 +699,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
 
   module = Module()
   for readIdx in range(numReadsForTile):
-    addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+    addrVgpr = lrOffsetRegs[mfmaId * numReadsForTile + readIdx]
     module.add(DSLoadB128(
         dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
         src=vgpr(addrVgpr),
@@ -754,19 +762,29 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
   atile = writer.states.a.tileInfo
   btile = writer.states.b.tileInfo
 
-  stmp = writer.sgprPool.checkOut(1, tag="_localReadDTLInitCommonSwapVgpr_stmp")
-  module.add(SMovB32(dst=sgpr(stmp), src=writer.ldsTotalSize, comment="Store Total Lds Size for one buffer"))
-  for i in range(len(atile.sharedVgprLROffset)):
-    vgprId = atile.sharedVgprLROffset[i]
-    vgprSwapId = atile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
+  # S2 explicit per-uid LDS read addressing (multi-DU, PGR<=1): the swap is no
+  # longer the uid selector, so sharedVgprLROffsetSwap holds the *absolute* uid
+  # base = sharedVgprLROffset + perUidLdsBytes (the LDS region the XOR toggle
+  # used to reach). emitSingleDsRead selects this array for uid>0; the per-uid
+  # lr_inc swaps are neutralized in InstructionEmitter so there is no double
+  # count. For single-DU / PGR>=2 this stays the legacy XOR swap mask, keeping
+  # those paths byte-identical.
+  uidRange = int(getattr(writer, "uidRange", 1))
+  pgr = int(kernel.get("PrefetchGlobalRead", 0))
+  explicitUid = uidRange > 1 and pgr <= 1
+  perUidLdsBytes = int(getattr(writer, "perUidLdsBytes", writer.ldsTotalSize))
 
-  for i in range(len(btile.sharedVgprLROffset)):
-    vgprId = btile.sharedVgprLROffset[i]
-    vgprSwapId = btile.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
-    module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
+  stmp = writer.sgprPool.checkOut(1, tag="_localReadDTLInitCommonSwapVgpr_stmp")
+  swapStride = perUidLdsBytes if explicitUid else writer.ldsTotalSize
+  module.add(SMovB32(dst=sgpr(stmp), src=swapStride,
+                     comment="per-uid LDS stride" if explicitUid else "Store Total Lds Size for one buffer"))
+  for tile in (atile, btile):
+    for i in range(len(tile.sharedVgprLROffset)):
+      vgprId = tile.sharedVgprLROffset[i]
+      vgprSwapId = tile.sharedVgprLROffsetSwap[i]
+      module.add(VAddU32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=sgpr(stmp), comment=""))
+      if not explicitUid:
+        module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment=""))
 
   writer.sgprPool.checkIn(stmp)
   return module
