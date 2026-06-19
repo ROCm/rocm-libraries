@@ -15,7 +15,8 @@
 from rocisa.code import Module
 from rocisa.container import RegisterContainer
 from rocisa.instruction import (
-    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SWaitAlu, VXorB32,
+    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SWaitAlu,
+    SWaitCnt, VXorB32,
 )
 
 # Number of WMMAs that must issue between a swap XOR and its dependent ds_read
@@ -100,20 +101,46 @@ def insertLRSwapWarWaitAlu(module, writer, kernel):
   xor must not overwrite the offset until the outstanding reads have drained.
   In SCHED_MODE 2 the hardware no longer enforces this, and with PGR=0 (one
   offset set, reloaded every iteration) the xor can outrun the reads.  One
-  SWaitAlu(vm_vsrc=0) drains all pending address reads, so a single wait ahead
-  of each consecutive swap-xor block is sufficient.  No-op unless SCHED_MODE 2
-  (HasWmmaArbStallBit) is active.  Returns a rebuilt Module.
+  SWaitAlu(vm_vsrc=0) drains every pending address read at once.
+
+  We place that wait at the exact instruction that needs it: the first swap
+  v_xor whose destination offset VGPR still has an in-flight ds_read address
+  use.  This mirrors insertLRSwapWaitAlu's dependency walk -- a ds_read marks
+  its address VGPR pending, an s_wait_dscnt 0 (the end-of-subIterK LR-complete
+  wait) drains all pending DS reads, and a swap v_xor that writes a pending
+  VGPR is the WAR consumer.  Because vm_vsrc(0) is a full drain, one wait
+  clears the whole pending set, so later xors in the same block need none.
+  No-op unless SCHED_MODE 2 (HasWmmaArbStallBit) is active.  Returns a rebuilt
+  Module; the input is left untouched.
   """
   if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
     return module
 
+  # VGPR indices with an in-flight ds_read address use, not yet drained.
+  pending = set()
   result = Module(module.name)
-  prevWasSwap = False
   for inst in module.flatitems():
-    isSwap = isinstance(inst, VXorB32)
-    if isSwap and not prevWasSwap:
+    # Producer: a ds_read puts its address VGPR's read in flight on VM_VSRC.
+    if isinstance(inst, LocalReadInstruction):
+      params = inst.getParams()
+      addr = params[1] if len(params) > 1 else None
+      pending.update(_vgprIndices(addr))
+      result.add(inst)
+      continue
+
+    # Drain: s_wait_dscnt 0 retires all in-flight DS (LDS) source reads, so the
+    # offset reads are guaranteed complete and can no longer be clobbered.
+    if isinstance(inst, SWaitCnt) and inst.dscnt == 0:
+      pending.clear()
+      result.add(inst)
+      continue
+
+    # Consumer: a swap v_xor that overwrites an offset VGPR with a pending read
+    # is the WAR.  Drain once (covers every pending offset), then clear.
+    if isinstance(inst, VXorB32) and any(idx in pending for idx in _vgprIndices(inst.dst)):
       result.add(SWaitAlu(vm_vsrc=0,
                           comment="wait for LR offset read before swap (WAR)"))
-    prevWasSwap = isSwap
+      pending.clear()
+
     result.add(inst)
   return result
