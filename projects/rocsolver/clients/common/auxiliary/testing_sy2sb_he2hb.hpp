@@ -37,6 +37,7 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+//------------------------------------------------------------------------------
 template <typename T, typename I>
 void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
                               const I n,
@@ -67,6 +68,7 @@ void sy2sb_he2hb_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_success);
 }
 
+//------------------------------------------------------------------------------
 template <typename T, typename I>
 void testing_sy2sb_he2hb_bad_arg()
 {
@@ -94,7 +96,6 @@ void testing_sy2sb_he2hb_bad_arg()
 template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th>
 void sy2sb_he2hb_initData(const rocblas_handle handle,
                           const I n,
-                          const I kd, // unused
                           Td& dA,
                           const I lda,
                           Th& hA)
@@ -159,7 +160,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     std::vector<T> hwork(lwork);
 
     // input data initialization
-    sy2sb_he2hb_initData<true, true, T, I>(handle, n, kd, dA, lda, hA);
+    sy2sb_he2hb_initData<true, true, T, I>(handle, n, dA, lda, hA);
 
     // execute computations
     // GPU lapack
@@ -246,10 +247,10 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
+    sy2sb_he2hb_initData<true, false, T, I>(handle, n, dA, lda, hA);
+
     if(!perf)
     {
-        sy2sb_he2hb_initData<true, false, T, I>(handle, n, kd, dA, lda, hA);
-
         // lwork for LAPACK hetrd_he2hb
         size_t lwork = n * kd + n * std::max<I>(kd, 128) + 2 * kd * kd;
         std::vector<T> hwork(lwork);
@@ -261,12 +262,10 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    sy2sb_he2hb_initData<true, false, T, I>(handle, n, kd, dA, lda, hA);
-
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        sy2sb_he2hb_initData<false, true, T, I>(handle, n, kd, dA, lda, hA);
+        sy2sb_he2hb_initData<false, true, T, I>(handle, n, dA, lda, hA);
 
         CHECK_ROCBLAS_ERROR(rocsolver_sy2sb_he2hb(handle, n, kd, nb, // opts
                                                   dA.data(), lda, // A
@@ -287,7 +286,7 @@ void sy2sb_he2hb_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        sy2sb_he2hb_initData<false, true, T, I>(handle, n, kd, dA, lda, hA);
+        sy2sb_he2hb_initData<false, true, T, I>(handle, n, dA, lda, hA);
 
         timer.start(stream);
         rocsolver_sy2sb_he2hb(handle, n, kd, nb, // opts
