@@ -34,9 +34,10 @@ def _step(**over):
     return SimpleNamespace(**base)
 
 
-def _cache_dict(step, codeObjects=("k.co",)):
+def _cache_dict(step, codeObjects=("k.co",), libraryFile="lib.dat"):
     d = {f: getattr(step, attr) for f, attr in M._CACHE_FIELDS.items()}
     d["CodeObjectFiles"] = list(codeObjects)
+    d["LibraryFile"] = libraryFile
     return d
 
 
@@ -82,7 +83,10 @@ def test_read_cache_match_returns_code_objects(tmp_path, monkeypatch):
     path = tmp_path / "cache.yaml"
     path.write_text("placeholder")  # must exist
     monkeypatch.setattr(M.LibraryIO, "read", lambda p: _cache_dict(step, ["a.co", "b.co"]))
-    assert M._readCacheIfValid(str(path), step, "m") == ["a.co", "b.co"]
+    assert M._readCacheIfValid(str(path), step, "m") == {
+        "CodeObjectFiles": ["a.co", "b.co"],
+        "LibraryFile": "lib.dat",
+    }
 
 
 def test_read_cache_unreadable_returns_none(tmp_path, monkeypatch, capsys):
@@ -121,14 +125,20 @@ def test_load_cache_if_matches(tmp_path, monkeypatch):
     step = _step()
     (tmp_path / "cache.yaml").write_text("x")
     monkeypatch.setattr(M.LibraryIO, "read", lambda p: _cache_dict(step, ["z.co"]))
-    assert M._loadCacheIfMatches(str(tmp_path), step) == ["z.co"]
+    assert M._loadCacheIfMatches(str(tmp_path), step) == {
+        "CodeObjectFiles": ["z.co"],
+        "LibraryFile": "lib.dat",
+    }
 
 
 def test_load_legacy_cache_if_matches(tmp_path, monkeypatch):
     step = _step()
     (tmp_path / "cache.yaml").write_text("x")
     monkeypatch.setattr(M.LibraryIO, "read", lambda p: _cache_dict(step, ["legacy.co"]))
-    assert M._loadLegacyCacheIfMatches(str(tmp_path), step) == ["legacy.co"]
+    assert M._loadLegacyCacheIfMatches(str(tmp_path), step) == {
+        "CodeObjectFiles": ["legacy.co"],
+        "LibraryFile": "lib.dat",
+    }
 
 
 # ---------------------------------------------------------------------------

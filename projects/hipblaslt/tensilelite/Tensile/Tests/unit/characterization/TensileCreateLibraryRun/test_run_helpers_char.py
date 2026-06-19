@@ -22,18 +22,18 @@ SL = importlib.import_module("Tensile.SolutionLibrary")
 
 
 # ---------------------------------------------------------------------------
-# libraryDir
+# libraryRoot / libraryDir
 # ---------------------------------------------------------------------------
+def test_library_root():
+    assert M.libraryRoot("/out") == Path("/out/library")
+
+
 def test_library_dir_single_arch():
-    assert M.libraryDir("/out", ["gfx942"]) == Path("/out/library/gfx942")
+    assert M.libraryDir("/out", "gfx942") == Path("/out/library/gfx942")
 
 
-def test_library_dir_zero_archs_flat():
-    assert M.libraryDir("/out", []) == Path("/out/library")
-
-
-def test_library_dir_multi_arch_flat():
-    assert M.libraryDir("/out", ["gfx942", "gfx90a"]) == Path("/out/library")
+def test_library_dir_strips_target_features():
+    assert M.libraryDir("/out", "gfx942:sramecc+:xnack-") == Path("/out/library/gfx942")
 
 
 # ---------------------------------------------------------------------------

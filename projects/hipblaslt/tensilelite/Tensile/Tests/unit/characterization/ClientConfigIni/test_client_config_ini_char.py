@@ -386,8 +386,8 @@ class TestWriteClientConfigIniPlain:
                              libraryFile="/explicit/TensileLibrary.yaml")
         assert "library-file=/explicit/TensileLibrary.yaml" in content
 
-    def test_library_file_default_yaml(self, tmp_path, monkeypatch):
-        """Lines 581-582: when libraryFile=None, defaults to TensileLibrary.yaml."""
+    def test_library_file_none_raises(self, tmp_path, monkeypatch):
+        """Line 582: libraryFile=None is rejected -- AssertionError."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
         _set_all_gp(monkeypatch)
         monkeypatch.setitem(globalParameters, "LibraryFormat", "yaml")
@@ -397,27 +397,26 @@ class TestWriteClientConfigIniPlain:
         out_file = str(tmp_path / "Params.ini")
         factor_dim = _make_factor_dim_args(_PLAIN_GEMM_PT_DICT)
 
-        CW.writeClientConfigIni(
-            forBenchmark=False,
-            problemSizes=ProblemSizesMockDummy(),
-            biasTypeArgs="",
-            factorDimArgs=factor_dim,
-            activationArgs="",
-            icacheFlushArgs="",
-            problemType=pt,
-            sourceDir=source_dir,
-            codeObjectFiles=[],
-            resultsFileName="/data/Results.csv",
-            parametersFilePath=out_file,
-            deviceId=0,
-            gfxName="gfx942",
-            libraryFile=None,   # triggers default path logic
-        )
-        content = Path(out_file).read_text()
-        assert "TensileLibrary.yaml" in content
+        with pytest.raises(AssertionError, match="libraryFile is required"):
+            CW.writeClientConfigIni(
+                forBenchmark=False,
+                problemSizes=ProblemSizesMockDummy(),
+                biasTypeArgs="",
+                factorDimArgs=factor_dim,
+                activationArgs="",
+                icacheFlushArgs="",
+                problemType=pt,
+                sourceDir=source_dir,
+                codeObjectFiles=[],
+                resultsFileName="/data/Results.csv",
+                parametersFilePath=out_file,
+                deviceId=0,
+                gfxName="gfx942",
+                libraryFile=None,
+            )
 
-    def test_library_file_default_dat(self, tmp_path, monkeypatch):
-        """Line 582: LibraryFormat=msgpack -- TensileLibrary.dat."""
+    def test_library_file_dat_written_verbatim(self, tmp_path, monkeypatch):
+        """Line 588: a caller-supplied .dat path is written to library-file verbatim."""
         pt = _make_problem_type(_PLAIN_GEMM_PT_DICT)
         _set_all_gp(monkeypatch)
         monkeypatch.setitem(globalParameters, "LibraryFormat", "msgpack")
@@ -441,10 +440,10 @@ class TestWriteClientConfigIniPlain:
             parametersFilePath=out_file,
             deviceId=0,
             gfxName="gfx942",
-            libraryFile=None,
+            libraryFile="/lib/TensileLibrary.dat",
         )
         content = Path(out_file).read_text()
-        assert "TensileLibrary.dat" in content
+        assert "library-file=/lib/TensileLibrary.dat" in content
 
     def test_code_object_filtering_by_gfxname(self, tmp_path, monkeypatch):
         """Lines 585-587: code-object written only when gfxName in coFile or no 'gfx' in coFile."""
@@ -681,6 +680,7 @@ class TestWriteClientConfig:
                 tileAwareSelection=False,
                 deviceId=0,
                 gfxName="gfx942",
+                libraryFile="/lib/TensileLibrary.yaml",
             )
 
     def test_creates_ini_file(self, tmp_path, monkeypatch):

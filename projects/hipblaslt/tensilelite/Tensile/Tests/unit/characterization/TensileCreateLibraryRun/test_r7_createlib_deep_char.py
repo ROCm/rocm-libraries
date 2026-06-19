@@ -407,14 +407,14 @@ class TestWriteSolutionsAndKernelsTCL:
         assert n == 1
         assert len(uq) == 1
 
-    def test_multiple_archs_creates_flat_library_dir(self, tmp_path):
-        """Line 530: multiple archs => flat library/ dir (not per-arch subdir)."""
+    def test_multiple_archs_creates_per_base_library_dirs(self, tmp_path):
+        """Lines 574-576: multiple archs => one per-base subdir each under library/."""
         self._run_mocked(tmp_path, cmdlineArchs=["gfx942", "gfx950"])
         lib_dir = tmp_path / "output" / "library"
         assert lib_dir.is_dir()
-        # Flat layout: no per-arch subdir for multiple archs
-        assert not (lib_dir / "gfx942").is_dir()
-        assert not (lib_dir / "gfx950").is_dir()
+        # Per-base layout: each base arch gets its own subdir
+        assert (lib_dir / "gfx942").is_dir()
+        assert (lib_dir / "gfx950").is_dir()
 
     def test_write_helpers_is_called(self, tmp_path):
         """Line 606: writeHelpers is invoked."""
@@ -841,8 +841,15 @@ class TestRunCLIEntryPoint:
                           side_effect=lambda p, **kw: rmtree_calls.append(p)):
             M.run()
 
-        assert not rmtree_calls, (
-            "KeepBuildTmp=True must NOT call shutil.rmtree, got: " + str(rmtree_calls)
+        # joblib's memmap reaper may rmtree its own /dev/shm scratch dirs during
+        # teardown; those are unrelated to KeepBuildTmp. Only build_tmp removals
+        # are the behavior under test.
+        build_tmp_calls = [
+            p for p in rmtree_calls
+            if "joblib_memmapping_folder_" not in str(p)
+        ]
+        assert not build_tmp_calls, (
+            "KeepBuildTmp=True must NOT rmtree build_tmp, got: " + str(build_tmp_calls)
         )
 
     def test_run_experimental_flag_passes_through(self, logic_dir, output_dir):
