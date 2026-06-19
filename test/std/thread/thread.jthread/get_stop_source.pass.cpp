@@ -8,7 +8,7 @@
 //
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: hipthreads-no-stop-token
+// XFAIL: hipthreads-no-stop-token
 // XFAIL: availability-synchronization_library-missing
 
 // [[nodiscard]] stop_source get_stop_source() noexcept;
