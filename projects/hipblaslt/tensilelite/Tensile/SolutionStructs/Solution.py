@@ -950,11 +950,7 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
-      # Subtile supports the cluster barrier/signal handshake but not the
-      # multicast TDM data path, so keep Multicast off there while still
-      # enabling the cluster barrier.
-      if not state["UseSubtileImpl"]:
-        state["Multicast"] = True
+      state["Multicast"] = True
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
