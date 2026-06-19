@@ -58,44 +58,16 @@ namespace
         return ::testing::AssertionSuccess();
     }
 
-    void setBatchPointerResetPolicyArgs(Client::po::variables_map& args)
-    {
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "max-enqueues-per-sync",
-                                                     std::any(int(-1)));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "min-flops-per-sync",
-                                                     std::any(size_t(0)));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-a", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-b", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-c", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-d", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-ref",
-                                                     std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-bias",
-                                                     std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-amaxd",
-                                                     std::any(false));
-    }
-
     Client::po::variables_map
         makeBatchPointerResetArgs(std::vector<std::vector<size_t>> problemSizes)
     {
-        auto args = TensileLite::testing::buildBaseDataInitArgs(std::move(problemSizes));
-        setBatchPointerResetPolicyArgs(args);
-        return args;
+        return TensileLite::testing::buildBaseDataInitArgs(std::move(problemSizes));
     }
 
     Client::po::variables_map makeRingBatchPointerArgs(
         std::vector<std::vector<size_t>> problemSizes, int elementsToValidate = 1)
     {
-        auto args = TensileLite::testing::buildRingArgs(std::move(problemSizes),
-                                                        elementsToValidate);
-        setBatchPointerResetPolicyArgs(args);
-        return args;
+        return TensileLite::testing::buildRingArgs(std::move(problemSizes), elementsToValidate);
     }
 
     Client::po::variables_map makeConstantCachingArgs()

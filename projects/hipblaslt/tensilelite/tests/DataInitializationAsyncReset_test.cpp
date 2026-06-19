@@ -12,6 +12,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationTestUtils.hpp"
+#include "HipStreamGuard.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -19,30 +20,7 @@ using namespace TensileLite::Client;
 namespace
 {
     using TensileLite::testing::makePlainProblem;
-
-    struct StreamHandle
-    {
-        hipStream_t stream = nullptr;
-
-        explicit StreamHandle(unsigned int flags = hipStreamNonBlocking)
-        {
-            HIP_CHECK_EXC(hipStreamCreateWithFlags(&stream, flags));
-        }
-
-        ~StreamHandle()
-        {
-            if(stream)
-                (void)hipStreamDestroy(stream);
-        }
-
-        StreamHandle(StreamHandle const&)            = delete;
-        StreamHandle& operator=(StreamHandle const&) = delete;
-
-        hipStream_t get() const
-        {
-            return stream;
-        }
-    };
+    using TensileLite::testing::HipStreamGuard;
 
     struct EventHandle
     {
@@ -197,13 +175,13 @@ namespace
         HostByteBuffer host;
         host.allocate();
 
-        StreamHandle probeStream;
+        HipStreamGuard probeStream(hipStreamNonBlocking);
         HIP_CHECK_EXC(hipMemcpyAsync(host.get(),
                                      devicePtr,
                                      sizeof(uint8_t),
                                      hipMemcpyDeviceToHost,
                                      probeStream.get()));
-        HIP_CHECK_EXC(hipStreamSynchronize(probeStream.get()));
+        probeStream.synchronize();
         return *host.get();
     }
 } // namespace
@@ -250,9 +228,9 @@ TEST(DataInitializationAsyncReset, NaNResetOutputD2DUsesTargetStream)
     uint32_t zero = 0;
     HIP_CHECK_EXC(hipMemcpy(gateValue.get(), &zero, sizeof(zero), hipMemcpyHostToDevice));
 
-    StreamHandle gateStream;
-    StreamHandle targetStream;
-    StreamHandle releaseStream;
+    HipStreamGuard gateStream(hipStreamNonBlocking);
+    HipStreamGuard targetStream(hipStreamNonBlocking);
+    HipStreamGuard releaseStream(hipStreamNonBlocking);
     EventHandle  gateEvent;
 
     HIP_CHECK_EXC(hipStreamWaitValue32(

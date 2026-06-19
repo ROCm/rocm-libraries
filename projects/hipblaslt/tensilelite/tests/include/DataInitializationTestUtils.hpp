@@ -287,6 +287,8 @@ namespace TensileLite::testing
     {
         detail::setDataInitArg(args, "num-benchmarks", std::any(int(0)));
         detail::setDataInitArg(args, "num-enqueues-per-sync", std::any(int(0)));
+        detail::setDataInitArg(args, "max-enqueues-per-sync", std::any(int(-1)));
+        detail::setDataInitArg(args, "min-flops-per-sync", std::any(size_t(0)));
         detail::setDataInitArg(args, "num-syncs-per-benchmark", std::any(int(0)));
         detail::setDataInitArg(args, "num-warmups", std::any(int(0)));
 
@@ -295,6 +297,13 @@ namespace TensileLite::testing
                                std::any(int(elementsToValidate)));
         detail::setDataInitArg(args, "print-valids", std::any(false));
         detail::setDataInitArg(args, "print-max", std::any(int(-1)));
+        detail::setDataInitArg(args, "print-tensor-a", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-b", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-c", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-d", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-ref", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-bias", std::any(false));
+        detail::setDataInitArg(args, "print-tensor-amaxd", std::any(false));
 
         detail::setDataInitArg(args, "pristine-on-gpu", std::any(true));
         detail::setDataInitArg(args,

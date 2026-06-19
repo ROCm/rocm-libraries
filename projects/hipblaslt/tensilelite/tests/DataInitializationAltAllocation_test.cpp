@@ -113,27 +113,7 @@ namespace
 
     Client::po::variables_map makeAltAllocationArgs()
     {
-        auto args = TensileLite::testing::buildRingArgs({{32, 32, 32}}, 1);
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "max-enqueues-per-sync",
-                                                     std::any(int(-1)));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "min-flops-per-sync",
-                                                     std::any(size_t(0)));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-a", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-b", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-c", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args, "print-tensor-d", std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-ref",
-                                                     std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-bias",
-                                                     std::any(false));
-        TensileLite::testing::detail::setDataInitArg(args,
-                                                     "print-tensor-amaxd",
-                                                     std::any(false));
-        return args;
+        return TensileLite::testing::buildRingArgs({{32, 32, 32}}, 1);
     }
 
     void expectAltAllocationRollback(size_t callsBeforeFailure)

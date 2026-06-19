@@ -166,6 +166,12 @@ TEST(BuildRingArgs, ProblemSizesAndCustomBase)
                                                  "num-enqueues-per-sync",
                                                  std::any(int(4)));
     TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "max-enqueues-per-sync",
+                                                 std::any(int(9)));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "min-flops-per-sync",
+                                                 std::any(size_t(13)));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
                                                  "num-syncs-per-benchmark",
                                                  std::any(int(5)));
     TensileLite::testing::detail::setDataInitArg(baseArgs, "num-warmups", std::any(int(6)));
@@ -175,6 +181,17 @@ TEST(BuildRingArgs, ProblemSizesAndCustomBase)
                                                  std::any(int(7)));
     TensileLite::testing::detail::setDataInitArg(baseArgs, "print-valids", std::any(true));
     TensileLite::testing::detail::setDataInitArg(baseArgs, "print-max", std::any(int(11)));
+    TensileLite::testing::detail::setDataInitArg(baseArgs, "print-tensor-a", std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs, "print-tensor-b", std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs, "print-tensor-c", std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs, "print-tensor-d", std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs, "print-tensor-ref", std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "print-tensor-bias",
+                                                 std::any(true));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "print-tensor-amaxd",
+                                                 std::any(true));
 
     TensileLite::testing::detail::setDataInitArg(baseArgs, "pristine-on-gpu", std::any(false));
     TensileLite::testing::detail::setDataInitArg(baseArgs,
@@ -251,9 +268,100 @@ TEST(BuildRingArgs, ProblemSizesAndCustomBase)
     TensileLite::testing::detail::setDataInitArg(baseArgs,
                                                  "problem-identifier",
                                                  std::any(std::string("custom-base")));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "a-type",
+                                                 std::any(rocisa::DataType::BFloat16));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "activation-type",
+                                                 std::any(TensileLite::ActivationType::Clippedrelu));
+    TensileLite::testing::detail::setDataInitArg(baseArgs,
+                                                 "compute-input-type-A",
+                                                 std::any(rocisa::DataType::Double));
 
     auto overrideArgs = TensileLite::testing::buildRingArgs(baseArgs, 0);
     expectRingArgs(overrideArgs, 0);
+    EXPECT_EQ(overrideArgs.at("problem-size").as<std::vector<std::vector<size_t>>>(),
+              baseArgs.at("problem-size").as<std::vector<std::vector<size_t>>>());
     EXPECT_EQ(overrideArgs.at("problem-identifier").as<std::string>(),
               baseArgs.at("problem-identifier").as<std::string>());
+    expectArgEq(overrideArgs, "a-type", rocisa::DataType::BFloat16);
+    expectArgEq(overrideArgs, "activation-type", TensileLite::ActivationType::Clippedrelu);
+    expectArgEq(overrideArgs, "compute-input-type-A", rocisa::DataType::Double);
+}
+
+TEST(MakePlainProblem, ContractPreservesTransposeAndDescriptorGeometry)
+{
+    TensileLite::testing::PlainProblemSpec spec;
+    spec.m                 = 17;
+    spec.n                 = 23;
+    spec.k                 = 31;
+    spec.batch             = 5;
+    spec.transA            = false;
+    spec.transB            = true;
+    spec.aType             = rocisa::DataType::Half;
+    spec.bType             = rocisa::DataType::BFloat16;
+    spec.cType             = rocisa::DataType::Double;
+    spec.dType             = rocisa::DataType::Float;
+    spec.computeInputTypeA = rocisa::DataType::Double;
+    spec.computeInputTypeB = rocisa::DataType::Half;
+    spec.alphaType         = rocisa::DataType::BFloat16;
+    spec.betaType          = rocisa::DataType::Double;
+    spec.beta              = 1.5;
+
+    auto problem = TensileLite::testing::makePlainProblem(spec);
+
+    EXPECT_EQ(problem.freeSizeA(0), spec.m);
+    EXPECT_EQ(problem.freeSizeB(0), spec.n);
+    EXPECT_EQ(problem.boundSize(0), spec.k);
+    EXPECT_EQ(problem.batchSize(0), spec.batch);
+    EXPECT_DOUBLE_EQ(problem.beta(), spec.beta);
+    EXPECT_TRUE(problem.stridedBatched());
+
+    EXPECT_EQ(problem.a().dataType(), spec.aType);
+    EXPECT_EQ(problem.b().dataType(), spec.bType);
+    EXPECT_EQ(problem.c().dataType(), spec.cType);
+    EXPECT_EQ(problem.d().dataType(), spec.dType);
+    EXPECT_EQ(problem.computeInputTypeA(), spec.computeInputTypeA);
+    EXPECT_EQ(problem.computeInputTypeB(), spec.computeInputTypeB);
+    EXPECT_EQ(problem.alphaType(), spec.alphaType);
+    EXPECT_EQ(problem.betaType(), spec.betaType);
+
+    EXPECT_EQ(problem.a().sizes(), (std::vector<size_t>{spec.m, spec.k, spec.batch}));
+    EXPECT_EQ(problem.a().strides(), (std::vector<size_t>{1, spec.m, spec.m * spec.k}));
+    EXPECT_EQ(problem.b().sizes(), (std::vector<size_t>{spec.n, spec.k, spec.batch}));
+    EXPECT_EQ(problem.b().strides(), (std::vector<size_t>{1, spec.n, spec.n * spec.k}));
+    EXPECT_EQ(problem.c().sizes(), (std::vector<size_t>{spec.m, spec.n, spec.batch}));
+    EXPECT_EQ(problem.c().strides(), (std::vector<size_t>{1, spec.m, spec.m * spec.n}));
+    EXPECT_EQ(problem.d().sizes(), (std::vector<size_t>{spec.m, spec.n, spec.batch}));
+    EXPECT_EQ(problem.d().strides(), (std::vector<size_t>{1, spec.m, spec.m * spec.n}));
+}
+
+TEST(MakeBatchedProblem, ContractPinsBatchStridesAndFloatTypes)
+{
+    auto problem = TensileLite::testing::makeBatchedProblem(32, 48, 16, 4);
+
+    EXPECT_EQ(problem.freeSizeA(0), size_t(32));
+    EXPECT_EQ(problem.freeSizeB(0), size_t(48));
+    EXPECT_EQ(problem.boundSize(0), size_t(16));
+    EXPECT_EQ(problem.batchSize(0), size_t(4));
+    EXPECT_DOUBLE_EQ(problem.beta(), 0.0);
+    EXPECT_FALSE(problem.stridedBatched());
+
+    EXPECT_EQ(problem.a().dataType(), rocisa::DataType::Float);
+    EXPECT_EQ(problem.b().dataType(), rocisa::DataType::Float);
+    EXPECT_EQ(problem.c().dataType(), rocisa::DataType::Float);
+    EXPECT_EQ(problem.d().dataType(), rocisa::DataType::Float);
+
+    EXPECT_EQ(problem.a().sizes(), (std::vector<size_t>{32, 16, 4}));
+    EXPECT_EQ(problem.a().strides(), (std::vector<size_t>{1, 32, 32 * 16}));
+    EXPECT_EQ(problem.b().sizes(), (std::vector<size_t>{16, 48, 4}));
+    EXPECT_EQ(problem.b().strides(), (std::vector<size_t>{1, 16, 16 * 48}));
+    EXPECT_EQ(problem.c().sizes(), (std::vector<size_t>{32, 48, 4}));
+    EXPECT_EQ(problem.c().strides(), (std::vector<size_t>{1, 32, 32 * 48}));
+    EXPECT_EQ(problem.d().sizes(), (std::vector<size_t>{32, 48, 4}));
+    EXPECT_EQ(problem.d().strides(), (std::vector<size_t>{1, 32, 32 * 48}));
+
+    auto largerProblem = TensileLite::testing::makeBatchedProblem(64, 48, 16, 4);
+    EXPECT_EQ(largerProblem.a().strides()[2], size_t(64 * 16));
+    EXPECT_NE(largerProblem.a().strides()[2], problem.a().strides()[2]);
 }
