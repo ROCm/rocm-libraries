@@ -331,6 +331,8 @@ class StateValues:
   ldsStartOffsetMXSA: int                = -1
   ldsStartOffsetMXSB: int                = -1
   ldsTotalSize: int                      = 0
+  perUidLdsBytes: int                    = 0
+  uidRange: int                          = 1
 
   dtvKIntervalA: int                     = 1
   dtvKIntervalB: int                     = 1
@@ -6782,9 +6784,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.ldsStartOffsetMXSA = sizeA + sizeB
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
+      # One uid's worth of subtile LDS (A + B + scales for a single data DepthU).
+      # This is the per-uid stride: the XOR buffer swap still toggles by exactly
+      # this many bytes to select the uid in S1, and S2 will add u*perUidLdsBytes
+      # as an explicit offset once the swap is freed from carrying the uid index.
+      perUidLdsBytes = sizeA + sizeB + sizeMXSA + sizeMXSB
+      self.perUidLdsBytes = int(perUidLdsBytes)
+      self.ldsTotalSize = perUidLdsBytes
+
+      # uid is the explicit addressing dimension over the macro-scale span:
+      # uid_range = _ScaleDepthU / DepthU (= 1 for single-DU, where the two are
+      # equal). The data LDS buffer must have room for all uid_range uids of one
+      # macro tile at once so uid can become an offset rather than a swapped half.
+      uid_range = max(1, int(kernel.get("_ScaleDepthU", kernel["DepthU"])) // int(kernel["DepthU"]))
+      self.uidRange = uid_range
+      uidBufferBytes = perUidLdsBytes * uid_range
 
       kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
+      # For the multi-DU path the NumLdsBlk blocks already hold the uid regions
+      # contiguously (the buffer swap is spent on the uid dimension), so this is
+      # byte-identical wherever the existing allocation already covers every uid
+      # (NumLdsBlk >= uid_range). Only grow when a config would not otherwise
+      # reserve room for all uids, keeping S2's per-uid offsets in bounds.
+      if kernel["LdsNumBytes"] < uidBufferBytes:
+        kernel["LdsNumBytes"] = max(1, int(uidBufferBytes))
       if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
         self.states.overflowedResources = 8
 
