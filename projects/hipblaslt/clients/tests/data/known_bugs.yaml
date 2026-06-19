@@ -20,9 +20,16 @@ Known bugs:
   # coverage gap is tracked rather than silently failing CI. Remove the entry once
   # the underlying kernel is fixed.
   #
-  # NOTE: matmul_size_t_output_overflow_bf16_ROCM25793 is deliberately NOT listed
-  # here -- it is the FAIL-pre-fix / PASS-post-fix gate for ROCM-25793 and must
-  # remain an active (non-skipped) test.
-  #
   # Template (uncomment and scope once a failing kernel/platform is confirmed):
   # - { name: matmul_size_t_index_overflow, function: matmul, known_bug_platforms: "gfx942" }
+
+  # ROCM-26455: bf16 matmul output-store address overflow -- an output element
+  # offset > 2^31 (from an oversized output leading dimension ldc/ldd) wraps in the
+  # 32-bit global-write address path and produces silent wrong results. The gate
+  # matmul_size_t_output_overflow_bf16_ROCM26455 is the bit-exact reproducer
+  # (FAIL-pre-fix / PASS-post-fix). It is registered here as a known failure on the
+  # affected data-center arches so the reproducer can land ahead of the kernel fix.
+  # This is a distinct defect from ROCM-25793 (verified: PR #8480 does not fix it).
+  # REMOVE this entry once the output-store path is fixed so the case re-activates
+  # as an enforced bit-exact regression gate.
+  - { name: matmul_size_t_output_overflow_bf16_ROCM26455, function: matmul, known_bug_platforms: "gfx942, gfx950" }

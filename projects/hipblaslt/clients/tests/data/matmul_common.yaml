@@ -101,7 +101,7 @@ Definitions:
     - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb: 1049100, ldc:    2048, ldd:    2048 }
     - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb:    2048, ldc: 1049100, ldd: 1049100 }
 
-  # Output-only oversized leading dimension (C and D): the ROCM-25793 write
+  # Output-only oversized leading dimension (C and D): the ROCM-26455 write
   # path. K is kept small so the CPU reference / unit_check stays inexpensive.
   - &size_t_output_overflow
     - { M: 2048, N: 2048, K: 256, lda: 2048, ldb: 2048, ldc: 1049100, ldd: 1049100 }
