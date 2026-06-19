@@ -428,8 +428,7 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K with a
-  //              large free dim
+  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
   // ========================================================================
   // Subtile kernels are not competitive when the reduction dimension is small
   // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
