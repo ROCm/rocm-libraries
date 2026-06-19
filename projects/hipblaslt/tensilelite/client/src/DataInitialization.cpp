@@ -3598,8 +3598,8 @@ namespace TensileLite
 
         // For GEMM only
         std::shared_ptr<ProblemInputs>
-            DataInitialization::ConvertToProblemInputs(ContractionProblemGemm const& problem,
-                                                       bool                          isGPU)
+        DataInitialization::ConvertToProblemInputs(ContractionProblemGemm const& problem,
+                                                   bool                          isGPU)
         {
             if(isGPU)
                 return buildGPUProblemInputs(
@@ -3640,6 +3640,83 @@ namespace TensileLite
                     std::shared_ptr<ContractionGroupedInputs>(inputs));
             }
             return result;
+        }
+
+        void DataInitialization::refreshRotatingMode1Inputs(ContractionProblemGemm const& problem)
+        {
+            if(m_rotatingMode != 1 || m_rotatingBuffer == 0)
+                return;
+
+            auto mem = m_rm->getRotatingMemory();
+            for(size_t j = 1; j < mem.size(); j++)
+                for(size_t i = 0; i < m_vdata.size(); i++)
+                {
+                    auto& desc = problem.tensors()[i];
+                    auto  it   = m_vdata[i].pristine.find(desc.dataType());
+                    if(it != m_vdata[i].pristine.end())
+                    {
+                        auto& p = it->second;
+                        if(i <= ContractionProblemGemm::TENSOR::METADATA)
+                            HIP_CHECK_EXC(hipMemcpy(mem[j][i].data.get(),
+                                                    p.gpuInput.current.get(),
+                                                    mem[j][i].size,
+                                                    hipMemcpyDeviceToDevice));
+                    }
+                }
+        }
+
+        std::shared_ptr<ProblemInputs> DataInitialization::populateTensorSlot(
+            ContractionProblemGemm const&    problem,
+            std::vector<void*>&              ptrs,
+            std::vector<void**>&             batchPtrs,
+            std::vector<size_t>&             maxElements,
+            std::vector<std::vector<size_t>>& offsets,
+            hipMemcpyKind                    copyKind,
+            hipStream_t                      targetStream,
+            std::vector<SwizzleUpload>*      swizzleStaging,
+            bool                             refreshRotatingMode1)
+        {
+            bool needSwizzle   = problem.swizzleTensorA() || problem.swizzleTensorB();
+            bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+
+            {
+                ScopedTimer t("async_reset_probdep");
+                if(m_cpuPtrs.empty() && m_problemDependentData)
+                {
+                    ScopedTimer t2("async_reset_cpuinit");
+                    initializeCPUInputs(problem);
+                }
+                if(m_problemDependentData)
+                {
+                    ScopedTimer t2("async_reset_copyvalid");
+                    copyValidToGPUBuffer(problem, targetStream != nullptr);
+                }
+                if(needSwizzle || needMXSwizzle)
+                {
+                    ScopedTimer t2("async_reset_swizzle");
+                    copySwizzledToGPUBuffer(problem, targetStream, swizzleStaging);
+                }
+            }
+
+            // copyInputs appends grouped offsets, so clear the destination before
+            // rebuilding this slot.
+            offsets.clear();
+
+            {
+                ScopedTimer t("async_reset_copyinputs");
+                copyInputs(ptrs,
+                           batchPtrs,
+                           maxElements,
+                           offsets,
+                           problem,
+                           copyKind,
+                           targetStream);
+            }
+
+            if(refreshRotatingMode1 && m_rotatingMode == 1 && m_rotatingBuffer > 0)
+                refreshRotatingMode1Inputs(problem);
+
+            return buildGPUProblemInputs(ptrs, batchPtrs, maxElements, offsets, problem);
         }
 
         size_t getRotatingSize(ContractionProblemGemm const& problem,
@@ -3979,57 +4056,20 @@ namespace TensileLite
                 markGpuInputsPrepared(problem);
                 return m_cachedGPUInputs;
             }
-            else
-            {
-                {
-                    ScopedTimer t("async_reset_probdep");
-                    if(m_problemDependentData)
-                    {
-                        ScopedTimer t2("async_reset_copyvalid");
-                        copyValidToGPUBuffer(problem, targetStream != nullptr);
-                    }
-                    if(needSwizzle || needMXSwizzle)
-                    {
-                        ScopedTimer t2("async_reset_swizzle");
-                        copySwizzledToGPUBuffer(problem, targetStream);
-                    }
-                }
-
-                {
-                    ScopedTimer t("async_reset_copyinputs");
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem,
-                               hipMemcpyDeviceToDevice,
-                               targetStream);
-                }
-                if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
-                {
-                    auto mem = m_rm->getRotatingMemory();
-                    for(size_t j = 1; j < mem.size(); j++)
-                        for(size_t i = 0; i < m_vdata.size(); i++)
-                        {
-                            auto& desc = problem.tensors()[i];
-                            auto  it   = m_vdata[i].pristine.find(desc.dataType());
-                            if(it != m_vdata[i].pristine.end())
-                            {
-                                auto& p = it->second;
-                                if(i <= ContractionProblemGemm::TENSOR::METADATA)
-                                    HIP_CHECK_EXC(hipMemcpy(mem[j][i].data.get(),
-                                                            p.gpuInput.current.get(),
-                                                            mem[j][i].size,
-                                                            hipMemcpyDeviceToDevice));
-                            }
-                        }
-                }
-                m_gpuInit = true;
-            }
-
+            // buildGPUProblemInputs() copies m_cdata into the cached inputs, so
+            // refresh constants before the helper snapshots ProblemInputs.
             initializeConstantInputs(problem);
 
-            m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+            m_cachedGPUInputs = populateTensorSlot(problem,
+                                                   m_gpuPtrs,
+                                                   m_gpuBatchPtrs,
+                                                   m_maxElements,
+                                                   m_groupedOffsets,
+                                                   hipMemcpyDeviceToDevice,
+                                                   targetStream,
+                                                   nullptr,
+                                                   /*refreshRotatingMode1=*/true);
+            m_gpuInit = true;
 
             // Store active slot state in ring[0] only on initial
             // preparation (targetStream == nullptr), not when called
@@ -4058,9 +4098,6 @@ namespace TensileLite
             hipMemcpyKind kind = (m_keepPristineCopyOnGPU && !m_problemDependentData)
                                      ? hipMemcpyDeviceToDevice
                                      : hipMemcpyHostToDevice;
-
-            bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
-            bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
             std::vector<SwizzleUpload>* swizzleStaging = nullptr;
             if(targetStream)
             {
@@ -4068,38 +4105,28 @@ namespace TensileLite
                 swizzleStaging->clear();
             }
 
-            // Local copies — critical: copyInputs doesn't clear offsets (only
-            // ptrs/batchPtrs/maxElements), so reusing m_groupedOffsets across
-            // repeated fillSlot calls would cause unbounded growth.
-            // resetOutput uses indexing, so locals must be pre-sized.
+            // Local copies — populateTensorSlot rebuilds the vectors in place,
+            // so reusing m_groupedOffsets across repeated fillSlot calls would
+            // cause unbounded growth.
             auto localMaxElements = m_maxElements;
             auto localOffsets     = m_groupedOffsets;
 
             // Full path: initialize all tensors into target slot
             if(!cpuInputsAlreadyCurrent)
                 ensureCPUInputsCurrent(problem);
-            if(m_problemDependentData)
-                copyValidToGPUBuffer(problem, targetStream != nullptr);
-            if(needSwizzle || needMXSwizzle)
-                copySwizzledToGPUBuffer(problem, targetStream, swizzleStaging);
-
-            // Clear offsets before copyInputs (it push_back's, doesn't clear)
-            localOffsets.clear();
-            copyInputs(m_gpuPtrsRing[slotIdx],
-                       m_gpuBatchPtrsRing[slotIdx],
-                       localMaxElements,
-                       localOffsets,
-                       problem,
-                       kind,
-                       targetStream);
+            // Enqueue the slot's batch-pointer upload before we snapshot the
+            // ProblemInputs for this ring entry.
             initializeGPUBatchedInputs(problem, targetStream, slotIdx);
 
-            m_cachedInputsRing[slotIdx] = buildGPUProblemInputs(
-                m_gpuPtrsRing[slotIdx],
-                m_gpuBatchPtrsRing[slotIdx],
-                localMaxElements,
-                localOffsets,
-                problem);
+            m_cachedInputsRing[slotIdx] = populateTensorSlot(problem,
+                                                             m_gpuPtrsRing[slotIdx],
+                                                             m_gpuBatchPtrsRing[slotIdx],
+                                                             localMaxElements,
+                                                             localOffsets,
+                                                             kind,
+                                                             targetStream,
+                                                             swizzleStaging,
+                                                             /*refreshRotatingMode1=*/false);
         }
 
         void DataInitialization::initializeAltBufferSets(

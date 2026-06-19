@@ -1142,6 +1142,19 @@ namespace TensileLite
                                       std::vector<std::vector<size_t>> const& offsets,
                                       ContractionProblemGemm const&          problem);
 
+            void refreshRotatingMode1Inputs(ContractionProblemGemm const& problem);
+
+            std::shared_ptr<ProblemInputs>
+                populateTensorSlot(ContractionProblemGemm const& problem,
+                                   std::vector<void*>&           ptrs,
+                                   std::vector<void**>&          batchPtrs,
+                                   std::vector<size_t>&          maxElements,
+                                   std::vector<std::vector<size_t>>& offsets,
+                                   hipMemcpyKind                 copyKind,
+                                   hipStream_t                   targetStream,
+                                   std::vector<SwizzleUpload>*   swizzleStaging,
+                                   bool                          refreshRotatingMode1);
+
             void fillSlot(size_t                       slotIdx,
                           ContractionProblemGemm const& problem,
                           hipStream_t                   targetStream,

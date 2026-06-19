@@ -19,6 +19,8 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
+#include <variant>
+
 #include "DataInitializationTestUtils.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
@@ -29,6 +31,7 @@ using namespace TensileLite::Client;
 namespace
 {
     using TensileLite::testing::makeBatchedProblem;
+    using TensileLite::testing::makePlainProblem;
 
     class PredicateDataInitialization : public DataInitialization
     {
@@ -92,6 +95,31 @@ namespace
         auto args = TensileLite::testing::buildRingArgs(std::move(problemSizes),
                                                         elementsToValidate);
         setBatchPointerResetPolicyArgs(args);
+        return args;
+    }
+
+    Client::po::variables_map makeConstantCachingArgs()
+    {
+        auto args = makeBatchPointerResetArgs({{32, 32, 32}});
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "activation-type",
+                                                     std::any(ActivationType::Clippedrelu));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "activation-enum-args",
+                                                     std::any(std::vector<ActivationType>{}));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "activation-compute-type",
+                                                     std::any(rocisa::DataType::Float));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-alpha",
+                                                     std::any(Client::InitMode::Two));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-beta",
+                                                     std::any(Client::InitMode::Two));
+        TensileLite::testing::detail::setDataInitArg(
+            args,
+            "activation-additional-args",
+            std::any(std::vector<std::vector<double>>{{3.25, -1.5}}));
         return args;
     }
 
@@ -352,6 +380,45 @@ TEST(BatchPointerReset, ProblemDependentCPUInputsRefreshAcrossPreparePaths)
     EXPECT_FLOAT_EQ(value, 48.0f)
         << "GPU input A(m=48, k=0) should follow the SerialDim0 pattern for problem 2.";
     EXPECT_FALSE(dataInit.cpuInputsNeedRefresh(p2));
+}
+
+TEST(BatchPointerReset, GPUPrepareCachesFreshConstantInputsOnFirstSlowPath)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    TensileLite::testing::PlainProblemSpec spec;
+    spec.m     = 32;
+    spec.n     = 32;
+    spec.k     = 32;
+    spec.beta  = 1.0;
+
+    auto problem = makePlainProblem(spec);
+    problem.setActivationType(ActivationType::Clippedrelu);
+    problem.setActivationComputeType(rocisa::DataType::Float);
+
+    auto args = makeConstantCachingArgs();
+
+    ClientProblemFactory factory(args);
+    DataInitialization   dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(problem);
+    auto* ci    = dynamic_cast<ContractionInputs*>(inputs.get());
+    ASSERT_NE(ci, nullptr);
+
+    ASSERT_TRUE(std::holds_alternative<float>(ci->alpha));
+    ASSERT_TRUE(std::holds_alternative<float>(ci->beta));
+    ASSERT_EQ(ci->activationArgs.size(), 2u);
+    ASSERT_TRUE(std::holds_alternative<float>(ci->activationArgs[0]));
+    ASSERT_TRUE(std::holds_alternative<float>(ci->activationArgs[1]));
+
+    EXPECT_FLOAT_EQ(std::get<float>(ci->alpha), 2.0f);
+    EXPECT_FLOAT_EQ(std::get<float>(ci->beta), 2.0f);
+    EXPECT_FLOAT_EQ(std::get<float>(ci->activationArgs[0]), 3.25f);
+    EXPECT_FLOAT_EQ(std::get<float>(ci->activationArgs[1]), -1.5f);
 }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
