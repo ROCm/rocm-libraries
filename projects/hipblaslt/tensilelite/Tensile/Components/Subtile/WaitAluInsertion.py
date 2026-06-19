@@ -94,24 +94,13 @@ def insertLRSwapWaitAlu(module, writer, kernel):
 
 
 def insertLRSwapWarWaitAlu(module, writer, kernel):
-  """Guard the ds_read -> LR offset-swap WAR hazard.
+  """Guard the ds_read -> LR offset-swap WAR hazard (gfx1250 SCHED_MODE 2).
 
-  A ds_read uses an LR offset VGPR as its address source; the swap v_xor then
-  overwrites that same VGPR.  The address read is tracked by VM_VSRC, so the
-  xor must not overwrite the offset until the outstanding reads have drained.
-  In SCHED_MODE 2 the hardware no longer enforces this, and with PGR=0 (one
-  offset set, reloaded every iteration) the xor can outrun the reads.  One
-  SWaitAlu(vm_vsrc=0) drains every pending address read at once.
-
-  We place that wait at the exact instruction that needs it: the first swap
-  v_xor whose destination offset VGPR still has an in-flight ds_read address
-  use.  This mirrors insertLRSwapWaitAlu's dependency walk -- a ds_read marks
-  its address VGPR pending, an s_wait_dscnt 0 (the end-of-subIterK LR-complete
-  wait) drains all pending DS reads, and a swap v_xor that writes a pending
-  VGPR is the WAR consumer.  Because vm_vsrc(0) is a full drain, one wait
-  clears the whole pending set, so later xors in the same block need none.
-  No-op unless SCHED_MODE 2 (HasWmmaArbStallBit) is active.  Returns a rebuilt
-  Module; the input is left untouched.
+  A ds_read reads an LR offset VGPR (address, tracked by VM_VSRC); the swap
+  v_xor then overwrites it.  Without the hardware interlock the xor can race
+  ahead of that read, so wait before it.  We emit one SWaitAlu(vm_vsrc=0) at
+  the first xor whose offset still has an undrained read; the full drain
+  covers the rest of the block.  No-op off SCHED_MODE 2.
   """
   if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
     return module
