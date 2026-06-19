@@ -156,13 +156,13 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
                                                                 max_run_length,
                                                                 seed_value);
 
-		std::default_random_engine            prng(seed_value);
+        std::default_random_engine            prng(seed_value);
         std::uniform_int_distribution<size_t> num_empty_runs_dist(1, 4);
         const size_t                          num_trailing_empty_runs = num_empty_runs_dist(prng);
 
-		const size_t total_size = std::accumulate(run_lengths.begin(), run_lengths.end(), 0);
-		CHECK_SIZE_ENABLEMENT(total_size);
-		
+        const size_t total_size = std::accumulate(run_lengths.begin(), run_lengths.end(), 0);
+        CHECK_SIZE_ENABLEMENT(total_size);
+        
         num_runs += num_trailing_empty_runs;
 
         const auto empty_run_items
