@@ -141,13 +141,13 @@ TYPED_TEST(HipcubBlockHistogramInputArrayTests, Histogram)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
     constexpr size_t bin = TestFixture::bin_size;
 
-	const size_t items_per_block = block_size * items_per_thread;
-	const size_t size = items_per_block * 37;
-	const size_t bin_sizes = bin * 37;
-	const size_t grid_size = size / items_per_block;
-	
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 37;
+    const size_t bin_sizes = bin * 37;
+    const size_t grid_size = size / items_per_block;
+    
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -158,7 +158,7 @@ TYPED_TEST(HipcubBlockHistogramInputArrayTests, Histogram)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
-	
+    
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, T(bin - 1), seed_value);
 

@@ -135,7 +135,7 @@
 /HipcubDeviceRadixSort\/.*/                : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
 /HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
 /HipcubDeviceMergeSort\/.*/                : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceMerge\/.*/                    : /<apus>/                                        : >= 17867 + 41   : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMerge\/.*/                    : /<apus>/                                        : >= 17867 + 41   : *              : "Skipping large sizes on APUs"
 /HipcubDeviceMergeNonTyped\..*/            : /<apus>/                                        : >= (1 << 28)    : *              : "Skipping sizes over 2^28 on APUs"
 /HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|<navi4x-family>|<apus>|gfx1250/ : *               : *              : "Test not run on gfx94x, gfx95x, gfx120x, or gfx1250 as texture cache API is not supported."
 /HipcubCachingDeviceAllocatorTests\.Test1/ : /<all>/                                         : *               : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."

@@ -132,8 +132,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>        input(size);
     std::vector<output_type> expected(size);
@@ -240,8 +240,8 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>        input(size);
     std::vector<output_type> expected(size);
@@ -358,8 +358,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>        input(size);
     std::vector<output_type> expected(size);
@@ -500,8 +500,8 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>        input(size);
     std::vector<output_type> expected(size);
@@ -635,8 +635,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>         input(size);
     std::vector<output_type>  expected(size);
@@ -766,8 +766,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>         input(size);
     std::vector<output_type>  expected(size);
@@ -892,8 +892,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuarded)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = grid_size * items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     type* host_input    = new type[size];
     type* host_expected = new type[size];
     int*  host_ranks    = new int[size];
@@ -1009,7 +1009,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlagged)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = grid_size * items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     type* host_input    = new type[size];
     type* host_expected = new type[size];
@@ -1133,8 +1133,8 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlockedOneParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     type* input    = new type[size];
     type* expected = new type[size];
@@ -1227,8 +1227,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStripedOneParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     type* input    = new type[size];
     type* expected = new type[size];
@@ -1332,8 +1332,8 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlockedOneParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     type* input    = new type[size];
     type* expected = new type[size];
@@ -1458,8 +1458,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStripedOneParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type> input(size);
     std::vector<type> expected(size);
@@ -1581,8 +1581,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlockedNoOutputParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>         input(size);
     std::vector<type>         expected(size);
@@ -1700,8 +1700,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedNoOutputParam)
     }
 
     const size_t size = items_per_block * 113;
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Generate data
     std::vector<type>         input(size);
     std::vector<type>         expected(size);
@@ -1817,7 +1817,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
 
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = grid_size * items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     type* host_input    = new type[size];
     type* host_expected = new type[size];
@@ -1928,7 +1928,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlaggedNoOutputParam)
 
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size            = grid_size * items_per_block;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     type* host_input    = new type[size];
     type* host_expected = new type[size];

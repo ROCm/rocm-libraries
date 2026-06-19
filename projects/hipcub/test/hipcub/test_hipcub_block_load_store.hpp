@@ -39,8 +39,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClass)
     const size_t                          size             = items_per_block * 113;
     const auto                            grid_size        = size / items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
@@ -127,8 +127,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassValid)
     const size_t                          size             = items_per_block * 113;
     const auto                            grid_size        = size / items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
@@ -228,8 +228,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassDefault)
     const size_t                          size             = items_per_block * 113;
     const auto                            grid_size        = size / items_per_block;
 
-	CHECK_SIZE_ENABLEMENT(size);
-	
+    CHECK_SIZE_ENABLEMENT(size);
+    
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
@@ -327,7 +327,7 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
 
     constexpr double fraction_valid = 0.8f;
 
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)

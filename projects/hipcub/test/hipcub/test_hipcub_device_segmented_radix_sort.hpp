@@ -370,7 +370,7 @@ inline void sort_keys_large_segments()
 
     size_t size           = 1 << 20;
     size_t segments_count = 2;
-	CHECK_SIZE_ENABLEMENT(size);
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
