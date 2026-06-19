@@ -117,6 +117,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # under integration_test_bundles/, re-run cmake to pick up the changes.
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration_test_bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration_test_bundles")
+if(Python3_FOUND)
+    add_test(
+        NAME hipdnn_bundle_verifier_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference_data_scripts/tests/test_verify_golden_bundles.py
+    )
+    set_tests_properties(hipdnn_bundle_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+endif()
 
 # Install integration test bundles so installed tests can find them at
 # <exe_dir>/../lib/integration_test_bundles/

@@ -52,6 +52,22 @@ The Linux CI workflow (`therock-ci-linux.yml`) runs `dvc pull` automatically. Ot
 
 > **Note:** DVC commands must be run from the repo root (`rocm-libraries/`), not from a subdirectory.
 
+## Verify Bundles
+
+```bash
+python dnn-providers/integration-tests/reference_data_scripts/verify_golden_bundles.py \
+  dnn-providers/integration-tests/integration_test_bundles
+```
+
+The verifier checks graph JSON parsing, tensor byte sizes, metadata sidecars, and
+output-tensor NaN/Inf rejection. DVC tensor data must be present locally for the
+byte-size and NaN/Inf checks. If `.bin` files are absent, run `dvc pull` for the
+bundle first.
+
+For `quick/BatchnormFwdInference/nchw/fp32/Small/Small.json`, the verifier
+prints the advisory test name
+`quick_BatchnormFwdInference_nchw_fp32_Small.Small`.
+
 ## Add a New Bundle
 
 ```bash
