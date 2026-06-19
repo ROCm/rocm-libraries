@@ -51,7 +51,7 @@ from rocisa.instruction import (
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
-  SCmpEQU32, SCmpLeU32, SLShiftLeftB32, SLongBranchPositive,
+  SCmpEQU32, SCmpLeU32, SCmpLtU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
   VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
@@ -1232,6 +1232,50 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
+def _emitMultiDUTailSrdRewind(writer, kernel, uidRange, tiA, tiB, scaleTiA, scaleTiB):
+  """Multi-DU explicit-uid (PGR=1) partial-macro-tile fix.
+
+  With PrefetchGlobalRead=1 the unroll loop prefetches one macro-DU iteration
+  ahead, so after the last main iteration every GR SRD (A, B and, when present,
+  the MX scale SRDs) sits one macro-DU increment *past* the start of the partial
+  last macro tile. The legacy `setTailSrd` rewind that compensates for this lives
+  in `KernelWriterAssembly.calculateLoopNumIter` but is only emitted under
+  `SuppressNoLoadLoop`, which the subtile path does not use. Without it the
+  partial tail reads the wrong global-K window for both data and scale.
+
+  Undo exactly one per-iteration increment on each SRD, gated at runtime on
+  >=1 main macro iteration having run (SizesSum >= _ScaleDepthU). Tail-only
+  (K < _ScaleDepthU) skips the rewind (no main iteration over-advanced the SRD)
+  and even-K (K % _ScaleDepthU == 0) never reaches here (tail loop skipped),
+  so their output is unchanged. Single-DU never reaches here (uid_range == 1).
+  """
+  module = Module("MultiDU tail SRD rewind (partial macro tile)")
+  macroDU = kernel.get("_ScaleDepthU", kernel["DepthU"])
+  incs = [("A", uidRange * int(tiA.depthUBytes)),
+          ("B", uidRange * int(tiB.depthUBytes))]
+  if scaleTiA is not None:
+    incs.append(("MXSA", int(scaleTiA.lrSubtileSize * scaleTiA.lrGlobalSubtileGrid[1])))
+  if scaleTiB is not None:
+    incs.append(("MXSB", int(scaleTiB.lrSubtileSize * scaleTiB.lrGlobalSubtileGrid[1])))
+  module.addComment0(
+      "Undo the PGR=1 prefetch over-advance of one macro-DU on the data/scale "
+      "GR SRDs for the partial last macro tile (only when a main iter ran).")
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    gate = tmpSgprRes.idx
+    for tc, inc in incs:
+      if inc == 0:
+        continue
+      module.add(SCmpLtU32(src0=sgpr("SizesSum+0"), src1=macroDU,
+                           comment=f"{tc}: K < macroDU (no main iter)?"))
+      module.add(SCSelectB32(dst=sgpr(gate), src0=0, src1=inc,
+                            comment=f"{tc}: rewind = 0 if tail-only else {inc}"))
+      module.add(SSubU32(dst=sgpr(f"Srd{tc}+0"), src0=sgpr(f"Srd{tc}+0"), src1=sgpr(gate),
+                        comment=f"{tc}: undo prefetch over-advance (lo)"))
+      module.add(SSubBU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                         comment=f"{tc}: borrow (hi)"))
+  return module
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1376,6 +1420,14 @@ def mainLoop(writer, kernel):
       mxScaleTPs.append(tensorParametersB["MX"])
     if mxScaleTPs:
       module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+    # Multi-DU explicit-uid (PGR=1) partial-macro-tile fix: undo the prefetch
+    # over-advance of the data/scale GR SRDs before the tail loop. Gated to the
+    # explicit-uid multi-DU path (uid_range > 1) so single-DU stays byte-identical;
+    # the runtime gate inside skips it for tail-only K, and even-K skips the whole
+    # tail loop, keeping their output unchanged.
+    if scheduler.config.uid_range > 1 and pgr == 1:
+      module.add(_emitMultiDUTailSrdRewind(
+          writer, kernel, scheduler.config.uid_range, tiA, tiB, scaleTiA, scaleTiB))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,
