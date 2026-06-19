@@ -28,7 +28,7 @@ These components are real production code paths on hardware with the caps set.
 The mock writer supplies:
   - ``vgprPool`` (rocisa RegisterPool, Vgpr type, 256 regs)
   - ``sgprPool`` (rocisa RegisterPool, Sgpr type, 256 regs)
-  - ``allocTmpSgpr(n)`` (context manager yielding ContinuousRegister)
+  - ``allocTmpSgpr(n, tag=None)`` (context manager yielding ContinuousRegister)
   - ``states.kernel["WavefrontSize"]``  = 64
   - ``states.lraTileProperties``        = {} (component writes tile01 key)
   - ``states.bpr``                      = 4 (bytes per register)
@@ -69,8 +69,8 @@ def _make_writer():
     sgpr_pool = RegisterPool(256, Sgpr, False)
     sgpr_pool.add(0, 256, "init")
 
-    def allocTmpSgpr(num):
-        return allocTmpGpr(sgpr_pool, num, 256)
+    def allocTmpSgpr(num, tag=None):
+        return allocTmpGpr(sgpr_pool, num, 256, tag=tag)
 
     states = SimpleNamespace(
         kernel={"WavefrontSize": 64},

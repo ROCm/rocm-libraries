@@ -81,7 +81,7 @@ class _MockPool:
     def size(self):
         return self._counter
 
-    def checkOut(self, n, align=None, preventOverflow=True):
+    def checkOut(self, n, align=None, tag=None, preventOverflow=True):
         r = self._counter
         self._counter += n
         return r
@@ -89,7 +89,7 @@ class _MockPool:
     def checkIn(self, v):
         pass
 
-    def checkOutAligned(self, n, align, name=None, preventOverflow=True):
+    def checkOutAligned(self, n, align, name=None, tag=None, preventOverflow=True):
         # align ignored in mock
         r = self._counter
         self._counter += n

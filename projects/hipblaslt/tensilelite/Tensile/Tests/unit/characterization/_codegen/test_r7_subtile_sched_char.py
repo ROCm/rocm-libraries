@@ -578,7 +578,7 @@ def test_r7_compute_tail_tile_state_multi_partition():
         def size(self):
             return self._ctr
 
-        def checkOut(self, n, align=None, preventOverflow=True):
+        def checkOut(self, n, align=None, tag=None, preventOverflow=True):
             r = self._ctr
             self._ctr += n
             return r
@@ -586,7 +586,7 @@ def test_r7_compute_tail_tile_state_multi_partition():
         def checkIn(self, v):
             pass
 
-        def checkOutAligned(self, n, align, name=None, preventOverflow=True):
+        def checkOutAligned(self, n, align, name=None, tag=None, preventOverflow=True):
             r = self._ctr
             self._ctr += n
             return r
@@ -687,11 +687,11 @@ def test_r7_get_partition_candidates_n_ge_m():
     class _MockPool:
         def size(self):
             return 0
-        def checkOut(self, n, align=None, preventOverflow=True):
+        def checkOut(self, n, align=None, tag=None, preventOverflow=True):
             return 0
         def checkIn(self, v):
             pass
-        def checkOutAligned(self, n, align, name=None, preventOverflow=True):
+        def checkOutAligned(self, n, align, name=None, tag=None, preventOverflow=True):
             return 0
 
     class _States:
@@ -731,11 +731,11 @@ def test_r7_get_partition_candidates_m_gt_n():
     class _MockPool:
         def size(self):
             return 0
-        def checkOut(self, n, align=None, preventOverflow=True):
+        def checkOut(self, n, align=None, tag=None, preventOverflow=True):
             return 0
         def checkIn(self, v):
             pass
-        def checkOutAligned(self, n, align, name=None, preventOverflow=True):
+        def checkOutAligned(self, n, align, name=None, tag=None, preventOverflow=True):
             return 0
 
     class _States:
