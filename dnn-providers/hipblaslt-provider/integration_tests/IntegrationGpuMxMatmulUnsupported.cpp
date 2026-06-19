@@ -13,11 +13,12 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "utils/MatmulUtils.hpp"
+#include "utils/MxMatmulUtils.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace test_matmul_common;
+using namespace test_mx_matmul_common;
 
 namespace
 {
@@ -116,7 +117,37 @@ protected:
     }
 };
 
+class IntegrationGpuMxMatmulSupported : public IntegrationGpuMxMatmulUnsupported
+{
+protected:
+    void SetUp() override
+    {
+        IntegrationGpuMxMatmulUnsupported::SetUp();
+        if(::testing::Test::IsSkipped())
+        {
+            return;
+        }
+
+        const std::string archName = currentDeviceArchName();
+        if(!isMxSupportedArch(archName))
+        {
+            GTEST_SKIP() << "MX block-scaled data types are not supported on " << archName;
+        }
+    }
+};
+
 } // namespace
+
+// Positive control: a supported config must build, proving the negatives'
+// GRAPH_NOT_SUPPORTED reflects the config and not a broken harness.
+TEST_F(IntegrationGpuMxMatmulSupported, AcceptsSupportedConfig)
+{
+    auto g = buildMxMatmulGraph(MatmulTestCase{{32, 128}, {128, 32}, true, false, 0});
+
+    auto result = g.build(_handle);
+
+    EXPECT_EQ(result.code, ErrorCode::OK) << "err_msg: " << result.err_msg;
+}
 
 TEST_P(IntegrationGpuMxMatmulUnsupported, RejectsUnsupportedConfig)
 {

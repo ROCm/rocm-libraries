@@ -3,10 +3,31 @@
 
 #pragma once
 
+#include <string>
+
+#include <hip/hip_runtime.h>
+
 #include "MatmulUtils.hpp"
 
 namespace test_mx_matmul_common
 {
+
+// The current device's gcnArchName, or an empty string if it cannot be queried.
+inline std::string currentDeviceArchName()
+{
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
+    {
+        return {};
+    }
+    return {props.gcnArchName};
+}
+
+// MX block-scaled GEMM (FP8/FP6/FP4) is supported only on gfx950 and gfx1250.
+inline bool isMxSupportedArch(const std::string& archName)
+{
+    return archName.rfind("gfx950", 0) == 0 || archName.rfind("gfx125", 0) == 0;
+}
 
 /// MX-specific GEMM shapes. A is [M, K] transposed (col-major, opA=T) and B is
 /// [K, N] non-transposed (row-major, opB=N); all shapes satisfy the VEC32_UE8M0

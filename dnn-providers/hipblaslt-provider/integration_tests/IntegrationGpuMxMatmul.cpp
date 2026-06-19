@@ -13,16 +13,6 @@ using namespace test_mx_matmul_common;
 namespace
 {
 
-std::string currentDeviceArchRaw()
-{
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-    {
-        return {};
-    }
-    return {props.gcnArchName};
-}
-
 template <typename InputDataType, typename OutputDataType>
 class IntegrationGpuMxMatmul
     : public IntegrationGpuMatmulBase<OutputDataType, MatmulTestCase, float>
@@ -40,11 +30,8 @@ protected:
             return;
         }
 
-        // MX block-scaled data types (FP8/FP6/FP4) are supported only on gfx950
-        // and gfx1250.
-        const std::string archName = currentDeviceArchRaw();
-        const bool supported = archName.rfind("gfx950", 0) == 0 || archName.rfind("gfx125", 0) == 0;
-        if(!supported)
+        const std::string archName = currentDeviceArchName();
+        if(!isMxSupportedArch(archName))
         {
             GTEST_SKIP() << "MX block-scaled data types are not supported on " << archName;
         }
