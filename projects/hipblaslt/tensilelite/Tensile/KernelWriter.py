@@ -46,6 +46,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
+from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
@@ -133,6 +134,19 @@ class ABMatrixInfo(MatrixInfo):
   startVgprGL2PrefetchAddr: int = -1
 
 # States
+@dataclass(frozen=True)
+class StreamKSettings:
+  """Snapshot of variant feature flags for the kernel being emitted.
+  Populated once at _initKernel time from the StreamK* variant class.
+  Frozen so consumers cannot mutate it mid-codegen."""
+  emitsParallelReductionSgprAliases: bool = False
+  borrowsSrdWsInEpilogue: bool = False
+  emitsWorkspaceReductionBpe: bool = False
+  requiresWorkspaceReductionStorePath: bool = False
+  keepsConstantsInSgpr: bool = False
+  supportsSubtileImpl: bool = False
+
+
 @dataclass
 class StateValues:
   version: Tuple[int, int, int]
@@ -307,6 +321,7 @@ class StateValues:
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
   numSgprStreamK: int                    = 0
+  streamK: StreamKSettings               = field(default_factory=StreamKSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
@@ -5197,9 +5212,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # StreamK Constants In VGPRs
   ##############################################################################
   def isStreamKConstantsToVgprEnabled(self, kernel):
-    # SK4 uses a different runtime-argument set and still references those
-    # constants directly in the dynamic queue path.
-    return kernel["ISA"] == IsaVersion(12,5,0) and kernel["StreamK"] != 4
+    # Variants that mark keepsConstantsInSgpr=True (the dynamic
+    # per-XCD path references SK kernarg constants directly) cannot
+    # cache them in VGPRs on gfx1250.
+    return kernel["ISA"] == IsaVersion(12,5,0) and not self.states.streamK.keepsConstantsInSgpr
 
   def acquireStreamKConstSgpr(self, kernel, name):
     if self.isStreamKConstantsToVgprEnabled(kernel):
@@ -6057,9 +6073,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersA["MX"]))
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersB["MX"]))
 
-      # reset memToken for tail loop
-      self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
-      self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
+      # LDS mem tokens: baseline buffer 0 for tail-loop codegen
+      self.resetLdsTokensForTailLoop()
       module.addComment1("Update M0 for DTLDS")
       moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
@@ -6672,6 +6687,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
+    # Snapshot the StreamK variant's feature flags onto self.states
+    # so downstream emitters can query them by name instead of
+    # branching on the integer kernel["StreamK"] value.
+    _skVariantCls = streamKVariantClass(kernel.get("StreamK", 0))
+    self.states.streamK = StreamKSettings(
+      emitsParallelReductionSgprAliases=_skVariantCls.emitsParallelReductionSgprAliases,
+      borrowsSrdWsInEpilogue=_skVariantCls.borrowsSrdWsInEpilogue,
+      emitsWorkspaceReductionBpe=_skVariantCls.emitsWorkspaceReductionBpe,
+      requiresWorkspaceReductionStorePath=_skVariantCls.requiresWorkspaceReductionStorePath,
+      keepsConstantsInSgpr=_skVariantCls.keepsConstantsInSgpr,
+      supportsSubtileImpl=_skVariantCls.supportsSubtileImpl,
+    )
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
     self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
@@ -6760,9 +6787,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
       numBSubtiles = int(bTileInfo.globalSubtileGrid[0] * bTileInfo.globalSubtileGrid[1])
       readSize = 2*aTileInfo.subtileSize
-      # Align A and B sizes to readSize for DTL 2xsubtile reads
-      sizeA = int(((numASubtiles * aTileInfo.subtileSize + readSize-1) // readSize) * readSize)
-      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + readSize-1) // readSize) * readSize)
+      # Align A and B sizes to readSize for DTL 2xsubtile reads.
+      # TDM-based solution use padding per row. Take that into account for size calculation.
+      mtA = kernel["MacroTile0"]
+      mtB = kernel["MacroTile1"]
+      padA = int(getattr(aTileInfo, "ldsRowPadBytes", 0)) * mtA
+      padB = int(getattr(bTileInfo, "ldsRowPadBytes", 0)) * mtB
+      sizeA = int(((numASubtiles * aTileInfo.subtileSize + padA + readSize-1) // readSize) * readSize)
+      sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0
@@ -9158,6 +9190,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWI", 1)
       self.defineSgpr("skGrid", 1)
       self.states.numSgprStreamK += 6
+    elif kernel["StreamK"] == 5:
+      # Hybrid SK3+SK4: define exactly the 6 SK3-named SGPRs that hold the
+      # kernarg slots; the SK4 reader names (TotalItems, SKTiles, SKSplit,
+      # SKItersPerWI, SKGrid) are emitted as RegSet aliases in
+      # KernelWriterAssembly.py (SK5 block guarded by emitsParallelReductionSgprAliases).
+      # This collapse matches the host's per-mode 6-arg pack
+      # (ContractionSolution.cpp SK5 branch). The runtime mode bit
+      # (bit 30 of MagicShiftItersPerTile) is extracted into StreamKHybridMode
+      # at preLoop, after which _emitModeExtraction also clears that bit so
+      # the SK4 path's read via the SKTiles alias sees a clean value.
+      self.defineSgpr("ItersPerTile", 1)
+      self.defineSgpr("MagicNumberItersPerTile", 1)
+      self.defineSgpr("MagicShiftItersPerTile", 1)
+      self.defineSgpr("SKItersPerWG", 1)
+      self.defineSgpr("skGrid", 1)
+      self.defineSgpr("skTiles", 1)
+      self.states.numSgprStreamK += 6
     elif kernel["StreamK"]:
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
@@ -9223,6 +9272,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if kernel["StreamKAtomic"] == 0:
+        requiredAligned4SgprVar.append("SrdWS")
+    elif kernel["StreamK"] == 5:
+      # Hybrid SK3+SK4: the SK3 and SK4 code paths are mutually exclusive at
+      # runtime (selected by StreamKHybridMode), so their path-specific
+      # persistent SGPRs overlap. Only allocate the shared SGPRs, the
+      # SK4-only pair (StreamKTileIdx/StreamKPartialIdx) and the dedicated
+      # StreamKHybridMode bit (extracted from bit 30 of MagicShiftItersPerTile
+      # at preLoop entry). The SK3-only pair (StreamKIter/StreamKIterEnd) is
+      # NOT defined here: it is RegSet-aliased onto the SK4-only
+      # StreamKTileIdx/StreamKPartialIdx slots in KernelWriterAssembly.py
+      # (SK5 block), mirroring the kernarg-slot aliasing, so SK5 allocates
+      # the same persistent SGPR count as SK4 plus the single mode bit.
+      requiredUnalignedSgprVar += [
+        "StreamKIdx",
+        "StreamKTileIdx",
+        "StreamKPartialIdx",
+        "StreamKLocalStart",
+        "StreamKLocalEnd",
+        "StreamKHybridMode",
+      ]
+      if len(kernel["SpaceFillingAlgo"]):
+        requiredUnalignedSgprVar.append("StreamKTileID")
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"]:
@@ -10332,16 +10404,122 @@ class KernelWriter(metaclass=abc.ABCMeta):
           return list(memTokenObj.tokens)
       return []
 
+    def _accessPhase(access):
+      return "writing" if access == "write" else "reading"
+
+    def _conflicts(access, state):
+      return (access == "read" and state == "writing") or \
+             (access == "write" and state == "reading")
+
+    def _isUnrollLoopBeginLabel(labelName):
+      # The repeating unroll loop is delimited by a "LoopBegin<char>" label and
+      # a backward branch that targets it. Tail-loop begin labels ("TailLoopBegin")
+      # are excluded - they are handled by their own pass and are not the main
+      # unroll loop we model the back-edge for.
+      return isinstance(labelName, str) and "LoopBegin" in labelName and "TailLoopBegin" not in labelName
+
+    def _detectLoopHeadInfo():
+      # Detect the real loop span(s) from the back-edge, not from module names.
+      # A module named "loopBody" also contains the odd/even-iter exit code and
+      # the loop-end label that execute AFTER the back-branch, so its last token
+      # access is not the loop tail. Instead, flatten leaves in program order,
+      # find each backward branch to a "LoopBegin" label, and treat
+      # [begin .. back-branch] as the loop body.
+      #
+      # Returns beginLabelName -> {token: [firstAccess, tailState]} where:
+      #   firstAccess: access ("read"/"write") of the token's FIRST occurrence in
+      #                the body (what the back-edge feeds into).
+      #   tailState:   phase ("reading"/"writing") of the token's LAST occurrence
+      #                in the body (the phase the back-edge carries out).
+      flatLeaves = []
+      def _flattenLeaves(mod: Module):
+        for item in mod.items():
+          if isinstance(item, Module):
+            _flattenLeaves(item)
+          else:
+            flatLeaves.append(item)
+      _flattenLeaves(rootModule)
+
+      labelDefIndex = {}
+      for idx, leaf in enumerate(flatLeaves):
+        if hasattr(leaf, "getLabelName") and not isinstance(leaf, Instruction):
+          name = leaf.getLabelName()
+          labelDefIndex.setdefault(name, idx)
+
+      # beginLabelName -> (beginIdx, backBranchIdx) using the widest back-edge span.
+      loopSpanByLabel = {}
+      for idx, leaf in enumerate(flatLeaves):
+        target = getattr(leaf, "labelName", None)
+        if target is None or not _isUnrollLoopBeginLabel(target):
+          continue
+        beginIdx = labelDefIndex.get(target, None)
+        if beginIdx is None or beginIdx >= idx:
+          continue  # forward branch, not a back-edge
+        prev = loopSpanByLabel.get(target)
+        if prev is None or idx > prev[1]:
+          loopSpanByLabel[target] = (beginIdx, idx)
+
+      headInfo = {}
+      for beginName, (beginIdx, branchIdx) in loopSpanByLabel.items():
+        info = {}
+        for k in range(beginIdx, branchIdx + 1):
+          leaf = flatLeaves[k]
+          if not isinstance(leaf, Instruction):
+            continue
+          access = _classifyTokenAccess(leaf)
+          tokens = _getTokenList(leaf)
+          if access is None or not tokens:
+            continue
+          phase = _accessPhase(access)
+          for token in tokens:
+            if token not in info:
+              info[token] = [access, phase]  # [firstAccess, tailState]
+            else:
+              info[token][1] = phase          # update tail to the last access
+        headInfo[beginName] = info
+      return headInfo
+
+    # Back-edge modeling is only needed for PrefetchGlobalRead < 2. With
+    # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
+    # iteration's LDS data, so the steady-state phase is already established and
+    # a plain single linear pass is correct - leaving loopHeadInfo empty makes
+    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    loopEntryOverride = {}
+    loopPendingTokens = set()
+    loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
+
     def _rewriteModuleInOrder(mod: Module):
       nonlocal insertedCount
       rewrittenItems = []
       for item in mod.items():
-        if hasattr(item, "getLabelName"):
+        if hasattr(item, "getLabelName") and not isinstance(item, Instruction):
           labelName = item.getLabelName()
           if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
             # recover token state from the snapshot
             tokenState.clear()
             tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+          if labelName in loopHeadInfo:
+            # Entering the unroll loop. The loop-head barrier is driven purely by
+            # the back-edge (loop-tail) state, so a steady-state iteration only
+            # gets a barrier when the carried phase truly conflicts with the
+            # first access. The first iteration's pre-loop conflict, if any and
+            # not already covered by a back-edge barrier, is satisfied ONCE by a
+            # barrier hoisted into the prologue (emitted right before the loop
+            # label) instead of one that re-fires every iteration.
+            prologueBarrierTokens = []
+            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+              preState = tokenState.get(token, "standby")
+              loopEntryOverride[token] = tailState
+              loopPendingTokens.add(token)
+              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+                prologueBarrierTokens.append(token)
+            if prologueBarrierTokens:
+              uniqueTokens = sorted(set(prologueBarrierTokens))
+              syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
+              barrier = SBarrier(comment=f"auto token transition barrier (loop prologue), {syncComments}")
+              barrier.setMemToken(MemTokenData(uniqueTokens))
+              rewrittenItems.append(barrier)
+              insertedCount += 1
           rewrittenItems.append(item)
           continue
 
@@ -10357,6 +10535,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
           # Save token state at the first branch to OptNLL_End.
           branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
+        if branchLabelName in loopHeadInfo:
+          # Reached the loop back-branch: drop any stale loop-entry overrides.
+          loopEntryOverride.clear()
+          loopPendingTokens.clear()
 
         access = _classifyTokenAccess(item)
         tokens = _getTokenList(item)
@@ -10368,10 +10550,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         barrierTokens = []
         for token in tokens:
-          state = tokenState.get(token, "standby")
-          if access == "read" and state == "writing":
-            barrierTokens.append(token)
-          elif access == "write" and state == "reading":
+          if token in loopPendingTokens:
+            # First access of this token inside the loop body: evaluate it
+            # against the back-edge (loop-tail) state.
+            state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+            loopPendingTokens.discard(token)
+          else:
+            state = tokenState.get(token, "standby")
+          if _conflicts(access, state):
             barrierTokens.append(token)
 
         if barrierTokens:
@@ -10382,7 +10568,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           rewrittenItems.append(barrier)
           insertedCount += 1
 
-        nextState = "writing" if access == "write" else "reading"
+        nextState = _accessPhase(access)
         for token in tokens:
           tokenState[token] = nextState
 
@@ -10570,7 +10756,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
+  def resetLdsTokensForTailLoop(self) -> None:
+    """Point all LDS-related memory tokens at buffer 0 before tail-loop codegen.
+
+    Keep assignments in sync with the baseline next to ``memTokenLdsBuffer*`` setup
+    (``ldsReadTokenIdx`` / ``ldsTensorTokenIdx`` / ``ldsDirectToLDSTokenIdx`` /
+    ``ldsWriteTokenIdx``).
+    """
+    t0 = self.states.memTokenLdsBuffer0
+    self.states.ldsWriteTokenIdx = t0
+    self.states.ldsReadTokenIdx = t0
+    self.states.ldsTensorTokenIdx = t0
+    self.states.ldsDirectToLDSTokenIdx = t0
 
   def resetTDMDescriptorForTail(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
