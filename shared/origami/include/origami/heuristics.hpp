@@ -162,6 +162,11 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
+  // === Kernel Rejection ===
+  /// When true, the kernel is rejected: its predicted latency is forced to the
+  /// maximum so that rank_configs() drops it from selection entirely.
+  bool reject = false;
+
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
    * Only non-default values from 'other' override values in 'this'.
@@ -186,6 +191,7 @@ struct ORIGAMI_EXPORT heuristic_key_t {
   std::optional<size_t> mt_n;
   std::optional<size_t> mt_k;
   std::optional<bool> hand_optimized_main_loop;
+  std::optional<bool> subtile;
 
   // For problem-size dependent heuristics
   std::optional<size_t> min_m;

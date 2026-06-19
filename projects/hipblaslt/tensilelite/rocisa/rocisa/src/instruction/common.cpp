@@ -737,6 +737,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SEndpgm& self, nb::dict&) { return new rocisa::SEndpgm(self); });
 
+    nb::class_<rocisa::STtraceData, rocisa::Instruction>(m_common, "STtraceData")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::STtraceData::getParams)
+        .def("__str__", &rocisa::STtraceData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::STtraceData& self, nb::dict&) { return new rocisa::STtraceData(self); });
+
     nb::class_<rocisa::SSleep, rocisa::Instruction>(m_common, "SSleep")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSleep::getParams)

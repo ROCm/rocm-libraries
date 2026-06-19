@@ -143,6 +143,7 @@ NB_MODULE(origami, m) {
       .def_rw("mt", &origami::config_t::mt)
       .def_rw("mi", &origami::config_t::mi)
       .def_rw("hand_optimized_main_loop", &origami::config_t::hand_optimized_main_loop)
+      .def_rw("subtile", &origami::config_t::subtile)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
       .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)

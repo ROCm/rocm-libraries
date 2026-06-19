@@ -22,11 +22,19 @@ set(TEST_INCLUDE_DIRS
     ${TABLEGEN_OUTPUT_DIR}
 )
 
-# Common link libraries for all tests
+# Common link libraries for all tests.
+# unit_tests links the static lib so all symbols (including non-exported ones)
+# are accessible for white-box coverage testing. When BUILD_SHARED_LIBS=OFF,
+# stinkytofu itself is already static so no separate target is needed.
+if(BUILD_SHARED_LIBS)
+    set(_stinkytofu_test_lib stinkytofu_static)
+else()
+    set(_stinkytofu_test_lib stinkytofu)
+endif()
 set(TEST_LINK_LIBS
     GTest::gtest
     Threads::Threads
-    stinkytofu
+    ${_stinkytofu_test_lib}
 )
 
 # =============================================================================
@@ -113,20 +121,26 @@ add_dependencies(unit_tests tablegen_generated)
 # Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
 # only exists when examples are built, so the integration test compiles only then.
 # Future example tests slot in under this same flag.
+#
+# Static build: plugin is an OBJECT lib linked directly into unit_tests.
+# Shared build: plugin is a MODULE loaded at runtime via loadPlugin(). Because
+# the plugin links stinkytofu.dll, the test binary must also use the shared lib
+# so both share the same registry instance. Plugin tests therefore live in
+# api_tests (which links stinkytofu shared), not unit_tests (which links
+# stinkytofu_static). Only the STINKYTOFU_BUILD_EXAMPLES compile definition is
+# added to unit_tests so non-plugin tests in the same file still compile.
 if(STINKYTOFU_BUILD_EXAMPLES)
-    target_compile_definitions(unit_tests PRIVATE STINKYTOFU_BUILD_EXAMPLES)
-    target_include_directories(unit_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
-    )
-    # LLVM-style plugin test linkage:
-    #   Shared build  → plugin is a MODULE; test loads it via loadPlugin() at runtime
-    #   Static build  → plugin is an OBJECT lib; link directly into the test binary
     if(BUILD_SHARED_LIBS)
-        add_dependencies(unit_tests stinkytofu-plugin-helloworld)
-        target_compile_definitions(unit_tests PRIVATE
-            STINKYTOFU_PLUGIN_HELLOWORLD_PATH="$<TARGET_FILE:stinkytofu-plugin-helloworld>"
-        )
+        # Shared build: plugin links stinkytofu.dll so the plugin test must run
+        # inside api_tests (which also links stinkytofu.dll). unit_tests links
+        # stinkytofu_static — two separate registry instances — so the plugin test
+        # would not see its registered passes. Leave STINKYTOFU_BUILD_EXAMPLES
+        # undefined here; PassBuilderTest.cpp's plugin section is compiled out.
     else()
+        target_compile_definitions(unit_tests PRIVATE STINKYTOFU_BUILD_EXAMPLES)
+        target_include_directories(unit_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
+        )
         target_link_libraries(unit_tests PRIVATE stinkytofu-plugin-helloworld)
     endif()
 endif()
@@ -155,10 +169,59 @@ if(UNIX AND NOT APPLE AND BUILD_SHARED_LIBS AND CMAKE_READELF)
 endif()
 
 # =============================================================================
+# API Export Tests
+# Links stinkytofu as a SHARED library (or static when BUILD_SHARED_LIBS=OFF).
+# Purpose: verify that every symbol used by real consumers (rocisa,
+# stinkytofu-opt) is properly exported. A linker failure here means a symbol
+# was accidentally un-exported.
+# Only meaningful when BUILD_SHARED_LIBS=ON; skipped otherwise since all
+# symbols are always visible in a static build.
+# =============================================================================
+if(BUILD_SHARED_LIBS)
+    add_executable(api_tests
+        ${TEST_MAIN}
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+    )
+    target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
+    target_link_libraries(api_tests PUBLIC
+        GTest::gtest
+        Threads::Threads
+        stinkytofu  # shared lib — only exported symbols visible
+    )
+    target_include_directories(api_tests PRIVATE ${TEST_INCLUDE_DIRS})
+    add_dependencies(api_tests tablegen_generated)
+
+    # Plugin integration tests require the shared lib so the plugin and the test
+    # binary share the same stinkytofu registry instance at runtime.
+    if(STINKYTOFU_BUILD_EXAMPLES)
+        target_sources(api_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/unit/core/PassBuilderTest.cpp
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_BUILD_EXAMPLES
+            STINKYTOFU_PLUGIN_HELLOWORLD_PATH="$<TARGET_FILE:stinkytofu-plugin-helloworld>"
+        )
+        target_include_directories(api_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
+        )
+        add_dependencies(api_tests stinkytofu-plugin-helloworld)
+    endif()
+
+    gtest_discover_tests(api_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 60
+        PROPERTIES LABELS "api_tests"
+    )
+endif()
+
+# =============================================================================
 # All Tests Target (convenience target to build all test executables)
 # =============================================================================
 add_custom_target(tests COMMENT "Build all test executables")
 add_dependencies(tests unit_tests)
+if(BUILD_SHARED_LIBS)
+    add_dependencies(tests api_tests)
+endif()
 
 # Note: Future test executables can be added here, e.g.:
 # add_executable(integration_tests ...)
