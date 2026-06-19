@@ -61,26 +61,32 @@ MxMatmulParams::MxMatmulParams(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
+    // tXA/tXB are the graph's logical A/B (the block-scaled X inputs of dequant A/B).
     const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
     const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
     const auto tC = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.c_tensor_uid());
 
-    _matrixLayoutA = HipblasltMatrixLayout(tXA);
-    _matrixLayoutB = HipblasltMatrixLayout(tXB);
+    // Row-major BLAS trick: hipDNN tensors are row-major but hipBLASLt is
+    // column-major, so we compute C^T = B^T * A^T by presenting our B as
+    // hipBLAS's A operand and our A as its B operand. The swap is applied once,
+    // here, so every member is already in hipBLAS's frame and execute() needs no
+    // further swapping: a()/aScaleUid() are what hipBLAS receives as A/A_SCALE.
+    _matrixLayoutA = HipblasltMatrixLayout(tXB); // hipBLAS A <- our B
+    _matrixLayoutB = HipblasltMatrixLayout(tXA); // hipBLAS B <- our A
     _matrixLayoutC = HipblasltMatrixLayout(tC);
 
-    _aScaleUid = deqAttrA.scale_tensor_uid();
-    _bScaleUid = deqAttrB.scale_tensor_uid();
+    _aScaleUid = deqAttrB.scale_tensor_uid(); // hipBLAS A_SCALE <- our B's scale
+    _bScaleUid = deqAttrA.scale_tensor_uid(); // hipBLAS B_SCALE <- our A's scale
 
-    // A is [..., M, K], scales are blocked 32-wide along K (innermost). M and the
-    // K-block count drive the scale_A transpose performed at execute time.
+    // Our A is [..., M, K], scales blocked 32-wide along K (innermost). Our A's
+    // scale becomes hipBLAS's B_SCALE and is transposed [M, K/32] -> [K/32, M] at
+    // execute time; M and the K-block count drive that transpose.
     const auto& aDims = tXA.dims();
     _m = aDims[aDims.size() - 2];
     _kBlocks = aDims[aDims.size() - 1] / 32;
 
-    // Row-major BLAS trick: swap transA/transB (same as MatmulParams).
-    // FP8 OCP MX GEMM always uses HIPBLAS_COMPUTE_32F.
-    // Row-major swap: desc transA = getTrans(B), desc transB = getTrans(A)
+    // FP8 OCP MX GEMM always uses HIPBLAS_COMPUTE_32F. desc transA/transB are in
+    // hipBLAS's frame too: transA = getTrans(hipBLAS A = our B), transB = our A.
     _matmulDesc = HipblasltMatmulDesc(
         getTransFromStrides(tXB), getTransFromStrides(tXA), HIPBLAS_COMPUTE_32F, HIP_R_32F);
 
@@ -153,14 +159,15 @@ MxMatmulPlan::MxMatmulPlan(const HipdnnEnginePluginHandle& handle, MxMatmulParam
                                               &maxWorkspaceSize,
                                               sizeof(maxWorkspaceSize)));
 
-    // Row-major BLAS trick: swap A and B layouts (same as MatmulPlan)
+    // Operands are already in hipBLAS's frame (swapped in MxMatmulParams), so
+    // a()/b() are passed straight through as hipBLAS A/B.
     constexpr int REQUEST_SOLUTIONS = 1;
     std::array<hipblasLtMatmulHeuristicResult_t, REQUEST_SOLUTIONS> heuristicResult{};
     int returnedAlgoCount = 0;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
                                                                _params.desc().matmulDesc(),
-                                                               _params.b().matrixLayout(),
                                                                _params.a().matrixLayout(),
+                                                               _params.b().matrixLayout(),
                                                                _params.c().matrixLayout(),
                                                                _params.c().matrixLayout(),
                                                                pref.get(),
@@ -175,12 +182,13 @@ MxMatmulPlan::MxMatmulPlan(const HipdnnEnginePluginHandle& handle, MxMatmulParam
     _heuristicResult = heuristicResult[0];
     _workspaceSize = _heuristicResult.workspaceSize;
 
-    // scale_A is transposed on-device at execute time; reserve aligned room for
-    // it at the front of the workspace so the plan owns no device memory itself.
+    // Our A's scale (hipBLAS B_SCALE) is transposed on-device at execute time;
+    // reserve aligned room for it at the front of the workspace so the plan owns
+    // no device memory itself.
     const auto scaleBytes = static_cast<size_t>(_params.m() * _params.kBlocks());
     _scaleBufferBytes = alignUp(scaleBytes, WORKSPACE_ALIGNMENT);
 
-    // Prebuild the scale_A transpose descriptors; reused on every execute. scale_A
+    // Prebuild the transpose descriptors; reused on every execute. Our A's scale
     // [M, K/32] row-major is viewed column-major as (K/32, M) on input and written
     // as (M, K/32) column-major == [K/32, M] row-major on output. R_8I moves the
     // UE8M0 bytes verbatim without interpreting them numerically.
@@ -212,43 +220,40 @@ void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
     auto bScaleBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.bScaleUid(), deviceBuffers, numDeviceBuffers);
 
-    // Workspace layout: [ transposed scale_A | hipBLASLt matmul workspace ].
-    void* transposedAScale = workspace;
+    // Workspace layout: [ transposed B_SCALE | hipBLASLt matmul workspace ].
+    void* transposedBScale = workspace;
     void* matmulWorkspace = static_cast<void*>(static_cast<char*>(workspace) + _scaleBufferBytes);
 
-    // hipBLASLt expects A_SCALE as [k/32, m'] and B_SCALE as [k/32, n'] for the
-    // GEMM it runs. Under the row-major A/B operand swap (m'=N, n'=M), its A
-    // operand is our B and its B operand is our A:
-    //   A_SCALE ← our scale_B ([K/32, N]) — already in the expected layout.
-    //   B_SCALE ← our scale_A transposed from [M, K/32] to [K/32, M].
-    // The operands are swapped for free via their layout handles (below), but
-    // scale pointers carry no layout, so scale_A must be physically transposed.
+    // hipBLASLt expects A_SCALE as [K/32, m] and B_SCALE as [K/32, n]. A_SCALE
+    // (our B's scale) is already in that layout. B_SCALE (our A's scale) is
+    // [M, K/32] and must be physically transposed to [K/32, M], because scale
+    // pointers carry no layout handle to swap for free.
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatrixTransform(handle.hipblasltHandle,
                                                         _scaleTransposeDesc.transformDesc(),
                                                         &ALPHA,
-                                                        aScaleBuffer.ptr,
+                                                        bScaleBuffer.ptr,
                                                         _scaleSrcLayout.matrixLayout(),
                                                         &BETA,
                                                         nullptr,
                                                         nullptr,
-                                                        transposedAScale,
+                                                        transposedBScale,
                                                         _scaleDstLayout.matrixLayout(),
                                                         handle.getStream()));
 
     // Scale pointers are device addresses, so they are set here rather than at
-    // build time (where the scale modes were set). Note: the buffers are swapped
-    // to match the operand swap.
-    _params.desc().setAScalePointer(bScaleBuffer.ptr);
-    _params.desc().setBScalePointer(transposedAScale);
+    // build time (where the scale modes were set). Already in hipBLAS's frame.
+    _params.desc().setAScalePointer(aScaleBuffer.ptr);
+    _params.desc().setBScalePointer(transposedBScale);
 
-    // Row-major BLAS trick: swap A and B (C = A*B → C^T = B^T * A^T)
+    // Operands are already in hipBLAS's frame (swapped in MxMatmulParams), so
+    // pass them straight through.
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
                                                _params.desc().matmulDesc(),
                                                &ALPHA,
-                                               bBuffer.ptr,
-                                               _params.b().matrixLayout(),
                                                aBuffer.ptr,
                                                _params.a().matrixLayout(),
+                                               bBuffer.ptr,
+                                               _params.b().matrixLayout(),
                                                &BETA,
                                                cBuffer.ptr,
                                                _params.c().matrixLayout(),

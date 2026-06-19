@@ -42,11 +42,13 @@ public:
     const HipblasltMatmulDesc& desc() const;
     HipblasltMatmulDesc& desc();
 
+    // Scale UIDs in hipBLAS's frame: aScaleUid() is our B's scale (A_SCALE),
+    // bScaleUid() is our A's scale (B_SCALE). See the constructor for the swap.
     int64_t aScaleUid() const;
     int64_t bScaleUid() const;
 
     // Logical GEMM M and the number of 32-wide K blocks (K / 32). Used to
-    // transpose scale_A from [M, K/32] to [K/32, M] for hipBLASLt's B_SCALE.
+    // transpose our A's scale from [M, K/32] to [K/32, M] for hipBLASLt's B_SCALE.
     int64_t m() const;
     int64_t kBlocks() const;
 
@@ -87,10 +89,12 @@ private:
     // hipBLASLt matmul workspace size (from the heuristic).
     size_t _workspaceSize = 0;
 
-    // Aligned front region of the workspace reserved for the transposed scale_A.
+    // Aligned front region of the workspace reserved for the transposed B_SCALE
+    // (our A's scale).
     size_t _scaleBufferBytes = 0;
 
-    // Prebuilt descriptors for the on-device scale_A transpose (fed as B_SCALE).
+    // Prebuilt descriptors for the on-device transpose of our A's scale (fed as
+    // hipBLAS B_SCALE).
     HipblasltMatrixTransformDesc _scaleTransposeDesc;
     HipblasltMatrixLayout _scaleSrcLayout;
     HipblasltMatrixLayout _scaleDstLayout;

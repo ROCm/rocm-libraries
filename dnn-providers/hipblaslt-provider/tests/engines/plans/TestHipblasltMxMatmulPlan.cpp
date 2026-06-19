@@ -62,9 +62,9 @@ T getDescAttribute(const HipblasltMatmulDesc& desc, hipblasLtMatmulDescAttribute
 // MxMatmulParams (CPU — host-side hipBLASLt layout/descriptor only, no device)
 // ===========================================================================
 
-// The A/B layouts are built from the FP8 X tensors of the dequant nodes and the
-// C layout from the matmul output, so the layout UIDs must trace back to those
-// exact tensors.
+// MxMatmulParams stores operands in hipBLAS's frame: the row-major swap maps our
+// B to hipBLAS A and our A to hipBLAS B. So a() traces back to dequant B's X
+// tensor, b() to dequant A's X tensor, and c() to the matmul output.
 TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 {
     auto fb = createValidMxMatmulGraph();
@@ -73,13 +73,14 @@ TEST(TestMxMatmulParams, LayoutUidsMatchInputTensors)
 
     MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
-    EXPECT_EQ(params.a().uid(), attrs.deqA.x_tensor_uid());
-    EXPECT_EQ(params.b().uid(), attrs.deqB.x_tensor_uid());
+    EXPECT_EQ(params.a().uid(), attrs.deqB.x_tensor_uid()); // hipBLAS A <- our B
+    EXPECT_EQ(params.b().uid(), attrs.deqA.x_tensor_uid()); // hipBLAS B <- our A
     EXPECT_EQ(params.c().uid(), attrs.matmul.c_tensor_uid());
 }
 
-// The scale UIDs must trace back to the correct dequant nodes and both scale
-// modes must be set to VEC32_UE8M0 (the OCP MX block-scale mode).
+// Scale UIDs follow the same hipBLAS-frame swap (aScaleUid = our B's scale,
+// bScaleUid = our A's scale), and both scale modes must be set to VEC32_UE8M0
+// (the OCP MX block-scale mode).
 TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 {
     auto fb = createValidMxMatmulGraph();
@@ -88,8 +89,8 @@ TEST(TestMxMatmulParams, ScaleUidsAndModeWiring)
 
     MxMatmulParams const params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
 
-    EXPECT_EQ(params.aScaleUid(), attrs.deqA.scale_tensor_uid());
-    EXPECT_EQ(params.bScaleUid(), attrs.deqB.scale_tensor_uid());
+    EXPECT_EQ(params.aScaleUid(), attrs.deqB.scale_tensor_uid()); // hipBLAS A_SCALE <- our B
+    EXPECT_EQ(params.bScaleUid(), attrs.deqA.scale_tensor_uid()); // hipBLAS B_SCALE <- our A
     EXPECT_NE(params.aScaleUid(), params.bScaleUid());
 
     EXPECT_EQ(getDescAttribute<hipblasLtMatmulMatrixScale_t>(params.desc(),
