@@ -185,6 +185,14 @@ class SchedulerConfig:
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
+    # Authoritative uid_range source (macro/data DU ratio = _ScaleDepthU//DepthU),
+    # plumbed from the kernel.  When provided it is the source of truth for
+    # uid_range, decoupling it from the scale GR granularity (maxGrK) so a future
+    # change to grSA.k cannot corrupt the uid dimension; the legacy maxGrK
+    # derivation is then kept only as a value-preserving cross-check.  Configs
+    # constructed without DU info (e.g. unit fixtures) keep the legacy derivation.
+    scaleDepthU: Optional[int] = None
+    dataDepthU: Optional[int] = None
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -282,21 +290,37 @@ class SchedulerConfig:
             self.numUnroll = {t: 1 for t in grans}
 
         # uid_range is the size of the uid dimension that indexes the scale span
-        # over data DUs.  Derive it directly from the scale/data DU ratio: the
-        # scale GR granularity (maxGrK) spans the full scale DU in k, while the
-        # original numSubIterK is the data DU's k extent, so
-        #     uid_range = scaleDU / dataDU = max(numSubIterK, maxGrK) // numSubIterK.
-        # This is a symmetric quantity — independent of which data tensor realises
-        # the multiplicity — unlike the per-data-tensor numUnroll max it replaces.
-        # numUnroll stays the realized per-tensor multiplicity (it may be
-        # asymmetric, e.g. {A:2, B:1}); uid_range is its DU-ratio summary and the
-        # two must coincide for every constructible config.  The assert turns any
-        # future divergence into a loud failure rather than a silent codegen
-        # change (a non-dividing GR granularity is already rejected upstream by
-        # the maxGrK % g.k == 0 check, so it can never reach here).
-        self._uid_range_val = (expanded_k // original_numSubIterK) if data_multi_du else 1
+        # over data DUs.  Its authoritative source is the macro/data DU ratio
+        #     uid_range = scaleDU / dataDU = _ScaleDepthU // DepthU,
+        # plumbed in via scaleDepthU/dataDepthU when the kernel constructs this
+        # config.  Sourcing it from the DU ratio (a property of the macro vs data
+        # DU split) instead of from the scale GR granularity (maxGrK) means a
+        # future change to grSA.k cannot recompute — and corrupt — the uid
+        # dimension.  The legacy maxGrK-based derivation
+        #     legacy = max(numSubIterK, maxGrK) // numSubIterK   (when multi-DU)
+        # is retained only as a value-preserving cross-check: today it coincides
+        # with the DU ratio for every constructible config (see EQUIVALENCE_PROOF),
+        # and the assert turns any future divergence into a loud failure rather
+        # than a silent codegen change.  Configs constructed without DU info
+        # (e.g. unit fixtures) fall back to the legacy derivation as the source.
+        legacy_uid_range = (expanded_k // original_numSubIterK) if data_multi_du else 1
+        if self.scaleDepthU is not None and self.dataDepthU is not None:
+            assert self.dataDepthU > 0, \
+                f"dataDepthU must be positive, got {self.dataDepthU}"
+            assert self.scaleDepthU % self.dataDepthU == 0, (
+                f"scaleDepthU={self.scaleDepthU} must be a multiple of "
+                f"dataDepthU={self.dataDepthU} (uid_range = scaleDU/dataDU)")
+            self._uid_range_val = self.scaleDepthU // self.dataDepthU
+            assert self._uid_range_val == legacy_uid_range, (
+                f"uid_range DU-ratio source (_ScaleDepthU//DepthU="
+                f"{self._uid_range_val}) diverged from the legacy maxGrK "
+                f"derivation ({legacy_uid_range}) (scaleDepthU={self.scaleDepthU}, "
+                f"dataDepthU={self.dataDepthU}, numSubIterK={original_numSubIterK}, "
+                f"maxGrK={maxGrK}); this is a behavior change, not value-preserving")
+        else:
+            self._uid_range_val = legacy_uid_range
         assert self._uid_range_val == self._uid_range(self.numUnroll), (
-            f"uid_range DU-ratio derivation ({self._uid_range_val}) diverged from "
+            f"uid_range derivation ({self._uid_range_val}) diverged from "
             f"realized max(numUnroll)={self._uid_range(self.numUnroll)} "
             f"(numUnroll={self.numUnroll}, numSubIterK={original_numSubIterK}, "
             f"maxGrK={maxGrK}); this is a behavior change, not value-preserving")
@@ -321,8 +345,10 @@ class SchedulerConfig:
     def uid_range(self) -> int:
         """Size of the uid dimension indexing the scale span (1 == single-DU).
 
-        Derived from the scale/data DU ratio in __post_init__ (scaleDU/dataDU),
-        not from the per-data-tensor numUnroll max.
+        Sourced from the macro/data DU ratio (_ScaleDepthU//DepthU) when plumbed
+        in via scaleDepthU/dataDepthU, otherwise from the legacy maxGrK
+        derivation; not from the per-data-tensor numUnroll max.  See
+        __post_init__ for the value-preserving cross-check between the two.
         """
         return self._uid_range_val
 

@@ -1291,6 +1291,11 @@ def mainLoop(writer, kernel):
           partitionSizeN=partSizeN,
           pgr=schedulerPgr,
           grPlacement=grPlacement,
+          # Authoritative uid_range source: the macro/data DU ratio
+          # _ScaleDepthU//DepthU (== scaleDU/dataDU).  Decouples uid_range from
+          # the scale GR granularity so changing grSA.k cannot corrupt it.
+          scaleDepthU=kernel.get("_ScaleDepthU", kernel["DepthU"]),
+          dataDepthU=kernel["DepthU"],
       )
 
       scheduler = LogicalScheduler(cfg)
