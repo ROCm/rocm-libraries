@@ -62,6 +62,9 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
+
+  // Kernel rejection
+  reject = other.reject;
 }
 
 // ============================================================================
@@ -84,6 +87,7 @@ bool heuristic_key_t::matches(const problem_t& problem,
   if (hand_optimized_main_loop.has_value() &&
       hand_optimized_main_loop.value() != config.hand_optimized_main_loop)
     return false;
+  if (subtile.has_value() && subtile.value() != config.subtile) return false;
 
   // Problem size ranges
   if (min_m.has_value() && problem.size.m < min_m.value()) return false;
@@ -108,6 +112,7 @@ size_t heuristic_key_t::specificity() const {
   if (mt_n.has_value()) count++;
   if (mt_k.has_value()) count++;
   if (hand_optimized_main_loop.has_value()) count++;
+  if (subtile.has_value()) count++;
   if (min_m.has_value()) count++;
   if (max_m.has_value()) count++;
   if (min_n.has_value()) count++;
@@ -157,7 +162,7 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
 
   // Compute arithmetic intensity for this specific problem
-  double arith     = emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
+  double arith     = gemm::emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
   double threshold = heuristic_defaults_t::TF32_ARITH_INTENSITY_THRESHOLD;
 
   // Custom kernel optimizations based on transpose mode and tile config
@@ -420,6 +425,26 @@ void heuristics_database_t::initialize_defaults() {
       params.main_loop_efficiency = cfg.eff;
       add_entry(key, params);
     }
+  }
+
+  // ========================================================================
+  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
+  // ========================================================================
+  // Subtile kernels are not competitive when the reduction dimension is small
+  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
+  {
+    heuristic_params_t reject_params;
+    reject_params.reject = true;
+
+    // K < 512
+    heuristic_key_t key;
+    key.arch        = hardware_t::architecture_t::gfx950;
+    key.mi_dtype    = data_type_t::BFloat16;
+    key.a_transpose = transpose_t::T;
+    key.b_transpose = transpose_t::N;
+    key.subtile     = true;
+    key.max_k       = 511;
+    add_entry(key, reject_params);
   }
 }
 

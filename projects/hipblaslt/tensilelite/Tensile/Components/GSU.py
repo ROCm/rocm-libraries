@@ -1126,30 +1126,41 @@ class GSUOn(GSU):
             module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="reset synchronizer"))
             module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
         else:
-            # gfx1250 does not have s_store_b32, use buffer_store_b32 instead
-            tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
-            readVgpr = writer.vgprPool.checkOut(1, "syncReadVgpr")
-            module.add(VMovB32(dst=vgpr(tmpVgpr.idx), src=0, comment="0 for store data and vaddr offset"))
-            module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("SrdSync", 2)))
-            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
-            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
-            module.add(writer.shiftSrdByIdx(tmpSgprBuffer))
+            # Poll+clear via the same atomic channel as the producer's atomic_dec: a plain
+            # buffer load/store races with it on gfx1250's CU-partitioned L2. atomic_dec(wrap=0)
+            # always writes 0 and returns old, so it atomically reads-and-resets; spin until old==1.
+            addrVgpr = writer.vgprPool.checkOutAligned(2, 2, "syncDecAddr")
+            dataVgpr = writer.vgprPool.checkOut(1, "syncDecData")  # wrap value = 0
+            dstVgpr  = writer.vgprPool.checkOut(1, "syncDecDst")   # atomic return (old)
+            # EXEC is wave-width: 1 sgpr on wave32, 2 on wave64
+            numExecSgpr = 1 if kernel["WavefrontSize"] == 32 else 2
+            SMovExec    = SMovB32 if numExecSgpr == 1 else SMovB64
+            execSgpr    = writer.sgprPool.checkOutAligned(numExecSgpr, numExecSgpr, preventOverflow=False)
+
+            module.add(VMovB64(dst=vgpr(addrVgpr, 2), src=sgpr("SrdSync", 2), comment="synchronizer atomic address"))
+            module.add(VMovB32(dst=vgpr(dataVgpr), src=0, comment="atomic_dec wrap value = 0 (forces slot to 0)"))
+            module.add(SMovExec(dst=sgpr(execSgpr, numExecSgpr), src=EXEC(), comment="save EXEC"))
+            module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
+
+            atomicFlat = FLATModifiers(scope=CacheScope.SCOPE_DEV) \
+                if writer.states.archCaps["DefaultScopeIsCULocal"] else None
             innerSpinLabel = Label(writer.labels.getNameInc("last_gsu_wg_busy_waiting_inner"), "")
             module.add(innerSpinLabel)
-            module.add(BufferLoadB32(dst=vgpr(readVgpr), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
-                                      mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \
-                                      comment="get atomic_dec value"))
-            module.add(SWaitCnt(vlcnt=0, comment="wait for buffer load"))
-            module.add(VReadfirstlaneB32(dst=sgpr(tmpS01), src=vgpr(readVgpr), comment="read atomic_dec value"))
-            module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+                module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
+            module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr), \
+                                        modifier=atomicFlat, \
+                                        comment="atomic read+reset synchronizer (wrap=0 -> slot:=0)"))
+            module.add(SWaitCnt(vlcnt=0, comment="wait for atomic return"))
+            module.add(VReadfirstlaneB32(dst=sgpr(tmpS01), src=vgpr(dstVgpr), comment="read old synchronizer value"))
+            module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG? (producer signalled)"))
             module.add(SCBranchSCC0(labelName=innerSpinLabel.getLabelName(), comment="branch if false (retry)"))
-            writer.vgprPool.checkIn(readVgpr)
-            # Use tmpVgpr (=0) for both src data and vaddr offset
-            module.add(BufferStoreB32(src=vgpr(tmpVgpr.idx), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
-                                      mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \
-                                      comment="reset synchronizer"))
-            module.add(SWaitCnt(vscnt=0, comment="wait for buffer store"))
-            writer.sgprPool.checkIn(tmpSgprBuffer)
+
+            module.add(SMovExec(dst=EXEC(), src=sgpr(execSgpr, numExecSgpr), comment="restore EXEC"))
+            writer.vgprPool.checkIn(addrVgpr)
+            writer.vgprPool.checkIn(dataVgpr)
+            writer.vgprPool.checkIn(dstVgpr)
+            writer.sgprPool.checkIn(execSgpr)
         module.add(SBranch(labelName=reductionBodyLabel.getLabelName(), comment=""))
 
         return module

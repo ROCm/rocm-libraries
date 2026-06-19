@@ -126,8 +126,10 @@ class TestPluginPathLoading:
 
         set_plugin_path(hipdnn, Path("/plugins/engines"))
 
+        # set_plugin_path forwards the native string form of the path; compare
+        # against that rather than a hardcoded POSIX path so this holds on Windows.
         hipdnn.set_engine_plugin_paths.assert_called_once_with(
-            ["/plugins/engines"], "absolute"
+            [str(Path("/plugins/engines"))], "absolute"
         )
 
 
@@ -577,14 +579,16 @@ class TestEngineFilter:
             )
 
         assert [r.engine_id for r in result.results] == [1, 1]
+        # plugin_path is stored as str(Path(...)), so it carries the
+        # platform separator.
         assert [r.plugin_path for r in result.results] == [
-            "/plugins/a",
-            "/plugins/b",
+            str(Path("/plugins/a")),
+            str(Path("/plugins/b")),
         ]
         hipdnn.set_engine_plugin_paths.assert_has_calls(
             [
-                call(["/plugins/a"], "absolute"),
-                call(["/plugins/b"], "absolute"),
+                call([str(Path("/plugins/a"))], "absolute"),
+                call([str(Path("/plugins/b"))], "absolute"),
             ]
         )
 
@@ -621,8 +625,8 @@ class TestEngineFilter:
             )
 
         assert [r.status for r in result.results] == ["success", "error"]
-        assert result.results[0].plugin_path == "/plugins/a"
-        assert result.results[1].plugin_path == "/plugins/b"
+        assert result.results[0].plugin_path == str(Path("/plugins/a"))
+        assert result.results[1].plugin_path == str(Path("/plugins/b"))
         assert "bad plugin" in (result.results[1].error_message or "")
         assert result.results[1].correctness is not None
         assert result.results[1].correctness.execution_success is False
@@ -961,6 +965,70 @@ class TestCorrectnessChecking:
         assert result.result.e2e_stats is not None
         assert result.result.gpu_kernel_stats is None
         assert result.result.status == "success"
+
+
+@patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+@patch("dnn_benchmarking.execution.pytorch_buffer_manager.PyTorchCudaBufferManager")
+def test_timed_pytorch_reference_attaches_manual_reference_warnings(
+    mock_buffer_manager_cls,
+    mock_executor_cls,
+):
+    graph_json = {
+        "nodes": [
+            {
+                "name": "rms_bwd",
+                "type": "RMSNormBackwardAttributes",
+                "inputs": {
+                    "dy_tensor_uid": 1,
+                    "x_tensor_uid": 1,
+                    "scale_tensor_uid": 2,
+                    "inv_rms_tensor_uid": 3,
+                },
+                "outputs": {"dx_tensor_uid": 4, "dscale_tensor_uid": 2},
+            }
+        ],
+        "tensors": [
+            {"uid": 1, "dims": [2, 3, 4]},
+            {"uid": 2, "dims": [4]},
+            {"uid": 3, "dims": [2, 3, 1]},
+            {"uid": 4, "dims": [2, 3, 4]},
+        ],
+    }
+    executor = MagicMock()
+    executor.init_time_ms = 1.25
+    executor.benchmark.return_value = MagicMock(
+        e2e_timings=[2.0],
+        kernel_timings=[],
+        has_kernel_timings=False,
+    )
+    mock_executor_cls.return_value = executor
+
+    buffer_manager = MagicMock()
+    buffer_manager.__enter__.return_value = buffer_manager
+    buffer_manager.__exit__.return_value = False
+    buffer_manager.get_tensors.return_value = {}
+    buffer_manager.get_output_tensors.return_value = [
+        _make_tensor_info(4, is_output=True)
+    ]
+    buffer_manager.get_output_data.return_value = np.zeros((2, 3, 4), dtype=np.float32)
+    mock_buffer_manager_cls.return_value = buffer_manager
+
+    timed = _run_timed_pytorch_row(
+        graph_path=Path("rms_bwd.json"),
+        graph_json=graph_json,
+        graph_name="rms_bwd",
+        tensor_infos=[_make_tensor_info(4, is_output=True)],
+        config=_make_config(warmup_iters=0, benchmark_iters=1),
+        input_data={},
+        analytical_flops=None,
+        analytical_flops_partial=False,
+        analytical_io_bytes=None,
+    )
+
+    assert timed.result.status == "success"
+    assert timed.result.warnings
+    assert "RMSNormBackwardAttributes" in timed.result.warnings[0]
+    assert "not solely built-in PyTorch operator time" in timed.result.warnings[0]
 
 
 class TestCheckCorrectnessOutputCount:
