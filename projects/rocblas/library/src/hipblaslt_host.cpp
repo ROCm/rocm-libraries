@@ -175,17 +175,6 @@ namespace
         }
     }
 
-#define RETURN_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK)                  \
-    do                                                                     \
-    {                                                                      \
-        rocblas_status TMP_STATUS_FOR_CHECK                                \
-            = convertHipblasStatusToRocblasStatus(INPUT_STATUS_FOR_CHECK); \
-        if(TMP_STATUS_FOR_CHECK != rocblas_status_success)                 \
-        {                                                                  \
-            return TMP_STATUS_FOR_CHECK;                                   \
-        }                                                                  \
-    } while(0)
-
 #define THROW_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK)                   \
     do                                                                     \
     {                                                                      \
@@ -196,6 +185,36 @@ namespace
             throw TMP_STATUS_FOR_CHECK;                                    \
         }                                                                  \
     } while(0)
+
+#define CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)                                   \
+    catch(rocblas_status & e)                                                                \
+    {                                                                                        \
+        rocblas_internal_ostream msg;                                                        \
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
+                             << rocblas_status_to_string(e));                                \
+        RETURN_STATUS = e;                                                                   \
+    }                                                                                        \
+    catch(hipError_t & e)                                                                    \
+    {                                                                                        \
+        rocblas_internal_ostream msg;                                                        \
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
+                             << hipGetErrorString(e));                                       \
+        RETURN_STATUS = rocblas_status_invalid_handle;                                       \
+    }
+
+#define HANDLE_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
+    try                                                               \
+    {                                                                 \
+        THROW_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK);             \
+    }                                                                 \
+    CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)
+
+#define HANDLE_HIP_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
+    try                                                         \
+    {                                                           \
+        THROW_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK);             \
+    }                                                           \
+    CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)
 
     template <typename T>
     __global__ void addOffsetKernel(T* dOutputPtr, T* dInputPtr, size_t offset, int size)
@@ -855,21 +874,21 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         status = rocblas_status_internal_error;
     }
     if(devicePtrArray_D)
-        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()));
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()), status);
     if(devicePtrArray_C)
-        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()));
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()), status);
     if(devicePtrArray_B)
-        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()));
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()), status);
     if(devicePtrArray_A)
-        THROW_IF_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()));
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
     if(workspaceSize > 0)
-        THROW_IF_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
-    THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
+        HANDLE_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB), status);
+    HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA), status);
     return status;
 #else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
