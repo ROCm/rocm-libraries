@@ -3,8 +3,8 @@
   "prev_n_estimators": 0,
   "new_n_estimators": 2000,
   "total_n_estimators": 2000,
-  "data_rows": 26531,
-  "valid_rows": 26531,
-  "unique_shapes": 2621,
-  "timestamp": "2026-06-18T17:32:48"
+  "data_rows": 195414,
+  "valid_rows": 195414,
+  "unique_shapes": 2919,
+  "timestamp": "2026-06-18T15:27:04"
 }

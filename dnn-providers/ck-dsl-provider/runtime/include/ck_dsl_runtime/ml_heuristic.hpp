@@ -8,7 +8,7 @@
 //   GEMM     — 72 features (byte-identical to CK Tile feature_spec.json;
 //               the CK Tile gemm_universal_fp16_gfx950 model is reusable)
 //   FMHA     — 68 features
-//   Conv-fwd — 97 features (grouped_conv_forward_fp16_gfx942)
+//   Conv-fwd — 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950})
 #pragma once
 
 #include <algorithm>
@@ -382,7 +382,7 @@ inline std::array<double, CKDSL_FMHA_NUM_FEATURES> ml_extract_fmha_features(
 }
 
 // ---- Conv ML features, mirroring ConvImplicitGemmScorer.cpp ----
-// 97 features (both gfx942 fp16 and gfx950 bf16 conv models use this schema).
+// 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950}).
 
 struct ConvHwProfile {
     int num_cus = 304, simds_per_cu = 4, shader_engines = 38, max_clock_mhz = 2400,
@@ -432,7 +432,7 @@ struct ConvHwProfile {
     }
 };
 
-static constexpr int CKDSL_CONV_NUM_FEATURES = 97;
+static constexpr int CKDSL_CONV_NUM_FEATURES = 101;
 
 inline int conv_encode_pipeline(const std::string& p) {
     if (p == "compv3") return 0;
@@ -451,12 +451,12 @@ inline double conv_dtype_bytes(const std::string& dt) {
     return 2.0;
 }
 
-// Direct C++ mirror of GroupedConvFeatureEngine.extract() (2D conv, 97 features).
-// Feature order matches feature_spec.json for grouped_conv_forward_fp16_gfx942
-// and grouped_conv_forward_2d3d_suffix_bf16_gfx950 exactly.
-// k.warp_m * k.warp_n maps to block_size (warp_m * warp_n * wave_size in the
-// original; wave_size is baked into warp_tile sizes so warp_m*warp_n == block_size/64).
-// We derive block_size as k.warp_m * k.warp_n * hw.wavefront_size.
+// Direct C++ mirror of GroupedConvFeatureEngine.extract() (2D conv, 101 features).
+// Feature order matches feature_spec.json for grouped_conv_forward_fp16_gfx90a,
+// grouped_conv_forward_fp16_gfx942, and grouped_conv_forward_2d3d_suffix_bf16_gfx950.
+// k.tile_k (== manifest block_k) is gemm_k_per_block — the tile size along the K
+// reduction dimension (32/64/128). k.threads_per_block is the thread block size (~256)
+// and is used only for num_warps; it must NOT be used as a tile_k proxy.
 inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const Problem& prob, const MlKernelConfig& k, const ConvHwProfile& hw) {
     const int N = (int)prob.conv_N;
@@ -515,17 +515,24 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const double cprod = cpg * ocpg;
     const double batch_group = (double)N * G;
     const double is_small_batch_grouped = (N < 8 && G > 1) ? 1.0 : 0.0;
+    const double k_per_c = (double)K / std::max(C, 1);
 
-    // Kernel features — block_size is threads_per_block from the manifest
+    // Kernel features
     const std::string pipeline_str = MlKernelConfig::dec_pipeline(k.pipeline);
     const int pipeline_code = conv_encode_pipeline(pipeline_str);
     const int block_size = k.threads_per_block > 0 ? k.threads_per_block : 256;
     const int tile_m = k.tile_m, tile_n = k.tile_n;
+    const int tile_k = k.tile_k > 0 ? k.tile_k : 64;  // gemm_k_per_block: K-dim tile (32/64/128)
+    // NOTE: misnamed -- this is block_size/4, not the true wavefront count
+    // (block_size/wavefront_size). Kept as-is so it matches the trained models'
+    // feature; the divisor is a linear rescale that LightGBM is invariant to, so
+    // fixing the name would require retraining all conv models for no gain. Must
+    // stay identical to feature_engine_grouped_conv.py. Revisit on next retrain.
     const double num_warps = (double)block_size / 4.0;
-    const double tile_vol = (double)tile_m * tile_n * block_size;
+    const double tile_vol = (double)tile_m * tile_n * tile_k;
     const double tile_mn = (double)tile_m * tile_n;
 
-    const double lds_est = ((double)tile_m * block_size + (double)tile_n * block_size) * bpe;
+    const double lds_est = ((double)tile_m * tile_k + (double)tile_n * tile_k) * bpe;
     double lds_cap = (double)hw.lds_capacity;
     if (pipeline_str.rfind("compv4", 0) == 0) lds_cap = 32768.0;
     const double lds_ratio = lds_est / std::max(lds_cap, 1.0);
@@ -551,7 +558,7 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const double gemm_k = std::floor(cpg * filter_volume);
     const double ntm = std::ceil(gemm_m / std::max(tile_m, 1));
     const double ntn = std::ceil(gemm_n / std::max(tile_n, 1));
-    const double ntk = std::ceil(gemm_k / std::max(block_size, 1));
+    const double ntk = std::ceil(gemm_k / std::max(tile_k, 1));
     const double tot_tiles = ntm * ntn;
     auto tile_eff = [](double d, int t) {
         if (t <= 0) return 1.0;
@@ -559,13 +566,15 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
         return r > 0.0 ? r / t : 1.0;
     };
     const double te_m = tile_eff(gemm_m, tile_m), te_n = tile_eff(gemm_n, tile_n),
-                 te_k = tile_eff(gemm_k, block_size);
+                 te_k = tile_eff(gemm_k, tile_k);
     const double overall_eff = te_m * te_n * te_k;
     const double cu_util = tot_tiles / std::max(hw.num_cus, 1);
     const double rm = gemm_m / std::max(tile_m, 1), rn = gemm_n / std::max(tile_n, 1),
-                 rk = gemm_k / std::max(block_size, 1);
+                 rk = gemm_k / std::max(tile_k, 1);
     const double psm = (gemm_m < tile_m) ? 1.0 : 0.0, psn = (gemm_n < tile_n) ? 1.0 : 0.0,
-                 psk = (gemm_k < block_size) ? 1.0 : 0.0;
+                 psk = (gemm_k < tile_k) ? 1.0 : 0.0;
+    const double log_gemm_m_n_ratio = std::log(std::max(gemm_m, 1.0) / std::max(gemm_n, 1.0));
+    const double log_total_output_tiles = std::log(std::max(tot_tiles, 1.0));
 
     return {{
         // Problem (30)
@@ -581,21 +590,23 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
         (double)Di, (double)Z3d, (double)Do,
         (double)stride_d, (double)pad_d,
         (double)dilation_h, (double)dilation_w,
-        // Group (8)
+        // Group (9)
         log2_cpg, log2_ocpg, is_depthwise, group_density,
         is_small_group, cprod, batch_group, is_small_batch_grouped,
-        // Kernel (15)
-        (double)block_size, (double)tile_m, (double)tile_n,
+        k_per_c,
+        // Kernel (16)
+        (double)block_size, (double)tile_m, (double)tile_n, (double)tile_k,
         (double)pipeline_code, num_warps, tile_vol, tile_mn,
         lds_est, lds_ratio, btr_m, btr_n, block_eff,
         is_compv3, is_compv4, is_compv5,
         // Suffix (6)
         is_intrawave, has_dsb, has_si, is_basic, is_compv6, is_mem,
-        // Interaction (18)
+        // Interaction (20)
         gemm_m, gemm_n, gemm_k,
         ntm, ntn, ntk, tot_tiles,
         te_m, te_n, te_k, overall_eff, cu_util,
         rm, rn, rk, psm, psn, psk,
+        log_gemm_m_n_ratio, log_total_output_tiles,
         // Hardware (12)
         (double)hw.num_cus, (double)hw.simds_per_cu, (double)hw.total_simds(),
         (double)hw.shader_engines, (double)hw.max_clock_mhz, (double)hw.max_waves_per_cu,
@@ -637,7 +648,7 @@ class DslMlHeuristic {
     }
 
     // Predict TFLOPS for one candidate, dispatching by op.
-    // Conv: dedicated 97-feature conv model when loaded, else GEMM approximation.
+    // Conv: dedicated 101-feature conv model when loaded, else GEMM approximation.
     double predict_tflops(const Problem& prob, const Manifest& m) const {
         if (prob.op == "attention") {
             if (!fmha_booster_) return 0;
