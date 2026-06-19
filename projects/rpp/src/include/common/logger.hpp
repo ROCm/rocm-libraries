@@ -51,93 +51,56 @@ SOFTWARE.
 #define RPP_PP_EXPAND(...) __VA_ARGS__
 #define RPP_PP_COMMA(...) ,
 
-#define RPP_PP_TRANSFORM_ARGS(m, ...)                                 \
-    RPP_PP_EXPAND(RPP_PP_PRIMITIVE_TRANSFORM_ARGS(m,               \
-                                                        RPP_PP_COMMA, \
-                                                        __VA_ARGS__,     \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        (),              \
-                                                        ()))
+#define RPP_PP_TRANSFORM_ARGS(m, ...)                                                           \
+    RPP_PP_EXPAND(RPP_PP_PRIMITIVE_TRANSFORM_ARGS(m, RPP_PP_COMMA, __VA_ARGS__, (), (), (), (), \
+                                                  (), (), (), (), (), (), (), (), (), (), (), ()))
 
-#define RPP_PP_EACH_ARGS(m, ...)                                    \
-    RPP_PP_EXPAND(RPP_PP_PRIMITIVE_TRANSFORM_ARGS(m,             \
-                                                        RPP_PP_EAT, \
-                                                        __VA_ARGS__,   \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        (),            \
-                                                        ()))
+#define RPP_PP_EACH_ARGS(m, ...)                                                                  \
+    RPP_PP_EXPAND(RPP_PP_PRIMITIVE_TRANSFORM_ARGS(m, RPP_PP_EAT, __VA_ARGS__, (), (), (), (), (), \
+                                                  (), (), (), (), (), (), (), (), (), (), ()))
 
-#define RPP_PP_PRIMITIVE_TRANSFORM_ARGS(                                              \
-    m, delim, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, ...) \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x0)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x1)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x1)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x2)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x2)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x3)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x3)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x4)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x4)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x5)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x5)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x6)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x6)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x7)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x7)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x8)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x8)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x9)                                         \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x9)                                             \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x10)                                        \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x10)                                            \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x11)                                        \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x11)                                            \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x12)                                        \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x12)                                            \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x13)                                        \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x13)                                            \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x14)                                        \
-    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x14)                                            \
+#define RPP_PP_PRIMITIVE_TRANSFORM_ARGS(m, delim, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, \
+                                        x11, x12, x13, x14, x15, ...)                          \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x0)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x1)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x1)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x2)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x2)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x3)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x3)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x4)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x4)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x5)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x5)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x6)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x6)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x7)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x7)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x8)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x8)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x9)                                                  \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x9)                                                      \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x10)                                                 \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x10)                                                     \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x11)                                                 \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x11)                                                     \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x12)                                                 \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x12)                                                     \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x13)                                                 \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x13)                                                     \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x14)                                                 \
+    RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x14)                                                     \
     RPP_PP_PRIMITIVE_TRANSFORM_ARG(delim, x15) RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x15)
 
-#define RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x) \
-    RPP_PP_IIF(RPP_PP_IS_PAREN(x))(RPP_PP_EAT, m)(x)
+#define RPP_PP_PRIMITIVE_TRANSFORM_ARG(m, x) RPP_PP_IIF(RPP_PP_IS_PAREN(x))(RPP_PP_EAT, m)(x)
 
 namespace rpp {
 
 template <class Range>
-std::ostream& LogRange(std::ostream& os, Range&& r, std::string delim)
-{
+std::ostream& LogRange(std::ostream& os, Range&& r, std::string delim) {
     bool first = true;
-    for(auto&& x : r)
-    {
-        if(first)
+    for (auto&& x : r) {
+        if (first)
             first = false;
         else
             os << delim;
@@ -147,8 +110,7 @@ std::ostream& LogRange(std::ostream& os, Range&& r, std::string delim)
 }
 
 template <class T, class... Ts>
-std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
-{
+std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs) {
     return {{x, xs...}};
 }
 
@@ -161,26 +123,24 @@ std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
 #endif
 
 template <class T, class Range>
-std::ostream& LogEnum(std::ostream& os, T x, Range&& values)
-{
+std::ostream& LogEnum(std::ostream& os, T x, Range&& values) {
     auto it = std::find_if(values.begin(), values.end(), [&](auto&& p) { return p.second == x; });
-    if(it == values.end())
+    if (it == values.end())
         os << "Unknown: " << x;
     else
         os << it->first;
     return os;
 }
 
-enum class LoggingLevel
-{
-    Default = 0, // Warning level for Release builds, Info for Debug builds.
-    Quiet   = 1, // None logging messages (except those controlled by RPP_ENABLE_LOGGING*).
-    Fatal   = 2, // Fatal errors only (not used yet).
-    Error   = 3, // Errors and fatals.
-    Warning = 4, // All errors and warnings.
-    Info    = 5, // All above plus information for debugging purposes.
-    Info2   = 6, // All above  plus more detailed information for debugging.
-    Trace   = 7  // The most detailed debugging messages
+enum class LoggingLevel {
+    Default = 0,  // Warning level for Release builds, Info for Debug builds.
+    Quiet = 1,    // None logging messages (except those controlled by RPP_ENABLE_LOGGING*).
+    Fatal = 2,    // Fatal errors only (not used yet).
+    Error = 3,    // Errors and fatals.
+    Warning = 4,  // All errors and warnings.
+    Info = 5,     // All above plus information for debugging purposes.
+    Info2 = 6,    // All above  plus more detailed information for debugging.
+    Trace = 7     // The most detailed debugging messages
 };
 
 const char* LoggingLevelToCString(LoggingLevel level);
@@ -193,21 +153,23 @@ bool IsLoggingCmd();
 bool IsLoggingFunctionCalls();
 
 template <class T>
-auto LogObjImpl(T* x) -> decltype(get_object(*x))
-{
+auto LogObjImpl(T* x) -> decltype(get_object(*x)) {
     return get_object(*x);
 }
 
-inline void* LogObjImpl(void* x) { return x; }
+inline void* LogObjImpl(void* x) {
+    return x;
+}
 
-inline const void* LogObjImpl(const void* x) { return x; }
+inline const void* LogObjImpl(const void* x) {
+    return x;
+}
 
 #ifndef _MSC_VER
 template <class T, typename std::enable_if<(std::is_pointer<T>{}), int>::type = 0>
-std::ostream& LogParam(std::ostream& os, std::string name, const T& x)
-{
+std::ostream& LogParam(std::ostream& os, std::string name, const T& x) {
     os << '\t' << name << " = ";
-    if(x == nullptr)
+    if (x == nullptr)
         os << "nullptr";
     else
         os << LogObjImpl(x);
@@ -215,45 +177,41 @@ std::ostream& LogParam(std::ostream& os, std::string name, const T& x)
 }
 
 template <class T, typename std::enable_if<(not std::is_pointer<T>{}), int>::type = 0>
-std::ostream& LogParam(std::ostream& os, std::string name, const T& x)
-{
+std::ostream& LogParam(std::ostream& os, std::string name, const T& x) {
     os << '\t' << name << " = " << get_object(x);
     return os;
 }
 
-#define RPP_LOG_FUNCTION_EACH(param)                                         \
-    do                                                                          \
-    {                                                                           \
+#define RPP_LOG_FUNCTION_EACH(param)                                            \
+    do {                                                                        \
         /* Clear temp stringstream & reset its state: */                        \
-        std::ostringstream().swap(rpp_log_func_ss);                          \
+        std::ostringstream().swap(rpp_log_func_ss);                             \
         /* Use stringstram as ostream to engage existing template functions: */ \
-        std::ostream& rpp_log_func_ostream = rpp_log_func_ss;             \
-        rpp_log_func_ostream << rpp::LoggingPrefix();                     \
-        rpp::LogParam(rpp_log_func_ostream, #param, param) << std::endl;  \
-        std::cerr << rpp_log_func_ss.str();                                  \
-    } while(false);
+        std::ostream& rpp_log_func_ostream = rpp_log_func_ss;                   \
+        rpp_log_func_ostream << rpp::LoggingPrefix();                           \
+        rpp::LogParam(rpp_log_func_ostream, #param, param) << std::endl;        \
+        std::cerr << rpp_log_func_ss.str();                                     \
+    } while (false);
 
-#define RPP_LOG_FUNCTION(...)                                                        \
-    do                                                                                  \
-        if(rpp::IsLoggingFunctionCalls())                                            \
-        {                                                                               \
-            std::ostringstream rpp_log_func_ss;                                      \
-            rpp_log_func_ss << rpp::LoggingPrefix() << __PRETTY_FUNCTION__ << "{" \
-                               << std::endl;                                            \
-            std::cerr << rpp_log_func_ss.str();                                      \
-            RPP_PP_EACH_ARGS(RPP_LOG_FUNCTION_EACH, __VA_ARGS__)                  \
-            std::ostringstream().swap(rpp_log_func_ss);                              \
-            rpp_log_func_ss << rpp::LoggingPrefix() << "}" << std::endl;          \
-            std::cerr << rpp_log_func_ss.str();                                      \
-        }                                                                               \
-    while(false)
+#define RPP_LOG_FUNCTION(...)                                                                   \
+    do                                                                                          \
+        if (rpp::IsLoggingFunctionCalls()) {                                                    \
+            std::ostringstream rpp_log_func_ss;                                                 \
+            rpp_log_func_ss << rpp::LoggingPrefix() << __PRETTY_FUNCTION__ << "{" << std::endl; \
+            std::cerr << rpp_log_func_ss.str();                                                 \
+            RPP_PP_EACH_ARGS(RPP_LOG_FUNCTION_EACH, __VA_ARGS__)                                \
+            std::ostringstream().swap(rpp_log_func_ss);                                         \
+            rpp_log_func_ss << rpp::LoggingPrefix() << "}" << std::endl;                        \
+            std::cerr << rpp_log_func_ss.str();                                                 \
+        }                                                                                       \
+    while (false)
 #else
 #define RPP_LOG_FUNCTION(...)
 #endif
 
 std::string LoggingParseFunction(const char* func, const char* pretty_func);
 
-#define RPP_LOG(level, ...)                                                               \
+#define RPP_LOG(level, ...) \
     // do                                                                                       \
     // {                                                                                        \
     //     if(rpp::IsLogging(level))                                                         \
@@ -273,17 +231,15 @@ std::string LoggingParseFunction(const char* func, const char* pretty_func);
 #define RPP_LOG_I2(...) RPP_LOG(rpp::LoggingLevel::Info2, __VA_ARGS__)
 #define RPP_LOG_T(...) RPP_LOG(rpp::LoggingLevel::Trace, __VA_ARGS__)
 
-#define RPP_LOG_DRIVER_CMD(...)                                                      \
-    do                                                                                  \
-    {                                                                                   \
-        std::ostringstream rpp_driver_cmd_ss;                                        \
-        rpp_driver_cmd_ss << rpp::LoggingPrefix() << "Command"                    \
-                             << " [" << rpp::LoggingParseFunction(                   \
-                                            __func__, __PRETTY_FUNCTION__) /* NOLINT */ \
-                             << "] ./bin/MIOpenDriver " << __VA_ARGS__ << std::endl;    \
-        std::cerr << rpp_driver_cmd_ss.str();                                        \
-    } while(false)
+#define RPP_LOG_DRIVER_CMD(...)                                                                    \
+    do {                                                                                           \
+        std::ostringstream rpp_driver_cmd_ss;                                                      \
+        rpp_driver_cmd_ss << rpp::LoggingPrefix() << "Command" << " ["                             \
+                          << rpp::LoggingParseFunction(__func__, __PRETTY_FUNCTION__) /* NOLINT */ \
+                          << "] ./bin/MIOpenDriver " << __VA_ARGS__ << std::endl;                  \
+        std::cerr << rpp_driver_cmd_ss.str();                                                      \
+    } while (false)
 
-} // namespace rpp
+}  // namespace rpp
 
 #endif
