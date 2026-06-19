@@ -56,7 +56,7 @@ class RunSummary:
     ms: float
     tflops: float
     gbps: float
-    max_err: float = 0.0
+    max_abs_diff: float = 0.0
     bad_count: int = 0
     total: int = 0
 
@@ -173,7 +173,7 @@ def run_manifest(
     warmup = int(manifest.get("warmup_iters", 5))
     iters = int(manifest.get("timed_iters", 100))
     ms = _launch_timed(rt, fn, grid, block, args, warmup, iters)
-    max_err, bad_count, total = check(rt, ptrs)
+    max_abs_diff, bad_count, total = check(rt, ptrs)
     for ptr in ptrs:
         rt.free(ptr)
     module.unload()
@@ -181,7 +181,7 @@ def run_manifest(
         ms=ms,
         tflops=flop / 1e9 / ms,
         gbps=bytes_xfer / 1e6 / ms,
-        max_err=max_err,
+        max_abs_diff=max_abs_diff,
         bad_count=bad_count,
         total=total,
     )
@@ -202,7 +202,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     if ns.verify:
         print(
-            f"verify max_err={summary.max_err:.8g} "
+            f"verify max_abs_diff={summary.max_abs_diff:.8g} "
             f"bad={summary.bad_count}/{summary.total}"
         )
     print(
@@ -218,7 +218,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "ms": summary.ms,
                 "tflops": summary.tflops,
                 "gbps": summary.gbps,
-                "max_err": summary.max_err,
+                "max_abs_diff": summary.max_abs_diff,
                 "bad_count": summary.bad_count,
                 "total": summary.total,
             }
