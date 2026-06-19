@@ -82,12 +82,27 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
 
 
+def _load_stinkytofu_tasks():
+    """Import shared/stinkytofu/tasks.py without triggering its venv guard.
+
+    The venv check was moved into build() so this import is side-effect-free.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "stinkytofu_tasks",
+        _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu" / "tasks.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
     """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
 
-    Mirrors TheRock's stinkytofu subproject declaration exactly (BUILD_SHARED_LIBS=ON,
-    tests OFF, python OFF, examples OFF by default) with only the install prefix
-    differing. Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
+    Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
+    of truth — so a new required cmake option only needs to be added there.
+    Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
     cmake is incremental, so repeat calls are a fast no-op when nothing changed.
     """
     stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
@@ -98,21 +113,17 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
     _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
     _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
 
+    st = _load_stinkytofu_tasks()
     cmake_cmd = [
         "cmake",
         "-S", str(stinkytofu_src),
         "-B", str(build_dir),
         "-DCMAKE_BUILD_TYPE=Release",
-        f"-DCMAKE_INSTALL_PREFIX={install_prefix}",
         f"-DROCM_PATH={rocm_s}",
         f"-DCMAKE_CXX_COMPILER={_cxx}",
         f"-DCMAKE_C_COMPILER={_cc}",
-        "-DSTINKYTOFU_BUILD_TESTS=OFF",
-        "-DSTINKYTOFU_BUILD_PYTHON=OFF",
-        # Examples ON so the installed plugin tree is exercised — only difference
-        # from TheRock's subproject declaration (which has examples OFF by default).
-        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
-        "-DBUILD_SHARED_LIBS=ON",
+        # examples=True: exercise the installed plugin tree (only delta from TheRock).
+        *st.cmake_build_args(install_prefix=install_prefix, examples=True),
     ]
     if shutil.which("ninja"):
         cmake_cmd.append("-G Ninja")
