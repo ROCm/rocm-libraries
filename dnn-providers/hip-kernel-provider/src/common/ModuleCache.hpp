@@ -68,13 +68,16 @@ public:
         return _entries.size();
     }
 
-private:
-    ModuleCache() = default;
-    ~ModuleCache() = default;
+    // NOLINTBEGIN(bugprone-crtp-constructor-accessibility)
     ModuleCache(const ModuleCache&) = delete;
     ModuleCache& operator=(const ModuleCache&) = delete;
     ModuleCache(ModuleCache&&) = delete;
     ModuleCache& operator=(ModuleCache&&) = delete;
+    // NOLINTEND(bugprone-crtp-constructor-accessibility)
+
+private:
+    ModuleCache() = default;
+    ~ModuleCache() = default;
 
     mutable std::mutex _mutex;
     std::unordered_map<std::string, Value> _entries;
