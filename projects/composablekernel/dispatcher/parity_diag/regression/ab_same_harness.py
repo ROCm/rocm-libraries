@@ -105,6 +105,19 @@ def build_old_so(stem: str) -> Path | None:
         f"-I{DISP / 'include'}", f"-I{ROOT / 'include'}", f"-I{ROOT}", f"-I{GEN}",
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hdr}", "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={ARCH}", f'-DGFX_ARCH="{ARCH}"',
+        # Match the bridge build's AMDGPU codegen flags (gemm_utils.py
+        # _build_compile_jobs / _TILE_ENGINE_CODEGEN_FLAGS), which are also what
+        # Tile Engine's own CMake passes. Without these the old-TE side is built
+        # with a *different* instruction schedule (notably -enable-post-misched
+        # defaults back on) and runs ~10-40% faster than real old-TE, making the
+        # bridge look regressed when it is actually at parity. Build BOTH sides
+        # identically so the A/B measures the kernel, not a flag asymmetry.
+        "-mllvm", "-enable-noalias-to-md-conversion=0",
+        "-mllvm", "--lsr-drop-solution=1",
+        "-mllvm", "-enable-post-misched=0",
+        "-mllvm", "-amdgpu-early-inline-all=true",
+        "-mllvm", "-amdgpu-function-calls=false",
+        "-fno-offload-uniform-block",
         "-Wno-undefined-func-template", "-Wno-float-equal",
     ]
     cc = subprocess.run(["/opt/rocm/bin/hipcc", "-c", *common, str(SRC), "-o", str(obj)],
