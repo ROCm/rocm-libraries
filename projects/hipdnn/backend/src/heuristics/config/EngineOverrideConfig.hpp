@@ -336,10 +336,27 @@ private:
                     rule.criteria.push_back(Criterion{item.key(), item.value().get<int64_t>()});
                 }
             }
+            std::vector<std::string> tensorIds;
             for(const auto& t : entry.at(config_json::TENSORS))
             {
                 TensorPattern pat;
-                if(t.contains(config_json::TENSOR_ID))
+                if(useNamedTensorIds)
+                {
+                    if(!t.contains(config_json::TENSOR_ID))
+                    {
+                        throw nlohmann::json::type_error::create(
+                            302, "versioned tensor entry must contain tensor_id", &t);
+                    }
+                    auto tensorId = t.at(config_json::TENSOR_ID).get<std::string>();
+                    if(std::find(tensorIds.begin(), tensorIds.end(), tensorId) != tensorIds.end())
+                    {
+                        throw nlohmann::json::type_error::create(
+                            302, "versioned tensor_id entries must be unique", &t);
+                    }
+                    tensorIds.push_back(tensorId);
+                    pat.tensorId = std::move(tensorId);
+                }
+                else if(t.contains(config_json::TENSOR_ID))
                 {
                     pat.tensorId = t.at(config_json::TENSOR_ID).get<std::string>();
                 }

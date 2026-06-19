@@ -84,6 +84,33 @@ inline bool entryUsesNamedTensorIds(const nlohmann::json& entry)
               });
 }
 
+inline bool entryTensorIdsAreUnique(const nlohmann::json& entry)
+{
+    if(!entry.contains(config_json::TENSORS) || !entry[config_json::TENSORS].is_array())
+    {
+        return false;
+    }
+
+    const auto& tensors = entry[config_json::TENSORS];
+    for(size_t i = 0; i < tensors.size(); ++i)
+    {
+        if(!tensors[i].contains(config_json::TENSOR_ID)
+           || !tensors[i][config_json::TENSOR_ID].is_string())
+        {
+            return false;
+        }
+        for(size_t j = i + 1; j < tensors.size(); ++j)
+        {
+            if(tensors[j].contains(config_json::TENSOR_ID)
+               && tensors[i][config_json::TENSOR_ID] == tensors[j][config_json::TENSOR_ID])
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
 {
     entry.erase(config_json::TENSOR_ID);
@@ -385,6 +412,11 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
         {
             return {ErrorCode::INVALID_VALUE,
                     "AutotuneFileWriter: tensor IDs are required for versioned config files"};
+        }
+        if(!entryTensorIdsAreUnique(*newEntry))
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "AutotuneFileWriter: tensor IDs must be unique for versioned config files"};
         }
 
         root[config_json::VERSION] = config_version::CURRENT;

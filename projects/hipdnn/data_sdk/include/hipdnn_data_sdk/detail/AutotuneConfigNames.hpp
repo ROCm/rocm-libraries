@@ -91,7 +91,6 @@ inline constexpr const char* A = "a_tensor_uid";
 inline constexpr const char* B = "b_tensor_uid";
 inline constexpr const char* BIAS = "bias_tensor_uid";
 inline constexpr const char* EPSILON = "epsilon_tensor_uid";
-inline constexpr const char* PEER_STATS = "peer_stats_tensor_uid";
 inline constexpr const char* PREV_RUNNING_MEAN = "prev_running_mean_tensor_uid";
 inline constexpr const char* PREV_RUNNING_VARIANCE = "prev_running_variance_tensor_uid";
 inline constexpr const char* MOMENTUM = "momentum_tensor_uid";

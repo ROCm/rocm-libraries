@@ -228,10 +228,6 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        for(const auto& peerStat : batchnorm.attributes.get_peer_stats())
-        {
-            appendOptionalMatchTensor(key, config_tensor::PEER_STATS, peerStat);
-        }
         appendOptionalMatchTensor(
             key, config_tensor::PREV_RUNNING_MEAN, batchnorm.attributes.get_prev_running_mean());
         appendOptionalMatchTensor(key,
@@ -289,10 +285,6 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key, config_tensor::MEAN, batchnorm.attributes.get_mean());
         appendOptionalMatchTensor(
             key, config_tensor::INV_VARIANCE, batchnorm.attributes.get_inv_variance());
-        for(const auto& peerStat : batchnorm.attributes.get_peer_stats())
-        {
-            appendOptionalMatchTensor(key, config_tensor::PEER_STATS, peerStat);
-        }
         return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
     }
     case graph::NodeType::LAYER_NORM:

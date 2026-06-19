@@ -1111,7 +1111,7 @@ TEST_F(TestConfigBuiltIn, FinalizeRejectsMissingOptionalTensorUidWhenPresent)
     EXPECT_FALSE(_plugin->finalize(_desc));
 }
 
-TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsVectorMatchesAndRejectsMissingUid)
+TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsDoNotParticipateInMatching)
 {
     const TempJsonOverrideFile json(
         makeOverrideConfig(
@@ -1122,8 +1122,7 @@ TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsVectorMatchesAndRejectsMissi
                   nlohmann::json::array({makeNamedRuleTensor(config_tensor::X, {1, 3, 4, 4}),
                                          makeNamedRuleTensor(config_tensor::SCALE, {3}),
                                          makeNamedRuleTensor(config_tensor::BIAS, {3}),
-                                         makeNamedRuleTensor(config_tensor::EPSILON, {1}),
-                                         makeNamedRuleTensor(config_tensor::PEER_STATS, {3})})}},
+                                         makeNamedRuleTensor(config_tensor::EPSILON, {1})})}},
             })
             .dump(2));
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
@@ -1138,7 +1137,10 @@ TEST_F(TestConfigBuiltIn, FinalizeBatchnormPeerStatsVectorMatchesAndRejectsMissi
 
     setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
     setSerializedGraph(buildBatchnormTrainingGraphBuffer(false));
-    EXPECT_FALSE(_plugin->finalize(_desc));
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_FALSE(sorted.empty());
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
 }
 
 // ========== Logging callback / getLastErrorString ABI shape ==========

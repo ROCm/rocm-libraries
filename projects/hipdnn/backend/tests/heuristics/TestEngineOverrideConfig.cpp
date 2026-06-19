@@ -385,6 +385,39 @@ TEST(TestEngineOverrideConfig, NewerVersionUsesNamedTensorMatching)
     EXPECT_EQ(*result, MIOPEN_ENGINE_ID);
 }
 
+TEST(TestEngineOverrideConfig, LoadFromContentRejectsDuplicateTensorIdsInNamedConfig)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_0}, {config_json::DIM, {2, 4}}},
+                     {{config_json::TENSOR_ID, config_tensor::IN_0},
+                      {config_json::DIM, {5, 6}}}})}}})}}.dump());
+    EXPECT_FALSE(config.has_value());
+}
+
+TEST(TestEngineOverrideConfig, LoadFromContentRejectsMissingTensorIdInNamedConfig)
+{
+    auto config = EngineOverrideConfig::loadFromContent(nlohmann::json{
+        {config_json::VERSION, config_version::CURRENT},
+        {config_json::ENGINE_OVERRIDES,
+         nlohmann::json::array(
+             {{{config_json::OP, config_op::POINTWISE},
+               {config_json::CRITERIA, {{config_criterion::POINTWISE_MODE, 2}}},
+               {config_json::ENGINE_NAME, MIOPEN_ENGINE_NAME},
+               {config_json::TENSORS,
+                nlohmann::json::array(
+                    {{{config_json::TENSOR_ID, config_tensor::IN_0}, {config_json::DIM, {2, 4}}},
+                     {{config_json::DIM, {5, 6}}}})}}})}}.dump());
+    EXPECT_FALSE(config.has_value());
+}
+
 TEST(TestEngineOverrideConfig, FirstRuleDimMismatchFallsThroughToSecondMatchingRule)
 {
     OperationRule first;

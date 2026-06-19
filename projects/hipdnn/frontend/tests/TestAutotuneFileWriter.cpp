@@ -321,6 +321,37 @@ TEST(TestAutotuneFileWriter, WrongTypeVersionFileRejectsAndRemainsUnchanged)
     expectReplacementRejectedAndUnchanged(root);
 }
 
+TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectNewFileWrite)
+{
+    const TempFile tmpFile;
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::X};
+
+    auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
+
+    EXPECT_FALSE(err.is_good());
+    EXPECT_FALSE(std::filesystem::exists(tmpFile.path));
+}
+
+TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectAndExistingFileRemainsUnchanged)
+{
+    const TempFile tmpFile;
+    const auto originalContents = writeJsonFile(tmpFile.path, makeExistingVersionedRoot());
+    std::vector<AutotuneResult> results;
+    results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
+    const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}, {64, 3, 7, 7}};
+    const std::vector<std::string> tensorIds = {config_tensor::X, config_tensor::X};
+
+    auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
+        tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
+
+    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
+}
+
 TEST(TestAutotuneFileWriter, NamedEntryReplacesExistingEntryWithReorderedNamedTensors)
 {
     const TempFile tmpFile;
@@ -821,7 +852,6 @@ TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)
                                              true,
                                              dims,
                                              {});
-
     EXPECT_TRUE(err.is_bad());
 }
 
@@ -851,7 +881,7 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
         outFile << "{ this is not valid json ]}}";
     }
 
-    // Write valid results — should start fresh despite corrupt existing
+    // Write valid results — corrupt existing JSON must be rejected and left untouched.
     std::vector<AutotuneResult> results;
     results.push_back(makeResult(1, "MIOPEN_ENGINE"));
     const std::vector<std::vector<int64_t>> dims = {{1, 3, 224, 224}};

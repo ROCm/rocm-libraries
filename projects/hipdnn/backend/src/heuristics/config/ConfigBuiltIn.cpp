@@ -281,8 +281,6 @@ public:
                || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
                || !appendUid(key, config_tensor::BIAS, batchnorm->bias_tensor_uid())
                || !appendUid(key, config_tensor::EPSILON, batchnorm->epsilon_tensor_uid())
-               || !appendUidVector(
-                   key, config_tensor::PEER_STATS, batchnorm->peer_stats_tensor_uid())
                || !appendOptionalUid(
                    key, config_tensor::PREV_RUNNING_MEAN, batchnorm->prev_running_mean_tensor_uid())
                || !appendOptionalUid(key,
@@ -331,9 +329,7 @@ public:
                || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
                || !appendOptionalUid(key, config_tensor::MEAN, batchnorm->mean_tensor_uid())
                || !appendOptionalUid(
-                   key, config_tensor::INV_VARIANCE, batchnorm->inv_variance_tensor_uid())
-               || !appendUidVector(
-                   key, config_tensor::PEER_STATS, batchnorm->peer_stats_tensor_uid()))
+                   key, config_tensor::INV_VARIANCE, batchnorm->inv_variance_tensor_uid()))
             {
                 return std::nullopt;
             }
@@ -446,24 +442,6 @@ private:
             return true;
         }
         return appendUid(key, tensorId, *uid);
-    }
-
-    bool appendUidVector(BackendAutotuneConfigMatchKey& key,
-                         std::string_view tensorId,
-                         const flatbuffers::Vector<int64_t>* uids) const
-    {
-        if(uids == nullptr)
-        {
-            return true;
-        }
-        for(const int64_t uid : *uids)
-        {
-            if(!appendUid(key, tensorId, uid))
-            {
-                return false;
-            }
-        }
-        return true;
     }
 
     const std::unordered_map<int64_t, TensorDimsStrides>& _tensorIndex;
