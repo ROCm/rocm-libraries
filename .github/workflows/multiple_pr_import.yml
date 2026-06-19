@@ -37,7 +37,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Checkout super‐repo
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7.0.0
         with:
           token: ${{ steps.gen_token.outputs.token }}
           fetch-depth: 0
