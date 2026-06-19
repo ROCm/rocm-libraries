@@ -352,9 +352,10 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false>
 #if USE_NEW_UNIFIED_FRAMEWORK
-// Now that we convert SwizzleA bool to SwizzleFactor. This used to be hardcoded in a number of
-// places in the original dispatcher / warpgemms, always using 2 for the cases where the dispatcher
-// was used.
+// Note that we convert the SwizzleA bool to a SwizzleFactor. This used to be hardcoded in a number
+// of places in the original Dispatcher / WarpGemms, always ending up with SFactor = 2 for the
+// cases where the Dispatcher was used. The rare SFactor = 4 cases never went through the
+// Dispatcher.
 using WarpGemmDispatcher =
     typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
                                                                BType,
