@@ -2407,11 +2407,10 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        # WMMA is only accepted for WavefrontSize=32 below. For that gfx12
-        # encoding, each lane supplies half of MatrixInstK; current validWMMA
-        # contains K=16, so this is 8, and remains proportional if more gfx12
-        # WMMA K shapes are added.
-        state['MIInputPerThread'] = state["MatrixInstruction"][2] // 2 if isGfx12(isa) else state["MatrixInstruction"][2]
+        # gfx12 WMMA uses the generic MI formula above. Older WMMA paths keep
+        # the historical full-K input packing.
+        if not isGfx12(isa):
+          state['MIInputPerThread'] = state["MatrixInstruction"][2]
 
     else:
       state["EnableMatrixInstruction"] = False

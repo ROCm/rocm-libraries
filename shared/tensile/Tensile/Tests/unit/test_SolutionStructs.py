@@ -36,7 +36,7 @@ def test_disable_preload_kernel_arguments_clears_delay():
     assert state["DelayRemainingArguments"] is False
 
 
-def test_gfx12_wmma_mi_input_per_thread_uses_half_k():
+def test_gfx12_wmma_mi_input_per_thread_uses_generic_formula():
     isa = (12, 0, 1)
     oldAsmCaps = globalParameters.get("AsmCaps")
     globalParameters["AsmCaps"] = {isa: {"HasMFMA": False, "HasWMMA": True}}
@@ -58,7 +58,7 @@ def test_gfx12_wmma_mi_input_per_thread_uses_half_k():
         else:
             globalParameters["AsmCaps"] = oldAsmCaps
 
-    assert state["MIInputPerThread"] == 8
+    assert state["MIInputPerThread"] == state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
 
 
 def test_gfx11_wmma_mi_input_per_thread_keeps_full_k():
