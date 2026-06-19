@@ -14,15 +14,17 @@ import platform
 
 _IS_WINDOWS = platform.system() == "Windows"
 
-# ROCm runtime libraries the compiled extension and hipdnn_backend link against.
-# On Windows every dependent DLL (runtime, runtime compiler, and engine-provider
-# deps) resolves by base name under a restricted loader search, so all must be
-# preloaded into the process. On Linux, RPATH/ldconfig pull the transitive deps
-# once libhipdnn itself is located, so only hipdnn needs to be named.
+# ROCm runtime libraries to preload via rocm_sdk before importing the compiled
+# extension. On Windows every dependent DLL resolves by base name under a
+# restricted loader search, so the runtime, runtime compiler, and engine-provider
+# deps -- including hipdnn -- must all be named. On Linux the libraries prefix is
+# already on the loader path (LD_LIBRARY_PATH, via the venv), so hipDNN resolves
+# on its own; only the HIP runtime, which lives off-path in the core wheel, needs
+# preloading (amdhip64 pulls comgr/hiprtc and the sysdeps via its own runpath).
 _ROCM_WHEEL_SHORTNAMES = (
     ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
     if _IS_WINDOWS
-    else ["hipdnn"]
+    else ["amd_comgr", "amdhip64", "hiprtc"]
 )
 
 

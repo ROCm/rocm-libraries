@@ -488,6 +488,9 @@ struct config_t {
   /// Main loop optimization flag (indicates use of any optimized kernel variant)
   bool hand_optimized_main_loop = false;
 
+  /// Whether this kernel uses the subtile implementation (UseSubtileImpl).
+  bool subtile = false;
+
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
@@ -553,7 +556,8 @@ struct config_t {
 
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
-           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
+           cache_hints_b == o.cache_hints_b &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -568,6 +572,7 @@ struct config_t {
                                           mi.n,
                                           mi.k,
                                           hand_optimized_main_loop,
+                                          subtile,
                                           cache_hints_a,
                                           cache_hints_b,
                                           workgroup_mapping,

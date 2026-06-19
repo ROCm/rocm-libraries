@@ -39,8 +39,6 @@ jobs:
         id: env
       - name: Detect changed components
         id: configure
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
         run: python .github/scripts/component_ci.py
 
   stinkytofu:
