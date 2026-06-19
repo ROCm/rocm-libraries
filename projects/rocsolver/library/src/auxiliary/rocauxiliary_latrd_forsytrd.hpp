@@ -44,6 +44,13 @@ ROCSOLVER_BEGIN_NAMESPACE
 /***************** Kernels/Device functions *******************************************/
 /**************************************************************************************/
 
+// 1. Double-layer helper macros to resolve and stringify the token
+#define STR_HELPER(x) #x
+#define STRINGIFY(x) STR_HELPER(x)
+
+// 2. The main macro that combines the pragma keyword with your argument K
+#define UNROLL_LOOP_BY(K) _Pragma(STRINGIFY(unroll K))
+
 // --------------------------------------------------------------------
 // use nontemporal load of read-only data to by-pass the cache
 //
@@ -52,33 +59,29 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 #include "hip/hip_vector_types.h"
 
-#define USE_SCALAR_TYPE
-#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
-#undef USE_SCALAR_TYPE
+#if defined(__GFX9__)
+#undef USE_SPLIT_TYPE
+#else
+#define USE_SPLIT_TYPE
 #endif
 
 static inline __device__ rocblas_double_complex nontemporal_load(rocblas_double_complex const* const p)
 {
-#ifdef USE_SCALAR_TYPE
+#ifdef USE_SPLIT_TYPE
     double const* const __restrict__ p2 = (double const*)p;
     return (rocblas_double_complex{*p2, *(p2 + 1)});
 #else
-    auto const p2 = (const double2*)p;
-    auto const val = __builtin_nontemporal_load(p2);
+    double2 const* const __restrict__ p2 = (double2 const*)p;
+    double2 const val = __builtin_nontemporal_load(p2);
     return (rocblas_double_complex{val.x, val.y});
 #endif
 }
 
 static inline __device__ rocblas_float_complex nontemporal_load(rocblas_float_complex const* const p)
 {
-#ifdef USE_SCALAR_TYPE
-    float const* const __restrict__ p2 = (float const*)p;
-    return (rocblas_float_complex{*p2, *(p2 + 1)});
-#else
-    auto const p2 = (const float2*)p;
-    auto const val = __builtin_nontemporal_load(p2);
+    uint64_t const* const __restrict__ p2 = (const uint64_t*)p;
+    float2 const val = (float2)__builtin_nontemporal_load(p2);
     return (rocblas_float_complex{val.x, val.y});
-#endif
 }
 
 static inline __device__ double nontemporal_load(double const* const p)
@@ -489,12 +492,159 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(i != c)
     {
-#pragma unroll 4
-        for(rocblas_int j = 0; j < n_full; j += NB_X)
+#define FORLOOP(K)                                                    \
+    {                                                                 \
+        _Pragma(STRINGIFY(unroll K)) for(int j = 0; j < K; j += NB_X) \
+        {                                                             \
+            auto const aj = nontemporal_load(&(a[j]));                \
+            res += conj(aj) * x[tx + j];                              \
+        };                                                            \
+        break;                                                        \
+    }
+        switch(n_full)
         {
-            auto const aj = nontemporal_load(&(a[j]));
-            res += conj(aj) * x[tx + j];
+        case 1:
+        {
+            FORLOOP(1);
         }
+        case 2:
+        {
+            FORLOOP(2);
+        }
+        case 3:
+        {
+            FORLOOP(3);
+        }
+        case 4:
+        {
+            FORLOOP(4);
+        }
+        case 5:
+        {
+            FORLOOP(5);
+        }
+        case 6:
+        {
+            FORLOOP(6);
+        }
+        case 7:
+        {
+            FORLOOP(7);
+        }
+        case 8:
+        {
+            FORLOOP(8);
+        }
+        case 9:
+        {
+            FORLOOP(9);
+        }
+        case 10:
+        {
+            FORLOOP(10);
+        }
+
+        case 11:
+        {
+            FORLOOP(11);
+        }
+        case 12:
+        {
+            FORLOOP(12);
+        }
+        case 13:
+        {
+            FORLOOP(13);
+        }
+        case 14:
+        {
+            FORLOOP(14);
+        }
+        case 15:
+        {
+            FORLOOP(15);
+        }
+        case 16:
+        {
+            FORLOOP(16);
+        }
+        case 17:
+        {
+            FORLOOP(17);
+        }
+        case 18:
+        {
+            FORLOOP(18);
+        }
+        case 19:
+        {
+            FORLOOP(19);
+        }
+        case 20:
+        {
+            FORLOOP(20);
+        }
+
+        case 21:
+        {
+            FORLOOP(21);
+        }
+        case 22:
+        {
+            FORLOOP(22);
+        }
+        case 23:
+        {
+            FORLOOP(23);
+        }
+        case 24:
+        {
+            FORLOOP(24);
+        }
+        case 25:
+        {
+            FORLOOP(25);
+        }
+        case 26:
+        {
+            FORLOOP(26);
+        }
+        case 27:
+        {
+            FORLOOP(27);
+        }
+        case 28:
+        {
+            FORLOOP(28);
+        }
+        case 29:
+        {
+            FORLOOP(29);
+        }
+        case 30:
+        {
+            FORLOOP(30);
+        }
+
+        case 31:
+        {
+            FORLOOP(31);
+        }
+        case 32:
+        {
+            FORLOOP(32);
+        }
+        default:
+        {
+#pragma unroll 4
+            for(rocblas_int j = 0; j < n_full; j += NB_X)
+            {
+                auto const aj = nontemporal_load(&(a[j]));
+                res += conj(aj) * x[tx + j];
+            }
+        }
+        } // end switch
+#undef FORFLOOP
 
         if(tx + n_full < n)
         {
@@ -585,12 +735,159 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(it != c)
     {
-#pragma unroll 4
-        for(rocblas_int j = 0; j < n_full; j += NB_X)
+#define FORLOOP(K)                                                    \
+    {                                                                 \
+        _Pragma(STRINGIFY(unroll K)) for(int j = 0; j < K; j += NB_X) \
+        {                                                             \
+            auto const aj = nontemporal_load(&(a[j]));                \
+            res += conj(aj) * x[tx + j];                              \
+        };                                                            \
+        break;                                                        \
+    }
+        switch(n_full)
         {
-            auto const aj = nontemporal_load(&(a[j]));
-            res += conj(aj) * x[tx + j];
+        case 1:
+        {
+            FORLOOP(1);
         }
+        case 2:
+        {
+            FORLOOP(2);
+        }
+        case 3:
+        {
+            FORLOOP(3);
+        }
+        case 4:
+        {
+            FORLOOP(4);
+        }
+        case 5:
+        {
+            FORLOOP(5);
+        }
+        case 6:
+        {
+            FORLOOP(6);
+        }
+        case 7:
+        {
+            FORLOOP(7);
+        }
+        case 8:
+        {
+            FORLOOP(8);
+        }
+        case 9:
+        {
+            FORLOOP(9);
+        }
+        case 10:
+        {
+            FORLOOP(10);
+        }
+
+        case 11:
+        {
+            FORLOOP(11);
+        }
+        case 12:
+        {
+            FORLOOP(12);
+        }
+        case 13:
+        {
+            FORLOOP(13);
+        }
+        case 14:
+        {
+            FORLOOP(14);
+        }
+        case 15:
+        {
+            FORLOOP(15);
+        }
+        case 16:
+        {
+            FORLOOP(16);
+        }
+        case 17:
+        {
+            FORLOOP(17);
+        }
+        case 18:
+        {
+            FORLOOP(18);
+        }
+        case 19:
+        {
+            FORLOOP(19);
+        }
+        case 20:
+        {
+            FORLOOP(20);
+        }
+
+        case 21:
+        {
+            FORLOOP(21);
+        }
+        case 22:
+        {
+            FORLOOP(22);
+        }
+        case 23:
+        {
+            FORLOOP(23);
+        }
+        case 24:
+        {
+            FORLOOP(24);
+        }
+        case 25:
+        {
+            FORLOOP(25);
+        }
+        case 26:
+        {
+            FORLOOP(26);
+        }
+        case 27:
+        {
+            FORLOOP(27);
+        }
+        case 28:
+        {
+            FORLOOP(28);
+        }
+        case 29:
+        {
+            FORLOOP(29);
+        }
+        case 30:
+        {
+            FORLOOP(30);
+        }
+
+        case 31:
+        {
+            FORLOOP(31);
+        }
+        case 32:
+        {
+            FORLOOP(32);
+        }
+        default:
+        {
+#pragma unroll 4
+            for(rocblas_int j = 0; j < n_full; j += NB_X)
+            {
+                auto const aj = nontemporal_load(&(a[j]));
+                res += conj(aj) * x[tx + j];
+            }
+        }
+        } // end switch
+#undef FORFLOOP
 
         if(tx + n_full < n)
         {
@@ -1097,5 +1394,5 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     return rocblas_status_success;
 }
 
-#undef USE_SCALAR_TYPE
+#undef USE_SPLIT_TYPE
 ROCSOLVER_END_NAMESPACE
