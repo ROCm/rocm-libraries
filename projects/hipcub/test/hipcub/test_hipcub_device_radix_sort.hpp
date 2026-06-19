@@ -37,12 +37,6 @@
 #include <cstdint>
 #include <vector>
 
-#if defined(HIPCUB_ROCPRIM_API)
-#include <rocprim/device/config_types.hpp>
-#include <set>
-#include <algorithm>
-#endif
-
 #define HIP_CHECK_MEMORY(condition)                                                         \
     {                                                                                       \
         hipError_t error = condition;                                                       \
@@ -59,49 +53,6 @@
             exit(error);                                                                    \
         }                                                                                   \
     }
-
-// Temporary functions to disable larger-sized tests on gfx115x devices.
-// TODO: remove this once it's replaced with a more robust fix.
-class TempDisablement
-{
-public:
-	static bool is_arch_disabled()
-	{
-#if defined(HIPCUB_ROCPRIM_API)
-		rocprim::detail::target_arch arch;
-		if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
-		{
-			std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
-		}
-
-		const std::set<rocprim::detail::target_arch> disabled_arches = {
-			rocprim::detail::target_arch::gfx1150,
-			rocprim::detail::target_arch::gfx1151,
-			rocprim::detail::target_arch::gfx1152,
-			rocprim::detail::target_arch::gfx1153
-		};
-
-		return disabled_arches.find(arch) != disabled_arches.end();
-#else
-		return false;
-#endif
-	}
-
-	static std::vector<size_t> filter_sizes(std::vector<size_t> sizes)
-	{
-#if defined(HIPCUB_ROCPRIM_API)
-		if (TempDisablement::is_arch_disabled())
-		{
-			auto it = std::remove_if(sizes.begin(), sizes.end(), [](const size_t& size) {
-				return size > 10000;
-			});
-			sizes.erase(it, sizes.end());
-		}
-#endif
-
-		return sizes;
-	}
-};
 
 template<class Key,
          class Value,
@@ -296,7 +247,7 @@ void sort_keys()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -558,7 +509,7 @@ void sort_pairs()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -856,7 +807,7 @@ void sort_keys_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -1097,7 +1048,7 @@ void sort_pairs_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -1289,7 +1240,7 @@ inline void sort_keys_over_4g()
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
 
 #if defined(HIPCUB_ROCPRIM_API)
-	if (TempDisablement::is_arch_disabled())
+	if (test_common_utils::TempDisablement::is_arch_disabled())
 		GTEST_SKIP() << "Temporarily skipping test on gfx115x.";
 #endif
 
@@ -1403,7 +1354,7 @@ inline void sort_keys_large_sizes()
 #else
     const std::vector<size_t> sizes = test_utils::get_large_sizes(seeds[0]);
 #endif
-    for(const size_t size : TempDisablement::filter_sizes(sizes))
+    for(const size_t size : test_common_utils::TempDisablement::filter_sizes(sizes))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
