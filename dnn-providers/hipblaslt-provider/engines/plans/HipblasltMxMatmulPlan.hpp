@@ -40,7 +40,6 @@ public:
     const HipblasltMatrixLayout& c() const;
 
     const HipblasltMatmulDesc& desc() const;
-    HipblasltMatmulDesc& desc();
 
     // Scale UIDs in hipBLAS's frame: aScaleUid() is our B's scale (A_SCALE),
     // bScaleUid() is our A's scale (B_SCALE). See the constructor for the swap.
@@ -83,7 +82,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    mutable MxMatmulParams _params;
+    MxMatmulParams _params;
     hipblasLtMatmulHeuristicResult_t _heuristicResult;
 
     // hipBLASLt matmul workspace size (from the heuristic).

@@ -114,11 +114,6 @@ const HipblasltMatmulDesc& MxMatmulParams::desc() const
     return _matmulDesc;
 }
 
-HipblasltMatmulDesc& MxMatmulParams::desc()
-{
-    return _matmulDesc;
-}
-
 int64_t MxMatmulParams::aScaleUid() const
 {
     return _aScaleUid;
@@ -248,15 +243,18 @@ void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                         _scaleDstLayout.matrixLayout(),
                                                         handle.getStream()));
 
-    // Scale pointers are device addresses, so they are set here rather than at
-    // build time (where the scale modes were set). Already in hipBLAS's frame.
-    _params.desc().setAScalePointer(aScaleBuffer.ptr);
-    _params.desc().setBScalePointer(transposedBScale);
+    // Clone the plan's descriptor so this call owns its own copy: scale pointers
+    // are per-call device addresses, and mutating a shared descriptor would make
+    // concurrent execute() calls on one plan instance race. Already in hipBLAS's
+    // frame (swapped in MxMatmulParams).
+    HipblasltMatmulDesc desc = _params.desc().clone();
+    desc.setAScalePointer(aScaleBuffer.ptr);
+    desc.setBScalePointer(transposedBScale);
 
     // Operands are already in hipBLAS's frame (swapped in MxMatmulParams), so
     // pass them straight through.
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,
-                                               _params.desc().matmulDesc(),
+                                               desc.matmulDesc(),
                                                &ALPHA,
                                                aBuffer.ptr,
                                                _params.a().matrixLayout(),
