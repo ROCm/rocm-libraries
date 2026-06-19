@@ -320,11 +320,14 @@ struct BQuantBlockUniversalGemmAsBsCr
                     {
                         printf("[BQ_LDS_SCALE] lane=0 blk=0 nIter=%d kQScale=%d "
                                "reg_offset=%d b_scale_f=%.6f\n",
-                               (int)nIter, (int)kQScale, (int)reg_offset, b_scale_f);
+                               static_cast<int>(nIter), static_cast<int>(kQScale),
+                               static_cast<int>(reg_offset), b_scale_f);
                         printf("[BQ_LDS_SCALE] NIterPerWarp=%d KIterPerQScale=%d "
                                "QScalesPerBlockRow=%d thread_buffer_size=%d\n",
-                               (int)NIterPerWarp, (int)Traits::KIterPerQScale,
-                               (int)Traits::QScalesPerBlockRow, (int)thread_buffer_size);
+                               static_cast<int>(NIterPerWarp),
+                               static_cast<int>(Traits::KIterPerQScale),
+                               static_cast<int>(Traits::QScalesPerBlockRow),
+                               static_cast<int>(thread_buffer_size));
                     }
                 }
 
@@ -360,14 +363,14 @@ struct BQuantBlockUniversalGemmAsBsCr
                         {
                             printf("[BQ_DEQUANT] lane=0 nIter=%d kIter=%d B after scale+cast "
                                    "(first 8): ",
-                                   (int)nIter, (int)kIter);
+                                   static_cast<int>(nIter), static_cast<int>(kIter));
                             constexpr index_t print_n =
                                 (thread_buffer_size * UnaryOpSize_ < 8)
                                     ? thread_buffer_size * UnaryOpSize_
                                     : 8;
                             static_for<0, print_n, 1>{}([&](auto ii) {
                                 printf("%.4f ",
-                                       (float)b_warp_thread_buffer.template get_as<BComputeDataType>()[ii]);
+                                       static_cast<float>(b_warp_thread_buffer.template get_as<BComputeDataType>()[ii]));
                             });
                             printf("\n");
                         }
@@ -424,24 +427,27 @@ struct BQuantBlockUniversalGemmAsBsCr
                             if(threadIdx.x == 0 && blockIdx.x == 0)
                             {
                                 printf("[BQ_GEMM] lane=0 blk=0 mIter=%d nIter=%d kIter=%d\n",
-                                       (int)mIter, (int)nIter, (int)kIter);
+                                       static_cast<int>(mIter), static_cast<int>(nIter),
+                                       static_cast<int>(kIter));
                                 printf("[BQ_GEMM] AWarpTensor buf_size=%d, BWarpTensor buf_size=%d\n",
-                                       (int)AWarpTensor::get_thread_buffer_size(),
-                                       (int)BWarpTensor::get_thread_buffer_size());
+                                       static_cast<int>(AWarpTensor::get_thread_buffer_size()),
+                                       static_cast<int>(BWarpTensor::get_thread_buffer_size()));
                                 constexpr index_t a_size = AWarpTensor::get_thread_buffer_size();
                                 constexpr index_t b_size = BWarpTensor::get_thread_buffer_size();
                                 constexpr index_t a_print = (a_size < 8) ? a_size : 8;
                                 constexpr index_t b_print = (b_size < 8) ? b_size : 8;
-                                printf("[BQ_GEMM] A data (first %d): ", (int)a_print);
+                                printf("[BQ_GEMM] A data (first %d): ",
+                                       static_cast<int>(a_print));
                                 static_for<0, a_print, 1>{}([&](auto ii) {
                                     printf("%.4f ",
-                                           (float)a_warp_tensor.get_thread_buffer()[ii]);
+                                           static_cast<float>(a_warp_tensor.get_thread_buffer()[ii]));
                                 });
                                 printf("\n");
-                                printf("[BQ_GEMM] B data (first %d): ", (int)b_print);
+                                printf("[BQ_GEMM] B data (first %d): ",
+                                       static_cast<int>(b_print));
                                 static_for<0, b_print, 1>{}([&](auto ii) {
                                     printf("%.4f ",
-                                           (float)b_warp_tensor.get_thread_buffer()[ii]);
+                                           static_cast<float>(b_warp_tensor.get_thread_buffer()[ii]));
                                 });
                                 printf("\n");
                             }
@@ -464,10 +470,11 @@ struct BQuantBlockUniversalGemmAsBsCr
                             {
                                 constexpr index_t c_size = CWarpTensor::get_thread_buffer_size();
                                 constexpr index_t c_print = (c_size < 4) ? c_size : 4;
-                                printf("[BQ_GEMM] C after MMA (first %d): ", (int)c_print);
+                                printf("[BQ_GEMM] C after MMA (first %d): ",
+                                       static_cast<int>(c_print));
                                 static_for<0, c_print, 1>{}([&](auto ii) {
                                     printf("%.4f ",
-                                           (float)c_warp_tensor.get_thread_buffer()[ii]);
+                                           static_cast<float>(c_warp_tensor.get_thread_buffer()[ii]));
                                 });
                                 printf("\n");
                             }
