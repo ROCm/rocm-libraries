@@ -2240,6 +2240,36 @@ class LogicalScheduler:
                             any_wrap = (lr.mtIteration > 0
                                         or any(d.mt_offset != 0 for d in gr_deps))
                             force_drain = (self.config.pgr == 1 and any_wrap)
+                            # S5: codify the invariants S6 relies on (the drain
+                            # stays ON here — these asserts emit nothing, so the
+                            # assembly is byte-identical). force_drain is the
+                            # StreamK wrap/cross-iter drain and is set on the
+                            # multi-DU pgr==1 path only; the single-DU / pgr>=2
+                            # rail never drains, so dropping the flag in S6 is
+                            # multi-DU-only and byte-identical elsewhere.
+                            assert (not force_drain) or self.config.pgr == 1, (
+                                "force_drain must be pgr==1 only (single-DU / "
+                                "pgr>=2 rail must stay byte-identical)")
+                            # The count carried on a force_drain wrap-LR is the
+                            # authoritative per-(tensor,uid) inflight set S6 will
+                            # emit once the drain is dropped (vmcnt(count)).  It
+                            # must be schedule-static: a pure function of the
+                            # logical schedule with no grid / StreamK input, so a
+                            # single static count is exact even under partial-tile
+                            # truncation (see §1.3 / STRIDE_MAPPING_PROOF).  Assert
+                            # determinism so a future change that smuggles grid
+                            # state into the count is caught before S6 trusts it.
+                            if force_drain:
+                                assert counts is not None, (
+                                    "force_drain wrap-LR must carry the precise "
+                                    "schedule-static count for S6")
+                                _recheck = self._compute_inflight_loads(
+                                    pi, lr.subIterK_slot,
+                                    wait_dep.ref.tensor, wait_dep)
+                                assert _recheck == counts, (
+                                    "wait_gr inflight count is not schedule-static "
+                                    f"(recompute {_recheck} != {counts}); S6's "
+                                    "static vmcnt(count) would be unsound")
                             lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                       has_sync=True,
                                                       adjustVmcnt=is_cross,

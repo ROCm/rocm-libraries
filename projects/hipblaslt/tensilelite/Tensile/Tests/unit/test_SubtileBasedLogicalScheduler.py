@@ -2033,6 +2033,96 @@ class TestComputeInflightLoads:
         assert found_any, "Expected at least one cross-iter / next-MT LR dep"
 
 
+class TestS5WaitGrCountAuthoritative:
+    """S5: the StreamK drain stays ON (force_drain still emits vmcnt(0)), but
+    we pin the invariants S6 will rely on once it drops the flag:
+
+      (a) every multi-DU pgr==1 wrap / cross-iter LR's wait_gr is force_drain,
+      (b) it still carries the precise per-(tensor,uid) inflight count, and
+      (c) that count is schedule-static — a pure function of the logical
+          schedule with no grid / StreamK input — so the future vmcnt(count)
+          is exact even under partial-tile truncation (§1.3).
+
+    The single-DU rail never force_drains, so S6's drain removal is
+    byte-identical for single-DU.  These assertions do not change any emitted
+    instruction; they lock the count S6 will trust.
+    """
+
+    # (label, make_cfg_256x256_fp4 kwargs) for multi-DU pgr==1 configs.
+    MULTI_DU_PGR1_CFGS = [
+        ("multi_partition",
+         dict(grSA_k_gran=2, grSB_k_gran=2, partSizeM=4, partSizeN=4, pgr=1)),
+        ("single_partition",
+         dict(grSA_k_gran=2, grSB_k_gran=2, pgr=1)),
+    ]
+
+    @staticmethod
+    def _wrap_waitgr_ops(sched):
+        """(pi, sk, lr_tensor, wait_gr_op) for every wrap / cross-iter LR."""
+        out = []
+        for pi, slots in enumerate(sched._partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    gr_deps = [d for d in lr.deps
+                               if isinstance(d.ref, GRPlacement)]
+                    any_wrap = (lr.mtIteration > 0
+                                or any(d.mt_offset != 0 for d in gr_deps))
+                    if not any_wrap:
+                        continue
+                    for op in lr.preOps:
+                        if op.kind == 'wait_gr':
+                            out.append((pi, slot.subIterK, lr.tensor, op))
+        return out
+
+    def test_wrap_waitgr_force_drains_and_carries_count(self):
+        """(a)+(b): every wrap-LR force_drains and still carries its count."""
+        for name, kw in self.MULTI_DU_PGR1_CFGS:
+            sched = LogicalScheduler(make_cfg_256x256_fp4(**kw))
+            assert sched._is_multi_du(), f"{name}: expected a multi-DU config"
+            sched.remove_cross_deps()
+            wraps = self._wrap_waitgr_ops(sched)
+            assert wraps, f"{name}: expected at least one wrap/cross-iter wait_gr"
+            for pi, sk, tensor, op in wraps:
+                assert getattr(op, 'force_drain', False), (
+                    f"{name}: pi={pi} sk={sk} lr={tensor}: wrap wait_gr must "
+                    "force_drain while the drain is on (S5 keeps vmcnt(0))")
+                assert op.wait_gr_counts is not None, (
+                    f"{name}: pi={pi} sk={sk} lr={tensor}: force_drain wait_gr "
+                    "must still carry the schedule-static count for S6")
+
+    def test_wrap_waitgr_count_is_schedule_static(self):
+        """(c): building the same config twice yields identical wrap-LR counts;
+        the count has no grid / StreamK dependence (so a static vmcnt is exact).
+        """
+        for name, kw in self.MULTI_DU_PGR1_CFGS:
+            s1 = LogicalScheduler(make_cfg_256x256_fp4(**kw))
+            s2 = LogicalScheduler(make_cfg_256x256_fp4(**kw))
+            assert s1._is_multi_du()
+            s1.remove_cross_deps()
+            s2.remove_cross_deps()
+            w1 = self._wrap_waitgr_ops(s1)
+            w2 = self._wrap_waitgr_ops(s2)
+            assert w1 and len(w1) == len(w2), f"{name}: wrap-LR set differs"
+            for (pi1, sk1, t1, a), (pi2, sk2, t2, b) in zip(w1, w2):
+                assert (pi1, sk1, t1) == (pi2, sk2, t2), f"{name}: order differs"
+                assert a.wait_gr_counts == b.wait_gr_counts, (
+                    f"{name}: count not schedule-static at pi={pi1} sk={sk1} "
+                    f"lr={t1}: {a.wait_gr_counts} vs {b.wait_gr_counts}")
+
+    def test_single_du_never_force_drains(self):
+        """The rail: a single-DU config never force_drains, so S6's drain
+        removal is byte-identical for single-DU."""
+        sched = LogicalScheduler(make_cfg_256x256_fp4())  # default → single-DU
+        assert not sched._is_multi_du()
+        sched.remove_cross_deps()
+        for slot in (s for slots in sched._partitions for s in slots):
+            for lr in slot.lrs:
+                for op in lr.preOps:
+                    assert not getattr(op, 'force_drain', False), (
+                        "single-DU must never force_drain (S6 drain removal is "
+                        "multi-DU-only)")
+
+
 # ══════════════════════════════════════════════════════════════
 # Step 8: Group LR/GR
 # ══════════════════════════════════════════════════════════════
