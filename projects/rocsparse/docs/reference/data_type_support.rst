@@ -1,7 +1,8 @@
 .. meta::
-  :description: rocSPARSE library precision support overview
+  :description: rocSPARSE library precision support
   :keywords: rocSPARSE, ROCm, API, Sparse Linear Algebra, documentation, precision support, data types
 
+.. _rocsparse-data-type-support:
 .. _rocsparse_precision_support_:
 
 ********************************************************************
@@ -10,6 +11,51 @@ rocSPARSE precision support
 
 This section provides an overview of the numerical precision types supported by the rocSPARSE library for sparse
 matrix operations.
+
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _rocsparse-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+rocSPARSE. For the precision-prefix naming convention used across the API, see
+the sections that follow.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
 
 Supported precision types
 =========================
