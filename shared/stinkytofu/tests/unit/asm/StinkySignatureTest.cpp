@@ -49,7 +49,7 @@ TEST(StinkySignatureHelpers, ToHex) {
 TEST(StinkySignatureHelpers, FieldDesc) {
     std::string d = fieldDesc("stride", 4, 14);
     EXPECT_NE(d.find("stride"), std::string::npos);
-    EXPECT_NE(d.find("4"), std::string::npos);
+    EXPECT_NE(d.find('4'), std::string::npos);
 
     std::string d2 = fieldDesc("type", 2);
     EXPECT_NE(d2.find("type"), std::string::npos);
