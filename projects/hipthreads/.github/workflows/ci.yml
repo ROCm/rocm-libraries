@@ -19,6 +19,7 @@ on:
 jobs:
   build-and-test:
     name: Build and Test
+    if: github.repository == 'ArchSWTech/gpulib'
     runs-on: self-hosted
     env:
       HIP_VISIBLE_DEVICES: 0

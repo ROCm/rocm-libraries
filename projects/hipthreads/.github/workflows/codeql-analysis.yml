@@ -9,6 +9,7 @@ on:
 jobs:
     analyze:
         name: Analyze
+        if: github.repository == 'ArchSWTech/gpulib'
         runs-on: gpu-thread-code-scan
         permissions:
             actions: read
