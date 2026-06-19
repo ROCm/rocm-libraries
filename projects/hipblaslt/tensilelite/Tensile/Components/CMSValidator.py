@@ -522,7 +522,7 @@ class Timeline:
             if force_unroll:
                 valid_suffixes = {0, 1, 2, 3}
             else:
-                n_sub_iters = kernel["DepthU"] // kernel["MatrixInstruction"][2]
+                n_sub_iters = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["MatrixInstruction"][2]
                 if n_sub_iters == 1:
                     valid_suffixes = {0, 1}
                 else:

@@ -276,12 +276,12 @@ class StreamK(Component):
                 if kernel.get("UseSubtileImpl"):
                     _DepthU = (_DepthU * 32)
                 return _DepthU
-            return kernel["DepthU"]
+            return kernel.get("_ScaleDepthU", kernel["DepthU"])
         if kernel["ProblemType"]["Sparse"]:
             key = "_DepthU%s" % tc
             if key in kernel:
                 return kernel[key]
-        return kernel["DepthU"]
+        return kernel.get("_ScaleDepthU", kernel["DepthU"])
 
     def shiftSrd(self, writer, srdIdx) -> Module:
       module = Module("shiftSrd")
@@ -619,15 +619,15 @@ class StreamK(Component):
             unrollIdx = writer.states.unrollIdx
             loopChar = writer.states.indexChars[kernel["ProblemType"]["IndicesSummation"][unrollIdx]]
 
-            assert kernel["DepthU"] % 2 == 0 # Assuming DepthU is power of 2, if odd DepthU were supported this divide would need 2 more temp registers for divide
+            assert kernel.get("_ScaleDepthU", kernel["DepthU"]) % 2 == 0 # Assuming DepthU is power of 2, if odd DepthU were supported this divide would need 2 more temp registers for divide
             maxUnit = writer.states.tailloopInNllmaxUnit
             # tailloopInNll + maxUnit == 1 case, tailloopInNll is always used and no need to adjust loopCounter
             if not (writer.states.tailloopInNll and maxUnit == 1):
-                if ((kernel["DepthU"] & (kernel["DepthU"] - 1)) == 0):
-                    module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=None, doRemainder=2))
+                if ((kernel.get("_ScaleDepthU", kernel["DepthU"]) & (kernel.get("_ScaleDepthU", kernel["DepthU"]) - 1)) == 0):
+                    module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel.get("_ScaleDepthU", kernel["DepthU"]), tmpSgprRes=None, doRemainder=2))
                 else:
                     with writer.allocTmpSgpr(4, tag="calculateLoopNumIterCommon_tmpSgpr1") as tmpSgpr1:
-                        module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
+                        module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel.get("_ScaleDepthU", kernel["DepthU"]), tmpSgprRes=tmpSgpr1, doRemainder=2))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
                 module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
                 sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
@@ -2294,13 +2294,13 @@ class StreamKOff(StreamK):
 
         quotient = loopCounterName
         dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
-        divisor = kernel["DepthU"]
+        divisor = kernel.get("_ScaleDepthU", kernel["DepthU"])
 
         module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
         if writer.states.tailloopInNll:
             maxUnit = writer.states.tailloopInNllmaxUnit
             sgprSizesSum = sgpr("SizesSum+%u" % writer.states.unrollIdx)
-            depthU = kernel["DepthU"]
+            depthU = kernel.get("_ScaleDepthU", kernel["DepthU"])
             tmpSgpr = tmpSgprInfo.idx
             assert (depthU > 1 and (depthU & (depthU - 1) == 0)), "DepthU should be power of 2 with tailloopInNll"
             # We need to increment loop counter by 1 if we use tailloopInNll code

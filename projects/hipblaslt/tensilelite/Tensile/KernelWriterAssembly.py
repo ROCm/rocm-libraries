@@ -1667,7 +1667,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     module.add(ValueSet("MT0", kernel["MacroTile0"]))
     module.add(ValueSet("MT1", kernel["MacroTile1"]))
-    module.add(ValueSet("DepthU", kernel["DepthU"]))
+    module.add(ValueSet("DepthU", kernel.get("_ScaleDepthU", kernel["DepthU"])))
 
     module.addComment0("Number of elements to shift-left SRD")
     module.add(ValueSet("SrdShiftLeftA", self.states.srdShiftLeft['A']))
@@ -3330,7 +3330,7 @@ class KernelWriterAssembly(KernelWriter):
 
       with self.allocTmpSgpr(1, tag="graUnrollAssignment_tmpSgprInfo") as tmpSgprInfo:
         # graUnrollAssignment += gsuSumIdx*DepthU
-        module.add(vectorStaticMultiply(vgpr(gsuOffset), vgpr(gsuOffset), kernel["DepthU"], tmpSgprInfo))
+        module.add(vectorStaticMultiply(vgpr(gsuOffset), vgpr(gsuOffset), kernel.get("_ScaleDepthU", kernel["DepthU"]), tmpSgprInfo))
 
       module.add(VAddCOU32(dst=vgpr(tP["gpr"]["uReg"]), dst1=VCC(), \
           src0=vgpr(gsuOffset), src1=vgpr(tP["gpr"]["uReg"]), \
@@ -3443,7 +3443,7 @@ class KernelWriterAssembly(KernelWriter):
               tmpVgprRes = None
               wave_id    = self.vgprPool.checkOut(1, tag="graTileOffsets_wave_id") # quotient
               # constant
-              du         = kernel["DepthU"]
+              du         = kernel.get("_ScaleDepthU", kernel["DepthU"])
               lsuStride  = du // lsu
               numWaves   = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
               # codes
@@ -3936,7 +3936,7 @@ class KernelWriterAssembly(KernelWriter):
 
     module.addComment("Using GLNC for %s"%tc)
     groVgpr0 = "GlobalReadOffset%s+%u" % (tc, 0)
-    parDimSize = kernel["MacroTile%s"%tc] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["DepthU"]
+    parDimSize = kernel["MacroTile%s"%tc] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel.get("_ScaleDepthU", kernel["DepthU"])
     numThreadsCoalesced = (parDimSize // kernel["GlobalReadVectorWidth%s"%tc])
 
     numThreadsPerMI = max((kernel["MatrixInstM"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
@@ -4297,7 +4297,7 @@ class KernelWriterAssembly(KernelWriter):
       module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), self.sizeRef(unrollSummation[-1]), \
                                 comment="scaled tile-offset by Summation size"))
 
-      depthU = kernel["DepthU"]
+      depthU = kernel.get("_ScaleDepthU", kernel["DepthU"])
       gsucLabel    = Label(label=self.labels.getNameInc("GSUC_M"), comment="")
       gsucLabelEnd = Label(label=self.labels.getNameInc("GSUC_M_End"), comment="")
       module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
@@ -4455,7 +4455,7 @@ class KernelWriterAssembly(KernelWriter):
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
             mt_units    = mt  # roundUp(MT/swizzleSize0), compile-time
-            extra_bytes = swizzleBlockSize * (kernel["DepthU"] // swizzleSize1)
+            extra_bytes = swizzleBlockSize * (kernel.get("_ScaleDepthU", kernel["DepthU"]) // swizzleSize1)
 
             for i in range(0, numDim):
               idx = indices[i]
@@ -4693,7 +4693,7 @@ class KernelWriterAssembly(KernelWriter):
         return module
 
     MX_PAD_K = 256
-    depthU = int(kernel["DepthU"])
+    depthU = int(kernel.get("_ScaleDepthU", kernel["DepthU"]))
 
     # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
     tcKpadBpeList = []
@@ -4811,7 +4811,7 @@ class KernelWriterAssembly(KernelWriter):
     # Both eligible — emit shared K math once, then per-tensor M/load blocks.
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
     waveSize        = kernel["WavefrontSize"]
-    depthU          = kernel["DepthU"]
+    depthU          = kernel.get("_ScaleDepthU", kernel["DepthU"])
     laneMaskCount   = self.states.laneSGPRCount
 
     # K-side geometry is identical for A and B in the bf16 subtile path.
@@ -5235,7 +5235,7 @@ class KernelWriterAssembly(KernelWriter):
             if tP["isA"]:
               quotient = loopCounterName
               dividend = "SizesSum+%u"%self.states.unrollIdx
-              divisor = kernel["DepthU"]
+              divisor = kernel.get("_ScaleDepthU", kernel["DepthU"])
               module.add(scalarStaticDivideAndRemainder(quotient, None, dividend, \
                          divisor, tmpSgprInfo, 0))
 
@@ -5581,7 +5581,7 @@ class KernelWriterAssembly(KernelWriter):
       validBytesPerLoad *= (kernel["NumThreads"] // self.states.kernel["WavefrontSize"])
     elif kernel["WaveSeparateGlobalRead%s"%tc] == 2:
       if kernel["ProblemType"]["TLU%s"%tc]:
-        validBytesPerLoad *= (kernel["DepthU"] // kernel["NumLoadsPerpendicular%s"%tc] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
+        validBytesPerLoad *= (kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["NumLoadsPerpendicular%s"%tc] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
       else:
         validBytesPerLoad *= (kernel["MacroTile%s"%tc] // kernel["NumLoadsPerpendicular%s"%tc] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
 
@@ -5824,7 +5824,7 @@ class KernelWriterAssembly(KernelWriter):
     # another address conversion for DirectToLds + NumLoadsCoalesced > 1
     divisorName = tP["lvc"]
     divisor = kernel[divisorName]
-    width = kernel["WavefrontSize"] if tP["tlu"] else kernel["DepthU"]
+    width = kernel["WavefrontSize"] if tP["tlu"] else kernel.get("_ScaleDepthU", kernel["DepthU"])
     if divisor < width:
       # DirectToLds + above conditions, rotate offset_val bits to adjust LDS offset
       lowerScale = tP["nrc"]
@@ -5834,7 +5834,7 @@ class KernelWriterAssembly(KernelWriter):
         tile01 = tP["tile01Idx"]
         rightShift = int(log2(lowerScale)) # assuming power of 2
         leftShift = int(log2(upperScale)) # assuming power of 2
-        line = kernel["MacroTile%u" % tile01] if tP["tlu"] else kernel["DepthU"]
+        line = kernel["MacroTile%u" % tile01] if tP["tlu"] else kernel.get("_ScaleDepthU", kernel["DepthU"])
         ldsLineSize = int(line * tP["bpe"]) // lowerScale
         maskBitsLow = (lowerScale - 1) * ldsLineSize
         maskBitsHigh = (upperScale - 1) * lowerScale * ldsLineSize
@@ -6894,7 +6894,7 @@ class KernelWriterAssembly(KernelWriter):
                          comment="Calculate the remaining dimension along I/J direction."))
         imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=int(tP["bpeGR"]), \
                          comment="In bytes"))
-        imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel["DepthU"] - 1), \
+        imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel.get("_ScaleDepthU", kernel["DepthU"]) - 1), \
                          comment="Calculate the remaining dimension along L direction."))
         imod.add(SLShiftRightB32(dst=sgpr(sx2Tmp1), shiftHex=hex(log2(lsc)), \
                                  src=sgpr(sTmp1), comment="Divided by lsc(%s)"%(lsc)))
@@ -6925,7 +6925,7 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(SAddI32(dst=sgpr(sLoadTileIdx), src0=sgpr(sTmp0), src1=sgpr(sx2Tmp1), \
                          comment=""))
         imod.add(scalarStaticDivideAndRemainder(sx2Tmp0, sTmp1, "SizesSum+%u"%loopIdx, \
-                                                kernel["DepthU"], ContinuousRegister(sx2Tmp0, 2), \
+                                                kernel.get("_ScaleDepthU", kernel["DepthU"]), ContinuousRegister(sx2Tmp0, 2), \
                                                 2))
         imod.add(SAndB32(dst=sgpr(sLoadNum), src0=sgpr(sTmp1), src1=(tP["glvw"] - 1), \
                          comment="sLoadNum = (SizesSum+%u"%(loopIdx)+" mod DU) & glvw"))
@@ -7360,7 +7360,7 @@ class KernelWriterAssembly(KernelWriter):
 
         # size % DepthU
         module.add(scalarStaticDivideAndRemainder(tmpSgpr, loopCounterName, \
-          "SizesSum+%u"%loopIdx, kernel["DepthU"], ContinuousRegister(tmpSgpr+2, 2), 2))
+          "SizesSum+%u"%loopIdx, kernel.get("_ScaleDepthU", kernel["DepthU"]), ContinuousRegister(tmpSgpr+2, 2), 2))
         loopCounter = sgpr(loopCounterName)
 
         if tailloopInNll and NLLindex == 0:
@@ -7404,7 +7404,7 @@ class KernelWriterAssembly(KernelWriter):
           wave_id    = self.vgprPool.checkOut(1, tag="calculateLoopNumIter_wave_id")
           numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
 
-          module.add(SMovB32(dst=sgpr(dividend), src=hex(kernel["DepthU"]//kernel["LocalSplitU"]), comment="DEPTHU / LOCAL_SPLITU" ))
+          module.add(SMovB32(dst=sgpr(dividend), src=hex(kernel.get("_ScaleDepthU", kernel["DepthU"])//kernel["LocalSplitU"]), comment="DEPTHU / LOCAL_SPLITU" ))
           module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgprRes))
           module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgprRes, comment="LSU offset: Get LSU wave_id"))
           #module.add(VAddU32(vgpr(wave_id), vgpr(wave_id), 1, "add 1"))
@@ -7563,7 +7563,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if loopIdx == self.states.unrollIdx:
         # 1 loop check is necessary only when AssertSummationElementMultiple % (DepthU * 2) != 0
-        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
+        if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel.get("_ScaleDepthU", kernel["DepthU"]) * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
               src1=hex(endCounter-1), \
@@ -7770,7 +7770,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         endCounter = 0
 
-      if kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) == 0 and endCounter > 0 and \
+      if kernel["AssertSummationElementMultiple"] % (kernel.get("_ScaleDepthU", kernel["DepthU"]) * 2) == 0 and endCounter > 0 and \
          kernel["PrefetchGlobalRead"] <= 2:
         # if AssertSummationElementMultiple is multiple of DepthU*2, loop exit is necessary only once in 2 Loop iterations
         #  In endCounter % 2 == 1 case, exit at lc % 2 == 0 (= oddLabel). It means no exit if not oddLabel
@@ -9754,7 +9754,7 @@ class KernelWriterAssembly(KernelWriter):
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             module.add(scalarStaticDivideAndRemainder(tmpSgpr, tmpSgpr+1, "SizesSum+%u"%self.states.unrollIdx, \
-                      kernel["DepthU"], ContinuousRegister(tmpSgpr+2, 2), 2))
+                      kernel.get("_ScaleDepthU", kernel["DepthU"]), ContinuousRegister(tmpSgpr+2, 2), 2))
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
             if placeHolder == None:
               if isLongBranch:
@@ -10254,7 +10254,7 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment0("calc last unroll offset")
       module.add(VMovB32(dst=vgpr(tmp), src=sgpr("SizesSum+%u"%self.states.unrollIdx)))
       with self.allocTmpSgpr(1, tag="globalReadGuardK_tmpSgprInfo2") as tmpSgprInfo:
-        module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel["DepthU"], tmpVgprRes, tmpSgprInfo))
+        module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel.get("_ScaleDepthU", kernel["DepthU"]), tmpVgprRes, tmpSgprInfo))
 
       module.addComment0("final offset")
       module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
@@ -18490,7 +18490,7 @@ class KernelWriterAssembly(KernelWriter):
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
-    du: int = kernel["DepthU"]
+    du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
     if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"] or tP["isM"]):
       du = du // 2
     if tP["isM"]:
@@ -18638,7 +18638,7 @@ class KernelWriterAssembly(KernelWriter):
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
-    du: int = kernel["DepthU"]
+    du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
     isMX: bool = tc.startswith("MX")
     duScale = kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMX else 1
     du //= duScale
@@ -18713,7 +18713,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
 
       if ("MXS" in tc):
-        mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+        mxDU = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
         dim0 = tmpSgprIdx
         dim1 = sizeRefName(3)
@@ -19297,13 +19297,13 @@ class KernelWriterAssembly(KernelWriter):
       return f"tdm{tc}Group{idx}"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
-    du: int = kernel["DepthU"]
+    du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
     isMXS: bool = tc.startswith("MX")
     duScale = kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMXS else 1
     if isMXS:
         subTc = tc[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-        mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+        mxDU = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
     mxKSplitting = numMxKGroups >= numComp if isMXS else False
 
@@ -19362,19 +19362,19 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajorA = not tluA
     tluB: int = tPB["tlu"]
     unrolledMajorB = not tluB
-    du: int = kernel["DepthU"]
+    du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
     isMXSA: bool = tcA.startswith("MX")
     isMXSB: bool = tcB.startswith("MX")
     if isMXSA:
         subTc = tcA[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-        mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+        mxDU = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
     mxKSplittingA = numMxKGroups >= numComp if isMXSA else False
     if isMXSB:
         subTc = tcB[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-        mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+        mxDU = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
     mxKSplittingB = numMxKGroups >= numComp if isMXSB else False
     assert numWaves > 1

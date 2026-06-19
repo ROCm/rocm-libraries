@@ -447,7 +447,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     if numWavesThisAxis <= 1:
       return  # this tensor's axis is not split
     wavesize = kernel["WavefrontSize"]
-    du = kernel["DepthU"]
+    du = kernel.get("_ScaleDepthU", kernel["DepthU"])
     mt = kernel["MacroTile0"] if tc == 'A' else kernel["MacroTile1"]
     bpe = tileInfo.bpe
     waveId = writer.vgprPool.checkOut(1)

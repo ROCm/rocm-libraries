@@ -28,9 +28,9 @@ class GL2PrefetchLoad(GL2Prefetch):
         
         if isMX:
             coalescedDim = mt * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
+            perpendicularDim = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["MatrixInstK"]
         else:
-            coalescedDim, perpendicularDim = (mt, kernel["DepthU"]) if tp["tlu"] else (kernel["DepthU"], mt)
+            coalescedDim, perpendicularDim = (mt, kernel.get("_ScaleDepthU", kernel["DepthU"])) if tp["tlu"] else (kernel.get("_ScaleDepthU", kernel["DepthU"]), mt)
 
         tp["gl2ncp"] = perpendicularDim
         tp["gl2ncc"] = max(1, round(coalescedDim * tp["bpeGR"]) // globalPrefetchSize)
@@ -47,12 +47,12 @@ class GL2PrefetchLoad(GL2Prefetch):
         bpe: float = tp["bpeGR"]
         if tc.startswith("MX"):
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
-                round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
+                round(kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
-            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(kernel["DepthU"] * bpe), comment="addr increment"))
+            mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(kernel.get("_ScaleDepthU", kernel["DepthU"]) * bpe), comment="addr increment"))
         else:
-            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(kernel["DepthU"] * bpe), comment="addr increment"))
+            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(kernel.get("_ScaleDepthU", kernel["DepthU"]) * bpe), comment="addr increment"))
         return mod
 
     def calculateStartAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:

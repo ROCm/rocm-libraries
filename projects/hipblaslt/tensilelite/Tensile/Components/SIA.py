@@ -411,15 +411,15 @@ def getNumLocalWritePerMfma(writer, kernel, lwStartMfmaIndex):
     # Get LocalWritePerMfma
     #########
     numMfmaCanSched = writer.states.lwEndMfmaIndex - lwStartMfmaIndex + 1
-    numLoadsA = kernel["DepthU"]*kernel["MacroTileA"]//kernel["GlobalReadVectorWidthA"]//kernel["NumThreads"]
+    numLoadsA = kernel.get("_ScaleDepthU", kernel["DepthU"])*kernel["MacroTileA"]//kernel["GlobalReadVectorWidthA"]//kernel["NumThreads"]
     if kernel["ProblemType"]["MXBlockA"]:
         numLoadsA += kernel["_DepthUMXSA"]*kernel["MacroTileA"]//kernel["GlobalReadVectorWidthMXSA"]//kernel["NumThreads"]
-    numLoadsB = kernel["DepthU"]*kernel["MacroTileB"]//kernel["GlobalReadVectorWidthB"]//kernel["NumThreads"]
+    numLoadsB = kernel.get("_ScaleDepthU", kernel["DepthU"])*kernel["MacroTileB"]//kernel["GlobalReadVectorWidthB"]//kernel["NumThreads"]
     if kernel["ProblemType"]["MXBlockB"]:
         numLoadsB += kernel["_DepthUMXSB"]*kernel["MacroTileB"]//kernel["GlobalReadVectorWidthMXSB"]//kernel["NumThreads"]
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         macroTile = kernel["MacroTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MacroTileA"]
-        numLoadsM = kernel["DepthU"]*macroTile//kernel["GlobalReadVectorWidthMetadata"]//kernel["NumThreads"]
+        numLoadsM = kernel.get("_ScaleDepthU", kernel["DepthU"])*macroTile//kernel["GlobalReadVectorWidthMetadata"]//kernel["NumThreads"]
     else:
         numLoadsM = 0
     writesToSched = (numLoadsA + numLoadsB + numLoadsM- 1) * PRECISION

@@ -558,8 +558,8 @@ class ProblemPredicate(Properties.Predicate):
             subrv={}
             subrv['ShiftPtrElemB'] = state['GlobalReadVectorWidthB'] if MayShiftB else 0
             subrv['ShiftPtrElemA'] = state['GlobalReadVectorWidthA'] if MayShiftA else 0
-            subrv['DUorMT1'] = state['DepthU'] if TLUB else state['MacroTile1']
-            subrv['DUorMT0'] = state['DepthU'] if TLUA else state['MacroTile0']
+            subrv['DUorMT1'] = state.get('_ScaleDepthU', state['DepthU']) if TLUB else state['MacroTile1']
+            subrv['DUorMT0'] = state.get('_ScaleDepthU', state['DepthU']) if TLUA else state['MacroTile0']
             # value is also a dict for better readibility, client side need to handel the serialization
             rv += [cls('BufferLoadOffsetLimitCheck', value=subrv)]
 
@@ -712,7 +712,7 @@ class SizeMapping:
                    workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
                    staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
                    staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
-                   depthU                   = d['DepthU'],
+                   depthU                   = d.get('_ScaleDepthU', d['DepthU']),
                    globalSplitUPGR          = internalParameters["GlobalSplitUPGR"],
                    globalSplitU             = d['GlobalSplitU'],
                    staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,

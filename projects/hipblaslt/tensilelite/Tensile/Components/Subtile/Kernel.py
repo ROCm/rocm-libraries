@@ -404,7 +404,7 @@ class TileInfo:
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["DepthU"]
+        self.depthU = kernel.get("_ScaleDepthU", kernel["DepthU"])
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]

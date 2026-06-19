@@ -5927,7 +5927,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
         mEnd = kernel["LoopIters"]
       if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"] or kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
-        mEnd = kernel["DepthU"]//(kernel["MatrixInstK"]*kernel["LocalSplitU"])
+        mEnd = kernel.get("_ScaleDepthU", kernel["DepthU"])//(kernel["MatrixInstK"]*kernel["LocalSplitU"])
 
       # Update local write pointers in case the upcoming global reads are writing directly to LDS:
       if kernel["PrefetchGlobalRead"]:
@@ -8064,7 +8064,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           lrvw = kernel["LocalReadVectorWidth"]
           grvw = kernel["GlobalReadVectorWidth%c"%tc]
           bpe = kernel["ProblemType"]["DataType%s"%tc].numBytes()
-          LdsStride = kernel["VectorWidth%s"%tc] * bpe * kernel["DepthU"]
+          LdsStride = kernel["VectorWidth%s"%tc] * bpe * kernel.get("_ScaleDepthU", kernel["DepthU"])
           MinLdsBlockSizePerPad = (kernel[f"GlobalReadVectorWidth%s"%tc] * bpe) * kernel["WavefrontSize"]
           isM0PadEnough = LdsStride >= MinLdsBlockSizePerPad
 

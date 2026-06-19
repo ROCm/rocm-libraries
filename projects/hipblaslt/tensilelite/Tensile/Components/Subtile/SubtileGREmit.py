@@ -1078,7 +1078,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
   dtype = kernel["ProblemType"][f"DataType{tc}"]
   mt = kernel[f"MacroTile{ti}"]
-  du = kernel["DepthU"]
+  du = kernel.get("_ScaleDepthU", kernel["DepthU"])
   bpe = tP["bpeGR"]
   numWaves = prod(kernel["MIWaveGroup"])
   wavelen = kernel["WavefrontSize"]

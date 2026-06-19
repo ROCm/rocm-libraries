@@ -270,7 +270,7 @@ class GSUOff(GSU):
 
     def calculateIncrementMetadata(self, writer, kernel, sgprOut):
         module = Module("GSU Off calculateLoopNumIter")
-        module.add(SMovB32(dst=sgpr(sgprOut), src=kernel["DepthU"], comment="IncsMetadata = DepthU if GSUC == 1"))
+        module.add(SMovB32(dst=sgpr(sgprOut), src=kernel.get("_ScaleDepthU", kernel["DepthU"]), comment="IncsMetadata = DepthU if GSUC == 1"))
         module.add(SLShiftRightB32(dst=sgpr(sgprOut), shiftHex=hex(log2(8)), src=sgpr(sgprOut)))
         return module
 
@@ -396,13 +396,13 @@ class GSUOn(GSU):
         # K stride differs from A/B; NoSwizzle MX scales share _DepthU with A/B.
         mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
         isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
-        depthU = kernel["DepthU"]
+        depthU = kernel.get("_ScaleDepthU", kernel["DepthU"])
         depthUDiv = kernel["_DepthU%s"%tc] if isMxSwizzledScaleLayout else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            depthUDiv = kernel["DepthU"] * kernel["MatrixInstM"]
+            depthUDiv = kernel.get("_ScaleDepthU", kernel["DepthU"]) * kernel["MatrixInstM"]
         elif (tP["isSwizzled"] and tc == 'B'):
-            depthUDiv = kernel["DepthU"] * kernel["MatrixInstN"]
+            depthUDiv = kernel.get("_ScaleDepthU", kernel["DepthU"]) * kernel["MatrixInstN"]
 
         gsuOffsetStr = "gsuOffset = DepthU*bpeGR*GSUSumIdx"
         divider = 1
@@ -539,7 +539,7 @@ class GSUOn(GSU):
         with writer.allocTmpSgpr(1, tag="GSU On graIncrementsRestore_tmpSgprInfo") as tmpSgprInfo:
             gsuSgpr = tmpSgprInfo.idx
             module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
-            module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=kernel["DepthU"]))
+            module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=kernel.get("_ScaleDepthU", kernel["DepthU"])))
             module.add(SMulI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
                                src1=sgpr(gsuSgpr), comment="=loopCounterName*DepthU"))
 
@@ -598,9 +598,9 @@ class GSUOn(GSU):
         module = Module("GSU On calculateLoopNumIter")
         with writer.allocTmpSgpr(1, tag="GSU On calculateIncrementMetadata_tmpSgprGSU") as tmpSgprGSU:
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
-            module.add(SMulI32(dst=sgpr(sgprOut), src0=kernel["DepthU"], src1=sgpr(tmpSgprGSU.idx), comment="IncsMetadata = GSU*DepthU"))
+            module.add(SMulI32(dst=sgpr(sgprOut), src0=kernel.get("_ScaleDepthU", kernel["DepthU"]), src1=sgpr(tmpSgprGSU.idx), comment="IncsMetadata = GSU*DepthU"))
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
-        module.add(SCMovB32(dst=sgpr(sgprOut), src=kernel["DepthU"], comment="IncsMetadata = DepthU if GSUC == 1"))
+        module.add(SCMovB32(dst=sgpr(sgprOut), src=kernel.get("_ScaleDepthU", kernel["DepthU"]), comment="IncsMetadata = DepthU if GSUC == 1"))
         module.add(SLShiftRightB32(dst=sgpr(sgprOut), shiftHex=hex(log2(8)), src=sgpr(sgprOut)))
         return module
 
@@ -689,8 +689,8 @@ class GSUOn(GSU):
             # calculate the lastWg
             tmpVgpr = writer.vgprPool.checkOut(2, tag="GSUOn_tailLoopNumIter_tmpVgpr")
             tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr+1), src=sgpr("SizesSum"), shiftHex=log2(kernel["DepthU"]), \
-                                            comment="s%s = s[sgprSizesSum] / %s"%(tmpSgpr+1,kernel["DepthU"])))
+            module.add(SLShiftRightB32(dst=sgpr(tmpSgpr+1), src=sgpr("SizesSum"), shiftHex=log2(kernel.get("_ScaleDepthU", kernel["DepthU"])), \
+                                            comment="s%s = s[sgprSizesSum] / %s"%(tmpSgpr+1,kernel.get("_ScaleDepthU", kernel["DepthU"]))))
             module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(scalarUInt32DivideAndRemainder(tmpSgpr, tmpSgpr+1, tmpSgpr+2, remainder, tmpVgprRes, kernel["WavefrontSize"]))
             module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+2), src1=1, comment="GSU-1"))

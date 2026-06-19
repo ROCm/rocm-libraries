@@ -784,7 +784,7 @@ class RegisterSchedule:
             if not self.dtype_predicate(kernel):
                 return ScheduleMatchStatus.NO_MATCH, None
 
-            MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]
+            MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel.get("_ScaleDepthU", kernel["DepthU"])
             PGR, PLR, DTL, DPLB = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"], kernel["DtlPlusLdsBuf"]
             WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
             kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, DPLB, WSGRA, WSGRB)

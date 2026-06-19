@@ -2754,6 +2754,12 @@ class Solution(collections.abc.Mapping):
 
       state["_DepthU"] = depthU
       state["DepthU"] = depthU
+      # _ScaleDepthU is the macro/scale DepthU: the amount of K consumed per
+      # main-loop iteration (== scaleDU == uid_range * dataDU).  Engine/codegen
+      # reads this for all loop-counting, SRD-advance and GSU math.  It always
+      # equals the macro DU here; the kernel-naming base DepthU may later be
+      # rebased onto the (smaller) data DU without disturbing the engine.
+      state["_ScaleDepthU"] = depthU
 
       state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:

@@ -50,12 +50,12 @@ class TensorDataMoverLoad(TensorDataMover):
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
-        du: int = kernel["DepthU"]
+        du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
         if "MXS" in tc:
             subTc0 = tc[3]
-            depthU: int = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc0}"]
+            depthU: int = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc0}"]
         else:
-            depthU: int = kernel["DepthU"]
+            depthU: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
         gsuOffsetBytes: int = round(depthU * bpe)
 
         mod.addComment(f"TDM calc start addr of {tc}")
@@ -133,7 +133,7 @@ class TensorDataMoverLoad(TensorDataMover):
         assert numWaves > 1
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
-        du: int = kernel["DepthU"]
+        du: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
         tile1Size: int = du if tlu else mt
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
         if tlu and ((kernel["ProblemType"]["Sparse"] == 1 and tc.endswith("A")) or (kernel["ProblemType"]["Sparse"] == 2 and tc.endswith("B"))):
@@ -142,9 +142,9 @@ class TensorDataMoverLoad(TensorDataMover):
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         if "MXS" in tc:
-            depthU: int = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            depthU: int = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
         else:
-            depthU: int = kernel["DepthU"]
+            depthU: int = kernel.get("_ScaleDepthU", kernel["DepthU"])
         gsuOffsetBytes: int = round(depthU * bpe)
 
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
@@ -163,7 +163,7 @@ class TensorDataMoverLoad(TensorDataMover):
             #add wave offset
             mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
             if ("MXS" in tc):
-                mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+                mxDU = kernel.get("_ScaleDepthU", kernel["DepthU"]) // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
                 if numMxKGroups >= numComp:
                     # K-splitting: offset by stride to next k_group

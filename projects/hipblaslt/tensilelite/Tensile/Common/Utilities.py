@@ -55,7 +55,7 @@ def isSubtileMultiDU(kernel) -> bool:
     re-derived inline across the codegen (AsmStoreState, GlobalWriteBatch,
     KernelWriterAssembly).
     """
-    du = kernel["DepthU"]
+    du = kernel.get("_ScaleDepthU", kernel["DepthU"])
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
 # Global
