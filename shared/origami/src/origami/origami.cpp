@@ -96,7 +96,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // because the K dimension is split across workgroups (skGrid > tiles): the fixup handoff
   // still needs a tile's co-op workgroups to stay in consecutive physical-WG order, and the
   // chunk transform reorders them. Disable chunking whenever tiles are split or partial.
-  bool sk_split_tiles  = (skGrid > 0 && skGrid > numMTs * batch);
+  bool sk_split_tiles  = (skGrid > 0 && split_factor > 1);
   bool sk_disable_chunk = sk_has_partial_tiles || sk_split_tiles;
 
   // -------------------
