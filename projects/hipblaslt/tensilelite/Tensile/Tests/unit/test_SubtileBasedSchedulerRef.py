@@ -1506,35 +1506,33 @@ MAINLOOP (dependency paths):
       path 1:
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [0-4]
     subIterK=1:
-      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [7]
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [6]
       preMFMA path 0:
-        [ 7] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
-        [ 8] wait_gr    wait_gr(A=5,B=8)
-        [ 9] sync       sync
-        [10] lr_inc     lr_inc(A)
-        [11] lr_inc     lr_inc(B)
+        [ 7] wait_gr    wait_gr(A=5,B=8)
+        [ 8] sync       sync
+        [ 9] lr_inc     lr_inc(A)
+        [10] lr_inc     lr_inc(B)
         [ 1] lr         LR A  (MT n, subIterK [2]) [0-7]
         [ 2] lr         LR B  (MT n, subIterK [2]) [0-7]
         [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-7]
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [5-7]
-        [ 6] gr_inc     gr_inc(A)
         [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-0]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-7] <- [9]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-7] <- [8]
       preMFMA path 0:
-        [ 9] wait_lr    wait_lr
+        [ 8] wait_lr    wait_lr
       path 0:
-        [10] wait_gr    wait_gr(A=8,B=1)
-        [11] sync       sync
+        [ 9] wait_gr    wait_gr(A=8,B=1)
+        [10] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-7]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-7]
         [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [1-7]
-        [ 6] gr_inc     gr_inc(B)
         [ 4] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-7]
-        [ 7] gr_inc     gr_inc(SA)
+        [ 6] gr_inc     gr_inc(SA)
         [ 5] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-7]
-        [ 8] gr_inc     gr_inc(SB)
+        [ 7] gr_inc     gr_inc(SB)
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [0-7] <- [10]
       preMFMA path 0:
@@ -1600,16 +1598,15 @@ MAINLOOP (dependency paths):
       path 1:
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [4-6]
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-5] <- [7]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-5] <- [6]
       preMFMA path 0:
-        [ 7] wait_lr    wait_lr
+        [ 6] wait_lr    wait_lr
       path 0:
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-7]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-5]
         [ 3] lr         LR SB (MT n, subIterK [0,1]) [6-7]
       path 1:
         [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [7-7]
-        [ 6] gr_inc     gr_inc(A)
         [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-2]
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [0-5] <- [3]
@@ -1644,15 +1641,14 @@ MAINLOOP (dependency paths):
         [ 3] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-7]
         [ 4] gr_inc     gr_inc(SB)
     subIterK=2:
-      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [6-7] <- [4]
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [6-7] <- [3]
       preMFMA path 0:
-        [ 4] wait_lr    wait_lr
+        [ 3] wait_lr    wait_lr
       path 0:
-        [ 5] wait_gr    wait_gr(SB=1)
-        [ 6] sync       sync
+        [ 4] wait_gr    wait_gr(SB=1)
+        [ 5] sync       sync
         [ 1] lr         LR B  (MT n, subIterK [3]) [6-7]
         [ 2] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
-        [ 3] gr_inc     gr_inc(B)
     subIterK=3:
       MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [6-7] <- [15]
       preMFMA path 0:

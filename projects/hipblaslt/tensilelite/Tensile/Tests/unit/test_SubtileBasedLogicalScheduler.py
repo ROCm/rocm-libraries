@@ -1799,11 +1799,19 @@ class TestInsertGrLrInc:
         assert _preop_inc_tensors(gr_a_p2[0], 'gr_inc') == ['A']
 
     def test_1x1_multi_du_gr_inc(self):
-        """Multi-DU PGR=1: gr_inc as postOps on the globally last GR per (tensor, uid).
+        """Multi-DU PGR=1: gr_inc as postOps on the globally last GR per tensor.
 
         With multi-DU, GRInc must fire AFTER all loads for a uid complete
         (not before the first load), because uid=0 and uid=1 loads are
         interleaved across slots and share the same SRD.
+
+        S4: the data SRD is advanced exactly once per MT (macro DU) on the last
+        uid's GRIncOp; the earlier-uid A/B GRIncOps emitted no instruction and
+        are no longer inserted. So A/B carry a single postOp gr_inc at
+        unrollId == uid_range-1 (==1 here), not one per (tensor, uid). Scale
+        (SA/SB) has a single uid and is unchanged. This change is
+        assembly-value-preserving (IS-output byte-identical); only this symbolic
+        dep-path topology re-baselines.
         """
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
         sched = LogicalScheduler(cfg)
@@ -1815,16 +1823,18 @@ class TestInsertGrLrInc:
                             for op in gr.preOps if op.kind == 'gr_inc']
         assert len(all_preop_gr_inc) == 0
 
-        # postOp gr_inc on the globally last GR of each (tensor, uid)
+        # postOp gr_inc on the globally last GR per tensor (A/B only at the last
+        # uid; SA/SB at their single uid).
         all_postop_gr_inc = [op for slot in slots for gr in slot.grs
                              for op in gr.postOps if op.kind == 'gr_inc']
         postop_keys = [(op.tensor, op.unrollId) for op in all_postop_gr_inc]
-        assert ('A', 0) in postop_keys
         assert ('A', 1) in postop_keys
-        assert ('B', 0) in postop_keys
         assert ('B', 1) in postop_keys
         assert ('SA', 0) in postop_keys
         assert ('SB', 0) in postop_keys
+        # S4: vestigial uid=0 A/B gr_inc (emitted nothing) is no longer inserted.
+        assert ('A', 0) not in postop_keys
+        assert ('B', 0) not in postop_keys
         # SA/SB have numUnroll=1, no uid=1
         assert ('SA', 1) not in postop_keys
         assert ('SB', 1) not in postop_keys
