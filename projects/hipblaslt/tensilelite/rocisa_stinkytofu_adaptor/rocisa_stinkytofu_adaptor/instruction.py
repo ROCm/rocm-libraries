@@ -1731,8 +1731,9 @@ SMinU32 = _make_scalar_alu_class("SMinU32", "s_min_u32", InstType.INST_U32)
 # SAddI32 — real class (see Scalar ALU section above)
 # SAddU32 — real class (see Scalar ALU section above)
 # SAddCU32 — real class (see Scalar ALU section above)
-_SAddU64 = make_dummy_class(f"{_P}._SAddU64")
-SAddU64 = make_dummy_class(f"{_P}.SAddU64")
+_SAddU64 = _make_scalar_alu_class("SAddU64", "s_add_u64", InstType.INST_U64)
+# logicalIR: SAddU64 (composite)
+SAddU64 = _make_scalar_alu_class("SAddU64", "s_add_u64", InstType.INST_U64)
 # SMulI32 — real class (see Scalar ALU section above)
 # SMulHII32 — real class (see Scalar ALU section above)
 # SMulHIU32 — real class (see Scalar ALU section above)
@@ -1885,11 +1886,179 @@ class _SWaitCnt(Instruction):
         return dup
 
 
-_SWaitCntVscnt = make_dummy_class(f"{_P}._SWaitCntVscnt")
-_SWaitStorecnt = make_dummy_class(f"{_P}._SWaitStorecnt")
-_SWaitLoadcnt = make_dummy_class(f"{_P}._SWaitLoadcnt")
-_SWaitKMcnt = make_dummy_class(f"{_P}._SWaitKMcnt")
-_SWaitDscnt = make_dummy_class(f"{_P}._SWaitDscnt")
+class _SWaitCntVscnt(Instruction):
+    """``s_waitcnt_vscnt`` primitive (vscnt counter only, gfx10+)."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_waitcnt_vscnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_waitcnt_vscnt null, {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitCntVscnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+class _SWaitStorecnt(Instruction):
+    """``s_wait_storecnt`` primitive (store counter, gfx11+)."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_storecnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_storecnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitStorecnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+class _SWaitLoadcnt(Instruction):
+    """``s_wait_loadcnt`` primitive (load counter, gfx11+)."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_loadcnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_loadcnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitLoadcnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+class _SWaitKMcnt(Instruction):
+    """``s_wait_kmcnt`` primitive (kernel memory counter, gfx11+)."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_kmcnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_kmcnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitKMcnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
+class _SWaitDscnt(Instruction):
+    """``s_wait_dscnt`` primitive (DS/LDS counter, gfx11+)."""
+
+    __slots__ = ("cnt",)
+
+    def __init__(self, cnt: int = 0, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cnt = int(cnt)
+        self.setInst("s_wait_dscnt")
+
+    def getParams(self):
+        return [self.cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.cnt]
+
+    def toString(self) -> str:
+        return self.formatWithComment(f"s_wait_dscnt {self.cnt}")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SWaitDscnt(cnt=self.cnt, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
 
 
 class SWaitCnt(Instruction):
@@ -2027,11 +2196,12 @@ VAddI32 = _make_scalar_alu_class("VAddI32", "v_add_nc_i32", InstType.INST_I32)
 VAddCOU32 = _make_scalar_alu_class("VAddCOU32", "v_add_co_u32", InstType.INST_U32)
 # logicalIR: VAddCCOU32
 VAddCCOU32 = _make_scalar_alu_class("VAddCCOU32", "v_add_co_ci_u32", InstType.INST_U32)
-_VAddNCU64 = make_dummy_class(f"{_P}._VAddNCU64")
-VAddNCU64 = make_dummy_class(f"{_P}.VAddNCU64")
+_VAddNCU64 = _make_scalar_alu_class("VAddNCU64", "v_add_nc_u64", InstType.INST_U64)
+# logicalIR: VAddNCU64 (composite)
+VAddNCU64 = _make_scalar_alu_class("VAddNCU64", "v_add_nc_u64", InstType.INST_U64)
 # logicalIR: VAddPKF16
 VAddPKF16 = _make_scalar_alu_class("VAddPKF16", "v_pk_add_f16", InstType.INST_F16)
-_VAddPKF32 = make_dummy_class(f"{_P}._VAddPKF32")
+_VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F32)
 # logicalIR: VAddPKF32
 VAddPKF32 = _make_scalar_alu_class("VAddPKF32", "v_pk_add_f32", InstType.INST_F32)
 # logicalIR: VAdd3U32
@@ -2045,7 +2215,7 @@ VMulF64 = _make_scalar_alu_class("VMulF64", "v_mul_f64", InstType.INST_F64)
 VMulPKF16 = _make_scalar_alu_class("VMulPKF16", "v_pk_mul_f16", InstType.INST_F16)
 # logicalIR: VMulPKF32S
 VMulPKF32S = _make_scalar_alu_class("VMulPKF32S", "v_pk_mul_f32", InstType.INST_F32)
-_VMulPKF32 = make_dummy_class(f"{_P}._VMulPKF32")
+_VMulPKF32 = _make_scalar_alu_class("VMulPKF32", "v_pk_mul_f32", InstType.INST_F32)
 # logicalIR: VMulPKF32
 VMulPKF32 = _make_scalar_alu_class("VMulPKF32", "v_pk_mul_f32", InstType.INST_F32)
 # VMulLOU32 — real class (see Vector ALU section above)
@@ -2136,20 +2306,22 @@ VLShiftLeftB16 = _make_vector_shift_class("VLShiftLeftB16", "v_lshlrev_b16", Ins
 # VLShiftRightB32 — real class (see Vector ALU section above)
 # VLShiftLeftB64 — real class (see Vector ALU section above)
 # VLShiftRightB64 — real class (see Vector ALU section above)
-_VLShiftLeftOrB32 = make_dummy_class(f"{_P}._VLShiftLeftOrB32")
+_VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32)
 # logicalIR: VAShiftRightI32
 VAShiftRightI32 = _make_vector_shift_class("VAShiftRightI32", "v_ashrrev_i32", InstType.INST_I32)
 # logicalIR: VLShiftLeftOrB32
 VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32)
-_VAddLShiftLeftU32 = make_dummy_class(f"{_P}._VAddLShiftLeftU32")
-VAddLShiftLeftU32 = make_dummy_class(f"{_P}.VAddLShiftLeftU32")
-_VLShiftLeftAddU32 = make_dummy_class(f"{_P}._VLShiftLeftAddU32")
-VLShiftLeftAddU32 = make_dummy_class(f"{_P}.VLShiftLeftAddU32")
+_VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32)
+# logicalIR: VAddLShiftLeftU32 (composite)
+VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32)
+_VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32)
+# logicalIR: VLShiftLeftAddU32 (composite)
+VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32)
 # logicalIR: VMovB32  -- real class defined at the bottom of this file
 # (after ``CommonInstruction`` / ``_to_stinky_register`` are in scope).
 # Intentionally NOT declared here so ``from rocisa.instruction import
 # VMovB32`` resolves to the real class via the module-scope binding.
-_VMovB64 = make_dummy_class(f"{_P}._VMovB64")
+_VMovB64 = _make_scalar_unary_class("VMovB64", "v_mov_b64", InstType.INST_B64)
 # logicalIR: VMovB64
 VMovB64 = _make_scalar_unary_class("VMovB64", "v_mov_b64", InstType.INST_B64)
 # logicalIR: VSwapB32

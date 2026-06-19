@@ -1231,13 +1231,9 @@ class TestDevelopInstructionExports(unittest.TestCase):
         "GlobalInv",
         "GlobalPrefetchB8",
         "GlobalWb",
-        "SAddU64",
         "SAtomicInc",
         "SBfeU32",
         "SMemAtomicIncInstruction",
-        "VAddNCU64",
-        "_SAddU64",
-        "_VAddNCU64",
     )
 
     def test_all_develop_exports_importable(self):

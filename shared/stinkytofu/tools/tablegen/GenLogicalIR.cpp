@@ -585,6 +585,10 @@ static bool genIRClasses(const std::string& outdir) {
     out << "        case logical::VMulPKF32:\n";
     out << "        case logical::VMovB64:\n";
     out << "        case logical::VLShiftLeftOrB32:\n";
+    out << "        case logical::SAddU64:\n";
+    out << "        case logical::VAddNCU64:\n";
+    out << "        case logical::VAddLShiftLeftU32:\n";
+    out << "        case logical::VLShiftLeftAddU32:\n";
     out << "            return true;\n";
     out << "        default:\n";
     out << "            return false;\n";
