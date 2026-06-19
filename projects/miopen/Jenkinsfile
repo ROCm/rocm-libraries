@@ -272,7 +272,12 @@ def cleanupAsanImage() {
 def runAsanTests(String gpuLabel, String gfxFamily) {
     withWorkingDir {
         def variant = env.STAGE_NAME
-        def asanImage = params.ASAN_IMAGE_OVERRIDE?.trim() ? params.ASAN_IMAGE_OVERRIDE
+        // Use ASAN_IMAGE_OVERRIDE as a direct Docker image only when it looks like one
+        // (contains ':' or '/'). A numeric value is a run ID used to build a candidate image;
+        // in that case ASAN_CANDIDATE_IMAGE is set by the build stage.
+        def override = params.ASAN_IMAGE_OVERRIDE?.trim()
+        def asanImage = (override && (override.contains(':') || override.contains('/')))
+                      ? override
                       : env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE
                       : "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
         def video_id = sh(returnStdout: true, script: 'getent group video | cut -d: -f3').trim()
@@ -378,7 +383,12 @@ def runAsanDockerBuild() {
     node(rocmnode("docker")) {
         try {
             withWorkingDir {
-                def candidateTag = buildAsanDockerImage(amdgpuFamilies: "gfx94X-dcgpu", amdgpuArchs: "gfx942")
+                def override = params.ASAN_IMAGE_OVERRIDE?.trim()
+                def isRunId  = override && override.isNumber()
+                def candidateTag = isRunId
+                    ? buildAsanDockerImage(amdgpuFamilies: "gfx94X-dcgpu", amdgpuArchs: "gfx942",
+                                           asanArtifactsRunId: override)
+                    : buildAsanDockerImage(amdgpuFamilies: "gfx94X-dcgpu", amdgpuArchs: "gfx942")
                 env.ASAN_CANDIDATE_IMAGE = candidateTag
             }
         } finally {
@@ -432,30 +442,45 @@ def buildAsanDockerImage(Map conf=[:]) {
     def variant = env.STAGE_NAME
     env.DOCKER_BUILDKIT = 1
     def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_source_cache"
     def amdgpuFamilies = conf.get("amdgpuFamilies", "gfx94X-dcgpu")
     def amdgpuArchs = conf.get("amdgpuArchs", "gfx942")
+    def asanArtifactsRunId = conf.get("asanArtifactsRunId", "")?.trim()
 
-    // Read TheRock hash from the single source of truth (same pattern as buildTheRockDockerImage)
-    def theRockHash = sh(
-        script: """
-            grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
-            | grep 'value:' | awk '{print \$2}' | tr -d '"'
-        """.stripIndent(),
-        returnStdout: true
-    ).trim()
+    def cacheRef
+    def dockerArgs
 
-    def dockerArgs = "--build-arg BUILD_TYPE=source_build " +
+    if (asanArtifactsRunId) {
+        // Prebuilt mode: fetch ROCm artifacts from a specific GitHub Actions run
+        cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_prebuilt_cache"
+        dockerArgs = "--build-arg BUILD_TYPE=prebuilt " +
+                     "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
+                     "--build-arg AMDGPU_TARGETS=\"${amdgpuArchs},${amdgpuArchs}:xnack+\" " +
+                     "--build-arg ASAN_ARTIFACTS_RUN_ID=\"${asanArtifactsRunId}\" " +
+                     " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
+        echo "Building ASAN image ${asanTag} from prebuilt artifacts (run=${asanArtifactsRunId}, families=${amdgpuFamilies})"
+    } else {
+        // Source build mode: build TheRock + MIOpen from source with ASAN preset
+        cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_source_cache"
+        // Read TheRock hash from the single source of truth (same pattern as buildTheRockDockerImage)
+        def theRockHash = sh(
+            script: """
+                grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
+                | grep 'value:' | awk '{print \$2}' | tr -d '"'
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+        dockerArgs = "--build-arg BUILD_TYPE=source_build " +
                      "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
                      "--build-arg GPU_ARCHS=\"${amdgpuArchs}\" " +
                      "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                      "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker\" " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
+        echo "Building ASAN image ${asanTag} from source (TheRock=${theRockHash}, families=${amdgpuFamilies})"
+    }
+
     def buildContext = "${env.WORKSPACE}/${env.MIOPEN_DIR}/."
     def dockerCacheArgs = "--cache-from type=registry,ref=${cacheRef} " +
                           "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min "
-
-    echo "Building ASAN image ${asanTag} from source (TheRock=${theRockHash}, families=${amdgpuFamilies})"
     utils.setGithubStatus(variant, 'pending', 'In progress')
     try {
         withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
@@ -584,7 +609,9 @@ pipeline {
             description: "Specify a custom Docker image to use for CI for debugging")
         string(name: "ASAN_IMAGE_OVERRIDE",
             defaultValue: '',
-            description: "Specify a custom ASAN Docker image to use instead of rocm/miopen-dev:asan (for debugging)")
+            description: "Override ASAN image for testing. Accepts: a Docker image tag (e.g. 'rocm/miopen-dev:asan', used directly, skips build) " +
+                         "or a numeric GitHub Actions run ID (builds ASAN image from prebuilt artifacts of that run, then promotes to :asan if tests pass). " +
+                         "Leave empty to use the weekly source-built rocm/miopen-dev:asan.")
         booleanParam(
             name: "USE_SCCACHE_DOCKER",
             defaultValue: true,
@@ -672,7 +699,10 @@ pipeline {
         }
         stage('Build ASAN Docker for gfx942') {
             when {
-                expression { params.BUILD_ASAN_DOCKER }
+                expression {
+                    def asanOverride = params.ASAN_IMAGE_OVERRIDE?.trim()
+                    params.BUILD_ASAN_DOCKER || (asanOverride && asanOverride.isNumber())
+                }
             }
             steps {
                 script {
@@ -683,7 +713,8 @@ pipeline {
         stage("Full Tests") {
             when {
                 expression {
-                    params.BUILD_FULL_TESTS || params.BUILD_THEROCK_DOCKER || params.BUILD_ASAN_DOCKER
+                    def asanOverride = params.ASAN_IMAGE_OVERRIDE?.trim()
+                    params.BUILD_FULL_TESTS || params.BUILD_THEROCK_DOCKER || params.BUILD_ASAN_DOCKER || asanOverride
                 }
             }
             steps {
@@ -707,9 +738,14 @@ pipeline {
             }
         }
         // Promotes ci_asan_candidate to :asan only after the ASAN test in Full Tests passes.
+        // Runs for both source builds (BUILD_ASAN_DOCKER) and prebuilt-from-run-ID flows.
+        // Skipped when ASAN_IMAGE_OVERRIDE is a Docker image (no candidate was built).
         stage('Promote ASAN Docker') {
             when {
-                expression { params.BUILD_ASAN_DOCKER }
+                expression {
+                    def asanOverride = params.ASAN_IMAGE_OVERRIDE?.trim()
+                    params.BUILD_ASAN_DOCKER || (asanOverride && asanOverride.isNumber())
+                }
             }
             steps {
                 script {

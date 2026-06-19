@@ -1332,7 +1332,8 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
 
     // GFX942 Tests : ASAN declared first so it enters the gfx942 queue sooner
     def asanGfx942 = 'ASAN Hip Install All gfx942'
-    addStageIf(stages, (pipelineParams.TARGET_GFX942 || pipelineParams.BUILD_ASAN_DOCKER) && runAsanTestsFn != null, asanGfx942) {
+    def asanOverrideSet = pipelineEnv.ASAN_IMAGE_OVERRIDE?.trim()
+    addStageIf(stages, (pipelineParams.TARGET_GFX942 || pipelineParams.BUILD_ASAN_DOCKER || asanOverrideSet) && runAsanTestsFn != null, asanGfx942) {
         node(rocmnodeFn("gfx942")) {
             try {
                 withStageStatus { runAsanTestsFn("gfx942", "gfx942") }
