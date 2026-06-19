@@ -703,6 +703,48 @@ TEST_F(ClientRunSchedulerTest, BenchmarkLoopUsesRotatingKernelIndexModuloInputAr
               (std::vector<std::string>{"slot0", "slot1", "slot0", "slot1", "slot0", "slot1"}));
 }
 
+TEST_F(ClientRunSchedulerTest, BenchmarkPathDoesNotUseNoBenchmarkResetHook)
+{
+    harness.listeners.m_warmupRuns     = 0;
+    harness.listeners.m_syncs          = 1;
+    harness.listeners.m_enqueues       = 1;
+    harness.config.runKernels          = true;
+    harness.config.gpuTimer            = false;
+    harness.solution->kernelsPerSolveCall = {{makeKernel("bench")}};
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchBenchmark:"),
+              (std::vector<std::string>{"bench"}));
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "beginAsyncReset").empty());
+    EXPECT_EQ(harness.events,
+              (std::vector<std::string>{"preBenchmarkRun",
+                                        "reportProblemIndex:0",
+                                        "reportProblemProgress:0/0",
+                                        "preProblem",
+                                        "cancelAsyncReset",
+                                        "prepareGPUInputs",
+                                        "prepareRotatingGPUOutput:1",
+                                        "deviceSynchronize",
+                                        "preSolution",
+                                        "prepareGPUInputs",
+                                        "solve",
+                                        "waitCopyDone",
+                                        "preSyncs",
+                                        "preEnqueues",
+                                        "selectRotationCopy:0",
+                                        "launchBenchmark:bench",
+                                        "postEnqueues",
+                                        "validateEnqueues",
+                                        "postSyncs",
+                                        "postSolution",
+                                        "postProblem",
+                                        "postBenchmarkRun"}));
+}
+
 TEST_F(ClientRunSchedulerTest, SkipsFlushGridCallbackWhenNoBenchmarkRuns)
 {
     harness.config.runKernels             = false;

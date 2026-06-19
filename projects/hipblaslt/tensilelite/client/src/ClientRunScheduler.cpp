@@ -424,6 +424,7 @@ namespace TensileLite
                                         size_t eventCount = m_config.gpuTimer ? kernels[0].size() : 0;
                                         size_t syncs = m_deps.listeners->numSyncs();
                                         size_t enq   = m_deps.listeners->numEnqueuesPerSync();
+                                        bool   ranBenchmarkEnqueue = false;
 
                                         {
                                             ScopedTimer timer("benchmark_runs");
@@ -447,6 +448,7 @@ namespace TensileLite
                                                                 m_deps.stream,
                                                                 nullptr,
                                                                 nullptr));
+                                                        ranBenchmarkEnqueue = true;
 
                                                         if(icacheFlush)
                                                         {
@@ -470,6 +472,7 @@ namespace TensileLite
                                             solution->relaseDeviceUserArgs(dUA, dUAHost);
                                         }
 
+                                        if(!ranBenchmarkEnqueue)
                                         {
                                             ScopedTimer timer("async_reset_submit");
                                             m_deps.dataCoordinator->beginAsyncReset(problem);
