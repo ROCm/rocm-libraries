@@ -1267,7 +1267,6 @@ try
 {
     client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
-    print_asan_kernel_warning("rocblas-bench");
 
     fix_batch(argc, argv);
     Arguments   arg;
