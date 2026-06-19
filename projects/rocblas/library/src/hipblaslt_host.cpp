@@ -186,20 +186,13 @@ namespace
         }                                                                  \
     } while(0)
 
-#define CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)                                   \
+#define CATCH_AND_HANDLE_ERROR(RETURN_STATUS)                                                \
     catch(rocblas_status & e)                                                                \
     {                                                                                        \
         rocblas_internal_ostream msg;                                                        \
         print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
                              << rocblas_status_to_string(e));                                \
         RETURN_STATUS = e;                                                                   \
-    }                                                                                        \
-    catch(hipError_t & e)                                                                    \
-    {                                                                                        \
-        rocblas_internal_ostream msg;                                                        \
-        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
-                             << hipGetErrorString(e));                                       \
-        RETURN_STATUS = rocblas_status_invalid_handle;                                       \
     }
 
 #define HANDLE_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
@@ -207,14 +200,14 @@ namespace
     {                                                                 \
         THROW_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK);             \
     }                                                                 \
-    CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)
+    CATCH_AND_HANDLE_ERROR(RETURN_STATUS)
 
 #define HANDLE_HIP_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
     try                                                         \
     {                                                           \
         THROW_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK);             \
     }                                                           \
-    CATCH_HIPBLASLT_ERROR_AND_HIP_ERROR(RETURN_STATUS)
+    CATCH_AND_HANDLE_ERROR(RETURN_STATUS)
 
     template <typename T>
     __global__ void addOffsetKernel(T* dOutputPtr, T* dInputPtr, size_t offset, int size)
@@ -235,8 +228,9 @@ namespace
                              size_t      offset,
                              hipStream_t stream)
     {
-        int threadsPerBlock = 256;
-        int blocksPerGrid   = (batch_count - 1) / threadsPerBlock + 1;
+        rocblas_status status          = rocblas_status_success;
+        int            threadsPerBlock = 256;
+        int            blocksPerGrid   = (batch_count - 1) / threadsPerBlock + 1;
         hipLaunchKernelGGL(addOffsetKernel,
                            dim3(blocksPerGrid),
                            dim3(threadsPerBlock),
@@ -246,7 +240,8 @@ namespace
                            static_cast<T1*>(input_device_pointer_array),
                            offset,
                            batch_count);
-        return rocblas_status_success;
+        RETURN_IF_HIP_ERROR(hipGetLastError());
+        return status;
     };
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
@@ -755,22 +750,17 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             throw rocblas_status_invalid_value;
         if(!prob.strided_batch)
         {
-            int              batch_count = prob.batch_count;
-            std::vector<Ti*> A(batch_count, nullptr);
-            std::vector<Ti*> B(batch_count, nullptr);
-            std::vector<To*> C(batch_count, nullptr);
-            std::vector<To*> D(batch_count, nullptr);
-            void *           ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
+            void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
                  *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
             if(prob.batch_A != nullptr)
             {
                 if(prob.buffer_offset_a > 0)
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_A, sizeof(void*) * batch_count, prob.handle->get_stream()));
+                        &devicePtrArray_A, sizeof(void*) * batchCount, prob.handle->get_stream()));
                     THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_A,
                                                      devicePtrArray_A,
-                                                     batch_count,
+                                                     batchCount,
                                                      prob.buffer_offset_a,
                                                      prob.handle->get_stream()));
                     ptrA = devicePtrArray_A;
@@ -782,10 +772,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 if(prob.buffer_offset_b > 0)
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_B, sizeof(void*) * batch_count, prob.handle->get_stream()));
+                        &devicePtrArray_B, sizeof(void*) * batchCount, prob.handle->get_stream()));
                     THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_B,
                                                      devicePtrArray_B,
-                                                     batch_count,
+                                                     batchCount,
                                                      prob.buffer_offset_b,
                                                      prob.handle->get_stream()));
                     ptrB = devicePtrArray_B;
@@ -797,10 +787,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 if(prob.buffer_offset_c > 0)
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_C, sizeof(void*) * batch_count, prob.handle->get_stream()));
+                        &devicePtrArray_C, sizeof(void*) * batchCount, prob.handle->get_stream()));
                     THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_C,
                                                      devicePtrArray_C,
-                                                     batch_count,
+                                                     batchCount,
                                                      prob.buffer_offset_c,
                                                      prob.handle->get_stream()));
                     ptrC = devicePtrArray_C;
@@ -812,10 +802,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                 if(prob.buffer_offset_d > 0)
                 {
                     THROW_IF_HIP_ERROR(hipMallocAsync(
-                        &devicePtrArray_D, sizeof(void*) * batch_count, prob.handle->get_stream()));
+                        &devicePtrArray_D, sizeof(void*) * batchCount, prob.handle->get_stream()));
                     THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_D,
                                                      devicePtrArray_D,
-                                                     batch_count,
+                                                     batchCount,
                                                      prob.buffer_offset_d,
                                                      prob.handle->get_stream()));
                     ptrD = devicePtrArray_D;
