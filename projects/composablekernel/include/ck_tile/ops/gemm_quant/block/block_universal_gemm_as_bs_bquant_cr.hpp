@@ -313,6 +313,21 @@ struct BQuantBlockUniversalGemmAsBsCr
                 auto& scale_reg = bq_block_tensor.get_thread_buffer()[reg_offset];
                 float b_scale_f = float(scale_reg);
 
+                // DEBUG: Print scale info for lane 0, block 0, first iteration
+                if constexpr(nIter == 0 && kQScale == 0)
+                {
+                    if(threadIdx.x == 0 && blockIdx.x == 0)
+                    {
+                        printf("[BQ_LDS_SCALE] lane=0 blk=0 nIter=%d kQScale=%d "
+                               "reg_offset=%d b_scale_f=%.6f\n",
+                               (int)nIter, (int)kQScale, (int)reg_offset, b_scale_f);
+                        printf("[BQ_LDS_SCALE] NIterPerWarp=%d KIterPerQScale=%d "
+                               "QScalesPerBlockRow=%d thread_buffer_size=%d\n",
+                               (int)NIterPerWarp, (int)Traits::KIterPerQScale,
+                               (int)Traits::QScalesPerBlockRow, (int)thread_buffer_size);
+                    }
+                }
+
                 static_for<0, Traits::KIterPerQScale, 1>{}([&](auto kIterInQScale) {
                     constexpr auto kIter = kQScale * Traits::KIterPerQScale + kIterInQScale;
                     // Thread buffers
@@ -337,6 +352,26 @@ struct BQuantBlockUniversalGemmAsBsCr
                                        b_lds_thread_buffer.template get_as<SrcVectorRawType>()[i],
                                        b_scale_f);
                     });
+
+                    // DEBUG: Print B dequant result for lane 0, block 0, first iter
+                    if constexpr(nIter == 0 && kIter == 0)
+                    {
+                        if(threadIdx.x == 0 && blockIdx.x == 0)
+                        {
+                            printf("[BQ_DEQUANT] lane=0 nIter=%d kIter=%d B after scale+cast "
+                                   "(first 8): ",
+                                   (int)nIter, (int)kIter);
+                            constexpr index_t print_n =
+                                (thread_buffer_size * UnaryOpSize_ < 8)
+                                    ? thread_buffer_size * UnaryOpSize_
+                                    : 8;
+                            static_for<0, print_n, 1>{}([&](auto ii) {
+                                printf("%.4f ",
+                                       (float)b_warp_thread_buffer.template get_as<BComputeDataType>()[ii]);
+                            });
+                            printf("\n");
+                        }
+                    }
 
                     // Store B thread buffer to tile (MMA type)
                     b_warp_tile_.set_y_sliced_thread_data(
@@ -382,6 +417,36 @@ struct BQuantBlockUniversalGemmAsBsCr
                             merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
+                        // DEBUG: Print A/B thread buffer for lane 0, block 0, first iteration
+                        if constexpr(mIter == 0 && nIter == 0 && kQScale == 0 &&
+                                     kIterInQScale == 0)
+                        {
+                            if(threadIdx.x == 0 && blockIdx.x == 0)
+                            {
+                                printf("[BQ_GEMM] lane=0 blk=0 mIter=%d nIter=%d kIter=%d\n",
+                                       (int)mIter, (int)nIter, (int)kIter);
+                                printf("[BQ_GEMM] AWarpTensor buf_size=%d, BWarpTensor buf_size=%d\n",
+                                       (int)AWarpTensor::get_thread_buffer_size(),
+                                       (int)BWarpTensor::get_thread_buffer_size());
+                                constexpr index_t a_size = AWarpTensor::get_thread_buffer_size();
+                                constexpr index_t b_size = BWarpTensor::get_thread_buffer_size();
+                                constexpr index_t a_print = (a_size < 8) ? a_size : 8;
+                                constexpr index_t b_print = (b_size < 8) ? b_size : 8;
+                                printf("[BQ_GEMM] A data (first %d): ", (int)a_print);
+                                static_for<0, a_print, 1>{}([&](auto ii) {
+                                    printf("%.4f ",
+                                           (float)a_warp_tensor.get_thread_buffer()[ii]);
+                                });
+                                printf("\n");
+                                printf("[BQ_GEMM] B data (first %d): ", (int)b_print);
+                                static_for<0, b_print, 1>{}([&](auto ii) {
+                                    printf("%.4f ",
+                                           (float)b_warp_tensor.get_thread_buffer()[ii]);
+                                });
+                                printf("\n");
+                            }
+                        }
+
                         if constexpr(kIterInQScale == 0)
                         {
                             c_warp_tensor = WarpGemm{}(a_warp_tensor, b_warp_tensor);
@@ -389,6 +454,23 @@ struct BQuantBlockUniversalGemmAsBsCr
                         else
                         {
                             WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                        }
+
+                        // DEBUG: Print C result for lane 0, block 0, first full iteration
+                        if constexpr(mIter == 0 && nIter == 0 && kQScale == 0 &&
+                                     kIterInQScale == 0)
+                        {
+                            if(threadIdx.x == 0 && blockIdx.x == 0)
+                            {
+                                constexpr index_t c_size = CWarpTensor::get_thread_buffer_size();
+                                constexpr index_t c_print = (c_size < 4) ? c_size : 4;
+                                printf("[BQ_GEMM] C after MMA (first %d): ", (int)c_print);
+                                static_for<0, c_print, 1>{}([&](auto ii) {
+                                    printf("%.4f ",
+                                           (float)c_warp_tensor.get_thread_buffer()[ii]);
+                                });
+                                printf("\n");
+                            }
                         }
                     });
 
