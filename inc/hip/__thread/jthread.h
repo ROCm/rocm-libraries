@@ -130,13 +130,13 @@ class jthread {
     __host__ __device__ void swap(jthread& other) noexcept { hip::std::swap(__thread_, other.__thread_); }
 
     /// Returns true if an execution context is owned and not yet joined/detached.
-    __host__ __device__ bool joinable() const noexcept { return __thread_.joinable(); }
+    [[nodiscard]] __host__ __device__ bool joinable() const noexcept { return __thread_.joinable(); }
 
     /**
      * @brief Returns the id of the (possibly width-partitioned) logical lane.
      * @param index Lane index (default 0).
      */
-    __host__ __device__ jthread::id get_id(uint32_t index = 0) const { return __thread_.get_id(index); }
+    [[nodiscard]] __host__ __device__ jthread::id get_id(uint32_t index = 0) const { return __thread_.get_id(index); }
 
     /**
      * @brief Waits for completion of the associated work.
@@ -154,7 +154,7 @@ class jthread {
     __host__ __device__ static constexpr unsigned int max_width() noexcept { return thread::max_width(); }
 
     /// Number of concurrent hardware slots usable (forwards to cuda::thread).
-    __host__ __device__ static unsigned int hardware_concurrency() noexcept { return thread::hardware_concurrency(); }
+    [[nodiscard]] __host__ __device__ static unsigned int hardware_concurrency() noexcept { return thread::hardware_concurrency(); }
 
   private:
     thread __thread_;
