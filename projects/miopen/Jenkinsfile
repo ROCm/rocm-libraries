@@ -323,21 +323,20 @@ def runAsanTests(String gpuLabel, String gfxFamily) {
                     def shardExit = sh label: 'Run ASAN shard tests', returnStatus: true, script: """#!/bin/bash
                         export LD_PRELOAD=\$(\${ROCM_PATH}/llvm/bin/clang --print-file-name libclang_rt.asan-x86_64.so)
                         export ASAN_OPTIONS="\${ASAN_OPTIONS}:print_stats=1"
-                        . /opt/venv/bin/activate
-                        cd /TheRock
                         SHARD_LOGS_DIR=${env.WORKSPACE}/shard_logs
                         mkdir -p \$SHARD_LOGS_DIR
                         overall_exit=0
                         pids=()
-                        for i in \$(seq 1 4); do
+                        for i in \$(seq 0 3); do
                             (
-                                THEROCK_BIN_DIR=\${ROCM_PATH}/bin \\
-                                AMDGPU_FAMILIES=${gfxFamily} \\
-                                TEST_TYPE=full \\
-                                SHARD_INDEX=\$i \\
-                                TOTAL_SHARDS=4 \\
+                                GTEST_SHARD_INDEX=\$i \\
+                                GTEST_TOTAL_SHARDS=4 \\
                                 GTEST_OUTPUT="xml:\$SHARD_LOGS_DIR/asan_shard_\$i.xml" \\
-                                python build_tools/github_actions/test_executable_scripts/test_miopen.py
+                                MIOPEN_INVOKED_FROM_CTEST=1 \\
+                                MIOPEN_USER_DB_PATH=${env.WORKSPACE}/${env.MIOPEN_DIR}/build/test/gtest \\
+                                ctest -R miopen_gtest_full_suite \\
+                                      --test-dir \${ROCM_PATH}/bin/MIOpen \\
+                                      --output-on-failure
                                 echo \$? > \$SHARD_LOGS_DIR/asan_shard_\$i.exit
                             ) 2>&1 | tee \$SHARD_LOGS_DIR/asan_shard_\$i.log | sed "s/^/[shard \$i] /" &
                             pids+=(\$!)
@@ -345,7 +344,7 @@ def runAsanTests(String gpuLabel, String gfxFamily) {
                         for pid in "\${pids[@]}"; do
                             wait \$pid
                         done
-                        for i in \$(seq 1 4); do
+                        for i in \$(seq 0 3); do
                             shard_exit=\$(cat \$SHARD_LOGS_DIR/asan_shard_\$i.exit 2>/dev/null || echo 1)
                             if [ "\$shard_exit" != "0" ]; then
                                 echo "[shard \$i] FAILED with exit code \$shard_exit"
