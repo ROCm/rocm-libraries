@@ -24,8 +24,8 @@ BIN="$OUT/ir_serialize_emit_c"
 # a duplicate-symbol link error (some helper buckets duplicate-define peers),
 # fall back to linking against the CMake static archive libckc_core.a.
 echo ">> compiling C ck.dsl.ir/v1 emitter (flat source build)"
-# WS3 Phase 1: engine + emitter compile as C++20 (no .c->.cpp renames).
-if c++ -std=c++20 -I "$CKC/include" $(find "$CKC/src" -name '*.c') \
+# Engine sources are C++20 (.cpp); the emitter is built as C++20 alongside them.
+if c++ -std=c++20 -I "$CKC/include" $(find "$CKC/src" -name '*.cpp') \
       "$HERE/ir_serialize_emit.c" -o "$BIN" -lm 2> "$OUT/cc.err"; then
     echo "   flat build OK"
 else

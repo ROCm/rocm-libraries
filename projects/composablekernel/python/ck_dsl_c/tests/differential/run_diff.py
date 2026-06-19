@@ -111,7 +111,7 @@ def find_families():
 def compile_c(name, archive):
     src = PARITY / f"{name}_emit.c"
     out = TMP / f"{name}_emit_c"
-    # WS3 Phase 1: engine + emitters compile as C++20 (no .c->.cpp renames).
+    # The engine archive is C++20; emitters are compiled as C++20 against it.
     cmd = [
         "c++",
         "-std=c++20",

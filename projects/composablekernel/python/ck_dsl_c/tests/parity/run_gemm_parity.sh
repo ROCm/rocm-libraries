@@ -18,8 +18,8 @@ mkdir -p "$OUT"
 
 BIN="$OUT/gemm_emit_c"
 echo ">> compiling C universal-GEMM emitter"
-# WS3 Phase 1: engine + emitter compile as C++20 (no .c->.cpp renames).
-c++ -std=c++20 -I "$CKC/include" $(find "$CKC/src" -name '*.c') "$HERE/gemm_emit.c" -o "$BIN" -lm || {
+# Engine sources are C++20 (.cpp); the emitter is built as C++20 alongside them.
+c++ -std=c++20 -I "$CKC/include" $(find "$CKC/src" -name '*.cpp') "$HERE/gemm_emit.c" -o "$BIN" -lm || {
     echo "C emitter compile FAILED"; exit 1; }
 
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"

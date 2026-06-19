@@ -1,21 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# ck_dsl_c -- pure C99 port of the ck_dsl Python IR -> LLVM codegen engine.
-# Builds a static library `ckc_core` from every src/**/*.c. Sources live in
+# ck_dsl_c -- C++20 port of the ck_dsl Python IR -> LLVM codegen engine.
+# Builds a static library `ckc_core` from every src/**/*.cpp. Sources live in
 # subfolders mirroring the Python package; new modules drop into the matching
 # src/ subfolder and are picked up automatically by the recursive glob below;
 # re-run cmake after adding files.
 
 cmake_minimum_required(VERSION 3.16)
-# WS3 Phase 1: the C99 sources are compiled as C++20 (no file renames). C is kept
-# enabled so the .c extension still configures; LANGUAGE CXX is forced per-source
-# below so every translation unit goes through the C++ frontend.
-project(ck_dsl_c LANGUAGES C CXX)
-
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+# The engine translation units are C++20 (.cpp). The public ABI surface in
+# include/ stays extern "C" so emitters, the provider plugin, and the language
+# bindings link unchanged.
+project(ck_dsl_c LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,24 +39,30 @@ endif()
 add_compile_options(-Wall -Wextra -Werror
                     -Wno-comment -Wno-missing-field-initializers)
 
-# WS3 Phase 2 hardening: optional Address+UndefinedBehavior sanitizer build.
+# Optional Address+UndefinedBehavior sanitizer build (diagnostics only, not for
+# Release artifacts):
 #   cmake -S . -B build_asan -DCKC_SANITIZE=ON && cmake --build build_asan -j
 # Applies to the engine, the unit tests, and (via run_diff --archive) the parity
-# emitters that link libckc_core.a. Not for Release artifacts -- diagnostics only.
+# emitters that link libckc_core.a.
+# _FORTIFY_SOURCE is disabled here because it conflicts with AddressSanitizer
+# (officially discouraged). -Wformat-truncation is also suppressed in this build
+# ONLY: the sanitizer instrumentation perturbs inlining enough that the -O
+# interprocedural analysis raises a false-positive "null format string" on the
+# variadic vsnprintf emit helpers (ckc_ll_emitf / ckc_ll_block_emitf, whose
+# forwarded format is always a literal). The normal/Release build keeps
+# -Werror=format-truncation, where it does not false-positive. This build is for
+# memory-safety diagnostics, not format-truncation.
 option(CKC_SANITIZE "Build with -fsanitize=address,undefined" OFF)
 if(CKC_SANITIZE)
-  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g
+                      -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Wno-format-truncation)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
 # Sources are organized into subfolders mirroring the ck_dsl Python package
 # (src/core/{ir,arch,isa,lower_llvm,lower_hip}, src/helpers, src/instances/{common,gfxNNNN},
-# src/support). GLOB_RECURSE picks up every .c regardless of depth.
-file(GLOB_RECURSE CKC_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
-
-# WS3 Phase 1: compile the .c sources through the C++20 frontend without renaming
-# them (RFC two-step rule: get it building as C++ identically first).
-set_source_files_properties(${CKC_CORE_SOURCES} PROPERTIES LANGUAGE CXX)
+# src/support). GLOB_RECURSE picks up every .cpp regardless of depth.
+file(GLOB_RECURSE CKC_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 add_library(ckc_core STATIC ${CKC_CORE_SOURCES})
 target_include_directories(ckc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -72,17 +74,14 @@ set_target_properties(ckc_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 include(CTest)
 
 # Optional smoke test: cmake --build build --target ckc_smoke
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke.c")
-  set_source_files_properties(tests/smoke.c PROPERTIES LANGUAGE CXX)
-  add_executable(ckc_smoke tests/smoke.c)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke.cpp")
+  add_executable(ckc_smoke tests/smoke.cpp)
   target_link_libraries(ckc_smoke PRIVATE ckc_core)
 endif()
 
 if(BUILD_TESTING)
-  set_source_files_properties(tests/tiled_attention_2d_reentrancy.c
-                              PROPERTIES LANGUAGE CXX)
   add_executable(ckc_tiled_attention_2d_reentrancy
-                 tests/tiled_attention_2d_reentrancy.c)
+                 tests/tiled_attention_2d_reentrancy.cpp)
   target_link_libraries(ckc_tiled_attention_2d_reentrancy PRIVATE ckc_core)
   if(UNIX)
     target_link_libraries(ckc_tiled_attention_2d_reentrancy PRIVATE m)
@@ -92,13 +91,11 @@ if(BUILD_TESTING)
   set_tests_properties(ckc_tiled_attention_2d_reentrancy
                        PROPERTIES LABELS "ckc;unit;host")
 
-  # WS1: ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
+  # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_serialize_roundtrip.c")
-    set_source_files_properties(tests/ir_serialize_roundtrip.c
-                                PROPERTIES LANGUAGE CXX)
-    add_executable(ckc_ir_serialize_roundtrip tests/ir_serialize_roundtrip.c)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir_serialize_roundtrip.cpp")
+    add_executable(ckc_ir_serialize_roundtrip tests/ir_serialize_roundtrip.cpp)
     target_link_libraries(ckc_ir_serialize_roundtrip PRIVATE ckc_core)
     if(UNIX)
       target_link_libraries(ckc_ir_serialize_roundtrip PRIVATE m)

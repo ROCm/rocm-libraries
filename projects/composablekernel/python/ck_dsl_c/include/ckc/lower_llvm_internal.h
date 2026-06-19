@@ -20,6 +20,12 @@
  *
  * Naming: internal helpers are prefixed ckc_ll_ (ll = lower_llvm) to keep them
  * out of the public ckc_ / ckc_b_ namespace.
+ *
+ * These declarations live in the internal C++ namespace ckc (the engine's
+ * private symbols). The public lowerer entry points (ckc_lower_kernel_to_llvm
+ * in ckc/lower_llvm.h) stay at global scope under extern "C" -- they are the
+ * stable ABI. Everything here is private to the lower_llvm_*.c translation
+ * units, which open `namespace ckc` around their bodies.
  */
 #ifndef CKC_LOWER_LLVM_INTERNAL_H
 #define CKC_LOWER_LLVM_INTERNAL_H
@@ -34,9 +40,7 @@
 #include "ckc/strbuf.h"
 #include "ckc/vec.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace ckc {
 
 /* ====================================================================== */
 /* Constants (module-level Python data)                                   */
@@ -415,8 +419,6 @@ const char* ckc_ll_param_attrs(ckc_lower_t* L, const ckc_param_t* p);
  * Sets VALUE error on a bad pair; returns "" then. */
 const char* ckc_ll_format_agpr_alloc(ckc_lower_t* L, const ckc_attr_value_t* v);
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
+} /* namespace ckc */
 
 #endif /* CKC_LOWER_LLVM_INTERNAL_H */

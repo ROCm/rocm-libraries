@@ -27,9 +27,11 @@
 #include "ckc/strbuf.h"
 #include "ckc/vec.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* The HIP lowerer's private symbols live in the internal C++ namespace ckc; the
+ * public entry (ckc_lower_kernel_to_hip in ckc/lower_hip.h) stays at global
+ * scope under extern "C". Only the lower_hip_*.c units include this and they
+ * open `namespace ckc` around their bodies. */
+namespace ckc {
 
 /* --------------------------------------------------------- lowerer state */
 
@@ -210,8 +212,6 @@ void ckc_h_smem_set_storage(ckc_h_lowerer_t* lw,
                             const char* storage_name);
 const char* ckc_h_smem_storage(ckc_h_lowerer_t* lw, const ckc_value_t* smem_result);
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
+} /* namespace ckc */
 
 #endif /* CKC_LOWER_HIP_INTERNAL_H */

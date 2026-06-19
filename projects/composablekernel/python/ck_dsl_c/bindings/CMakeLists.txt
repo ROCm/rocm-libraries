@@ -45,7 +45,8 @@ endif()
 # --- pybind11 ----------------------------------------------------------------
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(ckc_engine ckc_engine.cpp)
+pybind11_add_module(ckc_engine ckc_engine.cpp ckc_engine_img2col.cpp
+                    ckc_engine_attention.cpp ckc_engine_moe_gemm_fused.cpp)
 target_include_directories(ckc_engine PRIVATE "${CKC_INCLUDE_DIR}")
 
 # Link the engine archive whole, plus libm. The engine is C++; its symbols are
