@@ -8,8 +8,6 @@
     'operationType': 'GEMM',
     'schedule': 'aquavanjaram',
     'type_mismatches': list([
-      "('TransposeA', 'int', 'bool')",
-      "('TransposeB', 'int', 'bool')",
     ]),
   })
 # ---
@@ -22,8 +20,6 @@
     'operationType': 'GEMM',
     'schedule': 'aquavanjaram',
     'type_mismatches': list([
-      "('TransposeA', 'int', 'bool')",
-      "('TransposeB', 'int', 'bool')",
     ]),
   })
 # ---
@@ -36,8 +32,6 @@
     'operationType': 'GEMM',
     'schedule': 'aquavanjaram',
     'type_mismatches': list([
-      "('TransposeA', 'int', 'bool')",
-      "('TransposeB', 'int', 'bool')",
     ]),
   })
 # ---
@@ -50,8 +44,6 @@
     'operationType': 'GEMM',
     'schedule': 'aquavanjaram',
     'type_mismatches': list([
-      "('TransposeA', 'int', 'bool')",
-      "('TransposeB', 'int', 'bool')",
     ]),
   })
 # ---
@@ -64,8 +56,6 @@
     'operationType': 'GEMM',
     'schedule': 'aquavanjaram',
     'type_mismatches': list([
-      "('TransposeA', 'int', 'bool')",
-      "('TransposeB', 'int', 'bool')",
     ]),
   })
 # ---

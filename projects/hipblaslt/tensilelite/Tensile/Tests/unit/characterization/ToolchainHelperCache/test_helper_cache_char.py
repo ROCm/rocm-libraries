@@ -72,19 +72,23 @@ def test_check_cache_missing_empty_valid(tmp_path):
     entry = cacheDir / "key"; entry.mkdir()
     assert _checkCache(cacheDir, "key") is None            # empty dir
     (entry / "a.hsaco").write_text("x")
-    assert _checkCache(cacheDir, "key") is not None        # valid
-    (entry / "b.hsaco").write_text("")                     # zero-size -> invalid
+    assert _checkCache(cacheDir, "key") is None            # flat layout -> miss
+    arch = entry / "gfx942"; arch.mkdir()
+    (arch / "a.hsaco").write_text("x")
+    assert _checkCache(cacheDir, "key") is not None        # valid <key>/<arch>/*.hsaco
+    (arch / "b.hsaco").write_text("")                      # zero-size -> invalid
     assert _checkCache(cacheDir, "key") is None
 
 
 def test_populate_cache_and_already_exists(tmp_path):
     cacheDir = tmp_path / "cache"; cacheDir.mkdir()
-    src = tmp_path / "a.hsaco"; src.write_text("data")
+    archDir = tmp_path / "gfx942"; archDir.mkdir()
+    src = archDir / "a.hsaco"; src.write_text("data")
     _populateCache(cacheDir, "k", [src])
-    assert (cacheDir / "k" / "a.hsaco").read_text() == "data"
+    assert (cacheDir / "k" / "gfx942" / "a.hsaco").read_text() == "data"
     # Second call -> finalDir exists -> early return (no error).
     _populateCache(cacheDir, "k", [src])
-    assert (cacheDir / "k" / "a.hsaco").exists()
+    assert (cacheDir / "k" / "gfx942" / "a.hsaco").exists()
 
 
 def test_evict_stale(tmp_path):
