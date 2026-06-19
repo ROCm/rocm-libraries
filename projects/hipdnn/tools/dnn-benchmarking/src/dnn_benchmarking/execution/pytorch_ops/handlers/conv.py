@@ -108,13 +108,17 @@ def _conv_forward(
             f"Unsupported convolution spatial rank {len(stride)}; "
             "PyTorch reference supports 1D/2D/3D"
         )
+    groups = _conv_group_count(x.shape, w.shape)
+    if pre == post:
+        # Symmetric padding folds into the conv, matching the engine's native
+        # descriptor (no separate F.pad kernel in the timed window).
+        return conv_fn(
+            x, w, stride=stride, padding=pre, dilation=dilation, groups=groups
+        )
+    # Asymmetric padding can't be expressed via conv padding; pre-pad explicitly.
     padded_x = _pad_conv_input(x, pre, post)
     return conv_fn(
-        padded_x,
-        w,
-        stride=stride,
-        dilation=dilation,
-        groups=_conv_group_count(x.shape, w.shape),
+        padded_x, w, stride=stride, dilation=dilation, groups=groups
     )
 
 

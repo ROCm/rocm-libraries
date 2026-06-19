@@ -113,12 +113,18 @@ def _tensor_shape(graph_json: Dict[str, Any], uid: int) -> Optional[Tuple[int, .
 def _store_tensor(
     tensors: Dict[int, torch.Tensor], uid: int, value: torch.Tensor
 ) -> None:
+    # Replace the dict entry with the op's own output rather than copying into a
+    # pre-allocated buffer. The buffer manager shares this dict by reference
+    # (get_tensors) and reads outputs back device->host only after the timed
+    # region, so the timed execution avoids an unnecessary device-to-device copy
+    # every iteration. Coerce only the declared dtype/device, which is a no-op
+    # (no copy, no kernel) when the op already produced them -- the common case.
     existing = tensors.get(uid)
-    if existing is not None and tuple(existing.shape) == tuple(value.shape):
-        existing.copy_(value.to(dtype=existing.dtype, device=existing.device))
-        tensors[uid] = existing
-    else:
-        tensors[uid] = value
+    if existing is not None and existing is not value and (
+        value.dtype != existing.dtype or value.device != existing.device
+    ):
+        value = value.to(dtype=existing.dtype, device=existing.device)
+    tensors[uid] = value
 
 
 def _store_channel_tensor(

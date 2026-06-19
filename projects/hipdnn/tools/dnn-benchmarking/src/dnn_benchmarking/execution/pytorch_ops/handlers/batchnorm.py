@@ -135,14 +135,27 @@ def handle_batchnorm_training(
     bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
-    # Fused batchnorm forward-training: a single op returning (y, save_mean,
-    # save_invstd). x/scale/bias keep their graph dtypes so the timed reference
-    # measures the same precision workload as the graph under test, not a
-    # promoted-fp32 kernel plus surrounding casts. save_mean and
-    # save_invstd come back as float32 from the primitive.
-    y, mean, inv_variance = torch.native_batch_norm(
-        x, scale, bias, None, None, True, 0.0, epsilon
-    )
+    # Fused batchnorm forward-training returning (y, save_mean, save_invstd).
+    # On GPU route through the same MIOpen primitive as the engine under test:
+    # F.conv2d auto-dispatches conv to MIOpen, but native_batch_norm does NOT,
+    # so call miopen_batch_norm explicitly (it requires fp32 scale/bias). On CPU
+    # (unit tests / no HIP) fall back to native_batch_norm with graph-dtype
+    # params. Both keep x's dtype and return float32 saved stats.
+    if x.is_cuda:
+        y, mean, inv_variance = torch.ops.aten.miopen_batch_norm(
+            x,
+            scale.to(torch.float32),
+            bias.to(torch.float32),
+            None,
+            None,
+            True,
+            0.0,
+            epsilon,
+        )
+    else:
+        y, mean, inv_variance = torch.native_batch_norm(
+            x, scale, bias, None, None, True, 0.0, epsilon
+        )
     _store_tensor(tensors, y_uid, y)
 
     _store_channel_tensor(tensors, _optional_uid(node, "mean_tensor_uid"), mean, x.ndim)
@@ -228,22 +241,20 @@ def handle_batchnorm_backward(
             _channel_values(_tensor(tensors, int(inv_uid), node), x), "inv_variance"
         )
 
-    # Fused batchnorm backward: a single op returning (dx, dscale, dbias),
-    # replacing the hand-rolled gradient reduction.
-    # dy/x keep their graph dtype; saved mean/inv_variance are float32 as the
-    # primitive requires.
-    dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
-        dy,
-        x,
-        scale,
-        None,
-        None,
-        mean,
-        inv_variance,
-        True,
-        1e-5,
-        [True, True, True],
-    )
+    # Fused batchnorm backward returning (dx, dscale, dbias). On GPU route
+    # through the same MIOpen primitive as the engine (miopen_batch_norm_backward
+    # needs fp32 weight; arg order is input, grad_output, weight, running_mean,
+    # running_var, save_mean, save_invstd, epsilon). On CPU fall back to
+    # native_batch_norm_backward.
+    if x.is_cuda:
+        dx, dscale, dbias = torch.ops.aten.miopen_batch_norm_backward(
+            x, dy, scale.to(torch.float32), None, None, mean, inv_variance, 1e-5
+        )
+    else:
+        dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
+            dy, x, scale, None, None, mean, inv_variance, True, 1e-5,
+            [True, True, True],
+        )
 
     _store_tensor(tensors, dx_uid, dx)
     _store_channel_tensor(tensors, dscale_uid, dscale, x.ndim)
