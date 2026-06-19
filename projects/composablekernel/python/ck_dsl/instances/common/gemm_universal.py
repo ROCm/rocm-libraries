@@ -119,7 +119,7 @@ class TileSpec:
         return out
 
 
-Pipeline = Literal["mem", "compv3", "compv4", "wsp3"]
+Pipeline = Literal["mem", "compv3", "compv4", "wsp3", "wmma_v1"]
 Scheduler = Literal["intrawave", "interwave"]
 Epilogue = Literal["default", "cshuffle"]
 
@@ -457,18 +457,25 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
-    # WMMA (RDNA wave32) coverage is intentionally narrower than the full CDNA
-    # MFMA matrix: the unified body supports the 16x16x16 atom with the simple
-    # ``mem`` pipeline + ``default`` epilogue. The richer pipelines (compv3 /
-    # compv4 scheduler interleave, cshuffle LDS-staged C, DTLA, preshuffle)
-    # encode MFMA-shaped assumptions and are gated off until ported. CDNA keeps
-    # the full matrix.
+    # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
+    # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
+    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
+    # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
+    # interleave, cshuffle LDS-staged C, DTLA, preshuffle) encode MFMA-shaped
+    # assumptions and are gated off until ported. CDNA MFMA keeps the full
+    # matrix.
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA path supports only 16x16x16 (got {atom}) on {arch}"
-        if spec.trait.pipeline != "mem":
+        supported_atoms = {(16, 16, 16)}
+        if arch == "gfx1250":
+            supported_atoms = {(16, 16, 32)}
+        if atom not in supported_atoms:
+            supported = ", ".join(
+                f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
+            )
+            return False, f"WMMA path supports only {supported} (got {atom}) on {arch}"
+        if spec.trait.pipeline not in ("mem", "wmma_v1"):
             return False, (
-                f"WMMA path supports only the 'mem' pipeline "
+                f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
         if spec.trait.epilogue != "default":
@@ -1480,6 +1487,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b, op, a_rows[mi], b_cols[ni], new_accs[flat]
                     )
                     flat += 1
+        # WMMA intrawave compute schedule (the simple/mem k-loop keeps the LDS
+        # store + global load in a separate barrier region, so this region holds
+        # only the operand ds_reads + WMMAs). Opt-in via the 'wmma_v1' pipeline.
+        if spec.trait.pipeline == "wmma_v1":
+            from ...helpers.schedule import SchedulePolicy, WmmaHotLoopInstList
+
+            il = WmmaHotLoopInstList.from_geometry(
+                block_size=spec.block_size,
+                m_per_block=t.tile_m,
+                n_per_block=t.tile_n,
+                k_per_block=t.tile_k,
+                m_repeat=mfmas_m,
+                n_repeat=mfmas_n,
+                m_per_wmma=t.warp_tile_m,
+                n_per_wmma=t.warp_tile_n,
+                k_per_wmma=t.warp_tile_k,
+                a_frag_len=a_per_lane,
+                b_frag_len=b_per_lane,
+                a_dtype_bytes=2,
+                b_dtype_bytes=2,
+            )
+            SchedulePolicy.for_pipeline("wmma_v1").emit_wmma_compute_schedule(b, il)
         return new_accs
 
     def emit_mfma_phase(

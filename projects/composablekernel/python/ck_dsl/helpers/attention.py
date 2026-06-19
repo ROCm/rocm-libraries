@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import math
 from typing import Tuple
 
-from ..core.ir import FP8E4M3, IRBuilder, Type, Value
+from ..core.ir import BF8E5M2, FP8E4M3, IRBuilder, Type, Value
 
 
 def next_power_of_2(x: int) -> int:
@@ -452,6 +452,7 @@ def wave_reduce_max(
     *,
     wave_size: int = 64,
     lanes_per_row: int = 16,
+    use_dpp: bool = False,
 ) -> Value:
     """Arch-parameterized row-max reduction for the online softmax.
 
@@ -472,6 +473,10 @@ def wave_reduce_max(
     """
     stages = wave_reduce_stages(wave_size, lanes_per_row)
     cur = v
+    if use_dpp:
+        for k in range(stages):
+            cur = b.vop2_f32_dpp_xor(cur, 1 << k, "v_max_f32")
+        return cur
     for k in range(stages):
         remote = b.warp_shuffle_xor(cur, 1 << k)
         cur = b.fmax(cur, remote)
@@ -484,6 +489,7 @@ def wave_reduce_sum(
     *,
     wave_size: int = 64,
     lanes_per_row: int = 16,
+    use_dpp: bool = False,
 ) -> Value:
     """Arch-parameterized row-sum reduction; ``fadd`` sibling of
     :func:`wave_reduce_max`.
@@ -494,6 +500,10 @@ def wave_reduce_sum(
     """
     stages = wave_reduce_stages(wave_size, lanes_per_row)
     cur = v
+    if use_dpp:
+        for k in range(stages):
+            cur = b.vop2_f32_dpp_xor(cur, 1 << k, "v_add_f32")
+        return cur
     for k in range(stages):
         remote = b.warp_shuffle_xor(cur, 1 << k)
         cur = b.fadd(cur, remote)
@@ -749,6 +759,25 @@ def dequant_fp8x8_to_dtype(
     hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)
     lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
     hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
+    deq = [
+        b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)
+    ] + [
+        b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), scale), dtype) for i in range(4)
+    ]
+    return b.vec_pack(deq, dtype)
+
+
+def dequant_bf8x8_to_dtype(
+    b: IRBuilder,
+    bf8_vec: Value,
+    scale: Value,
+    dtype: Type,
+) -> Value:
+    """In-register dequant of ``<8 x bf8e5m2>`` to ``<8 x dtype>``."""
+    lo_bf8 = b.vec_pack([b.vec_extract(bf8_vec, i) for i in range(4)], BF8E5M2)
+    hi_bf8 = b.vec_pack([b.vec_extract(bf8_vec, i) for i in range(4, 8)], BF8E5M2)
+    lo_f32 = b.cvt_pk_f32_bf8x4(lo_bf8)
+    hi_f32 = b.cvt_pk_f32_bf8x4(hi_bf8)
     deq = [
         b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)
     ] + [

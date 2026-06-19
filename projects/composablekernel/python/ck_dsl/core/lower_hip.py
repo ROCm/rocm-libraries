@@ -580,6 +580,52 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, {_name(c)});"
         )
 
+    def _op_tile_wmma_gfx1250_f32_16x16x32_f16(self, op: Op) -> None:
+        # gfx1250 builtin: K=32, 16-wide f16 operands, 8-operand form:
+        # (negA, A, negB, B, fmt, C, reuseA, reuseB).
+        self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_f16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x32_f16("
+            f"false, {_name(a)}, false, {_name(b)}, (int16_t)0, "
+            f"{_name(c)}, false, false);"
+        )
+
+    def _op_tile_wmma_gfx1250_f32_16x16x64_fp8_fp8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "fp8_fp8")
+
+    def _op_tile_wmma_gfx1250_f32_16x16x64_fp8_bf8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "fp8_bf8")
+
+    def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_fp8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "bf8_fp8")
+
+    def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
+
+    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
+        # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
+        # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
+        self._require_wmma_arch(f"wmma_gfx1250_f32_16x16x64_{ab}")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
+            f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
+        )
+
+    def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
+        # Same gfx1250 K=32 ABI as the f16 form, but operands are true bf16 vectors.
+        self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_bf16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x32_bf16("
+            f"false, {_name(a)}, false, {_name(b)}, (int16_t)0, "
+            f"{_name(c)}, false, false);"
+        )
+
     # ---- WMMA iu8 (RDNA3/3.5, gfx11, wave32) — integer matrix engine ----
     #
     # The integer twin of the f16 WMMA handler. Per-lane A/B operands are
@@ -1687,6 +1733,20 @@ class _Lowerer:
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, "
             f"{1 if bound_ctrl else 0});"
+        )
+
+    def _op_tile_dpp_xor(self, op: Op) -> None:
+        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+
+        ``dpp_ctrl = 0x160 | mask`` (AMDGPU ``DPP_ROW_XMASK``). See
+        :meth:`_op_tile_dpp_xor` in ``lower_llvm.py`` for the rationale.
+        """
+        (data,) = op.operands
+        mask = int(op.attrs["xor_mask"])
+        dpp_ctrl = 0x160 | (mask & 0xF)
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
         )
 
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
