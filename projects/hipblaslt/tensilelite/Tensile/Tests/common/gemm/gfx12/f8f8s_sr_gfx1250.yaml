@@ -54,8 +54,8 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
         - DepthU: [64]
-        - VectorWidthA: [8]
-        - VectorWidthB: [2]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - WorkGroupMapping: [1]
@@ -70,7 +70,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [0]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [1]
         - StaggerU: [32]
@@ -84,6 +84,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 64, 512, 1, 64]
+          - Exact: [ 64, 512, 1, 96]
+          - Exact: [ 8, 16, 1, 96]
 
   #######################################
   # TN - standard

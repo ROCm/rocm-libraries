@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "auxil/testing_set_get_alpha_beta_stride.hpp"
 #include "auxil/testing_set_get_atomics_mode.hpp"
 #include "auxil/testing_set_get_math_mode.hpp"
 #include "auxil/testing_set_get_pointer_mode.hpp"
@@ -35,6 +36,7 @@ namespace
         SG_POINTER,
         SG_ATOMICS,
         SG_MATH,
+        SG_ALPHA_BETA,
     };
 
     // aux test template
@@ -72,6 +74,8 @@ namespace
                 return !strcmp(arg.function, "set_get_atomics_mode");
             case SG_MATH:
                 return !strcmp(arg.function, "set_get_math_mode");
+            case SG_ALPHA_BETA:
+                return !strcmp(arg.function, "set_get_alpha_beta_stride");
             }
             return false;
         }
@@ -86,6 +90,8 @@ namespace
                 testname_set_get_atomics_mode(arg, name);
             else if constexpr(AUX_TYPE == SG_MATH)
                 testname_set_get_math_mode(arg, name);
+            else if constexpr(AUX_TYPE == SG_ALPHA_BETA)
+                testname_set_get_alpha_beta_stride(arg, name);
 
             return std::move(name);
         }
@@ -102,6 +108,8 @@ namespace
                 testing_set_get_atomics_mode(arg);
             else if(!strcmp(arg.function, "set_get_math_mode"))
                 testing_set_get_math_mode(arg);
+            else if(!strcmp(arg.function, "set_get_alpha_beta_stride"))
+                testing_set_get_alpha_beta_stride(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -127,5 +135,12 @@ namespace
         CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(aux_mode_testing<>{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(set_get_math);
+
+    using set_get_alpha_beta = aux_mode_template<aux_mode_testing, SG_ALPHA_BETA>;
+    TEST_P(set_get_alpha_beta, aux)
+    {
+        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(aux_mode_testing<>{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(set_get_alpha_beta);
 
 } // namespace
