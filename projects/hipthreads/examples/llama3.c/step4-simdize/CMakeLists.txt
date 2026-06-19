@@ -1,9 +1,12 @@
 # ============================================================================
 # Usage Instructions:
 # ============================================================================
-# 1. Build:
-#    cmake -B build
-#    cmake --build ./build
+# 1a. Build (Windows, from x64 Native Tools Command Prompt for VS 2022):
+#    cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DHIP_PLATFORM=amd -DCMAKE_HIP_ARCHITECTURES=gfx1201 -DCMAKE_BUILD_TYPE=Release .
+#    cmake --build build
+#
+# 1b. Build (Linux):
+#    cmake -B build && cmake --build build
 #
 # 2. Download model and tokenizer:
 #    - Get LLaMA 3 models from: https://huggingface.co/meta-llama/
@@ -28,6 +31,13 @@ cmake_minimum_required(VERSION 3.21)
 
 project(Llama3 LANGUAGES CXX HIP)
 
+if(WIN32)
+  set(CMAKE_CXX_USING_LINKER_DEFAULT "-fuse-ld=lld")
+  set(CMAKE_CXX_USING_LINKER_LLD "-fuse-ld=lld")
+  set(CMAKE_HIP_USING_LINKER_DEFAULT "-fuse-ld=lld")
+  set(CMAKE_HIP_USING_LINKER_LLD "-fuse-ld=lld")
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -40,8 +50,21 @@ set_source_files_properties(llama3.cxx PROPERTIES LANGUAGE HIP)
 
 add_executable(llama3 llama3.cxx)
 
+if(WIN32)
+  target_sources(llama3 PRIVATE win.c)
+  set_source_files_properties(win.c PROPERTIES LANGUAGE CXX)
+  target_compile_definitions(llama3 PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
+
 target_compile_options(llama3 PUBLIC "-fgpu-rdc" "-O3" "-march=native")
-target_link_options(llama3 PUBLIC "-fgpu-rdc")
+target_link_options(llama3 PUBLIC "-fgpu-rdc" "--hip-link")
+
+if(WIN32)
+  # TheRock embeds /DEFAULTLIB:c++ in amdhip64.lib but doesn't ship libc++ on Windows,
+  # and clang's HIP driver auto-injects -lc++. Suppress both; MSVC's stdlib pulls in
+  # automatically via #pragma comment(lib, "msvcprt") from MSVC headers.
+  target_link_options(llama3 PRIVATE "-nostdlib++" "-Xlinker" "/NODEFAULTLIB:c++.lib")
+endif()
 
 find_package(hipthreads)
 find_package(rocprim REQUIRED CONFIG)

@@ -1,9 +1,12 @@
 # ============================================================================
 # Usage Instructions:
 # ============================================================================
-# 1. Build:
-#    cmake -B build
-#    cmake --build ./build
+# 1a. Build (Windows, from x64 Native Tools Command Prompt for VS 2022):
+#    cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DCMAKE_BUILD_TYPE=Release .
+#    cmake --build build
+#
+# 1b. Build (Linux):
+#    cmake -B build && cmake --build build
 #
 # 2. Download model and tokenizer:
 #    - Get LLaMA 3 models from: https://huggingface.co/meta-llama/
@@ -37,6 +40,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Create executable
 add_executable(llama3 llama3.cxx)
+
+if(WIN32)
+  target_sources(llama3 PRIVATE win.c)
+  set_source_files_properties(win.c PROPERTIES LANGUAGE CXX)
+  target_compile_definitions(llama3 PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
 
 target_compile_options(llama3 PUBLIC "-O3" "-march=native")
 

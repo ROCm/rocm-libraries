@@ -10,15 +10,6 @@ cmake_minimum_required(VERSION 3.21)
 # Turn static library generation ON
 option(BUILD_SHARED_LIBS "Build as a shared library" OFF)
 
-if (WIN32)
-  # For windows, AR is MS Librarian and that is picked by Visual Studio's command prompt.
-  find_program(libpath NAMES lib.exe)
-  set (CMAKE_AR ${libpath})
-
-  # For windows, We need to tell cmake how to create static library.
-  set (CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_AR> /out:<TARGET> <LINK_FLAGS> <OBJECTS>")
-endif()
-
 # Generate static lib libhipthreads.a
 add_library(hipthreads STATIC hip/thread.cxx)
 set_source_files_properties(hip/thread.cxx PROPERTIES LANGUAGE HIP)

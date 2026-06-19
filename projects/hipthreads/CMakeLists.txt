@@ -13,11 +13,17 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-add_compile_options("-Wno-error=#warnings")
-
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -stdlib=libc++")
-set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
+if(NOT WIN32)
+  add_compile_options("-Wno-error=#warnings")
+  set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")
+  set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fuse-ld=lld")
+  set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
+else()
+  set(CMAKE_CXX_USING_LINKER_DEFAULT "-fuse-ld=lld")
+  set(CMAKE_CXX_USING_LINKER_LLD "-fuse-ld=lld")
+  set(CMAKE_HIP_USING_LINKER_DEFAULT "-fuse-ld=lld")
+  set(CMAKE_HIP_USING_LINKER_LLD "-fuse-ld=lld")
+endif()
 
 list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 

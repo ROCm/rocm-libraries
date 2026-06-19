@@ -26,3 +26,6 @@ target_link_libraries(spmm PRIVATE Threads::Threads)
 
 # then build & run:
 # cd examples/sparse-mat-mul/step2-cpu-threading && cmake -B build && cmake --build build && ./build/bin/spmm
+
+# WINDOWS (from x64 Native Tools Command Prompt for VS 2022):
+# cd examples/sparse-mat-mul/step2-cpu-threading && cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DCMAKE_BUILD_TYPE=Release . && cmake --build build && build\bin\spmm.exe

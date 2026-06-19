@@ -20,4 +20,8 @@ target_compile_options(saxpy PUBLIC "-O3" "-march=native")
 find_package(Threads REQUIRED)
 target_link_libraries(saxpy PRIVATE Threads::Threads)
 
+# LINUX:
 # cd examples/saxpy/step1-baseline && cmake -B build && cmake --build ./build && ./build/bin/saxpy
+
+# WINDOWS (from x64 Native Tools Command Prompt for VS 2022):
+# cd examples/saxpy/step1-baseline && cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DCMAKE_BUILD_TYPE=Release && cmake --build build && build\bin\saxpy.exe
