@@ -123,6 +123,10 @@ target_link_libraries(batch-pointer-test
         rocisa::rocisa-cpp
 )
 
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(batch-pointer-test PRIVATE hipblaslt::mxdatagen)
+endif()
+
 if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(batch-pointer-test PRIVATE OpenMP::OpenMP_CXX)
 endif()

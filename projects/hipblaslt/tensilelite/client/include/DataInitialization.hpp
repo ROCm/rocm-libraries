@@ -36,6 +36,7 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <array>
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -217,8 +218,7 @@ namespace TensileLite
             std::shared_ptr<ProblemInputs>
                 prepareCPUInputs(ContractionProblemGroupedGemm const& problem)
             {
-                if(m_problemDependentData)
-                    initializeCPUInputs(problem);
+                ensureCPUInputsCurrent(problem);
                 std::vector<void**> bPtr;
                 copyInputs(m_cpuPtrs,
                            bPtr,
@@ -233,8 +233,7 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> prepareCPUInputs(ContractionProblemGemm const& problem)
             {
-                if(m_problemDependentData)
-                    initializeCPUInputs(problem);
+                ensureCPUInputsCurrent(problem);
                 std::vector<void**> bPtr;
                 copyInputs(m_cpuPtrs,
                            bPtr,
@@ -304,18 +303,14 @@ namespace TensileLite
                    && m_boundsCheck == BoundsCheckMode::GuardPageAll)
                     m_curBoundsCheck = BoundsCheckMode::GuardPageBack;
 
-                // GroupedGemm may need CPU init before delegating
-                if(!m_gpuInit || m_curBoundsCheck != BoundsCheckMode::Disable
-                   || m_problemDependentData)
-                {
-                    if(m_cpuPtrs.empty() && m_problemDependentData)
-                        initializeCPUInputs(problem);
-                }
+                ensureCPUInputsCurrent(problem);
 
                 // gemms[0] is representative for element byte sizes; the grouped
                 // ring path asserts that invariant before reusing a prepared slot.
                 assertGroupedRingFastPathInvariant(problem);
-                return prepareGPUInputsInternal(problem.gemms[0], nullptr);
+                return prepareGPUInputsInternal(problem.gemms[0],
+                                                nullptr,
+                                                /*cpuInputsAlreadyCurrent=*/true);
             }
 
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblemGemm const& problem)
@@ -800,11 +795,8 @@ namespace TensileLite
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
                 m_currentSolution  = nullptr;
-                // Belt-and-suspenders: the pointer-identity check in
-                // prepareGPUInputsInternal is the structural guard. This reset
-                // handles the edge case where the same ContractionProblemGemm
-                // object is reused for a logically different problem.
-                m_batchInitProblem = nullptr;
+                m_batchPointerSignatureValid   = false;
+                m_preparedProblemSignatureValid = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
@@ -813,16 +805,20 @@ namespace TensileLite
                 // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
                 // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
                 // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
-                // m_gpuInit is true once prepareGPUInputsInternal has run for the first time.  By the
-                // time preSolution fires, main.cpp guarantees prepareGPUInputs has been called for the
-                // current problem (preProblem → cancelAsyncReset → prepareGPUInputs → solution loop).
-                if(m_currentSolution != nullptr
-                   && m_mxScaleFormat > 0
+                // By the time preSolution fires, main.cpp guarantees prepareGPUInputs has been
+                // called for the current problem (preProblem → cancelAsyncReset → prepareGPUInputs
+                // → solution loop).
+                if(m_currentSolution != nullptr && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && m_gpuInit)
+                   && isMXProblemExceptF6(*m_currentGemmProblem))
                 {
-                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
-                    if(isMX)
+                    if(!gpuInputsPreparedFor(*m_currentGemmProblem))
+                    {
+                        assert(false);
+                        return;
+                    }
+
+                    if(shouldRefreshMXForSolution(solution, *m_currentGemmProblem))
                     {
                         initializeMXData(*m_currentGemmProblem);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
@@ -1034,6 +1030,74 @@ namespace TensileLite
 
             void initializeMXData(ContractionProblemGemm const& problem);
 
+            struct ProblemInputSignatureBase
+            {
+                BoundsCheckMode                    boundsCheck = BoundsCheckMode::Disable;
+                std::vector<std::array<size_t, 4>> batchIndices;
+                std::vector<TensorDescriptor>      tensors;
+                int                               useBias  = 0;
+                ContractionProblemGemm::TENSOR    biasSrc = ContractionProblemGemm::TENSOR::D;
+                int                               sparse   = 0;
+                bool                              swizzleA = false;
+                bool                              swizzleB = false;
+
+                bool operator==(ProblemInputSignatureBase const& rhs) const
+                {
+                    if(boundsCheck != rhs.boundsCheck || batchIndices != rhs.batchIndices
+                       || tensors != rhs.tensors || useBias != rhs.useBias
+                       || sparse != rhs.sparse || swizzleA != rhs.swizzleA
+                       || swizzleB != rhs.swizzleB)
+                    {
+                        return false;
+                    }
+
+                    if(useBias != 0 && biasSrc != rhs.biasSrc)
+                        return false;
+
+                    return true;
+                }
+            };
+
+            struct BatchPointerSignature
+            {
+                ProblemInputSignatureBase base;
+
+                bool operator==(BatchPointerSignature const& rhs) const
+                {
+                    return base == rhs.base;
+                }
+            };
+
+            struct PreparedProblemSignature
+            {
+                ProblemInputSignatureBase base;
+                size_t                    mxBlockA = 0;
+                size_t                    mxBlockB = 0;
+
+                bool operator==(PreparedProblemSignature const& rhs) const
+                {
+                    return base == rhs.base && mxBlockA == rhs.mxBlockA
+                        && mxBlockB == rhs.mxBlockB;
+                }
+            };
+
+            BatchPointerSignature makeBatchPointerSignature(
+                ContractionProblemGemm const& problem) const;
+            bool batchPointersCurrentFor(ContractionProblemGemm const& problem) const;
+            void markBatchPointersCurrent(ContractionProblemGemm const& problem);
+
+            PreparedProblemSignature makePreparedProblemSignature(
+                ContractionProblemGemm const& problem) const;
+            bool gpuInputsPreparedFor(ContractionProblemGemm const& problem) const;
+            void markGpuInputsPrepared(ContractionProblemGemm const& problem);
+
+            bool cpuInputsNeedRefresh(ContractionProblemGroupedGemm const& problem) const;
+            bool cpuInputsNeedRefresh(ContractionProblemGemm const& problem) const;
+            void ensureCPUInputsCurrent(ContractionProblemGroupedGemm const& problem);
+            void ensureCPUInputsCurrent(ContractionProblemGemm const& problem);
+            bool shouldRefreshMXForSolution(ContractionSolution const*     solution,
+                                            ContractionProblemGemm const& problem) const;
+
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
@@ -1080,9 +1144,11 @@ namespace TensileLite
 
             void fillSlot(size_t                       slotIdx,
                           ContractionProblemGemm const& problem,
-                          hipStream_t                   targetStream);
+                          hipStream_t                   targetStream,
+                          bool                          cpuInputsAlreadyCurrent = false);
 
-            void initializeAltBufferSets(ContractionProblemGemm const& problem);
+            void initializeAltBufferSets(ContractionProblemGemm const& problem,
+                                         bool                          cpuInputsAlreadyCurrent = false);
 
 #ifndef NDEBUG
             void assertGroupedRingFastPathInvariant(
@@ -1174,7 +1240,8 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputsInternal(ContractionProblemGemm const& problem,
-                                         hipStream_t                   targetStream);
+                                         hipStream_t                   targetStream,
+                                         bool                          cpuInputsAlreadyCurrent = false);
 
             std::vector<VectorDataInitProperties> m_vdata;
             std::vector<void*>                    m_cpuPtrs;
@@ -1185,8 +1252,11 @@ namespace TensileLite
             std::shared_ptr<void>                 m_workspacePristine;
             std::vector<ConstDataInitProperties>  m_cdata;
 
-            bool                          m_gpuInit          = false;
-            ContractionProblemGemm const* m_batchInitProblem = nullptr;
+            bool                    m_gpuInit                   = false;
+            BatchPointerSignature    m_batchPointerSignature;
+            bool                    m_batchPointerSignatureValid = false;
+            PreparedProblemSignature m_preparedProblemSignature;
+            bool                    m_preparedProblemSignatureValid = false;
 
             // Multi-buffer ring policy/control
             bool                  m_hasAltBuffers = false;

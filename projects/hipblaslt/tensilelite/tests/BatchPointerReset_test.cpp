@@ -16,6 +16,7 @@
 #include <hip/hip_runtime.h>
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
 #include "DataInitializationTestUtils.hpp"
@@ -28,6 +29,15 @@ using namespace TensileLite::Client;
 namespace
 {
     using TensileLite::testing::makeBatchedProblem;
+
+    class PredicateDataInitialization : public DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+        using DataInitialization::cpuInputsNeedRefresh;
+        using DataInitialization::gpuInputsPreparedFor;
+        using DataInitialization::shouldRefreshMXForSolution;
+    };
 
     ::testing::AssertionResult hasHipDevice()
     {
@@ -84,6 +94,82 @@ namespace
         setBatchPointerResetPolicyArgs(args);
         return args;
     }
+
+    template <typename T>
+    T readDeviceValue(T const* devicePtr, size_t index)
+    {
+        T value{};
+        HIP_CHECK_EXC(
+            hipMemcpy(&value, devicePtr + index, sizeof(T), hipMemcpyDeviceToHost));
+        return value;
+    }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    ContractionProblemGemm makeMXBatchedProblem(size_t M,
+                                                size_t N,
+                                                size_t K,
+                                                size_t batch,
+                                                int    mxBlock)
+    {
+        auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                             false,
+                                                             rocisa::DataType::Float4,
+                                                             rocisa::DataType::Float4,
+                                                             rocisa::DataType::BFloat16,
+                                                             rocisa::DataType::BFloat16,
+                                                             M,
+                                                             N,
+                                                             K,
+                                                             batch,
+                                                             M,
+                                                             M * K,
+                                                             K,
+                                                             K * N,
+                                                             M,
+                                                             M * N,
+                                                             M,
+                                                             M * N,
+                                                             0.0);
+        problem.setStridedBatched(false);
+        problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
+        problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+        return problem;
+    }
+
+    Client::po::variables_map
+        makeMXPredicateArgs(std::vector<std::vector<size_t>> problemSizes, int mxBlock)
+    {
+        auto args = makeBatchPointerResetArgs(std::move(problemSizes));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "a-type",
+                                                     std::any(rocisa::DataType::Float4));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "b-type",
+                                                     std::any(rocisa::DataType::Float4));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "c-type",
+                                                     std::any(rocisa::DataType::BFloat16));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "d-type",
+                                                     std::any(rocisa::DataType::BFloat16));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "mx-a-block",
+                                                     std::any(mxBlock));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "mx-b-block",
+                                                     std::any(mxBlock));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "mx-scale-format",
+                                                     std::any(1));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-a",
+                                                     std::any(Client::InitMode::SerialDim0));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-b",
+                                                     std::any(Client::InitMode::SerialDim0));
+        return args;
+    }
+#endif
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -180,6 +266,141 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
                "initializeGPUBatchedInputs was not re-invoked on the fast path.";
     }
 }
+
+TEST(BatchPointerReset, SameObjectMutationReinitializesBatchPointers)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto problem = makeBatchedProblem(32, 32, 32, BATCH);
+    auto args    = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
+
+    ClientProblemFactory factory(args);
+    DataInitialization   dataInit(args, factory);
+
+    auto inputs1 = dataInit.prepareGPUInputs(problem);
+    auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->batchA, nullptr);
+
+    void* batchA_p1[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p1, ci1->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride1   = (uint8_t*)batchA_p1[1] - (uint8_t*)batchA_p1[0];
+    ptrdiff_t expected1 = ptrdiff_t(32 * 32);
+    EXPECT_EQ(stride1, expected1);
+
+    auto const* stableProblemAddress = &problem;
+    problem = makeBatchedProblem(64, 64, 64, BATCH);
+    ASSERT_EQ(&problem, stableProblemAddress);
+
+    auto inputs2 = dataInit.prepareGPUInputs(problem);
+    auto* ci2    = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+
+    void* batchA_p2[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p2, ci2->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride2   = (uint8_t*)batchA_p2[1] - (uint8_t*)batchA_p2[0];
+    ptrdiff_t expected2 = ptrdiff_t(64 * 64);
+    EXPECT_EQ(stride2, expected2)
+        << "Batch pointer stride must follow the mutated problem descriptor, "
+           "not the original object address.";
+}
+
+TEST(BatchPointerReset, ProblemDependentCPUInputsRefreshAcrossPreparePaths)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+
+    auto args = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
+    TensileLite::testing::detail::setDataInitArg(args,
+                                                 "init-a",
+                                                 std::any(Client::InitMode::SerialDim0));
+
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization  dataInit(args, factory);
+
+    dataInit.prepareCPUInputs(p1);
+    EXPECT_FALSE(dataInit.cpuInputsNeedRefresh(p1));
+    EXPECT_TRUE(dataInit.cpuInputsNeedRefresh(p2));
+
+    auto inputs2 = dataInit.prepareGPUInputs(p2);
+    auto* ci2    = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->a, nullptr);
+
+    size_t const idx = p2.a().index(48, 0, 0);
+    float const  value
+        = readDeviceValue(static_cast<float const*>(ci2->a), idx);
+    EXPECT_FLOAT_EQ(value, 48.0f)
+        << "GPU input A(m=48, k=0) should follow the SerialDim0 pattern for problem 2.";
+    EXPECT_FALSE(dataInit.cpuInputsNeedRefresh(p2));
+}
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+TEST(BatchPointerReset, MXCpuFreshnessMarksGeneratedDescriptors)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH   = 4;
+    constexpr int    MXBLOCK = 32;
+
+    auto problem = makeMXBatchedProblem(64, 64, 32, BATCH, MXBLOCK);
+    auto args    = makeMXPredicateArgs({{64, 64, BATCH, 32}}, MXBLOCK);
+
+    ClientProblemFactory       factory(args);
+    PredicateDataInitialization dataInit(args, factory);
+
+    dataInit.prepareCPUInputs(problem);
+    EXPECT_FALSE(dataInit.cpuInputsNeedRefresh(problem));
+}
+
+TEST(BatchPointerReset, MXPreparedInputsAreEligibleForSolutionRefresh)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH   = 4;
+    constexpr int    MXBLOCK = 32;
+
+    auto problem = makeMXBatchedProblem(64, 64, 32, BATCH, MXBLOCK);
+    auto args    = makeMXPredicateArgs({{64, 64, BATCH, 32}}, MXBLOCK);
+
+    ClientProblemFactory       factory(args);
+    PredicateDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(problem);
+    ASSERT_NE(inputs, nullptr);
+    EXPECT_TRUE(dataInit.gpuInputsPreparedFor(problem));
+
+    ContractionSolution solution;
+    EXPECT_TRUE(dataInit.shouldRefreshMXForSolution(&solution, problem));
+}
+#endif
 
 TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
 {

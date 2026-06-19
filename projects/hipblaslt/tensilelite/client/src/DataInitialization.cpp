@@ -1854,6 +1854,68 @@ namespace TensileLite
             altAllocationGuard.release();
         }
 
+        DataInitialization::BatchPointerSignature
+            DataInitialization::makeBatchPointerSignature(
+                ContractionProblemGemm const& problem) const
+        {
+            BatchPointerSignature signature;
+            signature.base.boundsCheck = m_curBoundsCheck;
+            signature.base.tensors     = problem.tensors();
+            signature.base.useBias     = problem.useBias();
+            signature.base.biasSrc     = problem.biasSrc();
+            signature.base.sparse      = problem.sparse();
+            signature.base.swizzleA    = problem.swizzleTensorA();
+            signature.base.swizzleB    = problem.swizzleTensorB();
+
+            auto const& batchIndices = problem.batchIndices();
+            signature.base.batchIndices.reserve(batchIndices.size());
+            for(auto const& batchIndex : batchIndices)
+            {
+                signature.base.batchIndices.push_back(
+                    {batchIndex.a, batchIndex.b, batchIndex.c, batchIndex.d});
+            }
+
+            return signature;
+        }
+
+        bool DataInitialization::batchPointersCurrentFor(
+            ContractionProblemGemm const& problem) const
+        {
+            return m_batchPointerSignatureValid
+                && m_batchPointerSignature == makeBatchPointerSignature(problem);
+        }
+
+        void DataInitialization::markBatchPointersCurrent(
+            ContractionProblemGemm const& problem)
+        {
+            m_batchPointerSignature      = makeBatchPointerSignature(problem);
+            m_batchPointerSignatureValid = true;
+        }
+
+        DataInitialization::PreparedProblemSignature
+            DataInitialization::makePreparedProblemSignature(
+                ContractionProblemGemm const& problem) const
+        {
+            PreparedProblemSignature signature;
+            signature.base     = makeBatchPointerSignature(problem).base;
+            signature.mxBlockA = problem.mxBlockA();
+            signature.mxBlockB = problem.mxBlockB();
+            return signature;
+        }
+
+        bool DataInitialization::gpuInputsPreparedFor(ContractionProblemGemm const& problem) const
+        {
+            return m_gpuInit && m_preparedProblemSignatureValid
+                && m_preparedProblemSignature == makePreparedProblemSignature(problem);
+        }
+
+        void DataInitialization::markGpuInputsPrepared(
+            ContractionProblemGemm const& problem)
+        {
+            m_preparedProblemSignature      = makePreparedProblemSignature(problem);
+            m_preparedProblemSignatureValid = true;
+        }
+
         void DataInitialization::initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
                                                             hipStream_t                   targetStream,
                                                             size_t                        stagingBufferSlot)
@@ -2024,7 +2086,8 @@ namespace TensileLite
                         for(size_t j = 0; j < problem.gemms.size(); j++)
                         {
                             auto& tensors = problem.gemms[j].tensors();
-                            if(p.second.initDescriptor[j] != tensors[i])
+                            bool const primaryStale = p.second.initDescriptor[j] != tensors[i];
+                            if(primaryStale)
                             {
                                 p.second.initDescriptor[j] = tensors[i];
                                 initArray(p.first,
@@ -2032,39 +2095,42 @@ namespace TensileLite
                                           (void*)((int8_t*)p.second.cpuInput.valid.get()
                                                   + gemmInitOffset),
                                           tensors[i]);
-                                // FIXME: Should we init unused part to 0?
-                                if((problem.gemms[j].sparse() == 1
-                                    && i == ContractionProblemGemm::TENSOR::A)
-                                   || (problem.gemms[j].sparse() == 2
-                                       && i == ContractionProblemGemm::TENSOR::B))
-                                {
-                                    const TensorDescriptor& t = problem.gemms[j].sparse() == 2
-                                                                    ? problem.gemms[j].b()
-                                                                    : problem.gemms[j].a();
-                                    int                     tDim;
-                                    rocisa::DataType        tDataType;
-                                    if(problem.gemms[j].sparse() == 2)
-                                    {
-                                        tDim      = problem.gemms[j].boundIndices()[0].b;
-                                        tDataType = problem.gemms[j].b().dataType();
-                                    }
-                                    else
-                                    {
-                                        tDim      = problem.gemms[j].boundIndices()[0].a;
-                                        tDataType = problem.gemms[j].a().dataType();
-                                    }
+                            }
 
-                                    const TensorDescriptor& tM = problem.gemms[j].metadata();
-                                    const TensorDescriptor& tC = problem.gemms[j].compressed();
-                                    auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
-                                                       .pristine[p.first];
-                                    auto& pUnitCp
-                                        = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
-                                              .pristine[p.first];
-                                    pUnitM.initDescriptor[j]
-                                        = tensors[ContractionProblemGemm::TENSOR::METADATA];
-                                    pUnitCp.initDescriptor[j]
-                                        = tensors[ContractionProblemGemm::TENSOR::COMPRESSED];
+                            // FIXME: Should we init unused part to 0?
+                            if((problem.gemms[j].sparse() == 1
+                                && i == ContractionProblemGemm::TENSOR::A)
+                               || (problem.gemms[j].sparse() == 2
+                                   && i == ContractionProblemGemm::TENSOR::B))
+                            {
+                                const TensorDescriptor& t = problem.gemms[j].sparse() == 2
+                                                                ? problem.gemms[j].b()
+                                                                : problem.gemms[j].a();
+                                int                     tDim;
+                                if(problem.gemms[j].sparse() == 2)
+                                    tDim = problem.gemms[j].boundIndices()[0].b;
+                                else
+                                    tDim = problem.gemms[j].boundIndices()[0].a;
+
+                                const TensorDescriptor& tM = problem.gemms[j].metadata();
+                                const TensorDescriptor& tC = problem.gemms[j].compressed();
+                                auto& pUnitM = m_vdata[ContractionProblemGemm::TENSOR::METADATA]
+                                                   .pristine[tM.dataType()];
+                                auto& pUnitCp
+                                    = m_vdata[ContractionProblemGemm::TENSOR::COMPRESSED]
+                                          .pristine[tC.dataType()];
+                                if(pUnitM.initDescriptor.size() <= j)
+                                    pUnitM.initDescriptor.resize(problem.gemms.size());
+                                if(pUnitCp.initDescriptor.size() <= j)
+                                    pUnitCp.initDescriptor.resize(problem.gemms.size());
+
+                                bool const sparseSideStale
+                                    = pUnitM.initDescriptor[j] != tM
+                                      || pUnitCp.initDescriptor[j] != tC;
+                                if(primaryStale || sparseSideStale)
+                                {
+                                    pUnitM.initDescriptor[j] = tM;
+                                    pUnitCp.initDescriptor[j] = tC;
                                     initCPUSparseInput(
                                         m_pruneMode,
                                         (char*)p.second.cpuInput.valid.get() + gemmInitOffset,
@@ -2362,6 +2428,9 @@ namespace TensileLite
                             scalePtr, compactFreeA, compactKA, paddedKA, scaleElemA);
                 }
 
+                pristineA.initDescriptor[0] = tensorA;
+                pristineE8A.initDescriptor[0] = problem.mxsa();
+
                 // For preswizzle-arch (gfx950): when the preswizzle condition fires,
                 // generate the preswizzled scale and upload it directly to gpuInput.valid.
                 // copySwizzledToGPUBuffer will use gpuInput.valid as-is instead of
@@ -2480,6 +2549,9 @@ namespace TensileLite
                             scalePtr, compactFreeB, compactKB, paddedKB, scaleElemB);
                 }
 
+                pristineB.initDescriptor[0] = tensorB;
+                pristineE8B.initDescriptor[0] = problem.mxsb();
+
                 // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
                 if(m_isMXPreswizzleArch && !preSwizzleB.empty() && pristineE8B.gpuInput.valid)
                 {
@@ -2533,6 +2605,112 @@ namespace TensileLite
                 "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time");
         }
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+        bool DataInitialization::cpuInputsNeedRefresh(
+            ContractionProblemGemm const& problem) const
+        {
+            if(!m_problemDependentData)
+                return false;
+
+            auto const& tensors = problem.tensors();
+            if(tensors.size() != m_vdata.size())
+                return true;
+
+            for(size_t i = 0; i < m_vdata.size(); i++)
+            {
+                if((i == ContractionProblemGemm::TENSOR::METADATA
+                    || i == ContractionProblemGemm::TENSOR::COMPRESSED)
+                   && problem.sparse() == 0)
+                {
+                    continue;
+                }
+
+                auto const& desc = tensors[i];
+                auto const& pristine = m_vdata[i].pristine;
+                if(pristine.empty())
+                    continue;
+                auto        it       = pristine.find(desc.dataType());
+                if(it == pristine.end())
+                    return true;
+
+                auto const& p = it->second;
+                if(p.initDescriptor.size() != 1 || p.initDescriptor[0] != desc)
+                    return true;
+            }
+
+            return false;
+        }
+
+        bool DataInitialization::cpuInputsNeedRefresh(
+            ContractionProblemGroupedGemm const& problem) const
+        {
+            if(!m_problemDependentData)
+                return false;
+
+            if(problem.gemms.empty())
+                return true;
+
+            for(auto const& gemm : problem.gemms)
+            {
+                if(gemm.tensors().size() != m_vdata.size())
+                    return true;
+            }
+
+            for(size_t i = 0; i < m_vdata.size(); i++)
+            {
+                auto const& pristine = m_vdata[i].pristine;
+                if(pristine.empty())
+                    continue;
+                for(size_t j = 0; j < problem.gemms.size(); j++)
+                {
+                    if((i == ContractionProblemGemm::TENSOR::METADATA
+                        || i == ContractionProblemGemm::TENSOR::COMPRESSED)
+                       && problem.gemms[j].sparse() == 0)
+                    {
+                        continue;
+                    }
+
+                    auto const& desc = problem.gemms[j].tensors()[i];
+                    auto        it    = pristine.find(desc.dataType());
+                    if(it == pristine.end())
+                        return true;
+
+                    auto const& p = it->second;
+                    if(p.initDescriptor.size() <= j || p.initDescriptor[j] != desc)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        void DataInitialization::ensureCPUInputsCurrent(
+            ContractionProblemGemm const& problem)
+        {
+            if(cpuInputsNeedRefresh(problem))
+            {
+                initializeCPUInputs(problem);
+                assert(!cpuInputsNeedRefresh(problem));
+            }
+        }
+
+        void DataInitialization::ensureCPUInputsCurrent(
+            ContractionProblemGroupedGemm const& problem)
+        {
+            if(cpuInputsNeedRefresh(problem))
+            {
+                initializeCPUInputs(problem);
+                assert(!cpuInputsNeedRefresh(problem));
+            }
+        }
+
+        bool DataInitialization::shouldRefreshMXForSolution(
+            ContractionSolution const*     solution,
+            ContractionProblemGemm const& problem) const
+        {
+            return solution != nullptr && m_mxScaleFormat > 0 && isMXProblemExceptF6(problem)
+                && gpuInputsPreparedFor(problem);
+        }
 
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
         {
@@ -3755,14 +3933,18 @@ namespace TensileLite
         }
 
         std::shared_ptr<ProblemInputs>
-            DataInitialization::prepareGPUInputsInternal(
+        DataInitialization::prepareGPUInputsInternal(
                 ContractionProblemGemm const& problem,
-                hipStream_t                   targetStream)
+                hipStream_t                   targetStream,
+                bool                          cpuInputsAlreadyCurrent)
         {
             hipMemcpyKind kind;
 
             bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
             bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+
+            if(!cpuInputsAlreadyCurrent)
+                ensureCPUInputsCurrent(problem);
 
             if(m_keepPristineCopyOnGPU && !m_problemDependentData)
             {
@@ -3773,11 +3955,11 @@ namespace TensileLite
                 kind = hipMemcpyHostToDevice;
             }
 
-            if(m_batchInitProblem != &problem)
+            if(!batchPointersCurrentFor(problem))
             {
                 ScopedTimer t("gpu_batch_pointer_init");
                 initializeGPUBatchedInputs(problem, targetStream, /*stagingBufferSlot=*/0);
-                m_batchInitProblem = &problem;
+                markBatchPointersCurrent(problem);
             }
 
             if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
@@ -3794,17 +3976,13 @@ namespace TensileLite
                                 kind,
                                 targetStream);
                 }
+                markGpuInputsPrepared(problem);
                 return m_cachedGPUInputs;
             }
             else
             {
                 {
                     ScopedTimer t("async_reset_probdep");
-                    if(m_cpuPtrs.empty() && m_problemDependentData)
-                    {
-                        ScopedTimer t2("async_reset_cpuinit");
-                        initializeCPUInputs(problem);
-                    }
                     if(m_problemDependentData)
                     {
                         ScopedTimer t2("async_reset_copyvalid");
@@ -3849,8 +4027,7 @@ namespace TensileLite
                 m_gpuInit = true;
             }
 
-            if(m_cpuPtrs.empty())
-                initializeConstantInputs(problem);
+            initializeConstantInputs(problem);
 
             m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
 
@@ -3863,15 +4040,17 @@ namespace TensileLite
                 m_gpuBatchPtrsRing[0] = m_gpuBatchPtrs;
                 m_cachedInputsRing[0] = m_cachedGPUInputs;
 
-                initializeAltBufferSets(problem);
+                initializeAltBufferSets(problem, cpuInputsAlreadyCurrent);
             }
+            markGpuInputsPrepared(problem);
             return m_cachedGPUInputs;
         }
 
         void DataInitialization::fillSlot(
             size_t                        slotIdx,
             ContractionProblemGemm const& problem,
-            hipStream_t                   targetStream)
+            hipStream_t                   targetStream,
+            bool                          cpuInputsAlreadyCurrent)
         {
             // RAII: point gpuInput.current/batch at target slot, restore on exit
             SlotGuard guard(m_vdata, slotIdx);
@@ -3897,8 +4076,8 @@ namespace TensileLite
             auto localOffsets     = m_groupedOffsets;
 
             // Full path: initialize all tensors into target slot
-            if(m_cpuPtrs.empty() && m_problemDependentData)
-                initializeCPUInputs(problem);
+            if(!cpuInputsAlreadyCurrent)
+                ensureCPUInputsCurrent(problem);
             if(m_problemDependentData)
                 copyValidToGPUBuffer(problem, targetStream != nullptr);
             if(needSwizzle || needMXSwizzle)
@@ -3924,7 +4103,8 @@ namespace TensileLite
         }
 
         void DataInitialization::initializeAltBufferSets(
-            ContractionProblemGemm const& problem)
+            ContractionProblemGemm const& problem,
+            bool                          cpuInputsAlreadyCurrent)
         {
             // Early-out when m_gpuPtrsRing[1] is already populated: prevents
             // re-initialization if called redundantly before cancelAsyncReset
@@ -3933,7 +4113,7 @@ namespace TensileLite
                 return;
 
             for(size_t slot = 1; slot < m_ring.activeBufferCount(); slot++)
-                fillSlot(slot, problem, /*targetStream=*/nullptr);
+                fillSlot(slot, problem, /*targetStream=*/nullptr, cpuInputsAlreadyCurrent);
 
             m_altSlotsReady = true;
         }
@@ -4044,8 +4224,9 @@ namespace TensileLite
                 m_cachedInputsRing[i].reset();
                 m_swizzleUploadStaging[i].clear();
             }
-            m_batchInitProblem = nullptr;
-            m_altSlotsReady    = false;
+            m_batchPointerSignatureValid   = false;
+            m_preparedProblemSignatureValid = false;
+            m_altSlotsReady                = false;
         }
 
         // Kick off async reset of the next free buffer slot in the ring
