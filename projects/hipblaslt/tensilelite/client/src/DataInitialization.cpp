@@ -929,6 +929,371 @@ namespace TensileLite
             return dst;
         }
 
+        hipStream_t DataInitialization::effectiveStreamForOp(TensorCopyOp const& op,
+                                                              hipStream_t        d2dStream)
+        {
+            return op.kind == hipMemcpyDeviceToDevice ? d2dStream : nullptr;
+        }
+
+        DataInitialization::TensorCopyPlan
+            DataInitialization::planInputCopies(ContractionProblemGemm const& problem,
+                                                hipMemcpyKind                 kind) const
+        {
+            TensorCopyPlan plan;
+            plan.replaceDestinationViews = true;
+            plan.opsByTensor.resize(m_vdata.size());
+
+            auto const& tensors = problem.tensors();
+            if(tensors.size() != m_vdata.size())
+            {
+                throw std::runtime_error(
+                    "Tensor count mismatch while planning input copies.");
+            }
+
+            auto selectPointers = [&](TensorCopyOp& op, PristineUnit const& p, bool useBad) {
+                switch(kind)
+                {
+                case hipMemcpyHostToHost:
+                    op.dst = p.cpuInput.current.get();
+                    op.src = p.cpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.cpuInput.bad.get();
+                    return;
+                case hipMemcpyHostToDevice:
+                    op.dst = p.gpuInput.current.get();
+                    op.src = p.cpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.cpuInput.bad.get();
+                    return;
+                case hipMemcpyDeviceToDevice:
+                    op.dst = p.gpuInput.current.get();
+                    op.src = p.gpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.gpuInput.bad.get();
+                    return;
+                default:
+                    throw std::runtime_error("Unsupported hipMemcpyKind in planInputCopies.");
+                }
+            };
+
+            auto guardBackPadding = [&](TensorDescriptor const& desc) -> ptrdiff_t {
+                size_t MiM_N = 16;
+                size_t MiK   = 0;
+                size_t MiKv  = 0;
+                size_t PackK = 0;
+                calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+                auto const k        = desc.sizes()[0];
+                auto const m_n      = desc.sizes()[1];
+                auto const b        = desc.sizes()[2];
+                auto const swizzleK = MiK * PackK;
+                auto const paddedMN = (m_n + MiM_N - 1) / MiM_N * MiM_N;
+                auto const paddedK  = (k + swizzleK - 1) / swizzleK * swizzleK;
+                return static_cast<ptrdiff_t>(paddedMN * paddedK * b
+                                              - desc.totalAllocatedElements());
+            };
+
+            for(size_t i = 0; i < m_vdata.size(); ++i)
+            {
+                auto const& desc = tensors[i];
+                auto const   it   = m_vdata[i].pristine.find(desc.dataType());
+                if(it == m_vdata[i].pristine.end())
+                    continue;
+
+                auto const& p = it->second;
+                TensorCopyOp op;
+                op.tensorIndex    = i;
+                op.descriptor     = &desc;
+                op.kind           = kind;
+                op.maxElements    = p.maxElements;
+                op.batchPtr       = p.getInputByKind(kind).batch.get();
+                op.groupedOffsets = p.groupedGemmOffsets;
+
+                if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                {
+                    op.planKind = TensorCopyPlanKind::BadBounds;
+                    selectPointers(op, p, /*useBad=*/true);
+                }
+                else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                {
+                    op.planKind = TensorCopyPlanKind::GuardBack;
+                    selectPointers(op, p, /*useBad=*/false);
+                    if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
+                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
+                    {
+                        op.customPadding = guardBackPadding(desc);
+                    }
+                }
+                else
+                {
+                    op.planKind = TensorCopyPlanKind::Plain;
+                    selectPointers(op, p, /*useBad=*/false);
+                }
+
+                plan.opsByTensor[i] = std::move(op);
+            }
+
+            return plan;
+        }
+
+        DataInitialization::TensorCopyPlan DataInitialization::planOutputResetCopyOps(
+            ContractionProblemGemm const& problem, hipMemcpyKind kind) const
+        {
+            TensorCopyPlan plan;
+            plan.replaceDestinationViews = false;
+            plan.opsByTensor.resize(m_vdata.size());
+
+            auto const& tensors = problem.tensors();
+            if(tensors.size() != m_vdata.size())
+            {
+                throw std::runtime_error(
+                    "Tensor count mismatch while planning output reset copies.");
+            }
+
+            auto selectPointers = [&](TensorCopyOp& op, PristineUnit const& p, bool useBad) {
+                switch(kind)
+                {
+                case hipMemcpyHostToHost:
+                    op.dst = p.cpuInput.current.get();
+                    op.src = p.cpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.cpuInput.bad.get();
+                    return;
+                case hipMemcpyHostToDevice:
+                    op.dst = p.gpuInput.current.get();
+                    op.src = p.cpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.cpuInput.bad.get();
+                    return;
+                case hipMemcpyDeviceToDevice:
+                    op.dst = p.gpuInput.current.get();
+                    op.src = p.gpuInput.valid.get();
+                    if(useBad)
+                        op.bad = p.gpuInput.bad.get();
+                    return;
+                default:
+                    throw std::runtime_error(
+                        "Unsupported hipMemcpyKind in planOutputResetCopyOps.");
+                }
+            };
+
+            for(size_t i = 0; i < m_vdata.size(); ++i)
+            {
+                auto const& desc = tensors[i];
+                if(!desc.isOutput())
+                    continue;
+
+                auto const it = m_vdata[i].pristine.find(desc.dataType());
+                if(it == m_vdata[i].pristine.end())
+                    continue;
+
+                auto const& p = it->second;
+                TensorCopyOp op;
+                op.tensorIndex    = i;
+                op.descriptor     = &desc;
+                op.kind           = kind;
+                op.maxElements    = p.maxElements;
+                op.batchPtr       = p.getInputByKind(kind).batch.get();
+                op.groupedOffsets = p.groupedGemmOffsets;
+
+                if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                {
+                    op.planKind = TensorCopyPlanKind::BadBounds;
+                    selectPointers(op, p, /*useBad=*/true);
+                }
+                else
+                {
+                    op.planKind = TensorCopyPlanKind::Plain;
+                    selectPointers(op, p, /*useBad=*/false);
+                }
+
+                plan.opsByTensor[i] = std::move(op);
+            }
+
+            return plan;
+        }
+
+        std::vector<void*> DataInitialization::executeTensorCopyPlan(TensorCopyPlan const& plan,
+                                                                     hipStream_t d2dStream) const
+        {
+            std::vector<void*> resultPtrs(plan.opsByTensor.size(), nullptr);
+
+            for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+            {
+                auto const& maybeOp = plan.opsByTensor[i];
+                if(!maybeOp)
+                    continue;
+
+                auto const& op     = *maybeOp;
+                auto const   stream = effectiveStreamForOp(op, d2dStream);
+                void*        result = nullptr;
+
+                switch(op.planKind)
+                {
+                case TensorCopyPlanKind::Plain:
+                    result = copyInputBuffers(*op.descriptor,
+                                              op.dst,
+                                              op.src,
+                                              op.maxElements,
+                                              op.kind,
+                                              stream);
+                    break;
+                case TensorCopyPlanKind::BadBounds:
+                    result = copyBadInputBuffers(*op.descriptor,
+                                                 op.dst,
+                                                 op.src,
+                                                 op.bad,
+                                                 op.maxElements,
+                                                 op.kind,
+                                                 stream);
+                    break;
+                case TensorCopyPlanKind::GuardBack:
+                    if(op.customPadding != -1)
+                    {
+                        result = copyNaNInputBuffers(*op.descriptor,
+                                                     op.dst,
+                                                     op.src,
+                                                     op.maxElements,
+                                                     op.kind,
+                                                     op.customPadding,
+                                                     stream);
+                    }
+                    else
+                    {
+                        result = copyNaNInputBuffers(*op.descriptor,
+                                                     op.dst,
+                                                     op.src,
+                                                     op.maxElements,
+                                                     op.kind,
+                                                     -1,
+                                                     stream);
+                    }
+                    break;
+                }
+
+                if(result == nullptr)
+                {
+                    throw std::runtime_error("output ptr is null when copy input");
+                }
+
+                resultPtrs[i] = result;
+            }
+
+            return resultPtrs;
+        }
+
+        void DataInitialization::applyInputCopyPlanResults(
+            TensorCopyPlan const&             plan,
+            std::vector<void*> const&         resultPtrs,
+            std::vector<void*>&               ptrs,
+            std::vector<void**>&              batchPtrs,
+            std::vector<size_t>&              maxElements,
+            std::vector<std::vector<size_t>>& offsets) const
+        {
+            if(resultPtrs.size() != plan.opsByTensor.size())
+            {
+                throw std::runtime_error(
+                    "Tensor copy plan results are not tensor-indexed.");
+            }
+
+            ptrs.clear();
+            batchPtrs.clear();
+            maxElements.clear();
+            offsets.clear();
+
+            ptrs.reserve(resultPtrs.size());
+            batchPtrs.reserve(resultPtrs.size());
+            maxElements.reserve(resultPtrs.size());
+            offsets.reserve(resultPtrs.size());
+
+            for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+            {
+                auto const& maybeOp = plan.opsByTensor[i];
+                if(maybeOp)
+                {
+                    auto const& op = *maybeOp;
+                    ptrs.push_back(resultPtrs[i]);
+                    batchPtrs.push_back(op.batchPtr);
+                    maxElements.push_back(op.maxElements);
+                    offsets.push_back(op.groupedOffsets);
+                }
+                else
+                {
+                    ptrs.push_back(nullptr);
+                    batchPtrs.push_back(nullptr);
+                    maxElements.push_back(0);
+                    offsets.emplace_back();
+                }
+            }
+        }
+
+        void DataInitialization::applyOutputResetPlanResults(
+            TensorCopyPlan const&             plan,
+            ContractionProblemGemm const&     problem,
+            std::vector<void*> const&         resultPtrs,
+            std::vector<void*>&               ptrs,
+            std::vector<void**>&              batchPtrs,
+            std::vector<size_t>&              maxElements,
+            std::vector<std::vector<size_t>>& offsets) const
+        {
+            if(resultPtrs.size() != plan.opsByTensor.size())
+            {
+                throw std::runtime_error(
+                    "Tensor copy plan results are not tensor-indexed.");
+            }
+
+            auto const tensorCount = plan.opsByTensor.size();
+            if(ptrs.size() < tensorCount)
+                ptrs.resize(tensorCount, nullptr);
+            if(batchPtrs.size() < tensorCount)
+                batchPtrs.resize(tensorCount, nullptr);
+            if(maxElements.size() < tensorCount)
+                maxElements.resize(tensorCount, 0);
+            if(offsets.size() < tensorCount)
+                offsets.resize(tensorCount);
+
+            auto const& tensors = problem.tensors();
+            if(tensors.size() != tensorCount)
+            {
+                throw std::runtime_error(
+                    "Tensor count mismatch while applying output reset copies.");
+            }
+
+            for(size_t i = 0; i < tensorCount; ++i)
+            {
+                if(!tensors[i].isOutput())
+                    continue;
+
+                auto const& maybeOp = plan.opsByTensor[i];
+                if(!maybeOp)
+                {
+                    ptrs[i]        = nullptr;
+                    batchPtrs[i]   = nullptr;
+                    maxElements[i] = 0;
+                    offsets[i].clear();
+                    continue;
+                }
+
+                auto const& op = *maybeOp;
+                ptrs[i]        = resultPtrs[i];
+                batchPtrs[i]   = op.batchPtr;
+                maxElements[i] = op.maxElements;
+                offsets[i]     = op.groupedOffsets;
+            }
+        }
+
+        void DataInitialization::copyInputs(std::vector<void*>&               ptrs,
+                                            std::vector<void**>&              batchPtrs,
+                                            std::vector<size_t>&              maxElements,
+                                            std::vector<std::vector<size_t>>& offsets,
+                                            ContractionProblemGemm const&     problem,
+                                            hipMemcpyKind                     kind,
+                                            hipStream_t                       targetStream)
+        {
+            auto plan    = planInputCopies(problem, kind);
+            auto results  = executeTensorCopyPlan(plan, targetStream);
+            applyInputCopyPlanResults(plan, results, ptrs, batchPtrs, maxElements, offsets);
+        }
+
         std::ostream& operator<<(std::ostream& stream, PruneSparseMode const& mode)
         {
             std::string strValue;
@@ -2777,172 +3142,6 @@ namespace TensileLite
             return;
         }
 
-        void DataInitialization::copyInputs(std::vector<void*>&               ptrs,
-                                            std::vector<void**>&              batchPtrs,
-                                            std::vector<size_t>&              maxElements,
-                                            std::vector<std::vector<size_t>>& offsets,
-                                            ContractionProblemGemm const&     problem,
-                                            hipMemcpyKind                     kind,
-                                            hipStream_t                       targetStream)
-        {
-            ptrs.clear();
-            batchPtrs.clear();
-            maxElements.clear();
-            if(m_curBoundsCheck == BoundsCheckMode::NaN)
-            {
-                for(size_t i = 0; i < m_vdata.size(); i++)
-                {
-                    void* ptr  = nullptr;
-                    auto& desc = problem.tensors()[i];
-                    auto  it   = m_vdata[i].pristine.find(desc.dataType());
-                    if(it != m_vdata[i].pristine.end())
-                    {
-                        auto& p = it->second;
-                        if(kind == hipMemcpyHostToHost)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.cpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.cpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind);
-                        else if(kind == hipMemcpyHostToDevice)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.cpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind);
-                        else if(kind == hipMemcpyDeviceToDevice)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.gpuInput.valid.get(),
-                                                      p.gpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind,
-                                                      targetStream);
-                        ptrs.push_back(ptr);
-                        batchPtrs.push_back(p.getInputByKind(kind).batch.get());
-                        maxElements.push_back(p.maxElements);
-                        offsets.push_back(p.groupedGemmOffsets);
-                    }
-                    else
-                    {
-                        ptrs.push_back(nullptr);
-                        batchPtrs.push_back(nullptr);
-                        maxElements.push_back(0);
-                        offsets.push_back(std::vector<size_t>());
-                    }
-                }
-            }
-            else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
-            {
-                for(size_t i = 0; i < m_vdata.size(); i++)
-                {
-                    void* ptr  = nullptr;
-                    auto& desc = problem.tensors()[i];
-                    auto  it   = m_vdata[i].pristine.find(desc.dataType());
-                    if(it != m_vdata[i].pristine.end())
-                    {
-                        auto&     p = it->second;
-                        ptrdiff_t swizzlePadding{-1};
-
-                        if(problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A
-                           || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
-                        {
-                            //TODO: support more swizzle types,
-                            //      currently, if A then it means MiM = 16, if B then it means MiN = 16
-                            size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                            swizzlePadding
-                                = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK)
-                                  - desc.totalAllocatedElements();
-                        }
-
-                        if(kind == hipMemcpyHostToHost)
-                            ptr = copyNaNInputBuffers(desc,
-                                                      p.cpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.maxElements,
-                                                      kind,
-                                                      swizzlePadding);
-                        else if(kind == hipMemcpyHostToDevice)
-                            ptr = copyNaNInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.maxElements,
-                                                      kind,
-                                                      swizzlePadding);
-                        else if(kind == hipMemcpyDeviceToDevice)
-                            ptr = copyNaNInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.gpuInput.valid.get(),
-                                                      p.maxElements,
-                                                      kind,
-                                                      swizzlePadding,
-                                                      targetStream);
-                        ptrs.push_back(ptr);
-                        batchPtrs.push_back(p.getInputByKind(kind).batch.get());
-                        maxElements.push_back(p.maxElements);
-                        offsets.push_back(p.groupedGemmOffsets);
-                    }
-                    else
-                    {
-                        ptrs.push_back(nullptr);
-                        batchPtrs.push_back(nullptr);
-                        maxElements.push_back(0);
-                        offsets.push_back(std::vector<size_t>());
-                    }
-                }
-            }
-            else
-            {
-                for(size_t i = 0; i < m_vdata.size(); i++)
-                {
-                    void* ptr  = nullptr;
-                    auto& desc = problem.tensors()[i];
-                    auto  it   = m_vdata[i].pristine.find(desc.dataType());
-                    if(it != m_vdata[i].pristine.end())
-                    {
-                        auto& p = it->second;
-                        if(kind == hipMemcpyHostToHost)
-                            ptr = copyInputBuffers(desc,
-                                                   p.cpuInput.current.get(),
-                                                   p.cpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind);
-                        else if(kind == hipMemcpyHostToDevice)
-                            ptr = copyInputBuffers(desc,
-                                                   p.gpuInput.current.get(),
-                                                   p.cpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind);
-                        else if(kind == hipMemcpyDeviceToDevice)
-                            ptr = copyInputBuffers(desc,
-                                                   p.gpuInput.current.get(),
-                                                   p.gpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind,
-                                                   targetStream);
-                        if(ptr == nullptr)
-                        {
-                            throw std::runtime_error("output ptr is null when copy input");
-                        }
-                        ptrs.push_back(ptr);
-                        batchPtrs.push_back(p.getInputByKind(kind).batch.get());
-                        maxElements.push_back(p.maxElements);
-                        offsets.push_back(p.groupedGemmOffsets);
-                    }
-                    else
-                    {
-                        ptrs.push_back(nullptr);
-                        batchPtrs.push_back(nullptr);
-                        maxElements.push_back(0);
-                        offsets.push_back(std::vector<size_t>());
-                    }
-                }
-            }
-        }
-
         void DataInitialization::resetOutput(std::vector<void*>&               ptrs,
                                              std::vector<void**>&              batchPtrs,
                                              std::vector<size_t>&              maxElements,
@@ -2953,95 +3152,9 @@ namespace TensileLite
         {
             hipStream_t copyStream = targetStream ? targetStream : m_copyStream;
             bool        useAsync   = (kind == hipMemcpyDeviceToDevice) && copyStream;
-            {
-                for(size_t i = 0; i < m_vdata.size(); i++)
-                {
-                    void* ptr  = nullptr;
-                    auto& desc = problem.tensors()[i];
-                    if(!desc.isOutput()) // Need init first
-                        continue;
-                    auto it = m_vdata[i].pristine.find(desc.dataType());
-                    if(it != m_vdata[i].pristine.end())
-                    {
-                        auto& p = it->second;
-                        // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
-                        if(m_curBoundsCheck == BoundsCheckMode::NaN)
-                        {
-                            if(kind == hipMemcpyHostToHost)
-                                ptr = copyBadInputBuffers(desc,
-                                                          p.cpuInput.current.get(),
-                                                          p.cpuInput.valid.get(),
-                                                          p.cpuInput.bad.get(),
-                                                          p.maxElements,
-                                                          kind);
-                            else if(kind == hipMemcpyHostToDevice)
-                                ptr = copyBadInputBuffers(desc,
-                                                          p.gpuInput.current.get(),
-                                                          p.cpuInput.valid.get(),
-                                                          p.cpuInput.bad.get(),
-                                                          p.maxElements,
-                                                          kind);
-                            else if(kind == hipMemcpyDeviceToDevice)
-                                ptr = copyBadInputBuffers(desc,
-                                                          p.gpuInput.current.get(),
-                                                          p.gpuInput.valid.get(),
-                                                          p.gpuInput.bad.get(),
-                                                          p.maxElements,
-                                                          kind,
-                                                          useAsync ? copyStream : nullptr);
-                        }
-                        else
-                        {
-                            if(kind == hipMemcpyHostToHost)
-                                ptr = copyInputBuffers(desc,
-                                                       p.cpuInput.current.get(),
-                                                       p.cpuInput.valid.get(),
-                                                       p.maxElements,
-                                                       kind);
-                            else if(kind == hipMemcpyHostToDevice)
-                                ptr = copyInputBuffers(desc,
-                                                       p.gpuInput.current.get(),
-                                                       p.cpuInput.valid.get(),
-                                                       p.maxElements,
-                                                       kind);
-                            else if(kind == hipMemcpyDeviceToDevice)
-                            {
-                                if(useAsync)
-                                {
-                                    HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.current.get(),
-                                                                 p.gpuInput.valid.get(),
-                                                                 multiplyElementSize(p.maxElements,
-                                                                                     desc.elementBytes()),
-                                                                 kind,
-                                                                 copyStream));
-                                    ptr = p.gpuInput.current.get();
-                                }
-                                else
-                                    ptr = copyInputBuffers(desc,
-                                                           p.gpuInput.current.get(),
-                                                           p.gpuInput.valid.get(),
-                                                           p.maxElements,
-                                                           kind);
-                            }
-                        }
-                        if(ptr == nullptr)
-                        {
-                            throw std::runtime_error("output ptr is null when copy input");
-                        }
-                        ptrs[i]        = ptr;
-                        batchPtrs[i]   = p.getInputByKind(kind).batch.get();
-                        maxElements[i] = p.maxElements;
-                        offsets[i]     = p.groupedGemmOffsets;
-                    }
-                    else
-                    {
-                        ptrs[i]        = nullptr;
-                        batchPtrs[i]   = nullptr;
-                        maxElements[i] = 0;
-                        offsets[i].clear();
-                    }
-                }
-            }
+            auto plan   = planOutputResetCopyOps(problem, kind);
+            auto result = executeTensorCopyPlan(plan, useAsync ? copyStream : nullptr);
+            applyOutputResetPlanResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
             if(useAsync && !targetStream)
                 HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
         }
@@ -3670,8 +3783,7 @@ namespace TensileLite
                 }
             }
 
-            // copyInputs appends grouped offsets, so clear the destination before
-            // rebuilding this slot.
+            // Rebuild grouped offsets from scratch for this slot.
             offsets.clear();
 
             {

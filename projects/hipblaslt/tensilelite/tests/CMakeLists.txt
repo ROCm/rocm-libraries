@@ -99,6 +99,7 @@ add_executable(batch-pointer-test
     "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerReset_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationAltAllocation_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationAsyncReset_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationCopyPlan_test.cpp"
     "${CLIENT_SRC_DIR}/ClientProblemFactory.cpp"
     "${CLIENT_SRC_DIR}/DataInitialization.cpp"
     "${CLIENT_SRC_DIR}/ProgramOptions.cpp"

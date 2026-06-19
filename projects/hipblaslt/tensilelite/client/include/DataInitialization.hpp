@@ -41,6 +41,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <random>
 #include <stdexcept>
 
@@ -939,6 +940,41 @@ namespace TensileLite
                         return cpuInput;
                     return gpuInput;
                 }
+
+                MemoryInput const& getInputByKind(hipMemcpyKind kind) const
+                {
+                    if(kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost)
+                        return cpuInput;
+                    return gpuInput;
+                }
+            };
+
+            enum class TensorCopyPlanKind
+            {
+                Plain,
+                BadBounds,
+                GuardBack
+            };
+
+            struct TensorCopyOp
+            {
+                size_t                    tensorIndex = 0;
+                TensorDescriptor const*    descriptor  = nullptr;
+                void*                      dst         = nullptr;
+                void*                      src         = nullptr;
+                void*                      bad         = nullptr;
+                size_t                     maxElements = 0;
+                hipMemcpyKind              kind        = hipMemcpyHostToHost;
+                TensorCopyPlanKind         planKind    = TensorCopyPlanKind::Plain;
+                ptrdiff_t                  customPadding = -1;
+                void**                     batchPtr      = nullptr;
+                std::vector<size_t>        groupedOffsets;
+            };
+
+            struct TensorCopyPlan
+            {
+                std::vector<std::optional<TensorCopyOp>> opsByTensor;
+                bool                                     replaceDestinationViews = false;
             };
 
             // Properties for each tensor (arranged in index)
@@ -1097,6 +1133,27 @@ namespace TensileLite
             void ensureCPUInputsCurrent(ContractionProblemGemm const& problem);
             bool shouldRefreshMXForSolution(ContractionSolution const*     solution,
                                             ContractionProblemGemm const& problem) const;
+
+            TensorCopyPlan planInputCopies(ContractionProblemGemm const& problem,
+                                           hipMemcpyKind                 kind) const;
+            TensorCopyPlan planOutputResetCopyOps(ContractionProblemGemm const& problem,
+                                                  hipMemcpyKind                 kind) const;
+            std::vector<void*> executeTensorCopyPlan(TensorCopyPlan const& plan,
+                                                     hipStream_t           d2dStream) const;
+            void applyInputCopyPlanResults(TensorCopyPlan const&               plan,
+                                           std::vector<void*> const&           resultPtrs,
+                                           std::vector<void*>&                 ptrs,
+                                           std::vector<void**>&                batchPtrs,
+                                           std::vector<size_t>&                maxElements,
+                                           std::vector<std::vector<size_t>>&   offsets) const;
+            void applyOutputResetPlanResults(TensorCopyPlan const&             plan,
+                                             ContractionProblemGemm const&     problem,
+                                             std::vector<void*> const&         resultPtrs,
+                                             std::vector<void*>&               ptrs,
+                                             std::vector<void**>&              batchPtrs,
+                                             std::vector<size_t>&              maxElements,
+                                             std::vector<std::vector<size_t>>& offsets) const;
+            static hipStream_t effectiveStreamForOp(TensorCopyOp const& op, hipStream_t d2dStream);
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
