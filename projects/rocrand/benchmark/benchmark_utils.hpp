@@ -21,7 +21,6 @@
 #pragma once
 
 #include "primbench.hpp"
-#include <optional>
 
 #ifdef __HIP__
     #include <rocrand/rocrand_kernel.h>
