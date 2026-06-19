@@ -303,15 +303,6 @@ class FFTKernel(BaseNode):
                                    None)
         if pp_factors_other is not None:
             f += ', {' + cjoin(pp_factors_other) + '}'
-        batch_low = getattr(self.function.meta, 'batch_low', None)
-        batch_high = getattr(self.function.meta, 'batch_high', None)
-        if batch_low is None and batch_high is not None:
-            f += ', ' + 'std::nullopt' + ', ' + str(batch_high)
-        else:
-            if batch_low is not None:
-                f += ', ' + str(batch_low)
-            if batch_high is not None:
-                f += ', ' + str(batch_high)
         f += ')'
         return f
 

@@ -64,28 +64,23 @@ struct KernelConfig
     rocfft_array_type iAryType   = rocfft_array_type_complex_interleaved;
     rocfft_array_type oAryType   = rocfft_array_type_complex_interleaved;
 
-    std::optional<unsigned int> batch_low;
-    std::optional<unsigned int> batch_high;
-
     KernelConfig()                    = default;
     KernelConfig(const KernelConfig&) = default;
 
-    KernelConfig(bool                        use_3steps,
-                 std::vector<size_t>&&       factors,
-                 int                         tpb,
-                 int                         wgs,
-                 std::array<int, 2>&&        tpt,
-                 bool                        half_lds              = false,
-                 bool                        direct_to_from_reg    = false,
-                 bool                        intrinsic_buffer_inst = false,
-                 EmbeddedType                ebType                = EmbeddedType::NONE,
-                 int                         direction             = -1,
-                 int                         static_dim            = 0,
-                 PlacementCode               placement             = PC_UNSET,
-                 rocfft_array_type           iAryType   = rocfft_array_type_complex_interleaved,
-                 rocfft_array_type           oAryType   = rocfft_array_type_complex_interleaved,
-                 std::optional<unsigned int> batch_low  = std::nullopt,
-                 std::optional<unsigned int> batch_high = std::nullopt)
+    KernelConfig(bool                  use_3steps,
+                 std::vector<size_t>&& factors,
+                 int                   tpb,
+                 int                   wgs,
+                 std::array<int, 2>&&  tpt,
+                 bool                  half_lds              = false,
+                 bool                  direct_to_from_reg    = false,
+                 bool                  intrinsic_buffer_inst = false,
+                 EmbeddedType          ebType                = EmbeddedType::NONE,
+                 int                   direction             = -1,
+                 int                   static_dim            = 0,
+                 PlacementCode         placement             = PC_UNSET,
+                 rocfft_array_type     iAryType = rocfft_array_type_complex_interleaved,
+                 rocfft_array_type     oAryType = rocfft_array_type_complex_interleaved)
         : use_3steps_large_twd(use_3steps)
         , half_lds(half_lds)
         , direct_to_from_reg(direct_to_from_reg)
@@ -100,8 +95,6 @@ struct KernelConfig
         , placement(placement)
         , iAryType(iAryType)
         , oAryType(oAryType)
-        , batch_low(batch_low)
-        , batch_high(batch_high)
     {
     }
 
@@ -116,9 +109,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        batch_low,
-                        batch_high)
+                        factors)
                == std::tie(rhs.use_3steps_large_twd,
                            rhs.half_lds,
                            rhs.direct_to_from_reg,
@@ -126,9 +117,7 @@ struct KernelConfig
                            rhs.transforms_per_block,
                            rhs.workgroup_size,
                            rhs.threads_per_transform,
-                           rhs.factors,
-                           rhs.batch_low,
-                           rhs.batch_high);
+                           rhs.factors);
     }
 
     bool operator<(const KernelConfig& rhs) const
@@ -140,9 +129,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        batch_low,
-                        batch_high)
+                        factors)
                < std::tie(rhs.use_3steps_large_twd,
                           rhs.half_lds,
                           rhs.direct_to_from_reg,
@@ -150,9 +137,7 @@ struct KernelConfig
                           rhs.transforms_per_block,
                           rhs.workgroup_size,
                           rhs.threads_per_transform,
-                          rhs.factors,
-                          rhs.batch_low,
-                          rhs.batch_high);
+                          rhs.factors);
     }
 
     std::string Print() const
@@ -173,17 +158,7 @@ struct KernelConfig
             ss << COMMA << factor;
             COMMA = ", ";
         }
-        if(batch_low.has_value())
-            ss << "], batch_low: " << batch_low.value();
-        else
-            ss << "], batch_low: "
-               << "n/a";
-
-        if(batch_high.has_value())
-            ss << "], batch_high: " << batch_high.value();
-        else
-            ss << "], batch_high: "
-               << "n/a";
+        ss << "]";
 
         ss << "}";
 
@@ -222,8 +197,6 @@ namespace std
 
             for(auto& v : factors_max_len)
                 h ^= std::hash<size_t>{}(v);
-            h ^= std::hash<std::optional<unsigned int>>{}(config.batch_low);
-            h ^= std::hash<std::optional<unsigned int>>{}(config.batch_high);
             return h;
         }
     };

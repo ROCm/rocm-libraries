@@ -109,9 +109,6 @@ struct FFTKernel
 
     PartialPassParams pp_params;
 
-    std::optional<size_t> batch_low;
-    std::optional<size_t> batch_high;
-
     FFTKernel()                 = default;
     FFTKernel(const FFTKernel&) = default;
 
@@ -130,9 +127,7 @@ struct FFTKernel
               unsigned int                off_dim            = 0,
               unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
-              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>(),
-              std::optional<size_t>&&     batch_low          = std::nullopt,
-              std::optional<size_t>&&     batch_high         = std::nullopt)
+              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
         : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
@@ -142,8 +137,6 @@ struct FFTKernel
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
         , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
-        , batch_low(batch_low)
-        , batch_high(batch_high)
     {
     }
 
@@ -155,8 +148,6 @@ struct FFTKernel
         , use_3steps_large_twd(config.use_3steps_large_twd)
         , half_lds(config.half_lds)
         , direct_to_from_reg(config.direct_to_from_reg)
-        , batch_low(config.batch_low)
-        , batch_high(config.batch_high)
     {
     }
 
@@ -170,8 +161,6 @@ struct FFTKernel
         config.half_lds              = half_lds;
         config.direct_to_from_reg    = direct_to_from_reg;
         config.factors               = factors;
-        config.batch_low             = batch_low;
-        config.batch_high            = batch_high;
 
         return config;
     }
