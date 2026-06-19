@@ -364,11 +364,7 @@ struct BQuantBlockUniversalGemmAsBsCr
                             printf("[BQ_DEQUANT] lane=0 nIter=%d kIter=%d B after scale+cast "
                                    "(first 8): ",
                                    static_cast<int>(nIter), static_cast<int>(kIter));
-                            constexpr index_t print_n =
-                                (thread_buffer_size * UnaryOpSize_ < 8)
-                                    ? thread_buffer_size * UnaryOpSize_
-                                    : 8;
-                            static_for<0, print_n, 1>{}([&](auto ii) {
+                            static_for<0, 8, 1>{}([&](auto ii) {
                                 printf("%.4f ",
                                        static_cast<float>(b_warp_thread_buffer.template get_as<BComputeDataType>()[ii]));
                             });
