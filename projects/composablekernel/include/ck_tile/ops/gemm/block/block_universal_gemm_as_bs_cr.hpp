@@ -347,6 +347,41 @@ struct BlockUniversalGemmAsBsCr
                         merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
+                    // DEBUG: Print A/B/C for lane 0, block 0, first iteration
+                    if constexpr(kIter == 0 && mIter == 0 && nIter == 0)
+                    {
+                        if(threadIdx.x == 0 && blockIdx.x == 0)
+                        {
+                            printf("[BLOCK_GEMM] lane=0 blk=0 kIter=%d mIter=%d nIter=%d\n",
+                                   static_cast<int>(kIter), static_cast<int>(mIter),
+                                   static_cast<int>(nIter));
+                            printf("[BLOCK_GEMM] AWarpTensor buf_size=%d, BWarpTensor buf_size=%d, "
+                                   "CWarpTensor buf_size=%d\n",
+                                   static_cast<int>(AWarpTensor::get_thread_buffer_size()),
+                                   static_cast<int>(BWarpTensor::get_thread_buffer_size()),
+                                   static_cast<int>(CWarpTensor::get_thread_buffer_size()));
+                            printf("[BLOCK_GEMM] A (first 8): ");
+                            constexpr index_t a_n =
+                                AWarpTensor::get_thread_buffer_size() < 8
+                                    ? AWarpTensor::get_thread_buffer_size()
+                                    : 8;
+                            static_for<0, a_n, 1>{}([&](auto ii) {
+                                printf("%.4f ",
+                                       static_cast<float>(a_warp_tensor.get_thread_buffer()[ii]));
+                            });
+                            printf("\n[BLOCK_GEMM] B (first 8): ");
+                            constexpr index_t b_n =
+                                BWarpTensor::get_thread_buffer_size() < 8
+                                    ? BWarpTensor::get_thread_buffer_size()
+                                    : 8;
+                            static_for<0, b_n, 1>{}([&](auto ii) {
+                                printf("%.4f ",
+                                       static_cast<float>(b_warp_tensor.get_thread_buffer()[ii]));
+                            });
+                            printf("\n");
+                        }
+                    }
+
                     // warp GEMM
                     if constexpr(nIter != 0)
                     {
@@ -357,6 +392,24 @@ struct BlockUniversalGemmAsBsCr
                     {
                         WarpGemm{}.template operator()<ReuseA<false>, ReuseB<false>>(
                             c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
+
+                    // DEBUG: Print C after MMA for lane 0, block 0, first iteration
+                    if constexpr(kIter == 0 && mIter == 0 && nIter == 0)
+                    {
+                        if(threadIdx.x == 0 && blockIdx.x == 0)
+                        {
+                            printf("[BLOCK_GEMM] C after MMA (first 4): ");
+                            constexpr index_t c_n =
+                                CWarpTensor::get_thread_buffer_size() < 4
+                                    ? CWarpTensor::get_thread_buffer_size()
+                                    : 4;
+                            static_for<0, c_n, 1>{}([&](auto ii) {
+                                printf("%.4f ",
+                                       static_cast<float>(c_warp_tensor.get_thread_buffer()[ii]));
+                            });
+                            printf("\n");
+                        }
                     }
 
                     // write C warp tensor into C block tensor
