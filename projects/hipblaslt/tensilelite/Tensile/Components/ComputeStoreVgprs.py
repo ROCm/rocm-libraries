@@ -49,10 +49,6 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
         # tmpS1 = tmpS0+1
         # wgMT1 = tmpS0+2
 
-        # if writer.prefetchAcrossPersistent:
-        #     wg0="PrevWorkGroup0"
-        #     wg1="PrevWorkGroup1"
-        # else:
         wg0="WorkGroup0"
         wg1="WorkGroup1"
 

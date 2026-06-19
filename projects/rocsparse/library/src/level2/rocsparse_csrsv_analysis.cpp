@@ -57,13 +57,13 @@ rocsparse_status sort2(rocsparse_handle handle,
         handle, m, startbit, endbit, &rocprim_size)));
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
         handle, keys, vals, m, startbit, endbit, rocprim_size, buffer));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
     if(vals.current() != row_map)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             row_map, vals.current(), sizeof(J) * m, hipMemcpyDeviceToDevice, handle->stream));
     }
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
     return rocsparse_status_success;
 }
 
@@ -145,7 +145,7 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
     void* csrt_row_ptr = ref_csrt_row_ptr[0];
     if(nnz == 0)
     {
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::valset(handle, m + 1, descr->base, csrt_row_ptr_indextype, csrt_row_ptr));
     }
@@ -165,8 +165,8 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
     ptr += tmp_work2_size;
 
     // Load CSR column indices into work1 buffer
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(tmp_work1, csr_col_ind, sizeof_J * nnz, hipMemcpyDeviceToDevice, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        tmp_work1, csr_col_ind, sizeof_J * nnz, hipMemcpyDeviceToDevice, stream));
 
     void**       ref_csrt_perm           = info->get_ref_transposed_perm();
     const size_t csrt_perm_size_in_bytes = sizeof_I * nnz;
@@ -231,11 +231,11 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
     //
     if(p_sorted_perm[0] != csrt_perm)
     {
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrt_perm,
-                                           p_sorted_perm[0],
-                                           csrt_perm_size_in_bytes,
-                                           hipMemcpyDeviceToDevice,
-                                           handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrt_perm,
+                                                     p_sorted_perm[0],
+                                                     csrt_perm_size_in_bytes,
+                                                     hipMemcpyDeviceToDevice,
+                                                     handle->stream));
     }
 
     //
@@ -337,7 +337,7 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
 
     // Initialize temporary buffer with 0
     size_t zero_size_in_bytes = 256 + ((sizeof(int32_t) * m - 1) / 256 + 1) * 256;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(temp_buffer, 0, zero_size_in_bytes, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(temp_buffer, 0, zero_size_in_bytes, stream));
 
     // workspace
     const size_t              workspace_size_in_bytes = ((sizeof_J * m - 1) / 256 + 1) * 256;
@@ -365,7 +365,7 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     //
     // Synchronization needed.
     //
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     //
     // Initialize zero pivot
@@ -413,8 +413,8 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
         // Post processing
         int64_t max_nnz = 0; // important to set it to zero since sizeof_I might be int32_t.
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(&max_nnz, d_max_nnz, sizeof_I, hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            rocsparse_hipMemcpyAsync(&max_nnz, d_max_nnz, sizeof_I, hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         info->set_max_nnz(max_nnz);
     }
 

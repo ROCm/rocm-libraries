@@ -169,7 +169,13 @@ def TensileClientConfig(userArgs):
     if sizeList is None:
         printExit("No SizeList found; cannot produce output")
 
-    ssProblemType = ProblemType(problemDict)
+    # printIndexAssignmentInfo is required by ProblemType.__init__ but
+    # not exposed as a CLI flag here; default to False to match the
+    # other standalone client-side callers (ClientWriter,
+    # TensileCreateLibrary/Run.py). Prior code passed only one arg and
+    # crashed with TypeError on every invocation -- a latent arity bug
+    # surfaced by Step 5's strict validation work.
+    ssProblemType = ProblemType(problemDict, printIndexAssignmentInfo=False)
     conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
     sizes = ProblemSizes(ssProblemType, sizeList)  # TODO doesn't seem to work for range sizes
 
