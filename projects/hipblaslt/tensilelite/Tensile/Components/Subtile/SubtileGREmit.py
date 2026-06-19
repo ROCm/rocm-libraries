@@ -78,11 +78,11 @@ def _emitGRLDSBufferSwap(tag, tile, ti, writer, kernel):
   raise NotImplementedError(f"emitGRLDSBufferSwap not implemented for {type(tag).__name__}")
 
 @singledispatch
-def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
+def _emitGRPtrUpdate(tag, tile, ti, writer, kernel, incBytesOverride=None):
   raise NotImplementedError(f"emitGRPtrUpdate not implemented for {type(tag).__name__}")
 
 # Stubs for tags not yet implemented.
-_stub = lambda tag, tile, ti, writer, kernel: None
+_stub = lambda *a, **k: None
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
 _allocGROffsetRegisters.register(GRTag_TLU1)(_stub)
 _deallocGROffsetRegisters.register(GRTag_TLU1)(_stub)
@@ -520,13 +520,19 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
-def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
-  """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
+def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, incBytesOverride=None):
+  """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes).
+
+  incBytesOverride: when set (S3/E2 multi-DU), advance by this many bytes instead
+  of ti.depthUBytes. Used to advance the data SRD ONCE per MT by the macro DU
+  (uid_range * dataDUBytes = _ScaleDepthU * bpe) on the last uid, replacing the
+  per-uid depthUBytes advances.
+  """
   tc = ti.tc
   # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
   if kernel.get("enableTDM%s" % tc, False):
     module = Module(f"TDM GR Ptr Update ({tc})")
-    inc = int(ti.depthUBytes)
+    inc = int(incBytesOverride) if incBytesOverride is not None else int(ti.depthUBytes)
     module.addComment0("TDM addr update: %s += %u" % (tc, inc))
     module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
     group0 = "tdm%sGroup0" % tc
@@ -535,7 +541,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     return module
 
   module = Module(f"GR Ptr Update ({tc})")
-  inc = int(ti.depthUBytes)
+  inc = int(incBytesOverride) if incBytesOverride is not None else int(ti.depthUBytes)
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
              comment=f"{tc}: advance SRD by {inc} bytes"))
   module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
@@ -862,7 +868,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0, uidGlobalOffset=0):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -877,6 +883,19 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0):
                 and swap-driven paths byte-identical. S2 multi-DU sets this so
                 uid u lands in the LDS region the XOR swap used to select, with
                 the swap then neutralized to avoid double-counting.
+      uidGlobalOffset: explicit per-uid GLOBAL byte offset (u * dataDUBytes)
+                added to the buffer_load `offset12` MUBUF immediate (S3/E3-b).
+                For a DTL (lds=True) load the hardware global source address is
+                `Srd + vaddr + soffset + offset12` while the LDS dest is
+                `m0 + offset12`; `offset12` is an SRD-independent, per-instruction
+                12-bit immediate present on every load regardless of perpendicular
+                row (it occupies a different operand slot than `soffset`, which
+                carries the row). Folding the per-uid term here lets the SRD be
+                advanced once per MT (E2) while every uid/row reads the correct
+                global bytes. The matching `-uidGlobalOffset` in m0Imm cancels its
+                contribution to the LDS dest, so the LDS placement (S2) is
+                unchanged. Default 0 keeps single-DU and the legacy path
+                byte-identical.
   """
   module = Module()
 
@@ -913,9 +932,13 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0):
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
   for i in range(tileInfo.numGRPerSubtile):
     m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
-    m0Imm = m0Offset - offsetK + int(uidLdsOffset)
+    # E3-b: per-uid global term rides offset12 (SRD-independent); the matching
+    # -uidGlobalOffset in m0Imm cancels it out of the LDS dest (= m0 + offset12),
+    # leaving the LDS placement identical to S2.
+    grOffset12 = offsetK + int(uidGlobalOffset)
+    m0Imm = m0Offset - grOffset12 + int(uidLdsOffset)
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=m0Imm))
-    mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
+    mubuf = MUBUFModifiers(offen=True, offset12=grOffset12, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
     soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
@@ -1186,6 +1209,6 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
 ##################################################
 # Subroutine to update ptrs
 #
-def globalReadPtrUpdates(tc, writer, kernel):
+def globalReadPtrUpdates(tc, writer, kernel, incBytesOverride=None):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return ti_.emitGRPtrUpdate(writer, kernel)
+  return ti_.emitGRPtrUpdate(writer, kernel, incBytesOverride=incBytesOverride)

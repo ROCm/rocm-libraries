@@ -244,11 +244,20 @@ class InstructionEmitter:
             # lands in the region the swap used to toggle to (base + u*perUid).
             uidLdsOffset = (placement.uid * self._per_uid_lds_bytes
                             if self._explicit_uid_lds else 0)
+            # S3/E3-b: bake the explicit per-uid GLOBAL byte offset
+            # (u * dataDUBytes) into the buffer_load offset12 immediate, which is
+            # SRD-independent and per-instruction (present on every perpendicular
+            # row). Paired with E2 (SRD advanced once per MT), this makes uid an
+            # explicit, constant addressing offset instead of a per-uid SRD
+            # pre-advance, so StreamK truncation stays at MT granularity (§2.2).
+            uidGlobalOffset = (placement.uid * int(ti.depthUBytes)
+                               if self._explicit_uid_lds else 0)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
-                                                    uidLdsOffset=uidLdsOffset))
+                                                    uidLdsOffset=uidLdsOffset,
+                                                    uidGlobalOffset=uidGlobalOffset))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -327,13 +336,24 @@ class InstructionEmitter:
         if tensor in ('SA', 'SB'):
             module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
             module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+        elif self._explicit_uid_lds:
+            # S3/E2: advance the data SRD ONCE per MT by the macro DU
+            # (uid_range * dataDUBytes = _ScaleDepthU * bpe), fired on the last
+            # uid's GRIncOp (unrollId == uid_range-1); earlier uids emit no SRD
+            # advance. The per-uid global term now rides the offset12 immediate
+            # (E3-b), so the SRD carries only the whole-MT stride -> no sub-MT
+            # SRD state, keeping StreamK truncation at MT granularity (§2.2).
+            # The A/B LDS swap stays neutralized (S2).
+            if source.unrollId == self.config.uid_range - 1:
+                ti = self.tileInfoMap[tensor]
+                macroInc = self.config.uid_range * int(ti.depthUBytes)
+                module.add(globalReadPtrUpdates(tc, self.writer, self.kernel,
+                                                incBytesOverride=macroInc))
         else:
-            # SRD pointer advance stays per-uid here (the GR *global* side is
-            # re-expressed in S3). S2 only neutralizes the A/B *LDS* swap when
-            # uid is carried by the explicit m0 offset (multi-DU, PGR<=1).
+            # Legacy single-DU / PGR>=2: per-uid SRD advance + LDS double-buffer
+            # swap, byte-identical to develop.
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
-            if not self._explicit_uid_lds:
-                module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+            module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_skip(self, source):
