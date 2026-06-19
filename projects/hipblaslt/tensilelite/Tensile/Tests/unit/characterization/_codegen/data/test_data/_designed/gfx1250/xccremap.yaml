@@ -93,7 +93,6 @@ BenchmarkProblems:
         - ExpandPointerSwap: [0]
         - GroupLoadStore: [False]
         - ClusterDim: [[2, 2]]
-        - ClusterBarrier: [False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

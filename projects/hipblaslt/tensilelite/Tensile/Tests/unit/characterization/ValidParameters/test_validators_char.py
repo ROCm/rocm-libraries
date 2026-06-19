@@ -94,10 +94,9 @@ def test_space_fill_algo_wgm_invalid_raises(value, snapshot):
 # checkParametersAreValid — early returns
 # ===========================================================================
 
-@pytest.mark.parametrize("name", ["ProblemSizes", "InternalSupportParams"], ids=["problemsizes", "internalsupport"])
-def test_check_params_early_return(name):
-    # These two names are accepted unconditionally (no validParams lookup).
-    assert VP.checkParametersAreValid((name, ["anything", 1, 2]), {}) is None
+def test_check_params_early_return():
+    # ProblemSizes is the only name accepted unconditionally (no validParams lookup).
+    assert VP.checkParametersAreValid(("ProblemSizes", ["anything", 1, 2]), {}) is None
 
 
 # ===========================================================================

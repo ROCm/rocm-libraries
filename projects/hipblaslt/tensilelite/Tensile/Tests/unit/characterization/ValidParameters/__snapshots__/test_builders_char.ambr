@@ -1364,6 +1364,7 @@
     'ActivationFused',
     'AdaptiveGemm',
     'AdaptiveGemmGSUA',
+    'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
     'AssertFree0ElementMultiple',
@@ -1371,7 +1372,6 @@
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
-    'ClusterBarrier',
     'ClusterDim',
     'ClusterLocalRead',
     'ConvertAfterDS',
@@ -1441,10 +1441,22 @@
     'NonTemporalMXSB',
     'NonTemporalMetadata',
     'NonTemporalWS',
+    'NonVolatile',
+    'NonVolatileA',
+    'NonVolatileB',
+    'NonVolatileC',
+    'NonVolatileD',
+    'NonVolatileE',
+    'NonVolatileMXSA',
+    'NonVolatileMXSB',
+    'NonVolatileMetadata',
+    'NonVolatileWS',
     'NumElementsPerBatchStore',
     'NumLoadsCoalescedA',
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
+    'PrefetchAcrossPersistent',
+    'PrefetchGL2',
     'PrefetchGlobalRead',
     'PrefetchLocalRead',
     'PreloadKernArgs',
@@ -1466,13 +1478,25 @@
     'StreamK',
     'StreamKAtomic',
     'StreamKFixupTreeReduction',
+    'StreamKForceDPOnly',
     'StreamKXCCMapping',
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
     'TDMInst',
+    'TDMIterateMode',
     'TDMSplit',
     'TailloopInNll',
+    'TemporalHint',
+    'TemporalHintA',
+    'TemporalHintB',
+    'TemporalHintC',
+    'TemporalHintD',
+    'TemporalHintE',
+    'TemporalHintMXSA',
+    'TemporalHintMXSB',
+    'TemporalHintMetadata',
+    'TemporalHintWS',
     'ThreadTile',
     'TransposeLDS',
     'TransposeLDSMetadata',
@@ -1548,6 +1572,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'AdaptiveGemmNTAB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'AssertAIGreaterThanEqual': dict({
       'type': 'int',
       'value': -1,
@@ -1592,14 +1624,6 @@
       'type': 'list',
     }),
     'BufferStore': dict({
-      'head': list([
-        False,
-        True,
-      ]),
-      'len': 2,
-      'type': 'list',
-    }),
-    'ClusterBarrier': dict({
       'head': list([
         False,
         True,
@@ -1915,18 +1939,18 @@
       'head': list([
         -1,
         0,
-        64,
+        16,
       ]),
-      'len': 8,
+      'len': 64,
       'type': 'list',
     }),
     'LdsBlockSizePerPadB': dict({
       'head': list([
         -1,
         0,
-        64,
+        16,
       ]),
-      'len': 8,
+      'len': 64,
       'type': 'list',
     }),
     'LdsBlockSizePerPadMXSA': dict({
@@ -2228,6 +2252,87 @@
       'len': 8,
       'type': 'list',
     }),
+    'NonVolatile': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'NonVolatileA': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileC': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileD': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileE': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMXSA': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMXSB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMetadata': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileWS': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'NumElementsPerBatchStore': dict({
       'head': list([
         -1,
@@ -2256,6 +2361,23 @@
       'type': 'list',
     }),
     'OptNoLoadLoop': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2': dict({
       'head': list([
         0,
         1,
@@ -2436,6 +2558,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'StreamKForceDPOnly': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StreamKXCCMapping': dict({
       'head': list([
         0,
@@ -2478,6 +2608,15 @@
       'len': 4,
       'type': 'list',
     }),
+    'TDMIterateMode': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
     'TDMSplit': dict({
       'head': list([
         False,
@@ -2492,6 +2631,96 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TemporalHint': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 9,
+      'type': 'list',
+    }),
+    'TemporalHintA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintC': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintD': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMXSA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMXSB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMetadata': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintWS': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
       'type': 'list',
     }),
     'ThreadTile': dict({
