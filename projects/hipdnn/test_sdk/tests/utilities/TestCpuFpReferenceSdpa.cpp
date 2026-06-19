@@ -2410,7 +2410,7 @@ TEST(TestCpuFpReferenceSdpaBwdFp32, BackwardWithLSEAndWindowMask)
     Tensor<float> k({1, 2, 4, 4});
     Tensor<float> v({1, 2, 4, 4});
     Tensor<float> o({1, 2, 4, 4});
-    Tensor<float> lse({1, 2, 4});
+    Tensor<float> lse({1, 2, 4, 1});
     Tensor<float> dO({1, 2, 4, 4});
     Tensor<float> dQWithLse({1, 2, 4, 4});
     Tensor<float> dKWithLse({1, 2, 4, 4});

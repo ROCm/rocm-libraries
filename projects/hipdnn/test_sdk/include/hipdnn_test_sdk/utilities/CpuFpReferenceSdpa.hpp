@@ -352,7 +352,7 @@ public:
     /// @param dK               Output: gradient w.r.t. K [B, H_k, Skv, D]
     /// @param dV               Output: gradient w.r.t. V [B, H_v, Skv, Dv]
     /// @param attnScaleValue   Optional scale factor; defaults to 1/sqrt(D)
-    /// @param lse              Optional log-sum-exp from forward [B, H_q, Sq] (FP32).
+    /// @param lse              Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
     ///                         When provided, enables efficient softmax recomputation.
     ///                         When nullptr, recomputes softmax from scratch.
     /// @param attnMask         Optional additive attention mask (same as forward)
