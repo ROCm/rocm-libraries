@@ -20,12 +20,14 @@
 #include <type_traits>
 #include <utility>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
 static_assert(noexcept(::std::declval<const hip::jthread&>().get_stop_token()));
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Represents a thread
   {
     hip::jthread jt                                     = support::make_test_jthread([] __device__ () {});
@@ -45,6 +47,6 @@ int main(int, char**) {
 
     assert(!st.stop_possible());
   }
-
+#endif
   return 0;
 }

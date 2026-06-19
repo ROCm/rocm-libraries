@@ -17,6 +17,7 @@
 #include <hip/thread>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 

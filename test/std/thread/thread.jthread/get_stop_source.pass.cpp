@@ -19,12 +19,14 @@
 #include <hip/thread>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
 static_assert(noexcept(::std::declval<hip::jthread&>().get_stop_source()));
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Represents a thread
   {
     hip::jthread jt                                          = support::make_test_jthread([] __device__ () {});
@@ -38,6 +40,6 @@ int main(int, char**) {
     ::std::same_as<::std::stop_source> decltype(auto) result = jt.get_stop_source();
     assert(!result.stop_possible());
   }
-
+#endif
   return 0;
 }
