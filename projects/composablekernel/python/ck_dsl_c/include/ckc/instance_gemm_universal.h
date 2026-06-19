@@ -101,6 +101,13 @@ typedef struct ckc_gemm_trait_spec
     bool active_tile_skip;
     int lds_k_pad; /* default 0 */
     bool lds_swizzle;
+    /* compv4/compv3 schedule-hint policy. Python: Optional[bool] = None.
+     * emit_sched_hints_set==false mirrors Python None (arch-resolved: hints
+     * OFF on gfx950, ON elsewhere). When set, emit_sched_hints forces the
+     * choice. Gates the per-cluster s_setprio/sched_barrier fences AND the
+     * two-stage sched_group_barrier HotLoop interleave. */
+    bool emit_sched_hints_set; /* false => Python None (arch-resolved) */
+    bool emit_sched_hints;
 } ckc_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

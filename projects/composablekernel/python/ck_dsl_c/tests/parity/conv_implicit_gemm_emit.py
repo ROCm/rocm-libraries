@@ -16,12 +16,14 @@ from ck_dsl.instances.common.conv_implicit_gemm import (
     build_implicit_gemm_conv,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`."""
     if idx == 0:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -39,7 +41,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 1:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -57,7 +59,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 2:
-        p = ConvProblem(N=16, Hi=112, Wi=112, C=128, K=128, R=3, S=3)
+        p = ConvProblem(N=16, Hi=112, Wi=112, C=128, K=128, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -75,7 +77,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 3:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -94,7 +96,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 4:
-        p = ConvProblem(N=1, Hi=224, Wi=224, C=3, K=64, R=7, S=7)
+        p = ConvProblem(N=1, Hi=224, Wi=224, C=3, K=64, Y=7, X=7)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -112,7 +114,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 5:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=1, S=1)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=1, X=1)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -132,7 +134,7 @@ def _spec(idx: int):
     if idx in (6, 7, 8):
         # WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32.
         arch = {6: "gfx1151", 7: "gfx1201", 8: "gfx11-generic"}[idx]
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -152,7 +154,7 @@ def _spec(idx: int):
         )
     if idx == 9:
         # chiplet_swizzle gfx950.
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3)
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -181,10 +183,19 @@ def main() -> int:
         sys.stderr.write("usage: conv_implicit_gemm_emit.py <config_index>\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     spec, arch = _spec(idx)
     kernel = build_implicit_gemm_conv(spec, arch=arch)
-    text = lower_kernel_to_llvm(kernel, arch=arch)
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch=arch)
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

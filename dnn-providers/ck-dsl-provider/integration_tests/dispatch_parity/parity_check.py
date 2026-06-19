@@ -42,13 +42,16 @@ import json
 import sys
 from pathlib import Path
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
+from ck_dsl.dispatch import GemmRequest, dispatch_gemm_bf16, dispatch_gemm_fp16
+
+_DISPATCH = {"fp16": dispatch_gemm_fp16, "bf16": dispatch_gemm_bf16}
 
 
-def python_pick(M: int, N: int, K: int, arch: str):
+def python_pick(M: int, N: int, K: int, arch: str, dtype: str = "fp16"):
     """Return the Python dispatcher's structural pick, or an error string."""
+    dispatch = _DISPATCH[dtype]
     try:
-        r = dispatch_gemm_fp16(GemmRequest(M=M, N=N, K=K, arch=arch))
+        r = dispatch(GemmRequest(M=M, N=N, K=K, arch=arch, dtype=dtype))
     except ValueError as e:
         return None, str(e)
     t = r.spec.tile
@@ -86,6 +89,7 @@ def main() -> int:
     ap.add_argument("--cpp-jsonl", default=str(here / "cpp_picks.jsonl"))
     ap.add_argument("--shapes", default=str(here / "shapes.txt"))
     ap.add_argument("--arch", default="gfx950")
+    ap.add_argument("--dtype", default="fp16", choices=("fp16", "bf16"))
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -124,7 +128,7 @@ def main() -> int:
             total += 1
             continue
 
-        py, py_err = python_pick(M, N, K, args.arch)
+        py, py_err = python_pick(M, N, K, args.arch, args.dtype)
         total += 1
 
         # Normalize both to "selected?" + structural key. The C++ side reports
@@ -220,10 +224,11 @@ def main() -> int:
 
     # Report.
     print("=" * 92)
-    print(f"ck-dsl GEMM dispatcher C++<->Python selection parity (arch={args.arch})")
     print(
-        "  scope: fp16 RCR UniversalGemm  (only family implemented in ck_dsl.dispatch)"
+        f"ck-dsl GEMM dispatcher C++<->Python selection parity "
+        f"(arch={args.arch}, dtype={args.dtype})"
     )
+    print(f"  scope: {args.dtype} RCR UniversalGemm")
     print("  identity compared: (block_m, block_n, block_k, pipeline, epilogue)")
     print("=" * 92)
     hdr = f"{'M':>6} {'N':>6} {'K':>6}  {'verdict':<16} {'C++ pick':<26} {'Python pick':<26}"
@@ -245,7 +250,7 @@ def main() -> int:
         # Show the naming-scheme difference explicitly on the first selected row.
         for M, N, K in shapes:
             cpp = cpp_by_shape.get((M, N, K))
-            py, _ = python_pick(M, N, K, args.arch)
+            py, _ = python_pick(M, N, K, args.arch, args.dtype)
             if cpp and cpp.get("selected") and py:
                 print(
                     "\nNOTE: raw kernel_name prefixes differ by construction (cosmetic):"

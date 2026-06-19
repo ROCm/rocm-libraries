@@ -130,6 +130,12 @@ typedef struct ckc_gemm_build_ctx
     ckc_value_t* warp_n_idx; /* warp_id % warp_n         */
     ckc_value_t* lane;       /* tid % wave               */
 
+    /* ---- compv4/compv3 schedule-hint policy (_sched_hints) -- */
+    /* spec.trait.emit_sched_hints if set, else (arch != "gfx950").
+     * Gates the per-cluster s_setprio/sched_barrier fences AND the
+     * two-stage sched_group_barrier HotLoop interleave. */
+    bool sched_hints;
+
     /* ---- LDS XOR swizzle (lds_swizzle) -- */
     bool swz;             /* _SWZ = spec.trait.lds_swizzle             */
     int swz_r;            /* CK_SWZ_R   (resolved)                     */

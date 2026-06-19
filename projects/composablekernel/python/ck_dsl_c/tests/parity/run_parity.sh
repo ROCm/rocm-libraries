@@ -17,7 +17,8 @@ mkdir -p "$OUT"
 
 BIN="$OUT/emit_c"
 echo ">> compiling C emitter"
-cc -std=c99 -I "$CKC/include" "$CKC"/src/*.c "$HERE/emit.c" -o "$BIN" -lm || {
+# WS3 Phase 1: engine + emitter compile as C++20 (no .c->.cpp renames).
+c++ -std=c++20 -I "$CKC/include" $(find "$CKC/src" -name '*.c') "$HERE/emit.c" -o "$BIN" -lm || {
     echo "C emitter compile FAILED"; exit 1; }
 
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"

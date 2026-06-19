@@ -14,6 +14,8 @@ from ck_dsl.instances.common.smoothquant import (
     build_smoothquant,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> SmoothQuantSpec:
@@ -46,13 +48,22 @@ def _spec(idx: int) -> SmoothQuantSpec:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        sys.stderr.write("usage: smoothquant_emit.py <config_index 0..5>\n")
+        sys.stderr.write("usage: smoothquant_emit.py <config_index 0..5> [mode]\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode not in ("ll", "ir", "verify"):
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     spec = _spec(idx)
     kernel = build_smoothquant(spec)
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
     return 0
 
 

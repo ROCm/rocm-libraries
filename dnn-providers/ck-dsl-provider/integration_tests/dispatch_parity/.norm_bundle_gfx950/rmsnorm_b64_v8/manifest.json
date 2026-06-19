@@ -1,0 +1,18 @@
+{
+  "arch": "gfx950",
+  "args_signature": [],
+  "block_k": 0,
+  "block_m": 64,
+  "block_n": 8,
+  "epilogue": "",
+  "hsaco": "",
+  "kernel_name": "ckdsl_norm2d_rmsnorm_b64_v8",
+  "kind": "norm2d_rmsnorm",
+  "max_elems_per_thread": 64,
+  "norm_kind": "rmsnorm",
+  "pipeline": "",
+  "schema": "ck.dsl.example.manifest/v1",
+  "threads_per_block": 64,
+  "two_pass_threshold": 64,
+  "vec": 8
+}

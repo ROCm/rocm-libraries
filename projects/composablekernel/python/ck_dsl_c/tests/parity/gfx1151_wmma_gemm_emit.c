@@ -17,7 +17,9 @@
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_gfx1151_wmma_gemm.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
@@ -90,18 +92,45 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* (3) lower to .ll (arch gfx1151, flavor AUTO) */
-    char *llvm_text = NULL;
-    ckc_status_t st =
-        ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
-    if (st != CKC_OK || !llvm_text) {
-        fprintf(stderr, "lower failed: status=%d\n", (int)st);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
+
+    if (strcmp(mode, "ll") == 0) {
+        /* (3) lower to .ll (arch gfx1151, flavor AUTO) */
+        char *llvm_text = NULL;
+        ckc_status_t st =
+            ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
+        if (st != CKC_OK || !llvm_text) {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    } else if (strcmp(mode, "ir") == 0) {
+        char *t = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &t);
+        if (st != CKC_OK || !t) {
+            fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    } else if (strcmp(mode, "verify") == 0) {
+        ckc_diag_t *d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char *s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
+    } else {
+        fprintf(stderr, "unknown mode %s\n", mode);
         ckc_ir_builder_free(&b);
-        return 1;
+        return 2;
     }
 
-    fputs(llvm_text, stdout);
-    free(llvm_text);
     ckc_ir_builder_free(&b);
     return 0;
 }

@@ -15,6 +15,8 @@ from ck_dsl.instances.common.attention_unified import (
     build_unified_attention_2d,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 # num_seqs is a runtime kernel param (not a build-time constant) in the scalar
@@ -112,12 +114,23 @@ def _kernel(idx: int):
 
 def main() -> int:
     if len(sys.argv) < 2:
-        sys.stderr.write("usage: attention_unified_emit.py <config_index>\n")
+        sys.stderr.write(
+            "usage: attention_unified_emit.py <config_index> [ll|ir|verify]\n"
+        )
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode not in ("ll", "ir", "verify"):
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     kernel = _kernel(idx)
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    else:  # verify
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0
 
 

@@ -26,6 +26,8 @@ from ck_dsl.instances.gfx950.attention_tiled_3d import (
     build_unified_attention_reduce_tiled,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 _CONFIGS = {
@@ -121,7 +123,44 @@ def main() -> int:
         sys.stderr.write("usage: gfx950_attention_tiled_3d_emit.py <config_index>\n")
         return 2
     idx = int(sys.argv[1])
-    sys.stdout.write(_emit(idx))
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode == "ll":
+        sys.stdout.write(_emit(idx))
+    elif mode == "ir":
+        cfg = _CONFIGS[idx] if idx in _CONFIGS else None
+        if cfg is None:
+            raise SystemExit(f"unknown config index {idx}")
+        seg_spec = UnifiedAttention3DTiledSpec(**cfg)
+        seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
+        red_spec = UnifiedAttentionReduceTiledSpec(
+            head_size=cfg["head_size"],
+            num_query_heads=cfg["num_query_heads"],
+            num_kv_heads=cfg["num_kv_heads"],
+            dtype=cfg["dtype"],
+            num_segments=cfg["num_segments"],
+        )
+        red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
+        sys.stdout.write(serialize(seg_kernel))
+        sys.stdout.write(serialize(red_kernel))
+    elif mode == "verify":
+        cfg = _CONFIGS[idx] if idx in _CONFIGS else None
+        if cfg is None:
+            raise SystemExit(f"unknown config index {idx}")
+        seg_spec = UnifiedAttention3DTiledSpec(**cfg)
+        seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
+        red_spec = UnifiedAttentionReduceTiledSpec(
+            head_size=cfg["head_size"],
+            num_query_heads=cfg["num_query_heads"],
+            num_kv_heads=cfg["num_kv_heads"],
+            dtype=cfg["dtype"],
+            num_segments=cfg["num_segments"],
+        )
+        red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(seg_kernel)))
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(red_kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

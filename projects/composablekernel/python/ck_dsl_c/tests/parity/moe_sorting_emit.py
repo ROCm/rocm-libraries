@@ -17,6 +17,8 @@ from ck_dsl.instances.common.moe_sorting import (
     build_moe_sort_scatter,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> MoeSortingSpec:
@@ -35,6 +37,11 @@ def _spec(idx: int) -> MoeSortingSpec:
     raise SystemExit(f"unknown config index {idx}")
 
 
+# Flat config index encoding (mirrors C emitter):
+#   0.. 5 = hist    / spec 0..5
+#   6..11 = scan    / spec 0..5
+#  12..17 = scatter / spec 0..5
+_PHASES = ["hist", "scan", "scatter"]
 _BUILD = {
     "hist": build_moe_sort_histogram,
     "scan": build_moe_sort_scan,
@@ -43,19 +50,30 @@ _BUILD = {
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         sys.stderr.write(
-            "usage: moe_sorting_emit.py <phase hist|scan|scatter> <config_index 0..5>\n"
+            "usage: moe_sorting_emit.py <flat_config_index 0..17> [mode]\n"
         )
         return 2
-    phase = sys.argv[1]
-    idx = int(sys.argv[2])
-    if phase not in _BUILD:
-        raise SystemExit(f"unknown phase {phase}")
+    flat = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    phase_idx = flat // 6
+    if phase_idx >= len(_PHASES):
+        raise SystemExit(f"unknown config index {flat}")
+    phase = _PHASES[phase_idx]
+    idx = flat % 6
     spec = _spec(idx)
     kernel = _BUILD[phase](spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

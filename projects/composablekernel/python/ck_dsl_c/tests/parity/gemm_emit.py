@@ -17,6 +17,8 @@ from ck_dsl.instances.common.gemm_universal import (
     build_universal_gemm,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> UniversalGemmSpec:
@@ -172,10 +174,19 @@ def main() -> int:
         sys.stderr.write("usage: gemm_emit.py <config_index 0..6>\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     spec = _spec(idx)
     kernel = build_universal_gemm(spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

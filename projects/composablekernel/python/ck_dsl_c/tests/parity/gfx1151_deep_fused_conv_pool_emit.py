@@ -17,6 +17,8 @@ from ck_dsl.instances.gfx1151.deep_fused_conv_pool import (
     build_deep_fused_conv_pool,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 _ARCH = "gfx1151"
 
@@ -53,10 +55,19 @@ def main() -> int:
         sys.stderr.write("usage: gfx1151_deep_fused_conv_pool_emit.py <config_index>\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     spec, arch = _spec(idx)
     kernel = build_deep_fused_conv_pool(spec, arch=arch)
-    text = lower_kernel_to_llvm(kernel, arch=arch)
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch=arch)
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

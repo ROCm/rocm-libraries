@@ -14,13 +14,20 @@
  * On a validation reject (or any other build/lower failure) nothing is written
  * to stdout and the program exits non-zero; the harness treats a both-sides
  * reject (empty stdout + nonzero exit) as parity.
+ *
+ * Optional argv[2] selects the output mode:
+ *   "ll"     (default) - lower to LLVM and print
+ *   "ir"               - print ck.dsl.ir/v1 serialization
+ *   "verify"           - run verifier; print each diagnostic on its own line
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_matmul_nbits.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
@@ -109,10 +116,17 @@ static int make_spec(int idx, ckc_matmul_nbits_spec_t *spec) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <config_index 0..5>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..5> [ll|ir|verify]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
+
+    if (strcmp(mode, "ll") != 0 && strcmp(mode, "ir") != 0 &&
+        strcmp(mode, "verify") != 0) {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        return 2;
+    }
 
     ckc_matmul_nbits_spec_t spec;
     if (make_spec(idx, &spec) != 0) {
@@ -142,16 +156,38 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    char *llvm_text = NULL;
-    ckc_status_t st =
-        ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1201", &llvm_text);
-    if (st != CKC_OK || !llvm_text) {
-        fprintf(stderr, "lower failed: status=%d\n", (int)st);
-        ckc_ir_builder_free(&b);
-        return 1;
+    if (strcmp(mode, "ll") == 0) {
+        char *llvm_text = NULL;
+        ckc_status_t st =
+            ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1201", &llvm_text);
+        if (st != CKC_OK || !llvm_text) {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    } else if (strcmp(mode, "ir") == 0) {
+        char *text = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &text);
+        if (st != CKC_OK || !text) {
+            fprintf(stderr, "serialize failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(text, stdout);
+        free(text);
+    } else { /* verify */
+        ckc_diag_t *d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char *s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
     }
-    fputs(llvm_text, stdout);
-    free(llvm_text);
+
     ckc_ir_builder_free(&b);
     return 0;
 }

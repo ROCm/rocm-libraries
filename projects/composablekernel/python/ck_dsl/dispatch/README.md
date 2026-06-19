@@ -10,31 +10,50 @@ ck_dsl/dispatch/
   core.py                  # operator-agnostic request/candidate/registry/result contracts
   __init__.py              # public dispatch exports
   gemm/
-    common.py              # GEMM-family request and selector helpers
+    common.py              # GEMM-family request/selector helpers + arch-family gate
     support.py             # GEMM config and shape support predicates
     fp16_rcr.py            # UniversalGemm FP16 RCR dispatcher case
+    bf16_rcr.py            # UniversalGemm BF16 RCR dispatcher case
     tests/
       test_fp16_rcr.py
+      test_bf16_rcr.py
+      test_arch_family_gate.py
       test_fp16_rcr_runtime.py
       test_parallel_runtime.py
       test_registry.py
       test_support.py
+  families/                # documented scaffolds for the remaining families
+    conv.py attention.py moe.py norm.py
 ```
 
 ## Current Scope
 
-The first supported case is UniversalGemm FP16 RCR:
+Two GEMM cases are fully implemented: UniversalGemm FP16 RCR and BF16 RCR. The
+conv / attention / moe / norm families are scaffolded under `families/` (each
+defines its normalized request + registry and documents exactly which instance
+builder + validator a full implementation reuses).
 
 ```python
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
+from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16, dispatch_gemm_bf16
 
-request = GemmRequest(M=4096, N=4096, K=4096, arch="gfx950")
-result = dispatch_gemm_fp16(request)
+result = dispatch_gemm_fp16(GemmRequest(M=4096, N=4096, K=4096, arch="gfx950"))
+result_bf16 = dispatch_gemm_bf16(
+    GemmRequest(M=4096, N=4096, K=4096, arch="gfx950", dtype="bf16")
+)
 
 print(result.kernel_id.cache_key)
 print(result.candidate.name)
 print(result.grid, result.block)
 ```
+
+### Arch-family gate
+
+Every GEMM candidate is gated to its micro-arch family (`cdna` or `rdna`) via
+`arch_family_supported` (in `gemm/common.py`), which consults
+`ArchTarget.family`. Without it an RDNA/WMMA candidate would report support on a
+CDNA arch (its spec rebuilds wave64 and a 16x16x16 MFMA atom that also exists on
+CDNA), wrongly out-ranking the intended CDNA candidate. The regression is pinned
+by `tests/gemm/test_arch_family_gate.py`.
 
 `KernelId` is the stable identity used by compile caches, manifests, logs, and
 benchmark records. It includes the operation family, candidate, algorithm,

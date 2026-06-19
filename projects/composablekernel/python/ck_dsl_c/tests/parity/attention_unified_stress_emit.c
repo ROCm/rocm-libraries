@@ -4,7 +4,9 @@
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_attention_unified.h"
 
 static int make_problem(int idx, ckc_unified_attention_problem_t *p) {
@@ -76,8 +78,15 @@ static int make_problem(int idx, ckc_unified_attention_problem_t *p) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "usage: %s <config_index>\n", argv[0]); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: %s <config_index> [ll|ir|verify]\n", argv[0]); return 2; }
     int idx = atoi(argv[1]);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
+
+    if (strcmp(mode, "ll") != 0 && strcmp(mode, "ir") != 0 && strcmp(mode, "verify") != 0) {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        return 2;
+    }
+
     ckc_unified_attention_problem_t p;
     if (make_problem(idx, &p) != 0) { fprintf(stderr, "unknown config index %d\n", idx); return 1; }
 
@@ -90,11 +99,28 @@ int main(int argc, char **argv) {
     ckc_kernel_def_t *kernel = ckc_build_unified_attention_2d_scalar(&b, &p, NULL);
     if (!kernel) { fprintf(stderr, "build failed for config %d (sticky err)\n", idx); return 3; }
 
-    char *llvm_text = NULL; char err[CKC_ERR_MSG_CAP]; err[0]=0;
-    ckc_status_t st = ckc_lower_kernel_to_llvm_ex(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
-    if (st != CKC_OK || !llvm_text) { fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err); return 4; }
-    fputs(llvm_text, stdout);
-    free(llvm_text);
+    if (strcmp(mode, "ll") == 0) {
+        char *llvm_text = NULL; char err[CKC_ERR_MSG_CAP]; err[0]=0;
+        ckc_status_t st = ckc_lower_kernel_to_llvm_ex(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
+        if (st != CKC_OK || !llvm_text) { fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err); return 4; }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    } else if (strcmp(mode, "ir") == 0) {
+        char *t = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &t);
+        if (st != CKC_OK || !t) { fprintf(stderr, "serialize failed: status=%d\n", (int)st); ckc_ir_builder_free(&b); return 1; }
+        fputs(t, stdout);
+        free(t);
+    } else { /* verify */
+        ckc_diag_t *d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char *s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
+    }
     ckc_ir_builder_free(&b);
     return 0;
 }

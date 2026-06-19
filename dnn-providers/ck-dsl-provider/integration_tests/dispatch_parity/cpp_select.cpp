@@ -86,6 +86,8 @@ int main(int argc, char** argv) {
     std::string bundle;
     std::string shapes_file;
     std::string arch = "gfx950";
+    std::string dtype = "fp16";
+    std::string op = "gemm";  // "gemm" | "norm" | "conv" | "attention" | "moe"
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--bundle" && i + 1 < argc)
@@ -94,6 +96,10 @@ int main(int argc, char** argv) {
             shapes_file = argv[++i];
         else if (a == "--arch" && i + 1 < argc)
             arch = argv[++i];
+        else if (a == "--dtype" && i + 1 < argc)
+            dtype = argv[++i];
+        else if (a == "--op" && i + 1 < argc)
+            op = argv[++i];
     }
     if (bundle.empty()) {
         std::fprintf(stderr, "usage: %s --bundle <dir> [--shapes file] [--arch gfx950]\n", argv[0]);
@@ -127,14 +133,155 @@ int main(int argc, char** argv) {
         auto hash = line.find('#');
         if (hash != std::string::npos) line = line.substr(0, hash);
         std::istringstream ls(line);
-        long M = 0, N = 0, K = 0;
-        if (!(ls >> M >> N >> K)) continue;
 
         Problem prob;
-        prob.op = "gemm";
-        prob.dtype = "fp16";
-        prob.layout = "RCR";
+        prob.op = op;
+        prob.dtype = dtype;
         prob.arch = arch;
+
+        if (op == "norm") {
+            // Norm shape line: rows cols [kind]   (kind: rmsnorm|layernorm)
+            long rows = 0, cols = 0;
+            std::string kind = "rmsnorm";
+            if (!(ls >> rows >> cols)) continue;
+            ls >> kind;  // optional
+            prob.rows = rows;
+            prob.cols = cols;
+            prob.kind = kind;
+
+            Dispatcher::Choice choice = disp.select(prob);
+            CppPick pick = resolve(store, choice);
+            std::printf(
+                "{\"rows\":%ld,\"cols\":%ld,\"kind\":\"%s\",\"selected\":%s,"
+                "\"kernel_name\":\"%s\",\"block_m\":%d,\"block_n\":%d,\"block_k\":%d,"
+                "\"pipeline\":\"%s\",\"epilogue\":\"%s\"}\n",
+                rows, cols, json_escape(kind).c_str(), pick.found ? "true" : "false",
+                json_escape(pick.kernel_name).c_str(), pick.block_m, pick.block_n, pick.block_k,
+                json_escape(pick.pipeline).c_str(), json_escape(pick.epilogue).c_str());
+            continue;
+        }
+
+        if (op == "moe") {
+            // MoE shape line: num_tokens hidden intermediate num_experts top_k dtype
+            long nt = 0, hid = 0, inter = 0, ne = 0, tk = 0;
+            std::string mdtype;
+            if (!(ls >> nt >> hid >> inter >> ne >> tk >> mdtype)) continue;
+            prob.M = nt;          // informational; MoE dims are runtime args
+            prob.dtype = mdtype;  // per-line dtype drives the element-path gate
+
+            Dispatcher::Choice choice = disp.select(prob);
+            CppPick pick = resolve(store, choice);
+            std::string mpath;
+            int tile_m = 0, tile_n = 0, tile_k = 0, atom_k = 0;
+            if (pick.found) {
+                for (const auto& kv : store.entries()) {
+                    if (kv.first != choice.cache_key) continue;
+                    const auto& mm = kv.second.manifest;
+                    if (mm.raw.has("moe_path")) mpath = mm.raw.get_str("moe_path");
+                    if (mm.raw.has("tile_m")) tile_m = (int)mm.raw.get_int("tile_m");
+                    if (mm.raw.has("tile_n_inter")) tile_n = (int)mm.raw.get_int("tile_n_inter");
+                    if (mm.raw.has("tile_k_gu")) tile_k = (int)mm.raw.get_int("tile_k_gu");
+                    if (mm.raw.has("atom_k")) atom_k = (int)mm.raw.get_int("atom_k");
+                    break;
+                }
+            }
+            std::printf(
+                "{\"num_tokens\":%ld,\"hidden\":%ld,\"intermediate\":%ld,"
+                "\"num_experts\":%ld,\"top_k\":%ld,\"dtype\":\"%s\",\"selected\":%s,"
+                "\"kernel_name\":\"%s\",\"path\":\"%s\",\"tile_m\":%d,"
+                "\"tile_n_inter\":%d,\"tile_k_gu\":%d,\"atom_k\":%d}\n",
+                nt, hid, inter, ne, tk, json_escape(mdtype).c_str(), pick.found ? "true" : "false",
+                json_escape(pick.kernel_name).c_str(), json_escape(mpath).c_str(), tile_m, tile_n,
+                tile_k, atom_k);
+            continue;
+        }
+
+        if (op == "attention") {
+            // Attention shape line:
+            //   batch nhq nhk seqlen_q seqlen_k hdim [sliding_window block_kv num_sms]
+            long b = 0, nhq = 0, nhk = 0, sq = 0, sk = 0, hd = 0;
+            if (!(ls >> b >> nhq >> nhk >> sq >> sk >> hd)) continue;
+            long sw = 0, bkv = 16, nsms = 120;
+            ls >> sw >> bkv >> nsms;  // optional
+            if (bkv <= 0) bkv = 16;
+            if (nsms <= 0) nsms = 120;
+            prob.batch = b;
+            prob.nhead_q = nhq;
+            prob.nhead_k = nhk;
+            prob.seqlen_q = sq;
+            prob.seqlen_k = sk;
+            prob.hdim_q = hd;
+            prob.hdim_v = hd;
+            prob.total_q = b * sq;
+            prob.num_seqs = b;
+            prob.sliding_window = sw;
+            prob.block_kv = bkv;
+            prob.num_sms = nsms;
+
+            Dispatcher::Choice choice = disp.select(prob);
+            CppPick pick = resolve(store, choice);
+            // For attention the structural identity is (path, head_size,
+            // block_size); path lives in the manifest raw JSON. Re-read it.
+            std::string path;
+            if (pick.found) {
+                for (const auto& kv : store.entries()) {
+                    if (kv.first == choice.cache_key) {
+                        if (kv.second.manifest.raw.has("path"))
+                            path = kv.second.manifest.raw.get_str("path");
+                        break;
+                    }
+                }
+            }
+            std::printf(
+                "{\"batch\":%ld,\"nhead_q\":%ld,\"nhead_k\":%ld,\"seqlen_q\":%ld,"
+                "\"seqlen_k\":%ld,\"hdim\":%ld,\"sliding_window\":%ld,"
+                "\"block_kv\":%ld,\"num_sms\":%ld,\"selected\":%s,"
+                "\"kernel_name\":\"%s\",\"path\":\"%s\",\"head_size\":%d,"
+                "\"block_size\":%d}\n",
+                b, nhq, nhk, sq, sk, hd, sw, bkv, nsms, pick.found ? "true" : "false",
+                json_escape(pick.kernel_name).c_str(), json_escape(path).c_str(), pick.block_m,
+                pick.block_n);
+            continue;
+        }
+
+        if (op == "conv") {
+            // Conv shape line: N C K Hi Wi Y X [pad_h pad_w stride_h stride_w]
+            long cN = 0, cC = 0, cK = 0, Hi = 0, Wi = 0, Y = 0, X = 0;
+            if (!(ls >> cN >> cC >> cK >> Hi >> Wi >> Y >> X)) continue;
+            long ph = 0, pw = 0, sh = 1, sw = 1;
+            ls >> ph >> pw >> sh >> sw;  // optional; default pad=0 stride=1
+            prob.conv_N = cN;
+            prob.conv_C = cC;
+            prob.conv_K = cK;
+            prob.Hi = Hi;
+            prob.Wi = Wi;
+            prob.Y = Y;
+            prob.X = X;
+            prob.pad_h = (int)ph;
+            prob.pad_w = (int)pw;
+            prob.stride_h = sh ? (int)sh : 1;
+            prob.stride_w = sw ? (int)sw : 1;
+            prob.conv_G = 1;
+
+            Dispatcher::Choice choice = disp.select(prob);
+            CppPick pick = resolve(store, choice);
+            std::printf(
+                "{\"N\":%ld,\"C\":%ld,\"K\":%ld,\"Hi\":%ld,\"Wi\":%ld,\"Y\":%ld,"
+                "\"X\":%ld,\"pad_h\":%ld,\"pad_w\":%ld,\"stride_h\":%ld,"
+                "\"stride_w\":%ld,\"selected\":%s,\"kernel_name\":\"%s\","
+                "\"block_m\":%d,\"block_n\":%d,\"block_k\":%d,"
+                "\"pipeline\":\"%s\",\"epilogue\":\"%s\"}\n",
+                cN, cC, cK, Hi, Wi, Y, X, ph, pw, (long)prob.stride_h, (long)prob.stride_w,
+                pick.found ? "true" : "false", json_escape(pick.kernel_name).c_str(), pick.block_m,
+                pick.block_n, pick.block_k, json_escape(pick.pipeline).c_str(),
+                json_escape(pick.epilogue).c_str());
+            continue;
+        }
+
+        // Default: GEMM shape line: M N K
+        long M = 0, N = 0, K = 0;
+        if (!(ls >> M >> N >> K)) continue;
+        prob.layout = "RCR";
         prob.M = M;
         prob.N = N;
         prob.K = K;

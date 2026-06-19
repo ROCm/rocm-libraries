@@ -316,7 +316,7 @@ typedef struct ckc_gfx942_attn2d_build_ctx
      * they must match the Python iter_args tuple names for byte-identity. Each
      * entry points into ctx->iter_args_name_buf. */
     const char* iter_args_names[CKC_GFX942_ATTN2D_MAX_ITER_ARGS];
-    char iter_args_name_buf[CKC_GFX942_ATTN2D_MAX_ITER_ARGS][24];
+    char iter_args_name_buf[CKC_GFX942_ATTN2D_MAX_ITER_ARGS][32]; /* "acc%da%d" worst case = 27 */
     int iter_args_count;
     int ml_count;    /* 2 * SOFTMAX_STATE_SLOTS         */
     int ACC_N_TILES; /* PV_N_TILES (epilogue alias)     */

@@ -1,0 +1,29 @@
+# Unified attention shape corpus for C++<->Python dispatcher path-parity.
+# One problem per line: batch nhq nhk seqlen_q seqlen_k hdim [sw block_kv num_sms]
+# (defaults sw=0 block_kv=16 num_sms=120). Path selection (pure):
+#   target = num_sms*4; block_m = 16 if nqpkv<=16 else next_pow2(nqpkv);
+#   block_q = block_m//nqpkv; num_2d = (total_q//block_q + batch)*nhk;
+#   path = "2d" if (sw>0 or seqlen_k<=512 or num_2d>target) else "3d".
+# Coverage gate: hdim in {64,128,256}, block_kv in {16,32,64}, dtype fp16/bf16.
+#
+# batch nhq nhk sq    sk    hdim  sw   bkv nsms
+1     32  32  1     4096  128                   # decode long kv -> 3d
+2     32  8   512   512   128                   # short kv -> 2d
+4     32  32  2048  2048  64                    # big grid -> 2d
+1     16  16  128   8192  128                   # long kv, small grid -> 3d
+2     16  4   128   1024  128   256             # sliding window -> 2d
+1     8   8   256   256   96                    # hd96 -> reject(coverage)
+8     32  8   1024  1024  128                   # many seqs -> 2d (num_2d>target)
+1     32  32  1     16384 256                   # decode huge kv hd256 -> 3d
+1     1   1   64    64    64                     # tiny -> 2d (kv<=512)
+2     64  8   4096  4096  128                   # long prefill many heads -> 2d
+1     16  16  1     2048  128                   # decode mid kv -> 3d
+1     32  32  128   600   128                   # kv just over 512 small grid -> 3d
+4     40  8   2048  2048  128                   # -> 2d
+1     8   2   512   4096  64    0   32          # block_kv=32 -> 3d
+2     32  32  333   777   128                   # odd -> depends, num_2d vs target
+1     16  16  2     50000 128                   # very long kv decode -> 3d
+1     12  12  256   256   100                    # hd100 -> reject
+2     32  8   64    512   64                     # kv<=512 -> 2d
+1     32  32  4096  4096  128   0   64           # block_kv=64 -> 2d
+16    32  8   2048  2048  256                    # -> 2d big

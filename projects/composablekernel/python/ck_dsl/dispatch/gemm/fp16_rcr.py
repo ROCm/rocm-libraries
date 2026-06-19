@@ -29,8 +29,8 @@ from ..core import (
 )
 from .common import (
     GemmRequest,
-    basic_gemm_request_errors,
-    normalize_dtype,
+    arch_family_supported,
+    rcr_request_errors,
     selector_matches,
 )
 from .support import (
@@ -45,17 +45,7 @@ GEMM_FP16_RCR_ABI_VERSION = "hipkg-gemm-fp16-rcr/v1"
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
-    errors = basic_gemm_request_errors(req)
-    if errors:
-        return errors
-    assert isinstance(req, GemmRequest)
-    if normalize_dtype(req.dtype) != "fp16":
-        errors.append(f"unsupported dtype {req.dtype!r}; phase 1 supports fp16 only")
-    if req.layout.upper() != "RCR":
-        errors.append(f"unsupported layout {req.layout!r}; phase 1 supports RCR only")
-    if req.trans_a or not req.trans_b:
-        errors.append("phase 1 expects A row-major and B logically transposed (RCR)")
-    return errors
+    return rcr_request_errors(req, dtype="fp16")
 
 
 def _make_spec(
@@ -176,12 +166,22 @@ def _make_candidate(
     spec_id: str,
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
+    arch_family: str,
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, GemmRequest)
+        # Arch-family gate: an RDNA/WMMA candidate must never report support on a
+        # CDNA arch (and vice versa). Without this gate ``_make_spec`` rebuilds an
+        # RDNA candidate with the target's native wave64 + a 16x16x16 MFMA atom
+        # that *also* exists on CDNA, so ``gemm_config_supported`` accepts it and
+        # the prio-10 RDNA candidate wrongly out-ranks the intended CDNA mem
+        # candidate whenever the 128x128 cshuffle tile does not divide.
+        ok, why = arch_family_supported(req, arch_family)
+        if not ok:
+            return False, why
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -231,24 +231,28 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="cdna_cshuffle_default",
             priority=10,
             spec_fn=_spec_cdna_cshuffle,
+            arch_family="cdna",
         ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
+            arch_family="rdna",
         ),
         _make_candidate(
             name="universal_gemm_fp16_cdna_mem",
             spec_id="cdna_mem_64x128",
             priority=20,
             spec_fn=_spec_cdna_mem,
+            arch_family="cdna",
         ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma_small",
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
+            arch_family="rdna",
         ),
     )
 )

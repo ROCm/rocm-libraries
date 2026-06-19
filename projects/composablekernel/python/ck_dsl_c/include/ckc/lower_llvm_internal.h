@@ -43,9 +43,19 @@ extern "C" {
 /* ====================================================================== */
 
 /* Verbatim datalayout / triple copied from clang for gfx950 (Python
- * _DATALAYOUT / _TRIPLE). Shared by all CDNA backends today. */
-extern const char* const CKC_LL_DATALAYOUT;
+ * _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 / _TRIPLE). Shared by all CDNA
+ * backends today, but the AMDGPU datalayout is FLAVOR-KEYED: only the
+ * buffer-fat-pointer address space (p8) drifts between LLVM 20 (ROCm 7.0/7.1)
+ * and LLVM 22 (ROCm >= 7.2). CKC_LL_DATALAYOUT is a back-compat alias for the
+ * LLVM20 form; new code keys on the flavor via ckc_ll_datalayout_for_flavor. */
+extern const char* const CKC_LL_DATALAYOUT_LLVM20;
+extern const char* const CKC_LL_DATALAYOUT_LLVM22;
+extern const char* const CKC_LL_DATALAYOUT; /* == CKC_LL_DATALAYOUT_LLVM20 */
 extern const char* const CKC_LL_TRIPLE;
+
+/* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, anything else
+ * (incl. unexpected values) => the modern LLVM22 layout. */
+const char* ckc_ll_datalayout_for_flavor(ckc_llvm_flavor_t flavor);
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */

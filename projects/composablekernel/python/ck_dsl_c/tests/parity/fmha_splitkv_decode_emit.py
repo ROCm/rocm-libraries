@@ -18,6 +18,8 @@ from ck_dsl.instances.common.fmha_splitkv_decode import (
     build_fmha_fwd_splitkv_decode_reduce,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> FmhaFwdSplitKvDecodeSpec:
@@ -87,23 +89,45 @@ def _spec(idx: int) -> FmhaFwdSplitKvDecodeSpec:
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         sys.stderr.write(
-            "usage: fmha_splitkv_decode_emit.py <config_index 0..5> <seg|reduce>\n"
+            "usage: fmha_splitkv_decode_emit.py <config_index 0..5> [<seg|reduce>|<ll|ir|verify>]\n"
         )
         return 2
     idx = int(sys.argv[1])
-    phase = sys.argv[2]
+
+    # argv[2] may be a phase ("seg"/"reduce") or a mode ("ll"/"ir"/"verify").
+    # If it looks like a mode, treat it as mode with default phase "seg".
+    # If it looks like a phase, treat it as phase with default mode "ll".
+    # If absent, default phase="seg", mode="ll".
+    phase = "seg"
+    mode = "ll"
+    if len(sys.argv) > 2:
+        arg2 = sys.argv[2]
+        if arg2 in ("ir", "verify", "ll"):
+            mode = arg2
+        elif arg2 in ("seg", "reduce"):
+            phase = arg2
+        else:
+            sys.stderr.write(f"unknown phase {arg2!r} (want seg|reduce)\n")
+            return 2
+
     spec = _spec(idx)
     if phase == "seg":
         kernel = build_fmha_fwd_splitkv_decode_segment(spec, arch="gfx950")
-    elif phase == "reduce":
-        kernel = build_fmha_fwd_splitkv_decode_reduce(spec, arch="gfx950")
     else:
-        sys.stderr.write(f"unknown phase {phase!r} (want seg|reduce)\n")
+        kernel = build_fmha_fwd_splitkv_decode_reduce(spec, arch="gfx950")
+
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
         return 2
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
     return 0
 
 

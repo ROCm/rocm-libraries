@@ -1,0 +1,47 @@
+{
+  "arch": "gfx950",
+  "args_signature": [
+    {
+      "name": "A",
+      "size_bytes": 8,
+      "type": "ptr<bf16, global>"
+    },
+    {
+      "name": "B",
+      "size_bytes": 8,
+      "type": "ptr<bf16, global>"
+    },
+    {
+      "name": "C",
+      "size_bytes": 8,
+      "type": "ptr<bf16, global>"
+    },
+    {
+      "name": "M",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "N",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "K",
+      "size_bytes": 4,
+      "type": "i32"
+    }
+  ],
+  "block_k": 32,
+  "block_m": 64,
+  "block_n": 128,
+  "epilogue": "default",
+  "grid_order": "NM",
+  "hsaco": "",
+  "kernel_name": "universal_gemm_bf16_cdna_mem_bf16_t64x128x32_w2x2x1_wt16x16x32_mem_intrawave_default",
+  "kind": "gemm_bf16",
+  "pipeline": "mem",
+  "scheduler": "intrawave",
+  "schema": "ck.dsl.example.manifest/v1",
+  "threads_per_block": 256
+}

@@ -29,6 +29,8 @@ from ck_dsl.instances.common.fused_moe_e2e import (
 )
 from ck_dsl.instances.common.topk_softmax import build_topk_softmax
 from ck_dsl.instances.common.batched_gemm import build_batched_gemm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 # The six sampled configs (must match the C emitter's make_spec()).
@@ -49,27 +51,26 @@ def _spec(idx: int) -> FusedMoeForwardSpec:
     return FusedMoeForwardSpec(arch="gfx950", **cfg)
 
 
-# Lowerable stages, in the C emitter's order. Each entry is (banner, builder)
-# where the builder takes the (tile-policy-adjusted) FusedMoeForward instance.
-def _emit_router(fwd: FusedMoeForward) -> str:
+# Lowerable stages, in the C emitter's order. Each entry is (banner, kernel_builder)
+# where the kernel_builder takes the (tile-policy-adjusted) FusedMoeForward instance
+# and returns the kernel object (not text).
+def _build_router_kernel(fwd: FusedMoeForward):
     spec = fwd.spec.to_topk_softmax_spec()
-    kernel = build_topk_softmax(spec)
-    return lower_kernel_to_llvm(kernel, arch="gfx950")
+    return build_topk_softmax(spec)
 
 
-def _emit_batched_gemm(fwd: FusedMoeForward) -> str:
+def _build_batched_gemm_kernel(fwd: FusedMoeForward):
     # GATE_UP_GEMM and DOWN_GEMM both lower via the batched-GEMM builder shape
     # (the orchestrator parameterises it per-call; the representative .ll for
     # golden diffing is the batched_gemm builder), matching the C port.
     spec = fwd.spec.to_batched_gemm_spec()
-    kernel = build_batched_gemm(spec)
-    return lower_kernel_to_llvm(kernel, arch="gfx950")
+    return build_batched_gemm(spec)
 
 
 _STAGES = (
-    ("ROUTER", _emit_router),
-    ("GATE_UP_GEMM", _emit_batched_gemm),
-    ("DOWN_GEMM", _emit_batched_gemm),
+    ("ROUTER", _build_router_kernel),
+    ("GATE_UP_GEMM", _build_batched_gemm_kernel),
+    ("DOWN_GEMM", _build_batched_gemm_kernel),
 )
 
 
@@ -78,16 +79,31 @@ def main() -> int:
         sys.stderr.write("usage: fused_moe_e2e_emit.py <config_index 0..5>\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     spec = _spec(idx)
     # Construct the orchestrator so __init__ runs the arch resolve + shape-aware
     # tile-swap policy; the stages below read the post-swap fwd.spec.
     fwd = FusedMoeForward(spec)
     out = []
-    for banner, emit in _STAGES:
+    for banner, build_kernel in _STAGES:
+        kernel = build_kernel(fwd)
         out.append(f"; === fused_moe_e2e stage: {banner} ===\n")
-        out.append(emit(fwd))
-        if not out[-1].endswith("\n"):
-            out.append("\n")
+        if mode == "ll":
+            text = lower_kernel_to_llvm(kernel, arch="gfx950")
+            out.append(text)
+            if not text.endswith("\n"):
+                out.append("\n")
+        elif mode == "ir":
+            text = serialize(kernel)
+            out.append(text)
+            if not text.endswith("\n"):
+                out.append("\n")
+        elif mode == "verify":
+            diags = "".join(str(d) + "\n" for d in verify(kernel))
+            out.append(diags)
+        else:
+            sys.stderr.write(f"unknown mode {mode}\n")
+            return 2
     sys.stdout.write("".join(out))
     return 0
 

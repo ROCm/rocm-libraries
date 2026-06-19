@@ -18,6 +18,8 @@ from ck_dsl.instances.common.fused_moe import (
     build_moe_topk_weighted_reduce,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 # Each tuple mirrors the C-side config table exactly:
@@ -101,20 +103,44 @@ def _spec(idx: int) -> FusedMoeSpec:
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
-        sys.stderr.write("usage: fused_moe_emit.py <config_index> <phase>\n")
+    if len(sys.argv) < 2:
+        sys.stderr.write(
+            "usage: fused_moe_emit.py <config_index> [<phase>|<ll|ir|verify>]\n"
+        )
         return 2
     idx = int(sys.argv[1])
-    phase = sys.argv[2]
+
+    # argv[2] may be a phase or a mode ("ll"/"ir"/"verify").
+    # If it looks like a mode, treat it as mode with default phase "gather".
+    # If it looks like a phase, treat it as phase with default mode "ll".
+    # If absent, default phase="gather", mode="ll".
+    phase = "gather"
+    mode = "ll"
+    if len(sys.argv) > 2:
+        arg2 = sys.argv[2]
+        if arg2 in ("ir", "verify", "ll"):
+            mode = arg2
+        elif arg2 in BUILDERS:
+            phase = arg2
+        else:
+            sys.stderr.write(f"unknown phase {arg2}\n")
+            return 2
+
     if idx < 0 or idx >= len(CONFIGS):
         sys.stderr.write(f"unknown config index {idx}\n")
         return 2
-    if phase not in BUILDERS:
-        sys.stderr.write(f"unknown phase {phase}\n")
-        return 2
+
     kernel = BUILDERS[phase](_spec(idx))
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

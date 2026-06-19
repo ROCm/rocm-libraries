@@ -299,7 +299,7 @@ typedef struct ckc_gfx950_attn2d_build_ctx
      * "cur_buf"). Emitted verbatim as the loop's phi-node names for byte-identity
      * with Python iter_args tuple names. Each entry points into iter_args_name_buf. */
     const char* iter_args_names[CKC_GFX950_ATTN2D_MAX_ITER_ARGS];
-    char iter_args_name_buf[CKC_GFX950_ATTN2D_MAX_ITER_ARGS][24];
+    char iter_args_name_buf[CKC_GFX950_ATTN2D_MAX_ITER_ARGS][32]; /* "acc%da%d" worst case = 27 */
     int iter_args_count;
     int ml_count;    /* 2 * SOFTMAX_STATE_SLOTS         */
     int ACC_N_TILES; /* PV_N_TILES (epilogue alias)     */

@@ -16,6 +16,8 @@ from ck_dsl.instances.common.add_rmsnorm2d_rdquant import (
     is_valid_spec,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> AddRmsnorm2DRdquantSpec:
@@ -90,17 +92,28 @@ def _spec(idx: int) -> AddRmsnorm2DRdquantSpec:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        sys.stderr.write("usage: add_rmsnorm2d_rdquant_emit.py <config_index 0..5>\n")
+        sys.stderr.write(
+            "usage: add_rmsnorm2d_rdquant_emit.py <config_index 0..5> [ll|ir|verify]\n"
+        )
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode not in ("ll", "ir", "verify"):
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     spec = _spec(idx)
     ok, reason = is_valid_spec(spec, "gfx950")
     if not ok:
         sys.stderr.write(f"invalid spec: {reason}\n")
         return 1
     kernel = build_add_rmsnorm2d_rdquant(spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    else:  # verify
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0
 
 

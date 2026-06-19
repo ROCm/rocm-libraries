@@ -90,11 +90,34 @@ extern "C" {
  * reads, so the populate routine fills it from spec.effective_lds_layout(). */
 typedef struct ckc_conv_lds_layout
 {
-    int logical_cols;    /* tile_k                          */
-    int k_pad;           /* +8 / +0 per effective policy    */
-    int row_stride;      /* logical_cols + k_pad            */
-    const char* swizzle; /* NULL | "xor" | "cyclic"        */
+    int logical_cols;           /* tile_k                          */
+    int k_pad;                  /* +8 / +0 per effective policy    */
+    int row_stride;             /* logical_cols + k_pad            */
+    const char* swizzle;        /* NULL | "xor" | "cyclic"        */
+    bool requires_packed_async; /* LdsLayout.requires_packed_async (async path) */
 } ckc_conv_lds_layout_t;
+
+/* LdsLayout port (ck_dsl/helpers/layouts.py) -- the slice the conv body / spec
+ * validation needs. All three mirror the Python methods 1:1 and write the
+ * structured ValueError message (verbatim) into reason on rejection.
+ *
+ *   ckc_conv_lds_layout_validate            <- LdsLayout.validate()
+ *   ckc_conv_lds_layout_validate_for_async  <- LdsLayout.validate_for_async()
+ *   ..._effective_lds_layout                <- ImplicitGemmConvSpec.effective_lds_layout()
+ *
+ * Each returns true on success, false on failure (reason filled if non-NULL).
+ * effective_lds_layout fills *out with the derived layout (and runs validate());
+ * the lds_layout override branch (spec.lds_layout != NULL) is a peer port -- it
+ * is unreachable through the current C spec (lds_layout is an opaque void* with
+ * no C constructor) and is reported as such rather than guessed. */
+bool ckc_conv_lds_layout_validate(const ckc_conv_lds_layout_t* l, char* reason, size_t reason_cap);
+bool ckc_conv_lds_layout_validate_for_async(const ckc_conv_lds_layout_t* l,
+                                            char* reason,
+                                            size_t reason_cap);
+bool ckc_implicit_gemm_conv_spec_effective_lds_layout(const ckc_implicit_gemm_conv_spec_t* s,
+                                                      ckc_conv_lds_layout_t* out,
+                                                      char* reason,
+                                                      size_t reason_cap);
 
 /* ============================================================ *
  * BufferResource (value-type slice)
@@ -310,7 +333,7 @@ ckc_value_t* ckc_conv_a_descriptor(ckc_ir_builder_t* b,
                                    ckc_value_t** out_valid,
                                    void* ctx_user);
 
-/* b_descriptor(ctx, row, col) -> (off, valid). KRSC: k_out = block_n_off + row;
+/* b_descriptor(ctx, row, col) -> (off, valid). KYXC: k_out = block_n_off + row;
  * k_gemm = k_off_capture + col. Same ckc_loads_descriptor_fn contract. */
 ckc_value_t* ckc_conv_b_descriptor(ckc_ir_builder_t* b,
                                    ckc_value_t* row,

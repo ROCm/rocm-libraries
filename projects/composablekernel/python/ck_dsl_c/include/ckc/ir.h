@@ -60,6 +60,27 @@ typedef enum ckc_status
 
 #define CKC_ERR_MSG_CAP 256
 
+/* CKC_ERR_SNPRINTF -- snprintf into a bounded diagnostic/error buffer where
+ * truncating an over-long message is INTENTIONAL (the buffer is a fixed
+ * CKC_ERR_MSG_CAP-sized field; we never grow it for a long reason string).
+ * snprintf is overflow-safe, so the only effect of truncation is a shortened
+ * human-readable message -- never memory unsafety and never emitted IR (these
+ * are reject/error paths). The localized pragma blesses exactly this idiom while
+ * keeping -Werror=format-truncation active everywhere else, so any NEW,
+ * unintended truncation (e.g. into a codegen name buffer) is still caught. */
+#if defined(__GNUC__)
+#define CKC_ERR_SNPRINTF(buf, cap, ...)                                     \
+    do                                                                      \
+    {                                                                       \
+        _Pragma("GCC diagnostic push")                                      \
+            _Pragma("GCC diagnostic ignored \"-Wformat-truncation\"")(void) \
+                snprintf((buf), (cap), __VA_ARGS__);                        \
+        _Pragma("GCC diagnostic pop")                                       \
+    } while(0)
+#else
+#define CKC_ERR_SNPRINTF(buf, cap, ...) (void)snprintf((buf), (cap), __VA_ARGS__)
+#endif
+
 /* --------------------------------------------------------------- type kinds */
 
 typedef enum ckc_type_kind

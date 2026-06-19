@@ -70,6 +70,46 @@ def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
+def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
+    """Shared RCR-layout request validation parametrized by element dtype.
+
+    Used by every RCR UniversalGemm family module (fp16, bf16, ...) so the
+    layout/transpose checks and the single-dtype gate live in one place. The
+    family passes the canonical dtype it implements (e.g. ``"fp16"``, ``"bf16"``).
+    """
+    errors = basic_gemm_request_errors(req)
+    if errors:
+        return errors
+    assert isinstance(req, GemmRequest)
+    if normalize_dtype(req.dtype) != dtype:
+        errors.append(
+            f"unsupported dtype {req.dtype!r}; this family supports {dtype} only"
+        )
+    if req.layout.upper() != "RCR":
+        errors.append(f"unsupported layout {req.layout!r}; RCR only")
+    if req.trans_a or not req.trans_b:
+        errors.append("RCR expects A row-major and B logically transposed")
+    return errors
+
+
+def arch_family_supported(req: GemmRequest, arch_family: str) -> Tuple[bool, str]:
+    """Gate a GEMM candidate to its intended arch family (``cdna`` or ``rdna``).
+
+    ``ArchTarget.family`` is the SSOT split (``cdna`` for gfx90a/gfx942/gfx950,
+    ``rdna`` for gfx11xx/gfx12xx). Candidates are tuned for one micro-arch family
+    only; this predicate keeps an RDNA candidate from matching a CDNA request
+    just because the rebuilt spec happens to satisfy the generic config checks
+    (and vice versa).
+    """
+    target = ArchTarget.from_gfx(req.arch)
+    if target.family != arch_family:
+        return False, (
+            f"{arch_family!r}-family candidate does not support "
+            f"{target.family!r}-family arch {req.arch}"
+        )
+    return True, "ok"
+
+
 def selector_matches(req: GemmRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
     algorithm = normalize_selector(req.algorithm)
     spec_id = normalize_selector(req.spec_id)

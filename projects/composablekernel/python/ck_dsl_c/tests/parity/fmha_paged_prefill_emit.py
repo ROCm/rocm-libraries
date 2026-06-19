@@ -16,6 +16,8 @@ from ck_dsl.instances.common.fmha_paged_prefill import (
     build_fmha_fwd_paged_prefill,
 )
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> FmhaFwdPagedPrefillSpec:
@@ -101,10 +103,19 @@ def main() -> int:
         sys.stderr.write("usage: fmha_paged_prefill_emit.py <config_index 0..5>\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     spec = _spec(idx)
     kernel = build_fmha_fwd_paged_prefill(spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ll":
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
+    elif mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     return 0
 
 

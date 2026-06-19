@@ -17,7 +17,7 @@
  *
  * Img2ColSpec.problem is a conv_implicit_gemm.ConvProblem. That type is not yet
  * ported to C, so this header defines the minimal subset of ConvProblem that
- * Img2ColSpec actually reads -- the seven layout dims (N, Hi, Wi, C, K, R, S),
+ * Img2ColSpec actually reads -- the seven layout dims (N, Hi, Wi, C, K, Y, X),
  * the stride/pad/dilation fields needed by short()'s siblings, and the derived
  * accessors M / K_gemm / short() -- as ckc_conv_problem_t. When the full
  * ConvProblem port lands it should subsume / replace this peer struct.
@@ -59,9 +59,9 @@ extern "C" {
  *       @property
  *       def M(self):  return N * Ho * Wo
  *       @property
- *       def K_gemm(self): return R * S * C
+ *       def K_gemm(self): return Y * X * C
  *       def short(self):
- *           return f"N{N}H{Hi}W{Wi}C{C}_K{K}R{R}S{S}"
+ *           return f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
  *
  * The frozen dataclass becomes a plain struct; the defaults are applied by
  * ckc_conv_problem_default(). Only the accessors Img2ColSpec needs (C field +
@@ -73,19 +73,27 @@ typedef struct ckc_conv_problem
     int Wi;
     int C;
     int K;
-    int R;
-    int S;
+    int Y;  /* #8355: was R */
+    int X;  /* #8355: was S */
     int sH; /* default 1 */
     int sW; /* default 1 */
     int pH; /* default 0 */
     int pW; /* default 0 */
     int dH; /* default 1 */
     int dW; /* default 1 */
+    /* 3-D-only fields (img2col is 2-D-only; kept for layout parity with the
+     * conv helper header's ckc_conv_problem_t). 0/false => 2-D. */
+    bool is_3d;
+    int Di;
+    int Z;
+    int sD;
+    int pD;
+    int dD;
 } ckc_conv_problem_t;
 
 /* A ConvProblem with the dataclass defaults installed (sH=sW=dH=dW=1,
  * pH=pW=0) and the seven required dims zeroed. The caller fills N, Hi, Wi, C,
- * K, R, S (and overrides stride/pad/dilation as needed). */
+ * K, Y, X (and overrides stride/pad/dilation as needed). */
 ckc_conv_problem_t ckc_img2col_conv_problem_default(void);
 
 /* ConvProblem.Ho property: (Hi + 2*pH - dH*(R-1) - 1)//sH + 1.
@@ -99,10 +107,10 @@ int ckc_img2col_conv_problem_wo(const ckc_conv_problem_t* p);
 /* ConvProblem.M property: N * Ho * Wo. */
 int ckc_img2col_conv_problem_m(const ckc_conv_problem_t* p);
 
-/* ConvProblem.K_gemm property: R * S * C. */
+/* ConvProblem.K_gemm property: Y * X * C. */
 int ckc_img2col_conv_problem_k_gemm(const ckc_conv_problem_t* p);
 
-/* ConvProblem.short(): "N{N}H{Hi}W{Wi}C{C}_K{K}R{R}S{S}" written NUL-terminated
+/* ConvProblem.short(): "N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}" written NUL-terminated
  * into out (capacity out_cap). Returns CKC_OK, or CKC_ERR_VALUE on NULL args /
  * a buffer too small to hold the whole string. */
 ckc_status_t ckc_img2col_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap);

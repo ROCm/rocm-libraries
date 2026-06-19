@@ -3,7 +3,7 @@
  *
  * ckc/instance_conv_implicit_gemm.h -- C99 port of the implicit-GEMM
  * convolution kernel instance builder
- * ck_dsl/instances/common/conv_implicit_gemm.py (NHWC x KRSC -> NHWK).
+ * ck_dsl/instances/common/conv_implicit_gemm.py (NHWC x KYXC -> NHWK).
  *
  *   Python (conv_implicit_gemm.py)        C99 (this header)
  *   -----------------------------------   --------------------------------------
@@ -155,6 +155,26 @@ typedef struct ckc_implicit_gemm_conv_spec
     bool k0_k1_split; /* default false */
     int groups;       /* default 1     */
 
+    /* #8624 vector-sizes-as-args: per-operand load/store vector widths
+     * (elements). has_* false => Python None => auto-select (choose_load_vec /
+     * CShuffleEpilogue.from_grid default). When set they override the per-A/B
+     * load width and the cshuffle C store width. */
+    bool has_vector_size_a;
+    int vector_size_a;
+    bool has_vector_size_b;
+    int vector_size_b;
+    bool has_vector_size_c;
+    int vector_size_c;
+
+    /* #8624 ConvDataSpec: element / accumulator dtypes. Defaults all "fp16"
+     * (acc "fp32"). dtype_a drives choose_load_vec's elem_bytes; A/B/D drive the
+     * IR param types and the descriptor naive dtype (descriptor naive pins f16 in
+     * the C port, so only the load-vec elem_bytes is observable for non-fp16). */
+    const char* dtype_a;   /* default "fp16" */
+    const char* dtype_b;   /* default "fp16" */
+    const char* dtype_d;   /* default "fp16" */
+    const char* dtype_acc; /* default "fp32" */
+
     ckc_conv_acc_epilogue_t acc_epilogue; /* default identity */
 } ckc_implicit_gemm_conv_spec_t;
 
@@ -210,7 +230,7 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
  *   make_a_descriptor(p, decompose_m=True): (m, k)->NHWC offset DAG. When
  *     decompose_m is false the leading unmerge('m'->n,ho,wo) is dropped and the
  *     user-facing upper coords become (n, ho, wo, k).
- *   make_b_descriptor(p):                   (n_gemm, k_gemm)->KRSC offset DAG.
+ *   make_b_descriptor(p):                   (n_gemm, k_gemm)->KYXC offset DAG.
  *   make_d_descriptor(p):                   (m, k_out)->NHWK offset DAG.
  *
  * The opaque return type avoids a transforms.h include in the public surface;

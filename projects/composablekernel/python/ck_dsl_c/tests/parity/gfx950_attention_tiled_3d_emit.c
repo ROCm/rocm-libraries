@@ -24,7 +24,9 @@
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_gfx950_attention_tiled_3d.h"
 
 /* Fill the segment spec `s` for config index `idx`. Returns 0 on success,
@@ -148,6 +150,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     int idx = atoi(argv[1]);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_unified_attention_3d_tiled_spec_t s;
     if (make_spec(idx, &s) != 0) {
@@ -158,11 +161,98 @@ int main(int argc, char **argv) {
     ckc_unified_attention_reduce_tiled_spec_t r;
     make_reduce_spec(&s, &r);
 
-    if (emit_segment(&s) != 0) {
-        return 1;
-    }
-    if (emit_reduce(&r) != 0) {
-        return 1;
+    if (strcmp(mode, "ll") == 0) {
+        if (emit_segment(&s) != 0) {
+            return 1;
+        }
+        if (emit_reduce(&r) != 0) {
+            return 1;
+        }
+    } else if (strcmp(mode, "ir") == 0) {
+        /* segment */
+        ckc_ir_builder_t b;
+        if (ckc_ir_builder_init(&b, "attention_tiled_3d_segment") != CKC_OK) {
+            fprintf(stderr, "segment builder init failed\n");
+            return 1;
+        }
+        ckc_kernel_def_t *seg_k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
+        if (!seg_k) {
+            fprintf(stderr, "segment build failed: err=%s\n", ckc_ir_builder_error(&b));
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        char *t = NULL;
+        ckc_status_t st = ckc_ir_serialize(seg_k, &t);
+        if (st != CKC_OK || !t) {
+            fprintf(stderr, "serialize failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+        ckc_ir_builder_free(&b);
+
+        /* reduce */
+        ckc_ir_builder_t rb;
+        if (ckc_ir_builder_init(&rb, "attention_tiled_3d_reduce") != CKC_OK) {
+            fprintf(stderr, "reduce builder init failed\n");
+            return 1;
+        }
+        ckc_kernel_def_t *red_k = ckc_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
+        if (!red_k) {
+            fprintf(stderr, "reduce build failed: err=%s\n", ckc_ir_builder_error(&rb));
+            ckc_ir_builder_free(&rb);
+            return 1;
+        }
+        char *t2 = NULL;
+        ckc_status_t st2 = ckc_ir_serialize(red_k, &t2);
+        if (st2 != CKC_OK || !t2) {
+            fprintf(stderr, "reduce serialize failed: status=%d\n", (int)st2);
+            ckc_ir_builder_free(&rb);
+            return 1;
+        }
+        fputs(t2, stdout);
+        free(t2);
+        ckc_ir_builder_free(&rb);
+    } else if (strcmp(mode, "verify") == 0) {
+        /* segment */
+        ckc_ir_builder_t b;
+        if (ckc_ir_builder_init(&b, "attention_tiled_3d_segment") != CKC_OK) {
+            fprintf(stderr, "segment builder init failed\n");
+            return 1;
+        }
+        ckc_kernel_def_t *seg_k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
+        if (!seg_k) {
+            fprintf(stderr, "segment build failed: err=%s\n", ckc_ir_builder_error(&b));
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        ckc_diag_t *d = NULL; size_t n = 0;
+        ckc_verify(seg_k, &d, &n);
+        for (size_t i = 0; i < n; i++) { char *s2 = ckc_diag_to_string(&d[i]); if (s2) { puts(s2); free(s2); } }
+        ckc_diags_free(d, n);
+        ckc_ir_builder_free(&b);
+
+        /* reduce */
+        ckc_ir_builder_t rb;
+        if (ckc_ir_builder_init(&rb, "attention_tiled_3d_reduce") != CKC_OK) {
+            fprintf(stderr, "reduce builder init failed\n");
+            return 1;
+        }
+        ckc_kernel_def_t *red_k = ckc_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
+        if (!red_k) {
+            fprintf(stderr, "reduce build failed: err=%s\n", ckc_ir_builder_error(&rb));
+            ckc_ir_builder_free(&rb);
+            return 1;
+        }
+        ckc_diag_t *d2 = NULL; size_t n2 = 0;
+        ckc_verify(red_k, &d2, &n2);
+        for (size_t i = 0; i < n2; i++) { char *s2 = ckc_diag_to_string(&d2[i]); if (s2) { puts(s2); free(s2); } }
+        ckc_diags_free(d2, n2);
+        ckc_ir_builder_free(&rb);
+    } else {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        return 2;
     }
     return 0;
 }

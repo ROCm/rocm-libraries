@@ -41,6 +41,7 @@
 #include <stdint.h>
 
 #include "ckc/ir.h"
+#include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t */
 #include "ckc/strbuf.h"
 
 #ifdef __cplusplus
@@ -102,13 +103,22 @@ bool ckc_backend_is_known(const char* gfx);
 
 /* ------------------------------------------------------- module preamble */
 
-/* The shared LLVM target triple ("amdgcn-amd-amdhsa"). */
+/* The shared LLVM target triple ("amdgcn-amd-amdhsa"). Flavor-invariant. */
 const char* ckc_isa_triple(const ckc_isa_backend_t* be);
-/* The shared LLVM datalayout string. */
+/* The LLVM datalayout string for `flavor` (Python backend.datalayout(flavor)).
+ * Only the buffer-fat-pointer address space (p8) drifts between LLVM 20 (ROCm
+ * 7.0/7.1) and LLVM 22 (ROCm >= 7.2). */
+const char* ckc_isa_datalayout_for_flavor(const ckc_isa_backend_t* be, ckc_llvm_flavor_t flavor);
+/* Flavor-agnostic accessor: the historical shared form (LLVM20). New callers
+ * should prefer ckc_isa_datalayout_for_flavor. */
 const char* ckc_isa_datalayout(const ckc_isa_backend_t* be);
-/* The two leading IR lines: `target datalayout = "..."` + newline +
- * `target triple = "..."`. Written into `out` (cleared first). Returns 0 on
- * success, -1 on OOM. */
+/* The two leading IR lines for `flavor` (Python backend.module_preamble):
+ * `target datalayout = "..."` + newline + `target triple = "..."`. Written
+ * into `out` (cleared first). Returns 0 on success, -1 on OOM. */
+int ckc_isa_module_preamble_for_flavor(const ckc_isa_backend_t* be,
+                                       ckc_llvm_flavor_t flavor,
+                                       ckc_strbuf_t* out);
+/* Flavor-agnostic preamble (LLVM20 datalayout). */
 int ckc_isa_module_preamble(const ckc_isa_backend_t* be, ckc_strbuf_t* out);
 
 /* DWORD3 of the buffer resource descriptor for this target. */

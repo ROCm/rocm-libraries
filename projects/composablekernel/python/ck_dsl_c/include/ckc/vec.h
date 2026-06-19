@@ -50,32 +50,36 @@ extern "C" {
 
 /* Ensure capacity for at least `n` total elements. Sets `ok` (an int lvalue) to
  * 0 on success or -1 on OOM. Internal helper; prefer ckc_vec_push. */
-#define ckc_vec_reserve(arena, v, n, ok)                                   \
-    do                                                                     \
-    {                                                                      \
-        (ok) = 0;                                                          \
-        if((size_t)(n) > (v)->cap)                                         \
-        {                                                                  \
-            size_t _nc = (v)->cap ? (v)->cap : 4;                          \
-            while(_nc < (size_t)(n))                                       \
-            {                                                              \
-                _nc *= 2;                                                  \
-            }                                                              \
-            void* _p = ckc_arena_alloc((arena), _nc * sizeof(*(v)->data)); \
-            if(!_p)                                                        \
-            {                                                              \
-                (ok) = -1;                                                 \
-            }                                                              \
-            else                                                           \
-            {                                                              \
-                if((v)->data && (v)->len)                                  \
-                {                                                          \
-                    memcpy(_p, (v)->data, (v)->len * sizeof(*(v)->data));  \
-                }                                                          \
-                (v)->data = _p;                                            \
-                (v)->cap  = _nc;                                           \
-            }                                                              \
-        }                                                                  \
+#define ckc_vec_reserve(arena, v, n, ok)                                        \
+    do                                                                          \
+    {                                                                           \
+        (ok) = 0;                                                               \
+        if((size_t)(n) > (v)->cap)                                              \
+        {                                                                       \
+            size_t _nc = (v)->cap ? (v)->cap : 4;                               \
+            while(_nc < (size_t)(n))                                            \
+            {                                                                   \
+                _nc *= 2;                                                       \
+            }                                                                   \
+            void* _p = ckc_arena_alloc((arena), _nc * sizeof(*(v)->data));      \
+            if(!_p)                                                             \
+            {                                                                   \
+                (ok) = -1;                                                      \
+            }                                                                   \
+            else                                                                \
+            {                                                                   \
+                if((v)->data && (v)->len)                                       \
+                {                                                               \
+                    memcpy(_p, (v)->data, (v)->len * sizeof(*(v)->data));       \
+                }                                                               \
+                /* WS3 C++ build: the arena returns void*; cast back to the     \
+                 * element type. __typeof__ works in both C and C++ (g++/clang) \
+                 * and keeps the assignment behaviour identical to C99.         \
+                 */                                                             \
+                (v)->data = (__typeof__((v)->data))_p;                          \
+                (v)->cap  = _nc;                                                \
+            }                                                                   \
+        }                                                                       \
     } while(0)
 
 /* Append `val`. Evaluates to an int statement-expression-like result via the

@@ -15,7 +15,9 @@
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_conv_implicit_gemm.h"
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -91,6 +93,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     int idx = atoi(argv[1]);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_implicit_gemm_conv_spec_t spec;
     const char *arch = "gfx950";
@@ -109,16 +112,42 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    char *llvm_text = NULL;
-    ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
-                                               arch, &llvm_text);
-    if (st != CKC_OK || !llvm_text) {
-        fprintf(stderr, "lower failed: status=%d\n", (int)st);
+    int ret = 0;
+    if (strcmp(mode, "ll") == 0) {
+        char *llvm_text = NULL;
+        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
+                                                   arch, &llvm_text);
+        if (st != CKC_OK || !llvm_text) {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    } else if (strcmp(mode, "ir") == 0) {
+        char *t = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &t);
+        if (st != CKC_OK || !t) {
+            fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    } else if (strcmp(mode, "verify") == 0) {
+        ckc_diag_t *d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char *s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
+    } else {
+        fprintf(stderr, "unknown mode %s\n", mode);
         ckc_ir_builder_free(&b);
-        return 1;
+        return 2;
     }
-    fputs(llvm_text, stdout);
-    free(llvm_text);
     ckc_ir_builder_free(&b);
-    return 0;
+    return ret;
 }

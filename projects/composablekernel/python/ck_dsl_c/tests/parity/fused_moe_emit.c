@@ -14,7 +14,9 @@
 #include <string.h>
 
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_fused_moe.h"
 
 /* Mirrors the CONFIGS table in fused_moe_emit.py exactly. */
@@ -77,13 +79,40 @@ static const cfg_t CONFIGS[] = {
 };
 static const int N_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
 
+/* Valid phase names for fused_moe. */
+static int is_moe_phase(const char* s) {
+    return strcmp(s, "gather") == 0
+        || strcmp(s, "silu_mul") == 0
+        || strcmp(s, "silu_mul_packed") == 0
+        || strcmp(s, "static_scatter_gather") == 0
+        || strcmp(s, "topk_weighted_reduce") == 0;
+}
+
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        fprintf(stderr, "usage: %s <config_index> <phase>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <config_index> [<phase>|<ll|ir|verify>]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char* phase = argv[2];
+
+    /* argv[2] may be a phase or a mode ("ll"/"ir"/"verify").
+     * If it looks like a mode, treat it as mode with default phase "gather".
+     * If it looks like a phase, treat it as phase with default mode "ll".
+     * If absent, default phase="gather", mode="ll". */
+    const char* phase = "gather";
+    const char* mode = "ll";
+    if (argc > 2) {
+        const char* arg2 = argv[2];
+        if (strcmp(arg2, "ir") == 0 || strcmp(arg2, "verify") == 0 || strcmp(arg2, "ll") == 0) {
+            mode = arg2;
+        } else if (is_moe_phase(arg2)) {
+            phase = arg2;
+        } else {
+            fprintf(stderr, "unknown phase %s\n", arg2);
+            return 2;
+        }
+    }
+
     if (idx < 0 || idx >= N_CONFIGS) {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -125,16 +154,41 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    char* llvm_text = NULL;
-    ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
-                                               "gfx950", &llvm_text);
-    if (st != CKC_OK || !llvm_text) {
-        fprintf(stderr, "lower failed: status=%d\n", (int)st);
+    if (strcmp(mode, "ll") == 0) {
+        char* llvm_text = NULL;
+        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
+                                                   "gfx950", &llvm_text);
+        if (st != CKC_OK || !llvm_text) {
+            fprintf(stderr, "lower failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(llvm_text, stdout);
+        free(llvm_text);
+    } else if (strcmp(mode, "ir") == 0) {
+        char* t = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &t);
+        if (st != CKC_OK || !t) {
+            fprintf(stderr, "serialize failed: status=%d\n", (int)st);
+            ckc_ir_builder_free(&b);
+            return 1;
+        }
+        fputs(t, stdout);
+        free(t);
+    } else if (strcmp(mode, "verify") == 0) {
+        ckc_diag_t* d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char* s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
+    } else {
+        fprintf(stderr, "unknown mode %s\n", mode);
         ckc_ir_builder_free(&b);
-        return 1;
+        return 2;
     }
-    fputs(llvm_text, stdout);
-    free(llvm_text);
     ckc_ir_builder_free(&b);
     return 0;
 }

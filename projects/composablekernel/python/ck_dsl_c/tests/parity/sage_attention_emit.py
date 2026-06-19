@@ -17,6 +17,8 @@ from ck_dsl.instances.common.sage_attention import (
 from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
 from ck_dsl.helpers.qk_scale import QkScaleSpec
 from ck_dsl import lower_kernel_to_llvm
+from ck_dsl.core.ir_serialize import serialize
+from ck_dsl.core.verify import verify
 
 
 def _spec(idx: int) -> SageAttentionSpec:
@@ -175,13 +177,22 @@ def _spec(idx: int) -> SageAttentionSpec:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        sys.stderr.write("usage: sage_attention_emit.py <config_index 0..5>\n")
+        sys.stderr.write("usage: sage_attention_emit.py <config_index 0..5> [mode]\n")
         return 2
     idx = int(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
+    if mode not in ("ll", "ir", "verify"):
+        sys.stderr.write(f"unknown mode {mode}\n")
+        return 2
     spec = _spec(idx)
     kernel = build_sage_attention(spec, arch="gfx950")
-    text = lower_kernel_to_llvm(kernel, arch="gfx950")
-    sys.stdout.write(text)
+    if mode == "ir":
+        sys.stdout.write(serialize(kernel))
+    elif mode == "verify":
+        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
+    else:
+        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        sys.stdout.write(text)
     return 0
 
 

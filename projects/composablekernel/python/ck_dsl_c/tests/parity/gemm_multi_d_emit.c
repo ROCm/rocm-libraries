@@ -15,7 +15,9 @@
 
 #include "ckc/arena.h"
 #include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/instance_gemm_multi_d.h"
 
@@ -110,6 +112,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     int idx = atoi(argv[1]);
+    const char *mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_gemm_universal_spec_t base;
     if (make_base(idx, &base) != 0) {
@@ -150,20 +153,44 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    char *llvm_text = NULL;
-    char err[CKC_ERR_MSG_CAP];
-    err[0] = 0;
-    ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
-        kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
-    if (st != CKC_OK || !llvm_text) {
-        fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
-        ckc_gemm_multi_d_kernel_free(kernel);
-        ckc_arena_destroy(&arena);
-        return 1;
+    int ret = 0;
+    if (strcmp(mode, "ll") == 0) {
+        char *llvm_text = NULL;
+        char err[CKC_ERR_MSG_CAP];
+        err[0] = 0;
+        ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
+            kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
+        if (st != CKC_OK || !llvm_text) {
+            fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
+            ret = 1;
+        } else {
+            fputs(llvm_text, stdout);
+            free(llvm_text);
+        }
+    } else if (strcmp(mode, "ir") == 0) {
+        char *t = NULL;
+        ckc_status_t st = ckc_ir_serialize(kernel, &t);
+        if (st != CKC_OK || !t) {
+            fprintf(stderr, "serialize failed: status=%d\n", (int)st);
+            ret = 1;
+        } else {
+            fputs(t, stdout);
+            free(t);
+        }
+    } else if (strcmp(mode, "verify") == 0) {
+        ckc_diag_t *d = NULL;
+        size_t n = 0;
+        ckc_verify(kernel, &d, &n);
+        for (size_t i = 0; i < n; i++) {
+            char *s = ckc_diag_to_string(&d[i]);
+            if (s) { puts(s); free(s); }
+        }
+        ckc_diags_free(d, n);
+    } else {
+        fprintf(stderr, "unknown mode %s\n", mode);
+        ret = 2;
     }
-    fputs(llvm_text, stdout);
-    free(llvm_text);
     ckc_gemm_multi_d_kernel_free(kernel);
     ckc_arena_destroy(&arena);
-    return 0;
+    return ret;
 }
