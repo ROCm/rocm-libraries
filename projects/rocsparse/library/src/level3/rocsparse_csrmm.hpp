@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_handle.hpp"
+#include "rocsparse_line_nnz_profile.hpp"
 
 typedef enum rocsparse_csrmm_alg_
 {
@@ -158,6 +159,34 @@ namespace rocsparse
                                     rocsparse_indextype       csr_col_ind_indextype,
                                     const void*               csr_col_ind,
                                     void*                     temp_buffer);
+
+    // Auto-selection of a load-balanced CSR SpMM algorithm for the format
+    // default (rocsparse_csrmm_alg_default). The expensive structural input -
+    // the matrix's line-length profile - is computed once by the shared
+    // rocsparse::compute_line_nnz_profile (declared in rocsparse_line_nnz_profile.hpp)
+    // and cached on the descriptor; this selector is only the policy on top of it.
+    //
+    // csrmm_select_default_alg is a pure, O(1), handle-free mapping applied on
+    // every stage: it upgrades the default to the non-zero-split kernel when one
+    // line is long enough, relative to the device's parallelism, that the
+    // row-split kernel would serialize on it (e.g. a power-law "hub" row). The
+    // crossover is the dimensionless, architecture-portable test
+    //
+    //     profile.max * cu_count >= C * profile.nnz
+    //
+    // where cu_count is the device compute-unit count (queried from the handle)
+    // and C is a single dimensionless constant; this replaces the previous pair
+    // of architecture-specific absolute thresholds and self-scales with the GPU.
+    // With nothing cached, or for an explicit (non-default) algorithm, the
+    // algorithm is returned unchanged. Applying the same deterministic test at
+    // every stage keeps the chosen algorithm - and thus the temp-buffer sizing -
+    // consistent, and keeps the capture-sensitive compute stage free of kernel
+    // launches and copies.
+    void csrmm_select_default_alg(rocsparse_operation                trans_A,
+                                  bool                               is_batched,
+                                  int                                cu_count,
+                                  const rocsparse::line_nnz_profile& profile,
+                                  rocsparse_csrmm_alg&               alg);
 
     rocsparse_status csrmm(rocsparse_handle          handle,
                            rocsparse_operation       trans_A,

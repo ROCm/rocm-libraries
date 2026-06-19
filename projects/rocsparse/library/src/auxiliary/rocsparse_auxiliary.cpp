@@ -3988,6 +3988,10 @@ try
     // Sparsity structure might have changed, analysis is required before calling SpMV
     descr->analysed = false;
 
+    // The row pointer is being reassigned, so the cached line-length profile
+    // (used by the default SpMM/SpMV algorithm selection) is now stale.
+    descr->line_profile.known = false;
+
     descr->row_data = csr_row_ptr;
     descr->col_data = csr_col_ind;
     descr->val_data = csr_val;

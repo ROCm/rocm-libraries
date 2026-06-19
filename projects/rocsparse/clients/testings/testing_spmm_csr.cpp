@@ -238,21 +238,27 @@ void testing_spmm_csr(const Arguments& arg)
     rocsparse_local_dnmat mat_C1(C_m, C_n, ldc, dC_1, ctype, order_C);
     rocsparse_local_dnmat mat_C2(C_m, C_n, ldc, dC_2, ctype, order_C);
 
-    // Query SpMM buffer
+    // Query SpMM buffer. Route through the graph-capture wrapper so the
+    // graph_test cases capture the buffer_size stage as well. The default
+    // algorithm selection runs a device reduction (kernel + D2H copy + stream
+    // sync) only at buffer_size; that sequence is illegal under HIP stream
+    // capture, so this exercises the capture guard (the call must still return
+    // success and fall back to the capture-safe row-split default). For the
+    // non-graph cases the wrapper is a plain passthrough.
     size_t buffer_size;
-    CHECK_ROCSPARSE_ERROR(rocsparse_spmm(handle,
-                                         trans_A,
-                                         trans_B,
-                                         &halpha,
-                                         mat_A,
-                                         mat_B,
-                                         &hbeta,
-                                         mat_C1,
-                                         ttype,
-                                         alg,
-                                         rocsparse_spmm_stage_buffer_size,
-                                         &buffer_size,
-                                         nullptr));
+    CHECK_ROCSPARSE_ERROR(testing::rocsparse_spmm(handle,
+                                                  trans_A,
+                                                  trans_B,
+                                                  &halpha,
+                                                  mat_A,
+                                                  mat_B,
+                                                  &hbeta,
+                                                  mat_C1,
+                                                  ttype,
+                                                  alg,
+                                                  rocsparse_spmm_stage_buffer_size,
+                                                  &buffer_size,
+                                                  nullptr));
 
     // Allocate buffer
     void* dbuffer;
