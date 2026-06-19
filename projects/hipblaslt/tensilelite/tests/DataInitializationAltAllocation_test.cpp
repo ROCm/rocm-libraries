@@ -31,9 +31,9 @@ namespace
             return m_ringPolicy.allocatesAltBuffers();
         }
 
-        bool altSlotsFilled() const
+        bool altSlotsReady() const
         {
-            return m_altSlotsFilled;
+            return m_altSlotsReady;
         }
 
         bool allAltGpuInputsCleared() const
@@ -154,7 +154,7 @@ namespace
         ASSERT_NE(inputs, nullptr);
         EXPECT_TRUE(dataInit.ringPolicyAllocatesAltBuffers());
         EXPECT_FALSE(dataInit.hasAltBuffers());
-        EXPECT_FALSE(dataInit.altSlotsFilled());
+        EXPECT_FALSE(dataInit.altSlotsReady());
         EXPECT_FALSE(dataInit.ringEligible());
         EXPECT_TRUE(dataInit.slotZeroInputsPresent());
         EXPECT_TRUE(dataInit.allAltGpuInputsCleared());

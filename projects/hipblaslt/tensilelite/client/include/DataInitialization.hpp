@@ -313,7 +313,7 @@ namespace TensileLite
                     m_swizzleUploadStaging[i].clear();
                 }
                 m_batchInitProblem = nullptr;
-                m_altSlotsFilled = false;
+                m_altSlotsReady = false;
             }
 
             void syncCopyStream()
@@ -357,7 +357,7 @@ namespace TensileLite
                 // validation-sensitive reuse must reset output tensors before
                 // recording copy completion. Record a no-op event as a sync
                 // marker.
-                if(m_altSlotsFilled)
+                if(m_altSlotsReady)
                 {
                     if(m_warmOutputResetRequired)
                     {
@@ -1101,16 +1101,20 @@ namespace TensileLite
 
             void rollbackAltGPUInputs() noexcept;
 
-            // callerStream: when non-null, copies enqueue on callerStream and the caller
-            //   manages synchronization; otherwise m_copyStream is used when available.
+            // callerOwnsCopySync: when true, the caller owns synchronizing or chaining
+            //   m_copyStream before any consumer uses the copied data. This helper
+            //   always enqueues on m_copyStream when available and does not select a
+            //   caller-provided stream.
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,
-                                      hipStream_t                   callerStream = nullptr);
+                                      bool                          callerOwnsCopySync = false);
 
-            // callerStream: when non-null, swizzle/MX uploads enqueue on callerStream.
+            // targetStream: when non-null, swizzle/MX uploads enqueue on targetStream.
             //   Async callers must provide swizzleStaging to keep temporary host sources
-            //   alive until the copy stream reaches the recorded event.
+            //   alive until the caller-managed stream reaches the recorded event.
+            //   When targetStream is null, m_copyStream is used when available and the
+            //   helper synchronizes before returning.
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem,
-                                         hipStream_t                   callerStream = nullptr,
+                                         hipStream_t                   targetStream = nullptr,
                                          std::vector<SwizzleUpload>*   swizzleStaging = nullptr);
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
@@ -1370,11 +1374,11 @@ namespace TensileLite
             /// with each kernel launch, but it will use extra memory.
             bool m_keepPristineCopyOnGPU = true;
 
-            /// True after initializeAltBufferSets fills all ring slots for the
+            /// True after initializeAltBufferSets fills all alternate slots for the
             /// current problem.  Cleared by cancelAsyncReset on problem change.
             /// When set, beginAsyncReset can skip the full re-copy and use the
-            /// fast path (resetOutput only) even with problem-dependent data.
-            bool m_altSlotsFilled = false;
+            /// fast path (resetOutput only) for the current problem.
+            bool m_altSlotsReady = false;
 
             /// If set "::NaN", we will initialize all out-of-bounds inputs to NaN, and
             /// all out-of-bounds outputs to a known value. This allows us to

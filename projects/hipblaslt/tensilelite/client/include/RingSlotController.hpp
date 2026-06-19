@@ -41,7 +41,7 @@ namespace Client
 
         bool needsCopyBarrier() const noexcept
         {
-            return m_needsCopyBarrier;
+            return m_computeNeedsCopyBarrier;
         }
 
         bool hasAvailableSlot() const noexcept
@@ -75,27 +75,27 @@ namespace Client
 
             m_activeSlot = (m_activeSlot + 1) % m_activeBufferCount;
             --m_availableSlots;
-            m_needsCopyBarrier = true;
+            m_computeNeedsCopyBarrier = true;
             return m_activeSlot;
         }
 
         void markBarrierWaited() noexcept
         {
-            m_needsCopyBarrier = false;
+            m_computeNeedsCopyBarrier = false;
         }
 
         void cancel() noexcept
         {
             m_activeSlot       = 0;
             m_availableSlots   = 0;
-            m_needsCopyBarrier = false;
+            m_computeNeedsCopyBarrier = false;
         }
 
     private:
         size_t m_activeBufferCount = 2;
         size_t m_activeSlot        = 0;
         size_t m_availableSlots    = 0;
-        bool   m_needsCopyBarrier  = false;
+        bool   m_computeNeedsCopyBarrier = false;
     };
 }
 }

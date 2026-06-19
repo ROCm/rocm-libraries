@@ -1632,7 +1632,7 @@ namespace TensileLite
                 m_gpuBatchPtrsRing[slot].clear();
                 m_cachedInputsRing[slot].reset();
             }
-            m_altSlotsFilled = false;
+            m_altSlotsReady = false;
         }
 
         void DataInitialization::allocNewGPUInputs()
@@ -2896,8 +2896,9 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
         }
 
-        void DataInitialization::copyValidToGPUBuffer(ContractionProblemGemm const& problem,
-                                                      hipStream_t                   callerStream)
+        void DataInitialization::copyValidToGPUBuffer(
+            ContractionProblemGemm const& problem,
+            bool                          callerOwnsCopySync)
         {
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
@@ -2935,21 +2936,22 @@ namespace TensileLite
                                             hipMemcpyHostToDevice));
                 }
             }
-            if(m_copyStream && !callerStream)
+            if(m_copyStream && !callerOwnsCopySync)
                 HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
         }
 
         void DataInitialization::copySwizzledToGPUBuffer(
             ContractionProblemGemm const& problem,
-            hipStream_t                   callerStream,
+            hipStream_t                   targetStream,
             std::vector<SwizzleUpload>*   swizzleStaging)
         {
             using ManipTensor = ::Tensor::Manipulation::Tensor;
 
-            hipStream_t copyStream = callerStream ? callerStream : m_copyStream;
+            hipStream_t copyStream = targetStream ? targetStream : m_copyStream;
             bool const  useAsync   = copyStream != nullptr;
+            bool const  callerOwnsCopySync = targetStream != nullptr;
 
-            if(callerStream && swizzleStaging == nullptr)
+            if(targetStream && swizzleStaging == nullptr)
                 throw std::logic_error("Async swizzle uploads require staging storage.");
 
             std::vector<SwizzleUpload> localSwizzleStaging;
@@ -3226,7 +3228,7 @@ namespace TensileLite
                 if(ptr == nullptr)
                     std::__throw_runtime_error("error");
             }
-            if(useAsync && !callerStream)
+            if(useAsync && !callerOwnsCopySync)
                 HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
         }
 
@@ -3806,7 +3808,7 @@ namespace TensileLite
                     if(m_problemDependentData)
                     {
                         ScopedTimer t2("async_reset_copyvalid");
-                        copyValidToGPUBuffer(problem, targetStream);
+                        copyValidToGPUBuffer(problem, targetStream != nullptr);
                     }
                     if(needSwizzle || needMXSwizzle)
                     {
@@ -3898,7 +3900,7 @@ namespace TensileLite
             if(m_cpuPtrs.empty() && m_problemDependentData)
                 initializeCPUInputs(problem);
             if(m_problemDependentData)
-                copyValidToGPUBuffer(problem, targetStream);
+                copyValidToGPUBuffer(problem, targetStream != nullptr);
             if(needSwizzle || needMXSwizzle)
                 copySwizzledToGPUBuffer(problem, targetStream, swizzleStaging);
 
@@ -3933,7 +3935,7 @@ namespace TensileLite
             for(size_t slot = 1; slot < m_ring.activeBufferCount(); slot++)
                 fillSlot(slot, problem, /*targetStream=*/nullptr);
 
-            m_altSlotsFilled = true;
+            m_altSlotsReady = true;
         }
 
         DataInitialization::~DataInitialization()
