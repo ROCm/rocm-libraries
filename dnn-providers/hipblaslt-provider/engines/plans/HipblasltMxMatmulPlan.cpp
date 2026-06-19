@@ -83,7 +83,7 @@ MxMatmulParams::MxMatmulParams(
     // execute time; M and the K-block count drive that transpose.
     const auto& aDims = tXA.dims();
     _m = aDims[aDims.size() - 2];
-    _kBlocks = aDims[aDims.size() - 1] / 32;
+    _kBlocks = aDims[aDims.size() - 1] / VEC32_BLOCK_SIZE;
 
     // FP8 OCP MX GEMM always uses HIPBLAS_COMPUTE_32F. desc transA/transB are in
     // hipBLAS's frame too: transA = getTrans(hipBLAS A = our B), transB = our A.

@@ -18,6 +18,9 @@
 namespace hipblaslt_plugin
 {
 
+// VEC32_UE8M0 block scaling stores one scale value per 32-element block along K.
+constexpr int64_t VEC32_BLOCK_SIZE = 32;
+
 class MxMatmulParams
 {
 public:

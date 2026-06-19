@@ -238,8 +238,6 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
                        const TensorWrapper& tXB,
                        const std::unordered_map<int64_t, const TensorAttributes*>& tensorMap)
 {
-    constexpr int64_t VEC32_BLOCK_SIZE = 32;
-
     const auto tScaleA
         = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.scale_tensor_uid());
     const auto tScaleB
@@ -283,7 +281,8 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 std::string("MX matmul: ") + operand + " K-dim (" + std::to_string(opDims[kIdx])
-                    + ") must be a multiple of 32 for VEC32 block scaling");
+                    + ") must be a multiple of " + std::to_string(VEC32_BLOCK_SIZE)
+                    + " for VEC32 block scaling");
         }
 
         for(size_t i = 0; i < opDims.size(); ++i)
@@ -295,7 +294,8 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                     std::string("MX matmul: ") + operand + " scale dim[" + std::to_string(i) + "] ("
                         + std::to_string(scaleDims[i]) + ") must equal " + std::to_string(expected)
-                        + " (operand shape with the K axis divided by 32)");
+                        + " (operand shape with the K axis divided by "
+                        + std::to_string(VEC32_BLOCK_SIZE) + ")");
             }
         }
     };
@@ -391,18 +391,22 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
             "MX matmul: K must be divisible by 128 (K=" + std::to_string(matK) + ")");
     }
 
-    // Inner block_size must be 32 for both scales (VEC32)
+    // Inner block_size must be VEC32_BLOCK_SIZE for both scales (VEC32)
     const auto* blockSizeA = deqAttrA.block_size();
-    if(blockSizeA == nullptr || blockSizeA->empty() || (*blockSizeA)[0] != 32)
+    if(blockSizeA == nullptr || blockSizeA->empty() || (*blockSizeA)[0] != VEC32_BLOCK_SIZE)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: A scale block_size[0] must be 32 (VEC32)");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: A scale block_size[0] must be " + std::to_string(VEC32_BLOCK_SIZE)
+                + " (VEC32)");
     }
     const auto* blockSizeB = deqAttrB.block_size();
-    if(blockSizeB == nullptr || blockSizeB->empty() || (*blockSizeB)[0] != 32)
+    if(blockSizeB == nullptr || blockSizeB->empty() || (*blockSizeB)[0] != VEC32_BLOCK_SIZE)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MX matmul: B scale block_size[0] must be 32 (VEC32)");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: B scale block_size[0] must be " + std::to_string(VEC32_BLOCK_SIZE)
+                + " (VEC32)");
     }
 }
 
