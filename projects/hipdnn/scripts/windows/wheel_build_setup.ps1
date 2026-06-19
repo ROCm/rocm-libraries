@@ -158,6 +158,7 @@ $RocmBin = "$RocmDevel\bin"
 
 Write-Host "Adding ROCm bin to PATH..." -ForegroundColor Yellow
 $env:PATH = "$RocmBin;$env:PATH"
+$env:ROCM_PATH = $RocmDevel
 
 # Convert to forward slashes for CMake compatibility
 $RocmDevelUnix = $RocmDevel -replace '\\', '/'
@@ -215,3 +216,7 @@ foreach ($pathEntry in $CurrentPathParts) {
 if (-not $HasRocmBinInCurrentPath) {
     $env:PATH = "$RocmBin;$env:PATH"
 }
+
+# Publish the wheel venv path for tools that install into it (e.g. dnn-benchmark's
+# setup.ps1), persisting after deactivation.
+$env:ROCM_WHEEL_VENV = $VenvPath
