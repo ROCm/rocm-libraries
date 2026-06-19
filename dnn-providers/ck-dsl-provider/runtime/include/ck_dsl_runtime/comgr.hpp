@@ -36,57 +36,75 @@ struct Compiler {
             }
         };
 
-        amd_comgr_data_set_t in_set{};
-        check(amd_comgr_create_data_set(&in_set), "create_data_set(in)");
-        amd_comgr_data_t src{};
-        check(amd_comgr_create_data(AMD_COMGR_DATA_KIND_SOURCE, &src), "create_data(src)");
-        check(amd_comgr_set_data(src, llvm_ir.size(), llvm_ir.data()), "set_data(src)");
-        check(amd_comgr_set_data_name(src, "kernel.ll"), "set_data_name(src)");
-        check(amd_comgr_data_set_add(in_set, src), "data_set_add(src)");
+        // Exception safety: every check() can throw, so the comgr handles below
+        // must be released on the throwing path, not only on the success path.
+        // A guard tracks the live handles and tears them down in its destructor
+        // (run during stack unwinding). Without it, a failed compile (the JIT
+        // error path) leaked the data sets / action info / source data on every
+        // bad .ll -- which a fuzzer or a transient comgr error would accumulate.
+        struct ComgrGuard {
+            amd_comgr_data_set_t in_set{}, bc_set{}, rel_set{}, exe_set{};
+            amd_comgr_action_info_t info{};
+            amd_comgr_data_t src{}, exe{};
+            bool has_in = false, has_bc = false, has_rel = false, has_exe = false;
+            bool has_info = false, has_src = false, has_exe_data = false;
+            ~ComgrGuard() {
+                if (has_exe_data) amd_comgr_release_data(exe);
+                if (has_src) amd_comgr_release_data(src);
+                if (has_in) amd_comgr_destroy_data_set(in_set);
+                if (has_bc) amd_comgr_destroy_data_set(bc_set);
+                if (has_rel) amd_comgr_destroy_data_set(rel_set);
+                if (has_exe) amd_comgr_destroy_data_set(exe_set);
+                if (has_info) amd_comgr_destroy_action_info(info);
+            }
+        } g;
 
-        amd_comgr_action_info_t info{};
-        check(amd_comgr_create_action_info(&info), "create_action_info");
-        check(amd_comgr_action_info_set_isa_name(info, isa.c_str()), "set_isa");
-        check(amd_comgr_action_info_set_language(info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang");
+        check(amd_comgr_create_data_set(&g.in_set), "create_data_set(in)");
+        g.has_in = true;
+        check(amd_comgr_create_data(AMD_COMGR_DATA_KIND_SOURCE, &g.src), "create_data(src)");
+        g.has_src = true;
+        check(amd_comgr_set_data(g.src, llvm_ir.size(), llvm_ir.data()), "set_data(src)");
+        check(amd_comgr_set_data_name(g.src, "kernel.ll"), "set_data_name(src)");
+        check(amd_comgr_data_set_add(g.in_set, g.src), "data_set_add(src)");
+
+        check(amd_comgr_create_action_info(&g.info), "create_action_info");
+        g.has_info = true;
+        check(amd_comgr_action_info_set_isa_name(g.info, isa.c_str()), "set_isa");
+        check(amd_comgr_action_info_set_language(g.info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang");
         std::vector<const char*> opt_ptrs;
         opt_ptrs.reserve(options.size());
         for (const auto& o : options) opt_ptrs.push_back(o.c_str());
-        check(amd_comgr_action_info_set_option_list(info, opt_ptrs.data(), opt_ptrs.size()),
+        check(amd_comgr_action_info_set_option_list(g.info, opt_ptrs.data(), opt_ptrs.size()),
               "set_options");
 
-        amd_comgr_data_set_t bc_set{}, rel_set{}, exe_set{};
-        check(amd_comgr_create_data_set(&bc_set), "create_data_set(bc)");
-        check(amd_comgr_do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, info, in_set, bc_set),
-              "COMPILE_SOURCE_TO_BC");
-        check(amd_comgr_create_data_set(&rel_set), "create_data_set(reloc)");
+        check(amd_comgr_create_data_set(&g.bc_set), "create_data_set(bc)");
+        g.has_bc = true;
         check(
-            amd_comgr_do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, info, bc_set, rel_set),
-            "CODEGEN_BC_TO_RELOCATABLE");
-        check(amd_comgr_create_data_set(&exe_set), "create_data_set(exe)");
-        check(amd_comgr_do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, info, rel_set,
-                                  exe_set),
+            amd_comgr_do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, g.info, g.in_set, g.bc_set),
+            "COMPILE_SOURCE_TO_BC");
+        check(amd_comgr_create_data_set(&g.rel_set), "create_data_set(reloc)");
+        g.has_rel = true;
+        check(amd_comgr_do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, g.info, g.bc_set,
+                                  g.rel_set),
+              "CODEGEN_BC_TO_RELOCATABLE");
+        check(amd_comgr_create_data_set(&g.exe_set), "create_data_set(exe)");
+        g.has_exe = true;
+        check(amd_comgr_do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, g.info,
+                                  g.rel_set, g.exe_set),
               "LINK_RELOCATABLE_TO_EXECUTABLE");
 
         size_t count = 0;
-        check(amd_comgr_action_data_count(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, &count),
+        check(amd_comgr_action_data_count(g.exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, &count),
               "action_data_count");
         if (count == 0) throw ComgrError("comgr produced no EXECUTABLE");
-        amd_comgr_data_t exe{};
-        check(amd_comgr_action_data_get_data(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &exe),
+        check(amd_comgr_action_data_get_data(g.exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &g.exe),
               "action_data_get_data");
+        g.has_exe_data = true;
         size_t sz = 0;
-        check(amd_comgr_get_data(exe, &sz, nullptr), "get_data(size)");
+        check(amd_comgr_get_data(g.exe, &sz, nullptr), "get_data(size)");
         std::vector<std::byte> hsaco(sz);
-        check(amd_comgr_get_data(exe, &sz, reinterpret_cast<char*>(hsaco.data())),
+        check(amd_comgr_get_data(g.exe, &sz, reinterpret_cast<char*>(hsaco.data())),
               "get_data(read)");
-
-        amd_comgr_release_data(exe);
-        amd_comgr_release_data(src);
-        amd_comgr_destroy_data_set(in_set);
-        amd_comgr_destroy_data_set(bc_set);
-        amd_comgr_destroy_data_set(rel_set);
-        amd_comgr_destroy_data_set(exe_set);
-        amd_comgr_destroy_action_info(info);
         return hsaco;
     }
 

@@ -39,6 +39,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"           /* ceil_div_grid, SignatureBuilder */
 #include "ckc/helper_ck_dsl.helpers.transforms.h"     /* unmerge_magic + tid decode */
 #include "ckc/ir_internal.h"                          /* ckc_i_set_err */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  is_valid_spec(spec, arch) -> (ok, reason)
@@ -776,21 +777,23 @@ ckc_kernel_def_t* ckc_build_img2col_new(ckc_ir_builder_t* b,
                                         const ckc_img2col_spec_t* spec,
                                         const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_img2col_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_img2col(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_img2col_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_img2col(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *

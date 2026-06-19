@@ -43,6 +43,7 @@
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* --------------------------------------------------------------- locals */
 
@@ -1119,21 +1120,24 @@ ckc_kernel_def_t* ckc_build_moe_smoothquant_new(ckc_ir_builder_t* b,
                                                 const ckc_moe_smoothquant_spec_t* spec,
                                                 const char* arch)
 {
-    char name[CKC_MOE_SQ_NAME_CAP];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[CKC_MOE_SQ_NAME_CAP];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_smoothquant_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_smoothquant(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_smoothquant_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_smoothquant(b, spec, arch);
+
+    });
 }
 
 /* --------------------------------------------------------------- grid */

@@ -25,27 +25,26 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "ckc/error.hpp"
 #include "ckc/helper_ck_dsl.helpers.scan.h"
 #include "ckc/ir.h"
 
 /* ----------------------------------------------------------------- helpers */
 
-/* Set the builder's sticky error (first failure wins). Mirrors the Python
- * ValueError but binds only to ckc/ir.h's public struct fields (status + err). */
-static void ckc_scan_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary catches it and records status + message on the builder, so the
+ * C ABI is unchanged. [[noreturn]] keeps the existing `ckc_scan_set_err(...);
+ * return;` call sites valid -- the trailing return is simply never reached. */
+[[noreturn]] static void ckc_scan_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
-    if(b == NULL)
-    {
-        return;
-    }
-    if(b->status == CKC_OK)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        vsnprintf(b->err, (size_t)CKC_ERR_MSG_CAP, fmt, ap);
-        va_end(ap);
-        b->status = st;
-    }
+    (void)b;
+    char msg[CKC_ERR_MSG_CAP];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    msg[sizeof(msg) - 1] = '\0';
+    ckc::raise_status(st, msg);
 }
 
 /* ------------------------------------------------------------- lds_zero_i32 */

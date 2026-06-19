@@ -22,6 +22,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"          /* ckc_kernel_name_join     */
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* mfma_attention_fwd body  */
 #include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* MFMA_ATTN_BLOCK_M / MFMA_ATTN_BLOCK_K come from helper_..mfma_attention.h:
  *   CKC_MFMA_ATTN_BLOCK_M == 16, CKC_MFMA_ATTN_BLOCK_K == 16. */
@@ -278,182 +279,184 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_varlen(ckc_fmha_kernel_builder_t* out_kb,
                                             char* err,
                                             size_t err_cap)
 {
-    char name[256];
-    char reason[256];
-    const ckc_fmha_common_spec_t* s;
-    ckc_fmha_kernel_builder_t* kb;
-    ckc_ir_builder_t* b;
-    ckc_value_t* cu_seqlens_q;
-    ckc_value_t* cu_seqlens_k;
-    ckc_value_t* q_tile_idx;
-    ckc_value_t* head_idx;
-    ckc_value_t* kv_head_idx;
-    ckc_value_t* scale_log2;
-    ckc_value_t* q_tile_base;
-    ckc_value_t* seq;
-    ckc_value_t* seq_idx;
-    ckc_value_t* cuq_base;
-    ckc_value_t* local_q_tile;
-    ckc_value_t* cuk_base;
-    ckc_value_t* cuk_next;
-    ckc_value_t* seqlen_k;
-    ckc_value_t* k_token_offset;
-    ckc_value_t* v_token_offset;
-    ckc_value_t* causal_ctx;
-    ckc_mfma_attn_params_t p;
-    int i;
+    return ckc::guard_builder(ckc_fmha_kernel_builder_builder(out_kb), [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        char reason[256];
+        const ckc_fmha_common_spec_t* s;
+        ckc_fmha_kernel_builder_t* kb;
+        ckc_ir_builder_t* b;
+        ckc_value_t* cu_seqlens_q;
+        ckc_value_t* cu_seqlens_k;
+        ckc_value_t* q_tile_idx;
+        ckc_value_t* head_idx;
+        ckc_value_t* kv_head_idx;
+        ckc_value_t* scale_log2;
+        ckc_value_t* q_tile_base;
+        ckc_value_t* seq;
+        ckc_value_t* seq_idx;
+        ckc_value_t* cuq_base;
+        ckc_value_t* local_q_tile;
+        ckc_value_t* cuk_base;
+        ckc_value_t* cuk_next;
+        ckc_value_t* seqlen_k;
+        ckc_value_t* k_token_offset;
+        ckc_value_t* v_token_offset;
+        ckc_value_t* causal_ctx;
+        ckc_mfma_attn_params_t p;
+        int i;
 
-    if (out_kb == NULL || spec == NULL)
-    {
-        copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: null spec/builder");
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = "gfx950";
-    }
+        if (out_kb == NULL || spec == NULL)
+        {
+            copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: null spec/builder");
+            return NULL;
+        }
+        if (arch == NULL)
+        {
+            arch = "gfx950";
+        }
 
-    /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if (!ckc_fmha_fwd_varlen_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        char msg[320];
-        snprintf(msg, sizeof(msg), "invalid fmha_fwd_varlen spec: %s", reason);
-        copy_reason(err, err_cap, msg);
-        return NULL;
-    }
+        /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
+        if (!ckc_fmha_fwd_varlen_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            char msg[320];
+            snprintf(msg, sizeof(msg), "invalid fmha_fwd_varlen spec: %s", reason);
+            copy_reason(err, err_cap, msg);
+            return NULL;
+        }
 
-    s = &spec->common;
+        s = &spec->common;
 
-    /* kb = FmhaKernelBuilder(spec.kernel_name(), s) */
-    if (ckc_fmha_fwd_varlen_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: kernel_name too long");
-        return NULL;
-    }
-    if (ckc_fmha_kernel_builder_init(out_kb, name, s) != CKC_OK)
-    {
-        copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: kernel builder init failed");
-        return NULL;
-    }
-    kb = out_kb;
+        /* kb = FmhaKernelBuilder(spec.kernel_name(), s) */
+        if (ckc_fmha_fwd_varlen_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: kernel_name too long");
+            return NULL;
+        }
+        if (ckc_fmha_kernel_builder_init(out_kb, name, s) != CKC_OK)
+        {
+            copy_reason(err, err_cap, "ckc_build_fmha_fwd_varlen: kernel builder init failed");
+            return NULL;
+        }
+        kb = out_kb;
 
-    /* kb.block_size(64) -- MFMA: one wave64 warp per CTA. */
-    ckc_fmha_kernel_builder_block_size(kb, 64);
-    /* _declare_params(kb) */
-    declare_params(kb);
-    /* kb.decode_grid() */
-    ckc_fmha_kernel_builder_decode_grid(kb, -1, false, NULL, NULL, NULL);
+        /* kb.block_size(64) -- MFMA: one wave64 warp per CTA. */
+        ckc_fmha_kernel_builder_block_size(kb, 64);
+        /* _declare_params(kb) */
+        declare_params(kb);
+        /* kb.decode_grid() */
+        ckc_fmha_kernel_builder_decode_grid(kb, -1, false, NULL, NULL, NULL);
 
-    /* b = kb.builder */
-    b = ckc_fmha_kernel_builder_builder(kb);
+        /* b = kb.builder */
+        b = ckc_fmha_kernel_builder_builder(kb);
 
-    /* cu_seqlens_q = kb.ptr("cu_seqlens_q"); cu_seqlens_k = kb.ptr("cu_seqlens_k") */
-    cu_seqlens_q = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_q");
-    cu_seqlens_k = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_k");
+        /* cu_seqlens_q = kb.ptr("cu_seqlens_q"); cu_seqlens_k = kb.ptr("cu_seqlens_k") */
+        cu_seqlens_q = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_q");
+        cu_seqlens_k = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_k");
 
-    /* q_tile_idx = kb.q_token */
-    q_tile_idx = kb->q_token;
-    /* head_idx = b.to_sgpr_u32(kb.head_idx) */
-    head_idx = ckc_b_to_sgpr_u32(b, kb->head_idx);
-    /* kv_head_idx = b.to_sgpr_u32(kb.kv_head_idx) */
-    kv_head_idx = ckc_b_to_sgpr_u32(b, kb->kv_head_idx);
-    /* scale_log2 = kb.scalar("scale_log2") */
-    scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+        /* q_tile_idx = kb.q_token */
+        q_tile_idx = kb->q_token;
+        /* head_idx = b.to_sgpr_u32(kb.head_idx) */
+        head_idx = ckc_b_to_sgpr_u32(b, kb->head_idx);
+        /* kv_head_idx = b.to_sgpr_u32(kb.kv_head_idx) */
+        kv_head_idx = ckc_b_to_sgpr_u32(b, kb->kv_head_idx);
+        /* scale_log2 = kb.scalar("scale_log2") */
+        scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
 
-    /* q_tile_base = b.to_sgpr_u32(b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))) */
-    q_tile_base = ckc_b_to_sgpr_u32(
-        b, ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M)));
+        /* q_tile_base = b.to_sgpr_u32(b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))) */
+        q_tile_base = ckc_b_to_sgpr_u32(
+            b, ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M)));
 
-    /* Find which sequence this tile belongs to via Python-unrolled scan of
-     * cu_seqlens_q (spec.batch compile-time constant => batch compares + cmovs).
-     *
-     *   seq = b.const_i32(0)
-     *   for i in range(spec.batch):
-     *       cuq_next = b.global_load_i32(cu_seqlens_q, b.const_i32(i + 1))
-     *       is_in_seq = b.cmp_lt(q_tile_base, cuq_next)
-     *       seq = b.select(is_in_seq, seq, b.add(seq, b.const_i32(1)))
-     *   seq_idx = b.to_sgpr_u32(seq)                                          */
-    seq = ckc_b_const_i32(b, 0);
-    for (i = 0; i < spec->batch; ++i)
-    {
-        ckc_value_t* cuq_next =
-            ckc_b_global_load_i32(b, cu_seqlens_q, ckc_b_const_i32(b, i + 1), 4);
-        ckc_value_t* is_in_seq = ckc_b_cmp_lt(b, q_tile_base, cuq_next);
-        seq = ckc_b_select(b, is_in_seq, seq, ckc_b_add(b, seq, ckc_b_const_i32(b, 1)));
-    }
-    seq_idx = ckc_b_to_sgpr_u32(b, seq);
+        /* Find which sequence this tile belongs to via Python-unrolled scan of
+         * cu_seqlens_q (spec.batch compile-time constant => batch compares + cmovs).
+         *
+         *   seq = b.const_i32(0)
+         *   for i in range(spec.batch):
+         *       cuq_next = b.global_load_i32(cu_seqlens_q, b.const_i32(i + 1))
+         *       is_in_seq = b.cmp_lt(q_tile_base, cuq_next)
+         *       seq = b.select(is_in_seq, seq, b.add(seq, b.const_i32(1)))
+         *   seq_idx = b.to_sgpr_u32(seq)                                          */
+        seq = ckc_b_const_i32(b, 0);
+        for (i = 0; i < spec->batch; ++i)
+        {
+            ckc_value_t* cuq_next =
+                ckc_b_global_load_i32(b, cu_seqlens_q, ckc_b_const_i32(b, i + 1), 4);
+            ckc_value_t* is_in_seq = ckc_b_cmp_lt(b, q_tile_base, cuq_next);
+            seq = ckc_b_select(b, is_in_seq, seq, ckc_b_add(b, seq, ckc_b_const_i32(b, 1)));
+        }
+        seq_idx = ckc_b_to_sgpr_u32(b, seq);
 
-    /* cuq_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_q, seq_idx)) */
-    cuq_base = ckc_b_to_sgpr_u32(b, ckc_b_global_load_i32(b, cu_seqlens_q, seq_idx, 4));
-    /* local_q_tile = b.to_sgpr_u32(b.sub(q_tile_base, cuq_base)) */
-    local_q_tile = ckc_b_to_sgpr_u32(b, ckc_b_sub(b, q_tile_base, cuq_base));
-    /* cuk_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_k, seq_idx)) */
-    cuk_base = ckc_b_to_sgpr_u32(b, ckc_b_global_load_i32(b, cu_seqlens_k, seq_idx, 4));
-    /* cuk_next = b.global_load_i32(cu_seqlens_k, b.add(seq_idx, b.const_i32(1))) */
-    cuk_next = ckc_b_global_load_i32(
-        b, cu_seqlens_k, ckc_b_add(b, seq_idx, ckc_b_const_i32(b, 1)), 4);
-    /* seqlen_k = b.to_sgpr_u32(b.sub(cuk_next, cuk_base)) */
-    seqlen_k = ckc_b_to_sgpr_u32(b, ckc_b_sub(b, cuk_next, cuk_base));
+        /* cuq_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_q, seq_idx)) */
+        cuq_base = ckc_b_to_sgpr_u32(b, ckc_b_global_load_i32(b, cu_seqlens_q, seq_idx, 4));
+        /* local_q_tile = b.to_sgpr_u32(b.sub(q_tile_base, cuq_base)) */
+        local_q_tile = ckc_b_to_sgpr_u32(b, ckc_b_sub(b, q_tile_base, cuq_base));
+        /* cuk_base = b.to_sgpr_u32(b.global_load_i32(cu_seqlens_k, seq_idx)) */
+        cuk_base = ckc_b_to_sgpr_u32(b, ckc_b_global_load_i32(b, cu_seqlens_k, seq_idx, 4));
+        /* cuk_next = b.global_load_i32(cu_seqlens_k, b.add(seq_idx, b.const_i32(1))) */
+        cuk_next = ckc_b_global_load_i32(
+            b, cu_seqlens_k, ckc_b_add(b, seq_idx, ckc_b_const_i32(b, 1)), 4);
+        /* seqlen_k = b.to_sgpr_u32(b.sub(cuk_next, cuk_base)) */
+        seqlen_k = ckc_b_to_sgpr_u32(b, ckc_b_sub(b, cuk_next, cuk_base));
 
-    /* k_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("k"))) */
-    k_token_offset = ckc_b_to_sgpr_u32(
-        b, ckc_b_mul(b, cuk_base, ckc_fmha_kernel_builder_stride_token(kb, "k")));
-    /* v_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("v"))) */
-    v_token_offset = ckc_b_to_sgpr_u32(
-        b, ckc_b_mul(b, cuk_base, ckc_fmha_kernel_builder_stride_token(kb, "v")));
+        /* k_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("k"))) */
+        k_token_offset = ckc_b_to_sgpr_u32(
+            b, ckc_b_mul(b, cuk_base, ckc_fmha_kernel_builder_stride_token(kb, "k")));
+        /* v_token_offset = b.to_sgpr_u32(b.mul(cuk_base, kb.stride_token("v"))) */
+        v_token_offset = ckc_b_to_sgpr_u32(
+            b, ckc_b_mul(b, cuk_base, ckc_fmha_kernel_builder_stride_token(kb, "v")));
 
-    /* causal_ctx = b.const_i32(0) if mask in ("causal","sliding_window") else None */
-    causal_ctx = (s->mask_mode == CKC_FMHA_MASK_CAUSAL
-                  || s->mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW)
-                     ? ckc_b_const_i32(b, 0)
-                     : NULL;
+        /* causal_ctx = b.const_i32(0) if mask in ("causal","sliding_window") else None */
+        causal_ctx = (s->mask_mode == CKC_FMHA_MASK_CAUSAL
+                      || s->mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW)
+                         ? ckc_b_const_i32(b, 0)
+                         : NULL;
 
-    /* mfma_attention_fwd_inner_body(b, Q=..., K=..., V=..., O=..., ...) */
-    memset(&p, 0, sizeof(p));
-    p.Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
-    p.K = ckc_fmha_kernel_builder_tensor(kb, "K");
-    p.V = ckc_fmha_kernel_builder_tensor(kb, "V");
-    p.O = ckc_fmha_kernel_builder_tensor(kb, "O");
-    p.head_size = s->shape.head_size;
-    p.seqlen_k = seqlen_k;
-    p.q_tile_base = q_tile_base;
-    /* q_pos_base = local_q_tile (within-sequence position for causal mask) */
-    p.q_pos_base = local_q_tile;
-    p.head_idx = head_idx;
-    p.kv_head_idx = kv_head_idx;
-    p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-    p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
-    p.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
-    p.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
-    p.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
-    p.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
-    p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-    p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
-    p.scale_log2 = scale_log2;
-    p.dtype = s->dtype;
-    p.mask_mode = fmha_to_attn_mask(s->mask_mode);
-    p.sliding_window = s->sliding_window;
-    p.causal_ctx_offset = causal_ctx;
-    p.k_token_offset_elems = k_token_offset;
-    p.v_token_offset_elems = v_token_offset;
-    /* remaining fields (callbacks, kv_dtype, v_scale, flags, k_tile_start/stop,
-     * codebook_ptr, wmma_v_lds_stage) are the Python defaults (None / False),
-     * which memset(0) already supplies. */
-    p.arch = arch;
+        /* mfma_attention_fwd_inner_body(b, Q=..., K=..., V=..., O=..., ...) */
+        memset(&p, 0, sizeof(p));
+        p.Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
+        p.K = ckc_fmha_kernel_builder_tensor(kb, "K");
+        p.V = ckc_fmha_kernel_builder_tensor(kb, "V");
+        p.O = ckc_fmha_kernel_builder_tensor(kb, "O");
+        p.head_size = s->shape.head_size;
+        p.seqlen_k = seqlen_k;
+        p.q_tile_base = q_tile_base;
+        /* q_pos_base = local_q_tile (within-sequence position for causal mask) */
+        p.q_pos_base = local_q_tile;
+        p.head_idx = head_idx;
+        p.kv_head_idx = kv_head_idx;
+        p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
+        p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
+        p.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
+        p.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
+        p.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
+        p.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
+        p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
+        p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
+        p.scale_log2 = scale_log2;
+        p.dtype = s->dtype;
+        p.mask_mode = fmha_to_attn_mask(s->mask_mode);
+        p.sliding_window = s->sliding_window;
+        p.causal_ctx_offset = causal_ctx;
+        p.k_token_offset_elems = k_token_offset;
+        p.v_token_offset_elems = v_token_offset;
+        /* remaining fields (callbacks, kv_dtype, v_scale, flags, k_tile_start/stop,
+         * codebook_ptr, wmma_v_lds_stage) are the Python defaults (None / False),
+         * which memset(0) already supplies. */
+        p.arch = arch;
 
-    ckc_mfma_attention_fwd_inner_body(b, &p);
+        ckc_mfma_attention_fwd_inner_body(b, &p);
 
-    /* b.ret() */
-    ckc_b_ret(b);
+        /* b.ret() */
+        ckc_b_ret(b);
 
-    if (ckc_ir_builder_status(b) != CKC_OK)
-    {
-        copy_reason(err, err_cap, ckc_ir_builder_error(b));
-        return NULL;
-    }
+        if (ckc_ir_builder_status(b) != CKC_OK)
+        {
+            copy_reason(err, err_cap, ckc_ir_builder_error(b));
+            return NULL;
+        }
 
-    /* return kb.kernel */
-    return ckc_fmha_kernel_builder_kernel(kb);
+        /* return kb.kernel */
+        return ckc_fmha_kernel_builder_kernel(kb);
+    });
 }
 
 /* ===================================================================== *

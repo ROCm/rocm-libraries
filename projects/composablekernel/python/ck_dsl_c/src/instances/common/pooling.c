@@ -39,6 +39,7 @@
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  * Store-epilogue helpers (ports of helpers/{tensor_view,distribution}.py
@@ -798,433 +799,437 @@ ckc_kernel_def_t* ckc_build_pooling2d(ckc_ir_builder_t* b,
                                       const ckc_pooling2d_spec_t* spec,
                                       const char* arch)
 {
-    const ckc_pooling_problem_t* p;
-    int VEC;
-    const ckc_type_t* io_ty;
-    ckc_param_opts_t opts;
-    const ckc_type_t* ptr_ty;
-    ckc_value_t* X;
-    ckc_value_t* Y;
-    ckc_value_t* X_bytes;
-    ckc_value_t* Y_bytes;
-    ckc_tensor_descriptor_t* in_desc;
-    int C_v, total_out_v;
-    ckc_value_t* c0;
-    ckc_value_t* c_elem_bytes;
-    ckc_value_t* c_vec;
-    ckc_value_t* oob_sentinel;
-    ckc_value_t* tid;
-    ckc_value_t* bid;
-    ckc_value_t* out_idx_v;
-    ckc_tensor_descriptor_t* out_unmerge_base;
-    ckc_tensor_descriptor_t* out_unmerge_desc;
-    ckc_transform_t* um;
-    const ckc_transform_t* um_chain[1];
-    int um_lengths[4];
-    const char* um_coord_names[4];
-    const char* um_into[4];
-    int um_dims[4];
-    /* unmerge_lower output map */
-    const char* dec_names[16];
-    ckc_value_t* dec_values[16];
-    int n_dec;
-    const char* in_names[1];
-    ckc_value_t* in_values[1];
-    ckc_value_t* n_val = NULL;
-    ckc_value_t* ho_val = NULL;
-    ckc_value_t* wo_val = NULL;
-    ckc_value_t* c_v_val = NULL;
-    ckc_value_t* c_base;
-    ckc_value_t* x_rsrc;
-    ckc_value_t* neutral;
-    ckc_value_t* acc_list[8];
-    ckc_value_t* valid_count = NULL;
-    int y_i, x_i, k, i;
-    /* store side */
-    int out_total;
-    ckc_buffer_resource_t* out_rsrc;
-    ckc_buffer_view_t* out_view;
-    int out_lengths[1];
-    ckc_h_row_t out_hs[1];
-    int out_h_levels[1];
-    int out_ys_major[1];
-    int out_ys_minor[1];
-    ckc_tile_distribution_encoding_t* out_enc;
-    ckc_tile_distribution_t* out_dist;
-    ckc_value_t* out_origin;
-    void* out_window;
-    ckc_value_t* origin_arr[1];
-    ckc_static_distributed_tensor_t* out_dt;
-    int yidx[1];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        const ckc_pooling_problem_t* p;
+        int VEC;
+        const ckc_type_t* io_ty;
+        ckc_param_opts_t opts;
+        const ckc_type_t* ptr_ty;
+        ckc_value_t* X;
+        ckc_value_t* Y;
+        ckc_value_t* X_bytes;
+        ckc_value_t* Y_bytes;
+        ckc_tensor_descriptor_t* in_desc;
+        int C_v, total_out_v;
+        ckc_value_t* c0;
+        ckc_value_t* c_elem_bytes;
+        ckc_value_t* c_vec;
+        ckc_value_t* oob_sentinel;
+        ckc_value_t* tid;
+        ckc_value_t* bid;
+        ckc_value_t* out_idx_v;
+        ckc_tensor_descriptor_t* out_unmerge_base;
+        ckc_tensor_descriptor_t* out_unmerge_desc;
+        ckc_transform_t* um;
+        const ckc_transform_t* um_chain[1];
+        int um_lengths[4];
+        const char* um_coord_names[4];
+        const char* um_into[4];
+        int um_dims[4];
+        /* unmerge_lower output map */
+        const char* dec_names[16];
+        ckc_value_t* dec_values[16];
+        int n_dec;
+        const char* in_names[1];
+        ckc_value_t* in_values[1];
+        ckc_value_t* n_val = NULL;
+        ckc_value_t* ho_val = NULL;
+        ckc_value_t* wo_val = NULL;
+        ckc_value_t* c_v_val = NULL;
+        ckc_value_t* c_base;
+        ckc_value_t* x_rsrc;
+        ckc_value_t* neutral;
+        ckc_value_t* acc_list[8];
+        ckc_value_t* valid_count = NULL;
+        int y_i, x_i, k, i;
+        /* store side */
+        int out_total;
+        ckc_buffer_resource_t* out_rsrc;
+        ckc_buffer_view_t* out_view;
+        int out_lengths[1];
+        ckc_h_row_t out_hs[1];
+        int out_h_levels[1];
+        int out_ys_major[1];
+        int out_ys_minor[1];
+        ckc_tile_distribution_encoding_t* out_enc;
+        ckc_tile_distribution_t* out_dist;
+        ckc_value_t* out_origin;
+        void* out_window;
+        ckc_value_t* origin_arr[1];
+        ckc_static_distributed_tensor_t* out_dt;
+        int yidx[1];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = "gfx950";
-    }
-
-    /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError. */
-    {
-        char reason[256];
-        if (!ckc_pooling2d_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        if (b == NULL || spec == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "invalid pooling2d spec: %s", reason);
             return NULL;
         }
-    }
-
-    p = &spec->problem;
-    VEC = spec->vec;
-
-    /* io_ty = io_ir_type(spec.dtype) */
-    io_ty = ckc_b_io_ir_type(b, spec->dtype);
-    if (io_ty == NULL)
-    {
-        return NULL;
-    }
-
-    /* b.kernel.attrs["max_workgroup_size"] = spec.block_size */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
-
-    /* X = b.param("X", PtrType(io_ty,"global"), noalias=True, readonly=True,
-     *             align=16) */
-    ptr_ty = ckc_ptr_type(b, io_ty, "global");
-    memset(&opts, 0, sizeof(opts));
-    opts.noalias = true;
-    opts.noalias_set = true;
-    opts.readonly = true;
-    opts.readonly_set = true;
-    opts.align = 16;
-    opts.align_set = true;
-    X = ckc_b_param(b, "X", ptr_ty, &opts);
-
-    /* Y = b.param("Y", PtrType(io_ty,"global"), noalias=True, writeonly=True,
-     *             align=16) */
-    memset(&opts, 0, sizeof(opts));
-    opts.noalias = true;
-    opts.noalias_set = true;
-    opts.writeonly = true;
-    opts.writeonly_set = true;
-    opts.align = 16;
-    opts.align_set = true;
-    Y = ckc_b_param(b, "Y", ptr_ty, &opts);
-
-    /* X_bytes = b.param("X_bytes", I32); Y_bytes = b.param("Y_bytes", I32) */
-    X_bytes = ckc_b_param(b, "X_bytes", ckc_i32(), NULL);
-    Y_bytes = ckc_b_param(b, "Y_bytes", ckc_i32(), NULL);
-
-    /* in_desc = _make_input_descriptor(p) */
-    in_desc = pool_make_input_descriptor(b, p);
-    if (in_desc == NULL)
-    {
-        return NULL;
-    }
-
-    /* C_v = p.C // VEC ; total_out_v = N * Ho * Wo * C_v */
-    C_v = p->C / VEC;
-    total_out_v = p->N * ckc_pooling_problem_ho(p) * ckc_pooling_problem_wo(p) * C_v;
-
-    /* c0 = const_i32(0); c_elem_bytes = const_i32(2); c_vec = const_i32(VEC);
-     * oob_sentinel = const_i32((1<<31)-1) */
-    c0 = ckc_b_const_i32(b, 0);
-    c_elem_bytes = ckc_b_const_i32(b, 2);
-    c_vec = ckc_b_const_i32(b, VEC);
-    oob_sentinel = ckc_b_const_i32(b, (int64_t)((1u << 31) - 1u));
-
-    /* tid = thread_id_x(); bid = block_id_x();
-     * out_idx_v = add(mul(bid, const_i32(block_size)), tid) */
-    tid = ckc_b_thread_id_x(b);
-    bid = ckc_b_block_id_x(b);
-    out_idx_v =
-        ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
-
-    /* out_unmerge_desc = TensorDescriptor.naive("pool_out_m",
-     *     lengths=[N,Ho,Wo,C_v], dtype=F16, coord_names=["n","ho","wo","c_v"])
-     *   .transform(unmerge_magic("out_idx_v", into=["n","ho","wo","c_v"],
-     *                            dims=[N,Ho,Wo,C_v])) */
-    um_lengths[0] = p->N;
-    um_lengths[1] = ckc_pooling_problem_ho(p);
-    um_lengths[2] = ckc_pooling_problem_wo(p);
-    um_lengths[3] = C_v;
-    um_coord_names[0] = "n";
-    um_coord_names[1] = "ho";
-    um_coord_names[2] = "wo";
-    um_coord_names[3] = "c_v";
-    out_unmerge_base = ckc_tensor_descriptor_naive(b, "pool_out_m", um_lengths, 4,
-                                                   NULL, um_coord_names, 4);
-    if (out_unmerge_base == NULL)
-    {
-        return NULL;
-    }
-    um_into[0] = "n";
-    um_into[1] = "ho";
-    um_into[2] = "wo";
-    um_into[3] = "c_v";
-    um_dims[0] = p->N;
-    um_dims[1] = ckc_pooling_problem_ho(p);
-    um_dims[2] = ckc_pooling_problem_wo(p);
-    um_dims[3] = C_v;
-    um = ckc_unmerge_magic(b, "out_idx_v", um_into, 4, um_dims);
-    if (um == NULL)
-    {
-        return NULL;
-    }
-    um_chain[0] = um;
-    out_unmerge_desc =
-        ckc_tensor_descriptor_transform(b, out_unmerge_base, um_chain, 1);
-    if (out_unmerge_desc == NULL)
-    {
-        return NULL;
-    }
-
-    /* decoded = out_unmerge_desc.unmerge_lower(b, out_idx_v=out_idx_v) */
-    in_names[0] = "out_idx_v";
-    in_values[0] = out_idx_v;
-    n_dec = ckc_tensor_descriptor_unmerge_lower(b, out_unmerge_desc, in_names,
-                                                in_values, 1, dec_names, dec_values,
-                                                (int)(sizeof(dec_names) /
-                                                      sizeof(dec_names[0])));
-    if (n_dec < 0)
-    {
-        return NULL;
-    }
-    /* n_val/ho_val/wo_val/c_v_val = decoded["n"/"ho"/"wo"/"c_v"] */
-    for (i = 0; i < n_dec; ++i)
-    {
-        if (strcmp(dec_names[i], "n") == 0)
+        if (arch == NULL)
         {
-            n_val = dec_values[i];
+            arch = "gfx950";
         }
-        else if (strcmp(dec_names[i], "ho") == 0)
+
+        /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError. */
         {
-            ho_val = dec_values[i];
-        }
-        else if (strcmp(dec_names[i], "wo") == 0)
-        {
-            wo_val = dec_values[i];
-        }
-        else if (strcmp(dec_names[i], "c_v") == 0)
-        {
-            c_v_val = dec_values[i];
-        }
-    }
-    if (n_val == NULL || ho_val == NULL || wo_val == NULL || c_v_val == NULL)
-    {
-        ckc_i_set_err(b, CKC_ERR_KEY,
-                      "pooling2d: unmerge_lower missing decoded coord");
-        return NULL;
-    }
-
-    /* c_base = mul(c_v_val, c_vec) if VEC > 1 else c_v_val */
-    c_base = (VEC > 1) ? ckc_b_mul(b, c_v_val, c_vec) : c_v_val;
-
-    /* x_rsrc = b.buffer_rsrc(X, X_bytes) */
-    x_rsrc = ckc_b_buffer_rsrc(b, X, X_bytes);
-
-    /* neutral = _neutral_value(b, op); acc_list = [neutral]*VEC */
-    neutral = pool_neutral_value(b, spec->op);
-    for (k = 0; k < VEC; ++k)
-    {
-        acc_list[k] = neutral;
-    }
-    /* valid_count = const_f32(0.0) if op == "avg" else None */
-    if (strcmp(spec->op, "avg") == 0)
-    {
-        valid_count = ckc_b_const_f32(b, 0.0);
-    }
-
-    /* for y_i in range(Y): for x_i in range(X): ... window reduction */
-    for (y_i = 0; y_i < p->Y; ++y_i)
-    {
-        ckc_value_t* c_y = ckc_b_const_i32(b, y_i);
-        for (x_i = 0; x_i < p->X; ++x_i)
-        {
-            ckc_value_t* c_x = ckc_b_const_i32(b, x_i);
-            ckc_value_t* off = NULL;
-            ckc_value_t* valid = NULL;
-            ckc_value_t* off_bytes;
-            ckc_value_t* safe_in_off;
-            const char* off_names[6];
-            ckc_value_t* off_vals[6];
-
-            /* off, valid = in_desc.offset(b, n=n_val, ho=ho_val, y=c_y,
-             *                             wo=wo_val, x=c_x, c=c_base) */
-            off_names[0] = "n";
-            off_vals[0] = n_val;
-            off_names[1] = "ho";
-            off_vals[1] = ho_val;
-            off_names[2] = "y";
-            off_vals[2] = c_y;
-            off_names[3] = "wo";
-            off_vals[3] = wo_val;
-            off_names[4] = "x";
-            off_vals[4] = c_x;
-            off_names[5] = "c";
-            off_vals[5] = c_base;
-            if (!ckc_transforms_descriptor_offset(b, in_desc, off_names, off_vals, 6,
-                                                  &off, &valid))
+            char reason[256];
+            if (!ckc_pooling2d_is_valid_spec(spec, arch, reason, sizeof(reason)))
             {
+                ckc_i_set_err(b, CKC_ERR_VALUE, "invalid pooling2d spec: %s", reason);
                 return NULL;
             }
+        }
 
-            /* off_bytes = mul(off, c_elem_bytes) */
-            off_bytes = ckc_b_mul(b, off, c_elem_bytes);
-            /* safe_in_off = select(valid, off_bytes, oob_sentinel) if valid is
-             *               not None else off_bytes */
-            safe_in_off = (valid != NULL)
-                              ? ckc_b_select(b, valid, off_bytes, oob_sentinel)
-                              : off_bytes;
+        p = &spec->problem;
+        VEC = spec->vec;
 
-            if (VEC >= 2)
+        /* io_ty = io_ir_type(spec.dtype) */
+        io_ty = ckc_b_io_ir_type(b, spec->dtype);
+        if (io_ty == NULL)
+        {
+            return NULL;
+        }
+
+        /* b.kernel.attrs["max_workgroup_size"] = spec.block_size */
+        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
+
+        /* X = b.param("X", PtrType(io_ty,"global"), noalias=True, readonly=True,
+         *             align=16) */
+        ptr_ty = ckc_ptr_type(b, io_ty, "global");
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        X = ckc_b_param(b, "X", ptr_ty, &opts);
+
+        /* Y = b.param("Y", PtrType(io_ty,"global"), noalias=True, writeonly=True,
+         *             align=16) */
+        memset(&opts, 0, sizeof(opts));
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        Y = ckc_b_param(b, "Y", ptr_ty, &opts);
+
+        /* X_bytes = b.param("X_bytes", I32); Y_bytes = b.param("Y_bytes", I32) */
+        X_bytes = ckc_b_param(b, "X_bytes", ckc_i32(), NULL);
+        Y_bytes = ckc_b_param(b, "Y_bytes", ckc_i32(), NULL);
+
+        /* in_desc = _make_input_descriptor(p) */
+        in_desc = pool_make_input_descriptor(b, p);
+        if (in_desc == NULL)
+        {
+            return NULL;
+        }
+
+        /* C_v = p.C // VEC ; total_out_v = N * Ho * Wo * C_v */
+        C_v = p->C / VEC;
+        total_out_v = p->N * ckc_pooling_problem_ho(p) * ckc_pooling_problem_wo(p) * C_v;
+
+        /* c0 = const_i32(0); c_elem_bytes = const_i32(2); c_vec = const_i32(VEC);
+         * oob_sentinel = const_i32((1<<31)-1) */
+        c0 = ckc_b_const_i32(b, 0);
+        c_elem_bytes = ckc_b_const_i32(b, 2);
+        c_vec = ckc_b_const_i32(b, VEC);
+        oob_sentinel = ckc_b_const_i32(b, (int64_t)((1u << 31) - 1u));
+
+        /* tid = thread_id_x(); bid = block_id_x();
+         * out_idx_v = add(mul(bid, const_i32(block_size)), tid) */
+        tid = ckc_b_thread_id_x(b);
+        bid = ckc_b_block_id_x(b);
+        out_idx_v =
+            ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
+
+        /* out_unmerge_desc = TensorDescriptor.naive("pool_out_m",
+         *     lengths=[N,Ho,Wo,C_v], dtype=F16, coord_names=["n","ho","wo","c_v"])
+         *   .transform(unmerge_magic("out_idx_v", into=["n","ho","wo","c_v"],
+         *                            dims=[N,Ho,Wo,C_v])) */
+        um_lengths[0] = p->N;
+        um_lengths[1] = ckc_pooling_problem_ho(p);
+        um_lengths[2] = ckc_pooling_problem_wo(p);
+        um_lengths[3] = C_v;
+        um_coord_names[0] = "n";
+        um_coord_names[1] = "ho";
+        um_coord_names[2] = "wo";
+        um_coord_names[3] = "c_v";
+        out_unmerge_base = ckc_tensor_descriptor_naive(b, "pool_out_m", um_lengths, 4,
+                                                       NULL, um_coord_names, 4);
+        if (out_unmerge_base == NULL)
+        {
+            return NULL;
+        }
+        um_into[0] = "n";
+        um_into[1] = "ho";
+        um_into[2] = "wo";
+        um_into[3] = "c_v";
+        um_dims[0] = p->N;
+        um_dims[1] = ckc_pooling_problem_ho(p);
+        um_dims[2] = ckc_pooling_problem_wo(p);
+        um_dims[3] = C_v;
+        um = ckc_unmerge_magic(b, "out_idx_v", um_into, 4, um_dims);
+        if (um == NULL)
+        {
+            return NULL;
+        }
+        um_chain[0] = um;
+        out_unmerge_desc =
+            ckc_tensor_descriptor_transform(b, out_unmerge_base, um_chain, 1);
+        if (out_unmerge_desc == NULL)
+        {
+            return NULL;
+        }
+
+        /* decoded = out_unmerge_desc.unmerge_lower(b, out_idx_v=out_idx_v) */
+        in_names[0] = "out_idx_v";
+        in_values[0] = out_idx_v;
+        n_dec = ckc_tensor_descriptor_unmerge_lower(b, out_unmerge_desc, in_names,
+                                                    in_values, 1, dec_names, dec_values,
+                                                    (int)(sizeof(dec_names) /
+                                                          sizeof(dec_names[0])));
+        if (n_dec < 0)
+        {
+            return NULL;
+        }
+        /* n_val/ho_val/wo_val/c_v_val = decoded["n"/"ho"/"wo"/"c_v"] */
+        for (i = 0; i < n_dec; ++i)
+        {
+            if (strcmp(dec_names[i], "n") == 0)
             {
-                /* loaded_vec = buffer_load_vN_f16(x_rsrc, safe_in_off, c0,
-                 *                                 dwords=VEC//2) */
-                ckc_value_t* loaded_vec =
-                    ckc_b_buffer_load_vN_f16(b, x_rsrc, safe_in_off, c0, VEC / 2);
-                for (k = 0; k < VEC; ++k)
+                n_val = dec_values[i];
+            }
+            else if (strcmp(dec_names[i], "ho") == 0)
+            {
+                ho_val = dec_values[i];
+            }
+            else if (strcmp(dec_names[i], "wo") == 0)
+            {
+                wo_val = dec_values[i];
+            }
+            else if (strcmp(dec_names[i], "c_v") == 0)
+            {
+                c_v_val = dec_values[i];
+            }
+        }
+        if (n_val == NULL || ho_val == NULL || wo_val == NULL || c_v_val == NULL)
+        {
+            ckc_i_set_err(b, CKC_ERR_KEY,
+                          "pooling2d: unmerge_lower missing decoded coord");
+            return NULL;
+        }
+
+        /* c_base = mul(c_v_val, c_vec) if VEC > 1 else c_v_val */
+        c_base = (VEC > 1) ? ckc_b_mul(b, c_v_val, c_vec) : c_v_val;
+
+        /* x_rsrc = b.buffer_rsrc(X, X_bytes) */
+        x_rsrc = ckc_b_buffer_rsrc(b, X, X_bytes);
+
+        /* neutral = _neutral_value(b, op); acc_list = [neutral]*VEC */
+        neutral = pool_neutral_value(b, spec->op);
+        for (k = 0; k < VEC; ++k)
+        {
+            acc_list[k] = neutral;
+        }
+        /* valid_count = const_f32(0.0) if op == "avg" else None */
+        if (strcmp(spec->op, "avg") == 0)
+        {
+            valid_count = ckc_b_const_f32(b, 0.0);
+        }
+
+        /* for y_i in range(Y): for x_i in range(X): ... window reduction */
+        for (y_i = 0; y_i < p->Y; ++y_i)
+        {
+            ckc_value_t* c_y = ckc_b_const_i32(b, y_i);
+            for (x_i = 0; x_i < p->X; ++x_i)
+            {
+                ckc_value_t* c_x = ckc_b_const_i32(b, x_i);
+                ckc_value_t* off = NULL;
+                ckc_value_t* valid = NULL;
+                ckc_value_t* off_bytes;
+                ckc_value_t* safe_in_off;
+                const char* off_names[6];
+                ckc_value_t* off_vals[6];
+
+                /* off, valid = in_desc.offset(b, n=n_val, ho=ho_val, y=c_y,
+                 *                             wo=wo_val, x=c_x, c=c_base) */
+                off_names[0] = "n";
+                off_vals[0] = n_val;
+                off_names[1] = "ho";
+                off_vals[1] = ho_val;
+                off_names[2] = "y";
+                off_vals[2] = c_y;
+                off_names[3] = "wo";
+                off_vals[3] = wo_val;
+                off_names[4] = "x";
+                off_vals[4] = c_x;
+                off_names[5] = "c";
+                off_vals[5] = c_base;
+                if (!ckc_transforms_descriptor_offset(b, in_desc, off_names, off_vals, 6,
+                                                      &off, &valid))
                 {
-                    /* raw = vec_extract(loaded_vec, k);
-                     * loaded_f32 = cast_to_f32(raw) */
-                    ckc_value_t* raw = ckc_b_vec_extract(b, loaded_vec, k);
-                    ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, raw);
-                    /* masked = select(valid, loaded_f32, neutral) if valid else
-                     *          loaded_f32 */
-                    ckc_value_t* masked =
-                        (valid != NULL)
-                            ? ckc_b_select(b, valid, loaded_f32, neutral)
-                            : loaded_f32;
-                    acc_list[k] = pool_combine(b, spec->op, acc_list[k], masked);
+                    return NULL;
                 }
-            }
-            else
-            {
-                /* loaded_raw = buffer_load_f16(x_rsrc, safe_in_off, c0);
-                 * loaded_f32 = cast_to_f32(loaded_raw) */
-                ckc_value_t* loaded_raw =
-                    ckc_b_buffer_load_f16(b, x_rsrc, safe_in_off, c0);
-                ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, loaded_raw);
-                ckc_value_t* masked =
-                    (valid != NULL) ? ckc_b_select(b, valid, loaded_f32, neutral)
-                                    : loaded_f32;
-                acc_list[0] = pool_combine(b, spec->op, acc_list[0], masked);
-            }
 
-            /* if op == "avg": contrib = select(valid, 1.0, 0.0) if valid else 1.0;
-             *                 valid_count = fadd(valid_count, contrib) */
-            if (strcmp(spec->op, "avg") == 0)
-            {
-                ckc_value_t* contrib;
-                if (valid != NULL)
+                /* off_bytes = mul(off, c_elem_bytes) */
+                off_bytes = ckc_b_mul(b, off, c_elem_bytes);
+                /* safe_in_off = select(valid, off_bytes, oob_sentinel) if valid is
+                 *               not None else off_bytes */
+                safe_in_off = (valid != NULL)
+                                  ? ckc_b_select(b, valid, off_bytes, oob_sentinel)
+                                  : off_bytes;
+
+                if (VEC >= 2)
                 {
-                    /* hoist select operands in Python's left-to-right order */
-                    ckc_value_t* one_c = ckc_b_const_f32(b, 1.0);
-                    ckc_value_t* zero_c = ckc_b_const_f32(b, 0.0);
-                    contrib = ckc_b_select(b, valid, one_c, zero_c);
+                    /* loaded_vec = buffer_load_vN_f16(x_rsrc, safe_in_off, c0,
+                     *                                 dwords=VEC//2) */
+                    ckc_value_t* loaded_vec =
+                        ckc_b_buffer_load_vN_f16(b, x_rsrc, safe_in_off, c0, VEC / 2);
+                    for (k = 0; k < VEC; ++k)
+                    {
+                        /* raw = vec_extract(loaded_vec, k);
+                         * loaded_f32 = cast_to_f32(raw) */
+                        ckc_value_t* raw = ckc_b_vec_extract(b, loaded_vec, k);
+                        ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, raw);
+                        /* masked = select(valid, loaded_f32, neutral) if valid else
+                         *          loaded_f32 */
+                        ckc_value_t* masked =
+                            (valid != NULL)
+                                ? ckc_b_select(b, valid, loaded_f32, neutral)
+                                : loaded_f32;
+                        acc_list[k] = pool_combine(b, spec->op, acc_list[k], masked);
+                    }
                 }
                 else
                 {
-                    contrib = ckc_b_const_f32(b, 1.0);
+                    /* loaded_raw = buffer_load_f16(x_rsrc, safe_in_off, c0);
+                     * loaded_f32 = cast_to_f32(loaded_raw) */
+                    ckc_value_t* loaded_raw =
+                        ckc_b_buffer_load_f16(b, x_rsrc, safe_in_off, c0);
+                    ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, loaded_raw);
+                    ckc_value_t* masked =
+                        (valid != NULL) ? ckc_b_select(b, valid, loaded_f32, neutral)
+                                        : loaded_f32;
+                    acc_list[0] = pool_combine(b, spec->op, acc_list[0], masked);
                 }
-                valid_count = ckc_b_fadd(b, valid_count, contrib);
+
+                /* if op == "avg": contrib = select(valid, 1.0, 0.0) if valid else 1.0;
+                 *                 valid_count = fadd(valid_count, contrib) */
+                if (strcmp(spec->op, "avg") == 0)
+                {
+                    ckc_value_t* contrib;
+                    if (valid != NULL)
+                    {
+                        /* hoist select operands in Python's left-to-right order */
+                        ckc_value_t* one_c = ckc_b_const_f32(b, 1.0);
+                        ckc_value_t* zero_c = ckc_b_const_f32(b, 0.0);
+                        contrib = ckc_b_select(b, valid, one_c, zero_c);
+                    }
+                    else
+                    {
+                        contrib = ckc_b_const_f32(b, 1.0);
+                    }
+                    valid_count = ckc_b_fadd(b, valid_count, contrib);
+                }
             }
         }
-    }
 
-    /* if op == "avg": safe_count = fmax(valid_count, 1.0);
-     *                 rcp_count = rcp(safe_count);
-     *                 acc_list = [fmul(acc, rcp_count) for acc in acc_list] */
-    if (strcmp(spec->op, "avg") == 0)
-    {
-        ckc_value_t* safe_count = ckc_b_fmax(b, valid_count, ckc_b_const_f32(b, 1.0));
-        ckc_value_t* rcp_count = ckc_b_rcp(b, safe_count);
+        /* if op == "avg": safe_count = fmax(valid_count, 1.0);
+         *                 rcp_count = rcp(safe_count);
+         *                 acc_list = [fmul(acc, rcp_count) for acc in acc_list] */
+        if (strcmp(spec->op, "avg") == 0)
+        {
+            ckc_value_t* safe_count = ckc_b_fmax(b, valid_count, ckc_b_const_f32(b, 1.0));
+            ckc_value_t* rcp_count = ckc_b_rcp(b, safe_count);
+            for (k = 0; k < VEC; ++k)
+            {
+                acc_list[k] = ckc_b_fmul(b, acc_list[k], rcp_count);
+            }
+        }
+
+        /* ---- store: store_tile over the flat output [N*Ho*Wo*C] ---- */
+        /* out_total = total_out_v * VEC */
+        out_total = total_out_v * VEC;
+        /* out_rsrc = make_buffer_resource(b, Y, num_bytes=Y_bytes) */
+        out_rsrc = ckc_make_buffer_resource(b, Y, Y_bytes);
+        /* out_view = make_buffer_view(out_rsrc, [out_total], io_ty) */
+        out_lengths[0] = out_total;
+        out_view = ckc_make_buffer_view(b, out_rsrc, out_lengths, 1, io_ty);
+
+        /* out_enc = TileDistributionEncoding(Hs=((VEC,),), Ys2RHs_major=(1,),
+         *                                    Ys2RHs_minor=(0,)) */
+        out_h_levels[0] = VEC;
+        out_hs[0].levels = out_h_levels;
+        out_hs[0].count = 1;
+        out_ys_major[0] = 1;
+        out_ys_minor[0] = 0;
+        out_enc = ckc_make_tile_distribution_encoding(b, /*Rs*/ NULL, 0, out_hs, 1,
+                                                      /*Ps*/ NULL, 0, out_ys_major,
+                                                      out_ys_minor, 1);
+        if (out_enc == NULL)
+        {
+            return NULL;
+        }
+        /* out_dist = make_static_tile_distribution(out_enc) */
+        out_dist = ckc_make_static_tile_distribution(b, out_enc);
+        if (out_dist == NULL)
+        {
+            return NULL;
+        }
+
+        /* out_origin = mul(out_idx_v, c_vec) if VEC > 1 else out_idx_v */
+        out_origin = (VEC > 1) ? ckc_b_mul(b, out_idx_v, c_vec) : out_idx_v;
+
+        /* out_window = out_view.tile(lengths=[VEC], origin=[out_origin]) */
+        origin_arr[0] = out_origin;
+        {
+            int win_lengths[1];
+            win_lengths[0] = VEC;
+            out_window = ckc_buffer_view_tile(b, out_view, win_lengths, 1, origin_arr, 1);
+        }
+
+        /* out_dt = make_static_distributed_tensor(out_dist, dtype=io_ty) */
+        out_dt = ckc_make_static_distributed_tensor(b, out_dist, io_ty);
+
+        /* for k in range(VEC): out_dt.set([k], acc_list[k]) */
         for (k = 0; k < VEC; ++k)
         {
-            acc_list[k] = ckc_b_fmul(b, acc_list[k], rcp_count);
+            yidx[0] = k;
+            ckc_static_distributed_tensor_set(b, out_dt, yidx, 1, acc_list[k]);
         }
-    }
 
-    /* ---- store: store_tile over the flat output [N*Ho*Wo*C] ---- */
-    /* out_total = total_out_v * VEC */
-    out_total = total_out_v * VEC;
-    /* out_rsrc = make_buffer_resource(b, Y, num_bytes=Y_bytes) */
-    out_rsrc = ckc_make_buffer_resource(b, Y, Y_bytes);
-    /* out_view = make_buffer_view(out_rsrc, [out_total], io_ty) */
-    out_lengths[0] = out_total;
-    out_view = ckc_make_buffer_view(b, out_rsrc, out_lengths, 1, io_ty);
+        /* store_tile(b, out_window, out_dt, ps=[]) */
+        ckc_store_tile(b, out_window, out_dt, NULL, 0);
 
-    /* out_enc = TileDistributionEncoding(Hs=((VEC,),), Ys2RHs_major=(1,),
-     *                                    Ys2RHs_minor=(0,)) */
-    out_h_levels[0] = VEC;
-    out_hs[0].levels = out_h_levels;
-    out_hs[0].count = 1;
-    out_ys_major[0] = 1;
-    out_ys_minor[0] = 0;
-    out_enc = ckc_make_tile_distribution_encoding(b, /*Rs*/ NULL, 0, out_hs, 1,
-                                                  /*Ps*/ NULL, 0, out_ys_major,
-                                                  out_ys_minor, 1);
-    if (out_enc == NULL)
-    {
-        return NULL;
-    }
-    /* out_dist = make_static_tile_distribution(out_enc) */
-    out_dist = ckc_make_static_tile_distribution(b, out_enc);
-    if (out_dist == NULL)
-    {
-        return NULL;
-    }
-
-    /* out_origin = mul(out_idx_v, c_vec) if VEC > 1 else out_idx_v */
-    out_origin = (VEC > 1) ? ckc_b_mul(b, out_idx_v, c_vec) : out_idx_v;
-
-    /* out_window = out_view.tile(lengths=[VEC], origin=[out_origin]) */
-    origin_arr[0] = out_origin;
-    {
-        int win_lengths[1];
-        win_lengths[0] = VEC;
-        out_window = ckc_buffer_view_tile(b, out_view, win_lengths, 1, origin_arr, 1);
-    }
-
-    /* out_dt = make_static_distributed_tensor(out_dist, dtype=io_ty) */
-    out_dt = ckc_make_static_distributed_tensor(b, out_dist, io_ty);
-
-    /* for k in range(VEC): out_dt.set([k], acc_list[k]) */
-    for (k = 0; k < VEC; ++k)
-    {
-        yidx[0] = k;
-        ckc_static_distributed_tensor_set(b, out_dt, yidx, 1, acc_list[k]);
-    }
-
-    /* store_tile(b, out_window, out_dt, ps=[]) */
-    ckc_store_tile(b, out_window, out_dt, NULL, 0);
-
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    return b->kernel;
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        return b->kernel;
+    });
 }
 
 ckc_kernel_def_t* ckc_build_pooling2d_new(ckc_ir_builder_t* b,
                                           const ckc_pooling2d_spec_t* spec,
                                           const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_pooling2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_pooling2d(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_pooling2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_pooling2d(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *

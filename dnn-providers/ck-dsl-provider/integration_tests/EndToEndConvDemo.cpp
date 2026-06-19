@@ -86,7 +86,7 @@ int main(int, char**) {
     std::uniform_real_distribution<float> d(-1.f, 1.f);
     const float sc = 0.02f;  // keep fp16 stable over R*S*C accumulations
     std::vector<fp16> Xh((size_t)N * Hi * Wi * C), Wh((size_t)K * R * Sf * C),
-        Yh((size_t)N * Ho * Wo * K, fp16(0));
+        Yh((size_t)N * Ho * Wo * K, fp16(0.f));
     for (auto& x : Xh) x = (fp16)(d(rng) * sc);
     for (auto& x : Wh) x = (fp16)(d(rng) * sc);
 

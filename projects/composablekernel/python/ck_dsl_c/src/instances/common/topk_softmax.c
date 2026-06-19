@@ -25,6 +25,18 @@
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.reduction.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary (ckc::guard_builder in ckc_build_topk_softmax_new) catches it
+ * and records status + message on the builder, so the extern "C" ABI is
+ * unchanged. [[noreturn]] keeps the existing `...; return NULL;` call sites
+ * valid -- the trailing return is simply never reached. */
+[[noreturn]] static void ckc_topk_fail(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+{
+    (void)b;
+    ckc::raise_status(st, msg ? msg : "");
+}
 
 /* topk_softmax.py: _NEG_INF_F32 = -3.4028234663852886e38. */
 static const double CKC_TOPK_NEG_INF_F32 = -3.4028234663852886e38;
@@ -350,10 +362,9 @@ ckc_kernel_def_t* ckc_build_topk_softmax(ckc_ir_builder_t* b,
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...). */
     if (!ckc_topk_softmax_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
-        /* Record the ValueError on the builder's sticky-error model. */
-        b->status = CKC_ERR_VALUE;
-        snprintf(b->err, sizeof(b->err), "invalid topk_softmax spec: %s", reason);
-        return NULL;
+        /* raise ValueError(...) -- caught at the public entry boundary. */
+        ckc_topk_fail(b, CKC_ERR_VALUE,
+                      ckc::format_error("invalid topk_softmax spec: %s", reason).c_str());
     }
 
     target    = ckc_arch_target_from_gfx(arch);
@@ -584,20 +595,23 @@ ckc_kernel_def_t* ckc_build_topk_softmax_new(ckc_ir_builder_t* b,
                                              const ckc_topk_softmax_spec_t* spec,
                                              const char* arch)
 {
-    char name[160];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_topk_softmax_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_topk_softmax(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[160];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_topk_softmax_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_topk_softmax(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

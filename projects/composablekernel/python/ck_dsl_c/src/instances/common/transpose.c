@@ -31,6 +31,7 @@
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Spec accessors
@@ -677,20 +678,22 @@ ckc_kernel_def_t* ckc_build_transpose2d_new(ckc_ir_builder_t* b,
                                             const ckc_transpose2d_spec_t* spec,
                                             const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_transpose2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_transpose2d(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_transpose2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_transpose2d(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *

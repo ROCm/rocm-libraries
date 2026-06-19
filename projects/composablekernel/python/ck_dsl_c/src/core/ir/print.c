@@ -211,6 +211,18 @@ static void emit_repr_value(ckc_strbuf_t *out, const ckc_attr_value_t *v) {
             ckc_strbuf_append_char(out, ']');
             break;
         }
+        case CKC_ATTR_INT_LIST: {
+            /* a list of bare ints (e.g. agpr_alloc pair). */
+            ckc_strbuf_append_char(out, '[');
+            for (int i = 0; i < v->u.ilist.count; ++i) {
+                if (i > 0) {
+                    ckc_strbuf_append(out, ", ");
+                }
+                ckc_strbuf_appendf(out, "%lld", (long long)v->u.ilist.ints[i]);
+            }
+            ckc_strbuf_append_char(out, ']');
+            break;
+        }
         default:
             break;
     }
@@ -268,6 +280,17 @@ static void emit_attr_value(ckc_strbuf_t *out, const ckc_attr_value_t *v) {
                     ckc_strbuf_append(out, ", ");
                 }
                 emit_repr_map(out, v->u.list.items[i]);
+            }
+            ckc_strbuf_append_char(out, ']');
+            break;
+        case CKC_ATTR_INT_LIST:
+            /* a list of bare ints (e.g. agpr_alloc pair). */
+            ckc_strbuf_append_char(out, '[');
+            for (int i = 0; i < v->u.ilist.count; ++i) {
+                if (i > 0) {
+                    ckc_strbuf_append(out, ", ");
+                }
+                ckc_strbuf_appendf(out, "%lld", (long long)v->u.ilist.ints[i]);
             }
             ckc_strbuf_append_char(out, ']');
             break;

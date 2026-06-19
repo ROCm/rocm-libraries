@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_status boundary shim */
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h"
 #include "ckc/strbuf.h"
@@ -261,6 +262,17 @@ static void emit_attr_value(ckc_strbuf_t *out, const ckc_attr_value_t *v) {
                 }
                 /* a list element is itself an attr map (the iter_args dict). */
                 emit_attr_map(out, v->u.list.items[i]);
+            }
+            ckc_strbuf_append(out, " ]");
+            break;
+        case CKC_ATTR_INT_LIST:
+            /* a list whose elements are bare ints, e.g. agpr_alloc (0,0). */
+            ckc_strbuf_append(out, "l:[ ");
+            for (int i = 0; i < v->u.ilist.count; ++i) {
+                if (i > 0) {
+                    ckc_strbuf_append(out, ", ");
+                }
+                ckc_strbuf_appendf(out, "i:%lld", (long long)v->u.ilist.ints[i]);
             }
             ckc_strbuf_append(out, " ]");
             break;
@@ -715,6 +727,7 @@ static int parse_attr_map(ser_scanner_t *sc, ckc_attr_map_t *m) {
             case CKC_ATTR_BOOL:
                 ckc_attr_set_bool(b, m, keybuf, val.u.b);
                 break;
+            case CKC_ATTR_INT_LIST:
             case CKC_ATTR_LIST: {
                 /* Append a list-valued entry directly (no public setter). */
                 if (m->count >= m->cap) {
@@ -857,6 +870,9 @@ static int parse_attr_value(ser_scanner_t *sc, ckc_attr_value_t *out) {
         /* gather child maps (each list element is a dict) */
         ckc_attr_map_t **items = NULL;
         int count = 0, cap = 0;
+        /* a list of bare ints (e.g. agpr_alloc l:[ i:0, i:0 ]). */
+        int64_t *ints = NULL;
+        int icount = 0, icap = 0;
         sc_skip_ws(sc);
         if (sc_peek(sc) == ']') {
             ++sc->i;
@@ -869,6 +885,48 @@ static int parse_attr_value(ser_scanner_t *sc, ckc_attr_value_t *out) {
             ckc_attr_value_t elem;
             memset(&elem, 0, sizeof(elem));
             if (parse_attr_value(sc, &elem) != 0) {
+                return -1;
+            }
+            /* bare-int element: accumulate into an int list. The element kinds
+             * within a v1 list are homogeneous (all dicts, or all bare ints). */
+            if (elem.kind == CKC_ATTR_INT) {
+                if (count > 0) {
+                    ckc_i_set_err(b, CKC_ERR_VALUE,
+                                  "list: mixed int/dict elements");
+                    return -1;
+                }
+                if (icount >= icap) {
+                    int nc = icap ? icap * 2 : 4;
+                    int64_t *ni = (int64_t *)ckc_arena_alloc(
+                        &b->arena, sizeof(int64_t) * (size_t)nc);
+                    if (!ni) {
+                        ckc_i_set_err(b, CKC_ERR_OOM, "list OOM");
+                        return -1;
+                    }
+                    if (ints && icount)
+                        memcpy(ni, ints, sizeof(int64_t) * (size_t)icount);
+                    ints = ni;
+                    icap = nc;
+                }
+                ints[icount++] = elem.u.i;
+                sc_skip_ws(sc);
+                char ic = sc_peek(sc);
+                if (ic == ',') {
+                    ++sc->i;
+                    continue;
+                }
+                if (ic == ']') {
+                    ++sc->i;
+                    out->kind = CKC_ATTR_INT_LIST;
+                    out->u.ilist.ints = ints;
+                    out->u.ilist.count = icount;
+                    return 0;
+                }
+                ckc_i_set_err(b, CKC_ERR_VALUE, "list: expected ',' or ']'");
+                return -1;
+            }
+            if (icount > 0) {
+                ckc_i_set_err(b, CKC_ERR_VALUE, "list: mixed int/dict elements");
                 return -1;
             }
             /* each element is a dict, encoded as the bare-dict marker above. */
@@ -1659,7 +1717,7 @@ static ckc_param_t *parse_param(ckc_ir_builder_t *b, const char *ln, ckc_value_t
     return p;
 }
 
-ckc_status_t ckc_ir_parse(const char *text, ckc_ir_builder_t *b, ckc_kernel_def_t **out) {
+static ckc_status_t ir_parse_impl(const char *text, ckc_ir_builder_t *b, ckc_kernel_def_t **out) {
     if (out) {
         *out = NULL;
     }
@@ -1966,6 +2024,15 @@ static void canon_rename_region(rename_table_t *rt, ckc_region_t *region) {
     for (int i = 0; i < region->num_ops; ++i) {
         canon_rename_op(rt, region->ops[i]);
     }
+}
+
+/* Boundary shim: a ckc::Error thrown while parsing is caught here and recorded
+ * on the builder, returning the exception's status code (the C ABI is
+ * unchanged). */
+ckc_status_t ckc_ir_parse(const char *text, ckc_ir_builder_t *b, ckc_kernel_def_t **out) {
+    return ckc::guard_status(b, [&]() -> ckc_status_t {
+        return ir_parse_impl(text, b, out);
+    });
 }
 
 ckc_status_t ckc_ir_canonicalize(const char *text, char **out_text) {

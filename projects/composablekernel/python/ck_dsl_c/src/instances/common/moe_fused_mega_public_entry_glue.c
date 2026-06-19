@@ -42,6 +42,7 @@
 #include "ckc/lower_llvm.h"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error setter)            */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  PRIMARY build entry -- build_moe_fused_mega_gemm(spec, arch)
@@ -146,22 +147,25 @@ ckc_kernel_def_t* ckc_build_moe_fused_mega_gemm_new(ckc_ir_builder_t* b,
                                                     const ckc_moe_fused_mega_kernel_spec_t* spec,
                                                     const char* arch)
 {
-    char name[1024];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[1024];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    /* b = IRBuilder(spec.kernel_name()) */
-    if (ckc_moe_fused_mega_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_fused_mega_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        /* b = IRBuilder(spec.kernel_name()) */
+        if (ckc_moe_fused_mega_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_fused_mega_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

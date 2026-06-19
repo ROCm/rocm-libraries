@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
 
     ckc_fmha_appendkv_spec_t spec;
     if (make_spec(idx, &spec) != 0) {
-        fprintf(stderr, "unknown/invalid config index %d\n", idx);
+        fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 

@@ -16,22 +16,29 @@
 
 #include "ckc/arch_target.h"
 #include "ckc/arch_target_internal.h"
+#include "ckc/error.hpp"
 #include "ckc/ir.h"
 
 /* ---------------------------------------------------------- local helpers */
 
-/* Set the builder's sticky error (mirrors the ir bucket-0 ckc_i_set_err, but
- * inlined here since that helper is private to the ir TUs). No-op on NULL. */
-static void ckc_ati_q_set_err(ckc_ir_builder_t *b, ckc_status_t st,
-                              const char *fmt, ...) {
+/* Raise a genuine query failure as a ckc::Error (mirroring the Python `raise`);
+ * the public entry boundary catches it and records status + message on the
+ * builder, so the extern "C" ABI is unchanged. This is used ONLY for true
+ * errors (the "no verified layout map" NotImplementedError-equivalent). The
+ * legitimate "not found" query results in this file return NULL with no error
+ * and never route through here. [[noreturn]] keeps the existing
+ * `ckc_ati_q_set_err(...); return NULL;` call site valid -- the return is simply
+ * never reached. */
+[[noreturn]] static void ckc_ati_q_set_err(ckc_ir_builder_t *b, ckc_status_t st,
+                                           const char *fmt, ...) {
+    (void)b;
+    char msg[CKC_ERR_MSG_CAP];
     va_list ap;
-    if (!b) return;
-    /* Match the ir builder's first-error-wins semantics. */
-    if (b->status != CKC_OK) return;
-    b->status = st;
     va_start(ap, fmt);
-    vsnprintf(b->err, CKC_ERR_MSG_CAP, fmt, ap);
+    (void)vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
+    msg[sizeof(msg) - 1] = '\0';
+    ckc::raise_status(st, msg);
 }
 
 /* family argument default ("mma"), matching the Python keyword default. */

@@ -26,6 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/error.hpp" /* ckc::Error boundary translation */
+
 /* ====================================================================== */
 /* Flavor helpers (Python LLVM_FLAVOR_LLVM20 / LLVM_FLAVOR_LLVM22)        */
 /* ====================================================================== */
@@ -151,24 +153,23 @@ const ckc_isa_backend_t *ckc_ll_backend_for(const char *arch, ckc_status_t *st) 
 /* Error model                                                            */
 /* ====================================================================== */
 
-ckc_status_t ckc_ll_fail(ckc_lower_t *L, ckc_status_t st, const char *fmt, ...) {
-    if (!L) {
-        return st;
-    }
-    if (L->status == CKC_OK) {
-        L->status = st;
-        if (L->err) {
-            va_list ap;
-            va_start(ap, fmt);
-            vsnprintf(L->err, CKC_ERR_MSG_CAP, fmt, ap);
-            va_end(ap);
-        }
-    }
-    return st;
+[[noreturn]] void ckc_ll_fail(ckc_lower_t *L, ckc_status_t st, const char *fmt, ...) {
+    /* Format the reason once (bounded exactly like the legacy sink), then raise.
+     * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
+     * the lowerer boundary and translated back into the status code + caller
+     * `err` buffer, so the extern "C" ABI is unchanged. */
+    (void)L; /* the lowerer no longer carries a sticky error; we raise instead */
+    char buf[CKC_ERR_MSG_CAP];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    buf[sizeof buf - 1] = '\0';
+    ckc::raise_status(st, buf);
 }
 
 bool ckc_ll_live(const ckc_lower_t *L) {
-    return L && L->status == CKC_OK;
+    return L != NULL;
 }
 
 /* ====================================================================== */
@@ -186,7 +187,6 @@ static ckc_ll_block_t *ll_make_block(ckc_lower_t *L, const char *label) {
     ckc_ll_block_t *blk = (ckc_ll_block_t*)ckc_arena_calloc(&L->arena, sizeof(*blk));
     if (!blk) {
         ckc_ll_fail(L, CKC_ERR_OOM, "block alloc");
-        return NULL;
     }
     blk->label = ckc_arena_strdup(&L->arena, label ? label : "");
     ckc_vec_init(&blk->lines);
@@ -195,7 +195,6 @@ static ckc_ll_block_t *ll_make_block(ckc_lower_t *L, const char *label) {
     ckc_vec_push(&L->arena, &L->blocks, blk, rc);
     if (rc != 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "blocks push");
-        return NULL;
     }
     return blk;
 }
@@ -209,7 +208,6 @@ ckc_ll_block_t *ckc_ll_new_block(ckc_lower_t *L, const char *base) {
                                    base ? base : "", L->block_counter);
     if (!label) {
         ckc_ll_fail(L, CKC_ERR_OOM, "new_block label");
-        return NULL;
     }
     return ll_make_block(L, label);
 }
@@ -232,12 +230,10 @@ void ckc_ll_block_emit(ckc_lower_t *L, ckc_ll_block_t *blk, const char *line) {
     if (blk->terminated) {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "block %s already terminated", blk->label);
-        return;
     }
     char *copy = ckc_arena_strdup(&L->arena, line ? line : "");
     if (!copy) {
         ckc_ll_fail(L, CKC_ERR_OOM, "emit strdup");
-        return;
     }
     int rc;
     ckc_vec_push(&L->arena, &blk->lines, copy, rc);
@@ -306,7 +302,6 @@ const char *ckc_ll_fresh(ckc_lower_t *L, const char *hint) {
                                hint ? hint : "t", L->tmp_counter);
     if (!s) {
         ckc_ll_fail(L, CKC_ERR_OOM, "fresh");
-        return "";
     }
     return s;
 }
@@ -386,7 +381,6 @@ void ckc_ll_need_dynamic(ckc_lower_t *L, const char *key, const char *decl) {
     ckc_vec_push(&L->arena, &L->dyn_decls, d, rc);
     if (rc != 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "dyn_decl push");
-        return;
     }
     ckc_ll_need(L, key);
 }
@@ -432,13 +426,11 @@ const char *ckc_ll_llvm_type(ckc_lower_t *L, const ckc_type_t *t) {
     }
     ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM mapping for type %s",
                 n ? n : "(null)");
-    return "";
 }
 
 const char *ckc_ll_llvm_type_from_name(ckc_lower_t *L, const char *name) {
     if (!name) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM type for (null)");
-        return "";
     }
     if (strcmp(name, "i32") == 0)      return "i32";
     if (strcmp(name, "i64") == 0)      return "i64";
@@ -469,13 +461,11 @@ const char *ckc_ll_llvm_type_from_name(ckc_lower_t *L, const char *name) {
             else {
                 ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                             "no LLVM type for vec elem %s", elem);
-                return "";
             }
             return ckc_arena_printf(&L->arena, "<%d x %s>", count, lelem);
         }
     }
     ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM type for %s", name);
-    return "";
 }
 
 const char *ckc_ll_smem_storage_type(ckc_lower_t *L, const ckc_type_t *smem) {
@@ -488,7 +478,6 @@ const char *ckc_ll_smem_storage_type(ckc_lower_t *L, const ckc_type_t *smem) {
         out = ckc_arena_printf(&L->arena, "[%d x %s]", smem->shape[d], out);
         if (!out) {
             ckc_ll_fail(L, CKC_ERR_OOM, "smem_storage_type");
-            return "";
         }
     }
     return out;
@@ -567,7 +556,6 @@ const char *ckc_ll_escape_asm_string(ckc_lower_t *L, const char *s) {
     char *out = (char*)ckc_arena_alloc(&L->arena, cap);
     if (!out) {
         ckc_ll_fail(L, CKC_ERR_OOM, "escape_asm");
-        return "";
     }
     size_t w = 0;
     for (size_t i = 0; i < n; i++) {
@@ -599,7 +587,6 @@ int64_t ckc_ll_eval_constant(ckc_lower_t *L, const ckc_value_t *v) {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "Value %s is not a compile-time constant",
                     (v && v->name) ? v->name : "(null)");
-        return 0;
     }
     int64_t iv = 0;
     if (ckc_attr_get_int(&v->op->attrs, "value", &iv)) {
@@ -751,7 +738,6 @@ const char *ckc_ll_smem_global_name(ckc_lower_t *L, const ckc_value_t *smem,
     }
     ckc_ll_fail(L, CKC_ERR_KEY, "smem value %s never allocated",
                 smem->name ? smem->name : "(null)");
-    return NULL;
 }
 
 /* ====================================================================== */
@@ -782,7 +768,6 @@ void ckc_ll_lower_op(ckc_lower_t *L, const ckc_op_t *op) {
     if (fn == NULL) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM lowering for op %s",
                     op->name ? op->name : ckc_opcode_name(oc));
-        return;
     }
     fn(L, op);
 }
@@ -854,7 +839,6 @@ const char *ckc_ll_param_attrs(ckc_lower_t *L, const ckc_param_t *p) {
 const char *ckc_ll_format_agpr_alloc(ckc_lower_t *L, const ckc_attr_value_t *v) {
     if (!L || !v) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc must be a (min, max) pair");
-        return "";
     }
     long lo = 0, hi = 0;
     if (v->kind == CKC_ATTR_STR) {
@@ -862,7 +846,6 @@ const char *ckc_ll_format_agpr_alloc(ckc_lower_t *L, const ckc_attr_value_t *v) 
         if (!text || !*text) {
             ckc_ll_fail(L, CKC_ERR_VALUE,
                         "agpr_alloc string must be 'min,max', not empty/'none'");
-            return "";
         }
         /* skip leading ws */
         while (*text == ' ' || *text == '\t') {
@@ -871,16 +854,18 @@ const char *ckc_ll_format_agpr_alloc(ckc_lower_t *L, const ckc_attr_value_t *v) 
         if (strncmp(text, "none", 4) == 0 || strncmp(text, "None", 4) == 0) {
             ckc_ll_fail(L, CKC_ERR_VALUE,
                         "agpr_alloc string must be 'min,max', not empty/'none'");
-            return "";
         }
         const char *comma = strchr(text, ',');
         if (!comma) {
             ckc_ll_fail(L, CKC_ERR_VALUE,
                         "agpr_alloc must contain two unsigned integers");
-            return "";
         }
         lo = strtol(text, NULL, 10);
         hi = strtol(comma + 1, NULL, 10);
+    } else if (v->kind == CKC_ATTR_INT_LIST && v->u.ilist.count == 2) {
+        /* A two-element list of bare ints (the (min, max) pair). */
+        lo = (long)v->u.ilist.ints[0];
+        hi = (long)v->u.ilist.ints[1];
     } else if (v->kind == CKC_ATTR_LIST && v->u.list.count == 2) {
         /* A two-element list of int maps; tolerate by reading [0]/[1] ints. */
         const ckc_attr_value_t *e0 = ckc_attr_get(v->u.list.items[0], "value");
@@ -892,15 +877,12 @@ const char *ckc_ll_format_agpr_alloc(ckc_lower_t *L, const ckc_attr_value_t *v) 
     } else {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "agpr_alloc must be a (min, max) pair or 'min,max' string");
-        return "";
     }
     if (lo < 0 || hi < 0) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc values must be unsigned");
-        return "";
     }
     if (lo > hi) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc min must be <= max");
-        return "";
     }
     return ckc_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
@@ -1065,11 +1047,68 @@ void ckc_ll_finalize(ckc_lower_t *L, ckc_strbuf_t *out) {
 /* Public entry points (Python lower_kernel_to_llvm)                      */
 /* ====================================================================== */
 
-ckc_status_t ckc_lower_kernel_to_llvm_ex(const ckc_kernel_def_t *kernel,
-                                         ckc_llvm_flavor_t flavor,
-                                         const char *arch,
-                                         char **out_text,
-                                         char *err, size_t err_cap) {
+/* Run the lowering against an initialized lowerer `L`. On any failure the
+ * per-op handlers (and the spine helpers) raise via ckc_ll_fail -> throw, so
+ * this body has no in-band error returns; success produces the heap-owned IR
+ * text in *out_text. The caller owns L.arena and destroys it on both paths. */
+static void ll_lower_into(ckc_lower_t *L, const ckc_kernel_def_t *kernel,
+                          ckc_llvm_flavor_t flavor, const char *arch,
+                          char **out_text) {
+    /* Resolve flavor. */
+    L->flavor = (flavor == CKC_LLVM_FLAVOR_AUTO) ? ll_resolve_flavor() : flavor;
+    if (L->flavor != CKC_LLVM_FLAVOR_LLVM20 &&
+        L->flavor != CKC_LLVM_FLAVOR_LLVM22) {
+        ckc_ll_fail(L, CKC_ERR_VALUE, "unknown LLVM flavor");
+    }
+
+    /* Resolve ISA backend. */
+    ckc_status_t bst = CKC_OK;
+    L->backend = ckc_ll_backend_for(arch, &bst);
+    if (L->backend == NULL || bst != CKC_OK) {
+        ckc_ll_fail(L, bst != CKC_OK ? bst : CKC_ERR_KEY,
+                    "unknown arch backend %s", arch ? arch : "(null)");
+    }
+    /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
+     * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
+     * LLVM22. backend_for installs the LLVM20 form by default; rebind the
+     * resolved backend's datalayout to the form for the resolved flavor.
+     * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
+     * does not mutate the canonical per-arch descriptors. */
+    LL_BACKEND_RESOLVED.datalayout = ckc_ll_datalayout_for_flavor(L->flavor);
+
+    /* Entry block (ll_make_block raises on OOM). */
+    ll_make_block(L, "entry");
+
+    /* Pre-pass + lowering. */
+    ckc_ll_collect_smem(L, kernel->body);
+    ckc_ll_lower_region(L, kernel->body);
+
+    ckc_strbuf_t sb;
+    if (ckc_strbuf_init(&sb, 4096) != 0) {
+        ckc_ll_fail(L, CKC_ERR_OOM, "out buffer");
+    }
+    ckc_ll_finalize(L, &sb);
+    if (sb.oom) {
+        ckc_strbuf_free(&sb);
+        ckc_ll_fail(L, CKC_ERR_OOM, "finalize OOM");
+    }
+    char *text = ckc_strbuf_detach(&sb);
+    if (text == NULL) {
+        /* empty builder -> hand back an empty heap string */
+        text = (char*)malloc(1);
+        if (text == NULL) {
+            ckc_ll_fail(L, CKC_ERR_OOM, "detach");
+        }
+        text[0] = '\0';
+    }
+    *out_text = text;
+}
+
+static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t *kernel,
+                                                    ckc_llvm_flavor_t flavor,
+                                                    const char *arch,
+                                                    char **out_text,
+                                                    char *err, size_t err_cap) {
     if (out_text) {
         *out_text = NULL;
     }
@@ -1100,83 +1139,29 @@ ckc_status_t ckc_lower_kernel_to_llvm_ex(const ckc_kernel_def_t *kernel,
     ckc_vec_init(&L.smem_names);
     ckc_vec_init(&L.yield_stack);
 
-    /* WS3 C++ build: declared before the first `goto fail` so the jump does not
-     * cross its initialization (C++ forbids that; C99 allowed it). Value and
-     * use are unchanged. */
-    ckc_status_t bst = CKC_OK;
-
-    /* Resolve flavor. */
-    L.flavor = (flavor == CKC_LLVM_FLAVOR_AUTO) ? ll_resolve_flavor() : flavor;
-    if (L.flavor != CKC_LLVM_FLAVOR_LLVM20 &&
-        L.flavor != CKC_LLVM_FLAVOR_LLVM22) {
-        ckc_ll_fail(&L, CKC_ERR_VALUE, "unknown LLVM flavor");
-        goto fail;
-    }
-
-    /* Resolve ISA backend. */
-    L.backend = ckc_ll_backend_for(arch, &bst);
-    if (L.backend == NULL || bst != CKC_OK) {
-        ckc_ll_fail(&L, bst != CKC_OK ? bst : CKC_ERR_KEY,
-                    "unknown arch backend %s", arch ? arch : "(null)");
-        goto fail;
-    }
-    /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
-     * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
-     * LLVM22. backend_for installs the LLVM20 form by default; rebind the
-     * resolved backend's datalayout to the form for the resolved flavor.
-     * L.backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
-     * does not mutate the canonical per-arch descriptors. */
-    LL_BACKEND_RESOLVED.datalayout = ckc_ll_datalayout_for_flavor(L.flavor);
-
-    /* Entry block. */
-    if (ll_make_block(&L, "entry") == NULL) {
-        goto fail;
-    }
-
-    /* Pre-pass + lowering. */
-    ckc_ll_collect_smem(&L, kernel->body);
-    ckc_ll_lower_region(&L, kernel->body);
-
-    if (!ckc_ll_live(&L)) {
-        goto fail;
-    }
-
-    {
-        ckc_strbuf_t sb;
-        if (ckc_strbuf_init(&sb, 4096) != 0) {
-            ckc_ll_fail(&L, CKC_ERR_OOM, "out buffer");
-            goto fail;
-        }
-        ckc_ll_finalize(&L, &sb);
-        if (sb.oom || !ckc_ll_live(&L)) {
-            ckc_strbuf_free(&sb);
-            goto fail;
-        }
-        char *text = ckc_strbuf_detach(&sb);
-        if (text == NULL) {
-            /* empty builder -> hand back an empty heap string */
-            text = (char*)malloc(1);
-            if (text) {
-                text[0] = '\0';
-            } else {
-                ckc_ll_fail(&L, CKC_ERR_OOM, "detach");
-                goto fail;
-            }
-        }
-        *out_text = text;
+    /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
+     * arena is always destroyed, then translate it into the legacy status code +
+     * caller `err` buffer (keeping the extern "C" ABI unchanged). */
+    try {
+        ll_lower_into(&L, kernel, flavor, arch, out_text);
         ckc_arena_destroy(&L.arena);
         return CKC_OK;
-    }
-
-fail:
-    if (err && err_cap > 0 && L.err) {
-        snprintf(err, err_cap, "%s", L.err);
-    }
-    {
-        ckc_status_t st = (L.status != CKC_OK) ? L.status : CKC_ERR_VALUE;
+    } catch (const ckc::Error &e) {
+        if (err && err_cap > 0) {
+            snprintf(err, err_cap, "%s", e.what());
+        }
         ckc_arena_destroy(&L.arena);
-        return st;
+        return e.code();
     }
+}
+
+ckc_status_t ckc_lower_kernel_to_llvm_ex(const ckc_kernel_def_t *kernel,
+                                         ckc_llvm_flavor_t flavor,
+                                         const char *arch,
+                                         char **out_text,
+                                         char *err, size_t err_cap) {
+    return ll_lower_kernel_to_llvm_ex_impl(kernel, flavor, arch, out_text,
+                                           err, err_cap);
 }
 
 ckc_status_t ckc_lower_kernel_to_llvm(const ckc_kernel_def_t *kernel,

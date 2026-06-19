@@ -29,7 +29,20 @@ extern "C" {
  * pointer. `fmt` is printf-style; the message is copied into builder->err
  * (truncated to CKC_ERR_MSG_CAP). If the builder is already failed, the
  * existing status/message are preserved. Always returns NULL. */
+#if defined(__cplusplus)
+[[noreturn]]
+#endif
 void* ckc_i_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...);
+
+/* Translate a thrown ckc::Error (already caught at a public entry boundary) into
+ * the builder's sticky status + err message, then return NULL. This is the
+ * boundary shim used by the extern "C" entry points: internal code throws a
+ * ckc::Error where the Python reference would `raise`, the entry point catches
+ * it and funnels it here so the C ABI (status code + builder->err) is unchanged.
+ * `code` and `msg` are taken from the caught exception. Unlike ckc_i_set_err
+ * this records the message even if the builder is already in an error state
+ * (the throw is the authoritative failure). Always returns NULL. */
+void* ckc_i_set_err_msg(ckc_ir_builder_t* b, ckc_status_t code, const char* msg);
 
 /* True if the builder is in the OK state (status == CKC_OK). Inline-able fast
  * path that every builder entry point calls first; a failed builder makes all

@@ -215,12 +215,15 @@ typedef struct ckc_lower
 /* Error model                                                            */
 /* ====================================================================== */
 
-/* Set the lowerer's sticky error (first failure wins) and return `st`. printf
- * style. Mirrors Python raising; downstream handlers see status != CKC_OK and
- * become no-ops. */
-ckc_status_t ckc_ll_fail(ckc_lower_t* L, ckc_status_t st, const char* fmt, ...);
+/* Raise the lowering failure as a ckc::Error (mirroring the Python `raise`),
+ * printf style. [[noreturn]]: it never returns -- the throw unwinds to the
+ * lowerer boundary (ckc_lower_kernel_to_llvm), which translates it back into the
+ * legacy status code + caller `err` buffer, so the extern "C" ABI is unchanged.
+ * Any statement following a ckc_ll_fail() call is therefore unreachable. */
+[[noreturn]] void ckc_ll_fail(ckc_lower_t* L, ckc_status_t st, const char* fmt, ...);
 
-/* True if the lowerer is still OK. */
+/* True if the lowerer is usable (non-null). The lowerer no longer carries a
+ * sticky error -- a failure raises instead -- so this is just a null guard. */
 bool ckc_ll_live(const ckc_lower_t* L);
 
 /* ====================================================================== */

@@ -45,6 +45,7 @@
 #include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h" /* ckc__mfma_32x32_c_* */
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h"                   /* binary_search_seq_idx */
 #include "ckc/helper_ck_dsl.helpers.spec.h"                               /* ckc_kernel_name_join  */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 #include <math.h>
 #include <stdio.h>
@@ -82,6 +83,17 @@ static void ckc_g950_set_err(char* err, size_t err_cap, const char* m)
 static void ckc_g950_reason(char* reason, size_t reason_cap, const char* m)
 {
     ckc_g950_set_err(reason, reason_cap, m);
+}
+
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary (ckc::guard_builder in the build entry) catches it and records
+ * status + message on the builder, so the extern "C" ABI is unchanged.
+ * [[noreturn]] keeps the existing `...; return false/NULL;` call sites valid --
+ * the trailing return is simply never reached. */
+[[noreturn]] static void ckc_g950_fail(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+{
+    (void)b;
+    ckc::raise_status(st, msg ? msg : "");
 }
 
 /* ===================================================================== *
@@ -186,12 +198,8 @@ static bool ckc_g950_require_tiled_attention_arch(ckc_ir_builder_t* b, const cha
     char reason[320];
     if (ckc_g950_validate_tiled_attention_arch(arch, reason, sizeof(reason)))
         return true;
-    if (b)
-    {
-        b->status = CKC_ERR_NOTIMPL;
-        CKC_ERR_SNPRINTF(b->err, CKC_ERR_MSG_CAP, "%s", reason);
-    }
-    return false;
+    /* raise NotImplementedError(reason) -- caught at the public entry boundary. */
+    ckc_g950_fail(b, CKC_ERR_NOTIMPL, reason);
 }
 
 /* ===================================================================== *
@@ -387,9 +395,7 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     /* ---- dtype gate (Py750) ---- */
     if (!(ckc_g950_streq(spec->dtype, "fp16") || ckc_g950_streq(spec->dtype, "bf16")))
     {
-        b->status = CKC_ERR_NOTIMPL;
-        snprintf(b->err, CKC_ERR_MSG_CAP, "tiled 2D kernel supports fp16/bf16");
-        return false;
+        ckc_g950_fail(b, CKC_ERR_NOTIMPL, "tiled 2D kernel supports fp16/bf16");
     }
     const ckc_type_t* dtype = ckc_attention_tiled_2d_spec_dtype_ir(spec);
     ctx->dtype              = dtype;
@@ -402,40 +408,30 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     {
         if (spec->use_mfma_32x32)
         {
-            b->status = CKC_ERR_VALUE;
-            snprintf(b->err, CKC_ERR_MSG_CAP,
-                     "use_register_pv currently targets the existing 16x16x32 path; "
-                     "the 32x32 path has a separate register-P migration");
-            return false;
+            ckc_g950_fail(b, CKC_ERR_VALUE,
+                          "use_register_pv currently targets the existing 16x16x32 path; "
+                          "the 32x32 path has a separate register-P migration");
         }
         if (!ckc_g950_streq(spec->dtype, "bf16"))
         {
-            b->status = CKC_ERR_VALUE;
-            snprintf(b->err, CKC_ERR_MSG_CAP,
-                     "use_register_pv v1 is restricted to dtype='bf16'");
-            return false;
+            ckc_g950_fail(b, CKC_ERR_VALUE,
+                          "use_register_pv v1 is restricted to dtype='bf16'");
         }
         if (spec->kv_storage_dtype != NULL)
         {
-            b->status = CKC_ERR_VALUE;
-            snprintf(b->err, CKC_ERR_MSG_CAP,
-                     "use_register_pv v1 does not support fp8 K/V cache");
-            return false;
+            ckc_g950_fail(b, CKC_ERR_VALUE,
+                          "use_register_pv v1 does not support fp8 K/V cache");
         }
         if (spec->use_sinks || spec->sliding_window > 0 || spec->has_softcap)
         {
-            b->status = CKC_ERR_VALUE;
-            snprintf(b->err, CKC_ERR_MSG_CAP,
-                     "use_register_pv v1 requires no sinks, no sliding window, "
-                     "and no softcap");
-            return false;
+            ckc_g950_fail(b, CKC_ERR_VALUE,
+                          "use_register_pv v1 requires no sinks, no sliding window, "
+                          "and no softcap");
         }
         if (spec->use_alibi || spec->use_qq_bias)
         {
-            b->status = CKC_ERR_VALUE;
-            snprintf(b->err, CKC_ERR_MSG_CAP,
-                     "use_register_pv v1 does not support ALiBi or QQ bias");
-            return false;
+            ckc_g950_fail(b, CKC_ERR_VALUE,
+                          "use_register_pv v1 does not support ALiBi or QQ bias");
         }
     }
 
@@ -563,8 +559,11 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
         if (spec->has_waves_per_eu)
             ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
-        if (spec->use_agpr_alloc_zero)
-            ckc_attr_set_int(b, &b->kernel->attrs, "agpr_alloc", 0); /* (0, 0) */
+        if (spec->use_agpr_alloc_zero) {
+            /* (0, 0) -- serialized as the bare-int list l:[ i:0, i:0 ] */
+            const int64_t agpr_zero[2] = {0, 0};
+            ckc_attr_set_int_list(b, &b->kernel->attrs, "agpr_alloc", agpr_zero, 2);
+        }
     }
 
     /* ---- parameter declarations (Py850-889) ---- */
@@ -792,6 +791,10 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
 ckc_kernel_def_t* ckc_gfx950_build_unified_attention_2d_tiled(
     ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch)
 {
+    /* Boundary: catch any reject raised by the prologue (ckc_g950_fail ->
+     * ckc::raise_status) and record it on the builder as status + message,
+     * returning nullptr -- the legacy non-throwing contract for this entry. */
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
     ckc_gfx950_attn2d_build_ctx_t ctx;
     ckc_kernel_def_t* kernel;
 
@@ -868,6 +871,7 @@ ckc_kernel_def_t* ckc_gfx950_build_unified_attention_2d_tiled(
     kernel = ckc_gfx950_attn2d_emit_epilogue(&ctx);
 
     return ckc_ir_builder_ok(b) ? kernel : NULL;
+    });
 }
 
 /* ===================================================================== *

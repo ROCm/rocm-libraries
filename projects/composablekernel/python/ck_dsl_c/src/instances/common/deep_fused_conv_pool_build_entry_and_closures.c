@@ -44,6 +44,7 @@
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  * PEER PORT FORWARD DECLARATIONS (opaque; see file banner)
@@ -871,22 +872,25 @@ ckc_kernel_def_t* ckc_build_deep_fused_conv_pool_new(
     const ckc_deep_fused_conv_pool_spec_t* spec,
     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_deep_fused_conv_pool_spec_kernel_name(spec, name, sizeof(name)) !=
-        CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_deep_fused_conv_pool(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_deep_fused_conv_pool_spec_kernel_name(spec, name, sizeof(name)) !=
+            CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_deep_fused_conv_pool(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

@@ -51,6 +51,7 @@
 #include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom */
 #include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE     */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  SageQuantMode helpers
@@ -486,21 +487,24 @@ ckc_kernel_def_t* ckc_build_sage_attention_new(ckc_fmha_kernel_builder_t* kb,
                                                const ckc_sage_attention_spec_t* spec,
                                                const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(ckc_fmha_kernel_builder_builder(kb), [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (kb == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_sage_attention_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_fmha_kernel_builder_init(kb, name, &spec->common) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_sage_attention(kb, spec, arch);
+        if (kb == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_sage_attention_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_fmha_kernel_builder_init(kb, name, &spec->common) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_sage_attention(kb, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

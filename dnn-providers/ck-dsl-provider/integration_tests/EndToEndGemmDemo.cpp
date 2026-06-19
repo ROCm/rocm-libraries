@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
     std::mt19937 rng(0xC0FFEE);
     std::uniform_real_distribution<float> d(-4.f, 4.f);
     std::vector<fp16> A_h((size_t)M * K), Bstd((size_t)K * N), Bbuf((size_t)N * K),
-        C_h((size_t)M * N, fp16(0));
+        C_h((size_t)M * N, fp16(0.f));
     for (auto& x : A_h) x = (fp16)std::round(d(rng));
     for (auto& x : Bstd) x = (fp16)std::round(d(rng));
     // RCR device buffer: Bbuf[n*K+k] = Bstd[k*N+n]  (so kernel's B[N,K] read == Bstd^T)

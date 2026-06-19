@@ -69,15 +69,32 @@ class Kernel {
 
     // AOT hook (ICompilablePlan::compile): compile .ll -> HSACO if needed, then
     // load the module + resolve the entry function. Idempotent.
+    //
+    // Lifetime: on a partial failure (module loads but the entry symbol does not
+    // resolve) the freshly loaded module is unloaded before throwing, so a retry
+    // never leaks a dangling hipModule_t. Without this, a second ensure_compiled()
+    // would overwrite module_ and leak the first load.
     void ensure_compiled() {
         if (function_) return;
         if (hsaco_.empty()) {
             if (llvm_ir_.empty()) throw std::runtime_error("Kernel has neither HSACO nor LLVM IR");
             hsaco_ = Compiler::compile(llvm_ir_, isa_);
         }
+        // module_ may be non-null from a prior attempt that loaded the module but
+        // failed to resolve the function; unload it before reloading.
+        if (module_) {
+            (void)hipModuleUnload(module_);
+            module_ = nullptr;
+        }
         hip_check(hipModuleLoadData(&module_, hsaco_.data()), "hipModuleLoadData");
-        hip_check(hipModuleGetFunction(&function_, module_, manifest_.kernel_name.c_str()),
-                  "hipModuleGetFunction");
+        hipError_t fe = hipModuleGetFunction(&function_, module_, manifest_.kernel_name.c_str());
+        if (fe != hipSuccess) {
+            // Don't strand the module if the entry symbol is missing/misnamed.
+            (void)hipModuleUnload(module_);
+            module_ = nullptr;
+            function_ = nullptr;
+            hip_check(fe, "hipModuleGetFunction");
+        }
     }
     // Compile targeting a specific device's arch (path b), then load.
     void ensure_compiled(const hipDeviceProp_t& props) {
@@ -109,14 +126,33 @@ class Kernel {
 
     // Pack the kernarg buffer per args_signature, honoring AMDGPU kernarg
     // alignment (each arg aligned to its size; segment aligned to max member).
+    //
+    // Defensive against a malformed manifest signature: an arg width is validated
+    // to be one of the legal kernarg widths {1,2,4,8} before it is used both as
+    // the field size and the alignment. align_up's `& ~(a-1)` form is only valid
+    // for power-of-two `a`, and the scalar path memcpy's from a fixed 8-byte
+    // uint64_t source -- a width > 8 (or a non-power-of-two width) from a
+    // hand-edited / fuzzed manifest would otherwise corrupt alignment math and
+    // read past the source. We throw a clear error instead.
     std::vector<char> pack_args(
         const std::unordered_map<std::string, void*>& ptr_args,
         const std::unordered_map<std::string, uint64_t>& scalar_args) const {
+        auto arg_width = [](const ArgSpec& a) -> size_t {
+            size_t al = static_cast<size_t>(a.width());
+            // Pointers are always 8 (is_pointer() forces width()==8). Scalars must
+            // pack into the 8-byte uint64_t value source, so cap at 8, and the
+            // alignment must be a power of two for align_up to be correct.
+            bool pow2 = al != 0 && (al & (al - 1)) == 0;
+            if (!pow2 || al > 8)
+                throw std::runtime_error("kernarg '" + a.name + "': illegal width " +
+                                         std::to_string(al) + " (expected 1/2/4/8)");
+            return al;
+        };
         size_t off = 0, max_align = 1;
         // First pass: compute total size with alignment. width() derives the
         // byte width from the type when size_bytes is absent (attention).
         for (const auto& a : manifest_.args_signature) {
-            size_t al = static_cast<size_t>(a.width());
+            size_t al = arg_width(a);
             max_align = std::max(max_align, al);
             off = align_up(off, al) + al;
         }
@@ -124,8 +160,13 @@ class Kernel {
         std::vector<char> buf(total, 0);
         off = 0;
         for (const auto& a : manifest_.args_signature) {
-            size_t al = static_cast<size_t>(a.width());
+            size_t al = arg_width(a);
             off = align_up(off, al);
+            // Belt-and-suspenders: the two-pass sizing above guarantees this, but
+            // assert the write stays inside the buffer so a future signature/sizing
+            // divergence can never become an out-of-bounds store.
+            if (off + al > buf.size())
+                throw std::runtime_error("kernarg pack overflow for '" + a.name + "'");
             if (a.is_pointer()) {
                 auto it = ptr_args.find(a.name);
                 if (it == ptr_args.end())

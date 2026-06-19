@@ -24,6 +24,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.sweep.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* The tensor_view f32 / lds factory peers --
  * make_naive_tensor_view_packed, make_lds_view, TensorView.load_vec_as_f32 --
@@ -596,20 +597,22 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b,
 ckc_kernel_def_t* ckc_build_layernorm2d_new(ckc_ir_builder_t* b,
                                             const ckc_layernorm2d_spec_t* spec)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_layernorm2d_kernel_name(spec, name, sizeof name) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_layernorm2d(b, spec);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_layernorm2d_kernel_name(spec, name, sizeof name) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_layernorm2d(b, spec);
+    });
 }
 
 /* ------------------------------------------------------------------ *

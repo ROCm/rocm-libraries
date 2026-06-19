@@ -23,6 +23,7 @@
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M, body  */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ------------------------------------------------------------------ *
  * _FNUZ_FP8_TARGET_FAMILIES (Python frozenset({"gfx9_mfma"}))
@@ -497,21 +498,23 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_fp8_new(ckc_fmha_kernel_builder_t* kb,
                                              const ckc_fmha_fwd_fp8_spec_t* spec,
                                              const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(ckc_fmha_kernel_builder_builder(kb), [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (kb == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_fmha_fwd_fp8_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_fmha_kernel_builder_init(kb, name, &spec->common) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_fmha_fwd_fp8(kb, spec, arch);
+        if (kb == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_fmha_fwd_fp8_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_fmha_kernel_builder_init(kb, name, &spec->common) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_fmha_fwd_fp8(kb, spec, arch);
+    });
 }
 
 /* ------------------------------------------------------------------ *

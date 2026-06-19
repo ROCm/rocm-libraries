@@ -29,6 +29,7 @@
 #include "ckc/helper_ck_dsl.helpers.preshuffle.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* SignatureBuilder, ceil_div_grid */
 #include "ckc/ir_internal.h"                /* ckc_i_set_err (sticky-error parity) */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ---------------------------------------------------------------- helpers *
  * Small NUL-terminated copy into a fixed buffer (snprintf-free, matching the
@@ -332,57 +333,59 @@ ckc_kernel_def_t* ckc_build_flatmm(ckc_ir_builder_t* b,
                                    const ckc_flatmm_spec_t* spec,
                                    const char* arch)
 {
-    ckc_gemm_universal_spec_t u;
-    char reason[320];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gemm_universal_spec_t u;
+        char reason[320];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = "gfx950";
-    }
-
-    reason[0] = '\0';
-    if (!ckc_flatmm_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        /* invalid flatmm spec for {arch}: {why} -> record on the builder. */
-        char msg[480];
-        const char* p1 = "invalid flatmm spec for ";
-        const char* p2 = ": ";
-        size_t a = strlen(arch);
-        size_t r = strlen(reason);
-        size_t l1 = strlen(p1);
-        size_t l2 = strlen(p2);
-        size_t off = 0;
-        if (l1 + a + l2 + r < sizeof(msg))
+        if (b == NULL || spec == NULL)
         {
-            memcpy(msg + off, p1, l1);
-            off += l1;
-            memcpy(msg + off, arch, a);
-            off += a;
-            memcpy(msg + off, p2, l2);
-            off += l2;
-            memcpy(msg + off, reason, r);
-            off += r;
-            msg[off] = '\0';
+            return NULL;
         }
-        else
+        if (arch == NULL)
         {
-            ckc__copy_str(msg, sizeof(msg), "invalid flatmm spec");
+            arch = "gfx950";
         }
-        ckc_i_set_err(b, CKC_ERR_VALUE, "%s", msg);
-        return NULL;
-    }
 
-    if (ckc_flatmm_to_universal_spec(spec, &u) != CKC_OK)
-    {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "flatmm spec conversion failed");
-        return NULL;
-    }
+        reason[0] = '\0';
+        if (!ckc_flatmm_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            /* invalid flatmm spec for {arch}: {why} -> record on the builder. */
+            char msg[480];
+            const char* p1 = "invalid flatmm spec for ";
+            const char* p2 = ": ";
+            size_t a = strlen(arch);
+            size_t r = strlen(reason);
+            size_t l1 = strlen(p1);
+            size_t l2 = strlen(p2);
+            size_t off = 0;
+            if (l1 + a + l2 + r < sizeof(msg))
+            {
+                memcpy(msg + off, p1, l1);
+                off += l1;
+                memcpy(msg + off, arch, a);
+                off += a;
+                memcpy(msg + off, p2, l2);
+                off += l2;
+                memcpy(msg + off, reason, r);
+                off += r;
+                msg[off] = '\0';
+            }
+            else
+            {
+                ckc__copy_str(msg, sizeof(msg), "invalid flatmm spec");
+            }
+            ckc_i_set_err(b, CKC_ERR_VALUE, "%s", msg);
+            return NULL;
+        }
 
-    return ckc_build_universal_gemm(b, &u, arch);
+        if (ckc_flatmm_to_universal_spec(spec, &u) != CKC_OK)
+        {
+            ckc_i_set_err(b, CKC_ERR_VALUE, "flatmm spec conversion failed");
+            return NULL;
+        }
+
+        return ckc_build_universal_gemm(b, &u, arch);
+    });
 }
 
 /* ----------------------------------------------------------- build_flatmm_new *
@@ -391,20 +394,23 @@ ckc_kernel_def_t* ckc_build_flatmm_new(ckc_ir_builder_t* b,
                                        const ckc_flatmm_spec_t* spec,
                                        const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_flatmm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_flatmm(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_flatmm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_flatmm(b, spec, arch);
+
+    });
 }
 
 /* -------------------------------------------------------- lower_to_llvm *

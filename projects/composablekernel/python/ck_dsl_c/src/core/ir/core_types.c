@@ -304,6 +304,27 @@ void ckc_attr_set_bool(ckc_ir_builder_t *b, ckc_attr_map_t *m, const char *key,
     e->value.u.b = v;
 }
 
+void ckc_attr_set_int_list(ckc_ir_builder_t *b, ckc_attr_map_t *m,
+                           const char *key, const int64_t *vals, int count) {
+    ckc_attr_entry_t *e = ckc_attr_reserve(b, m, key);
+    if (!e)
+        return;
+    e->value.kind = CKC_ATTR_INT_LIST;
+    e->value.u.ilist.count = count;
+    e->value.u.ilist.ints = NULL;
+    if (count > 0) {
+        int64_t *arr = (int64_t *)ckc_arena_alloc(
+            &b->arena, (size_t)count * sizeof(int64_t));
+        if (!arr) {
+            ckc_i_set_err(b, CKC_ERR_OOM, "attr: OOM");
+            return;
+        }
+        if (vals)
+            memcpy(arr, vals, (size_t)count * sizeof(int64_t));
+        e->value.u.ilist.ints = arr;
+    }
+}
+
 const ckc_attr_value_t *ckc_attr_get(const ckc_attr_map_t *m, const char *key) {
     ckc_attr_entry_t *e = ckc_attr_find((ckc_attr_map_t *)m, key);
     return e ? &e->value : NULL;

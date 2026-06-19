@@ -20,6 +20,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"  /* ckc_kernel_name_join, SignatureBuilder */
 #include "ckc/instance_gemm_universal.h"      /* ckc_build_universal_gemm, kernel_name */
 #include "ckc/lower_llvm.h"                    /* ckc_lower_kernel_to_llvm_ex */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -30,17 +31,15 @@ static const char* ckc_abd_d_op_str(const ckc_gemm_multi_d_op_t* d)
     return (d != NULL && d->op_is_mul) ? "mul" : "add";
 }
 
-/* Set the builder's sticky error (first failure wins). No-op if already
- * failed. Matches the direct b->status / b->err pattern the other instance_*.c
- * files use. */
-static void ckc_abd_fail(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary (ckc::guard_builder in the *_new entry) catches it and records
+ * status + message on the builder, so the extern "C" ABI is unchanged.
+ * [[noreturn]] keeps the existing `ckc_abd_fail(...); return NULL;` call sites
+ * valid -- the trailing return is simply never reached. */
+[[noreturn]] static void ckc_abd_fail(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
 {
-    if (b == NULL || b->status != CKC_OK)
-    {
-        return;
-    }
-    b->status = st;
-    CKC_ERR_SNPRINTF(b->err, CKC_ERR_MSG_CAP, "%s", msg ? msg : "");
+    (void)b;
+    ckc::raise_status(st, msg ? msg : "");
 }
 
 /* ------------------------------------------------------------------ defaults */
@@ -493,20 +492,23 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd_new(ckc_ir_builder_t* b,
                                                const ckc_gemm_multi_abd_spec_t* spec,
                                                const char* arch)
 {
-    char name[512];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_gemm_multi_abd_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_gemm_multi_abd(b, arena, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[512];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_gemm_multi_abd_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_gemm_multi_abd(b, arena, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

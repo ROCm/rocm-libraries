@@ -120,7 +120,6 @@ static void _op_arith_sitofp_f32(ckc_lower_t *L, const ckc_op_t *op)
         ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                     "arith.sitofp_f32 supports i32 input only, got %s",
                     (v->type && v->type->name) ? v->type->name : "<null>");
-        return;
     }
     ckc_ll_emitf(L, "  %s = sitofp i32 %s to float",
                  ckc_ll_result_name(op), ckc_ll_operand(L, v));

@@ -30,6 +30,7 @@
 #include "ckc/instance_fused_moe_internal.h"
 
 #include <string.h>
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* arch NULL-normalisation mirrors the Python `_resolve_launch_arch` fallback at
  * IR level: the MoE streaming kernels emit no MFMA, so "gfx950" is the
@@ -224,76 +225,91 @@ ckc_kernel_def_t* ckc_build_moe_gather_new(ckc_ir_builder_t* b,
                                            const ckc_fused_moe_spec_t* spec,
                                            const char* arch)
 {
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_init_named(b, spec, "gather") != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_gather(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_init_named(b, spec, "gather") != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_gather(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_silu_mul_new(ckc_ir_builder_t* b,
                                              const ckc_fused_moe_spec_t* spec,
                                              const char* arch)
 {
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_init_named(b, spec, "silu_mul") != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_silu_mul(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_init_named(b, spec, "silu_mul") != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_silu_mul(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_silu_mul_packed_new(ckc_ir_builder_t* b,
                                                     const ckc_fused_moe_spec_t* spec,
                                                     const char* arch)
 {
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_init_named(b, spec, "silu_mul_packed") != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_silu_mul_packed(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_init_named(b, spec, "silu_mul_packed") != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_silu_mul_packed(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_static_scatter_gather_new(ckc_ir_builder_t* b,
                                                           const ckc_fused_moe_spec_t* spec,
                                                           const char* arch)
 {
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_init_named(b, spec, "static_scatter_gather") != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_static_scatter_gather(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_init_named(b, spec, "static_scatter_gather") != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_static_scatter_gather(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_topk_weighted_reduce_new(ckc_ir_builder_t* b,
                                                          const ckc_fused_moe_spec_t* spec,
                                                          const char* arch)
 {
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    /* Python build_moe_topk_weighted_reduce uses the "reduce" phase tag. */
-    if (ckc_moe_init_named(b, spec, "reduce") != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_topk_weighted_reduce(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        /* Python build_moe_topk_weighted_reduce uses the "reduce" phase tag. */
+        if (ckc_moe_init_named(b, spec, "reduce") != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_topk_weighted_reduce(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

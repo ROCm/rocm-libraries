@@ -42,6 +42,7 @@
 #include <string.h>
 
 #include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
+#include "ckc/error.hpp"
 #include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
 
@@ -49,12 +50,14 @@
 
 /* Latch the first Python ValueError/NotImplementedError onto the sticky-error
  * IRBuilder, mirroring the peer buckets' error model. */
-static void ckc_q_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary catches it and records status + message on the builder, so the
+ * C ABI is unchanged. [[noreturn]] keeps the existing call sites' trailing
+ * return valid -- it is simply never reached. */
+[[noreturn]] static void ckc_q_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
 {
-    if (b == NULL || b->status != CKC_OK)
-        return;
-    snprintf(b->err, (size_t)CKC_ERR_MSG_CAP, "%s", msg);
-    b->status = st;
+    (void)b;
+    ckc::raise_status(st, msg ? msg : "");
 }
 
 /* neg_inf / one_f / rcp_ln2 SSA constants (Python 1132-1135). Created ONCE in

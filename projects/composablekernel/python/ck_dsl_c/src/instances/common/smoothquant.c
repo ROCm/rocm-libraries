@@ -31,6 +31,7 @@
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* --------------------------------------------------------------- locals */
 
@@ -642,451 +643,456 @@ ckc_kernel_def_t* ckc_build_smoothquant(ckc_ir_builder_t* b,
                                         const ckc_smoothquant_spec_t* spec,
                                         const char* arch)
 {
-    char reason[256];
-    const ckc_type_t* io_ty;
-    const ckc_type_t* q_ty;
-    double qmax;
-    int BS, VEC, N, EPT;
-    const char* out_canon;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char reason[256];
+        const ckc_type_t* io_ty;
+        const ckc_type_t* q_ty;
+        double qmax;
+        int BS, VEC, N, EPT;
+        const char* out_canon;
 
-    ckc_value_t* X;
-    ckc_value_t* SmScale;
-    ckc_value_t* QY;
-    ckc_value_t* YScale = NULL;
-    ckc_value_t* eps;
-    ckc_value_t* tid;
-    ckc_value_t* row;
+        ckc_value_t* X;
+        ckc_value_t* SmScale;
+        ckc_value_t* QY;
+        ckc_value_t* YScale = NULL;
+        ckc_value_t* eps;
+        ckc_value_t* tid;
+        ckc_value_t* row;
 
-    ckc_tensor_view_t x_view;
-    ckc_tensor_view_t qy_view;
-    ckc_tensor_view_t sm_view;
-    ckc_tile_window_t x_tile;
-    ckc_tile_window_t qy_tile;
-    ckc_value_t* lds;
+        ckc_tensor_view_t x_view;
+        ckc_tensor_view_t qy_view;
+        ckc_tensor_view_t sm_view;
+        ckc_tile_window_t x_tile;
+        ckc_tile_window_t qy_tile;
+        ckc_value_t* lds;
 
-    ckc_tile_distribution_t* x_dist;
-    ckc_value_t** cached = NULL; /* per-thread f32 X cache (k*VEC + i)   */
-    int num_cached;
+        ckc_tile_distribution_t* x_dist;
+        ckc_value_t** cached = NULL; /* per-thread f32 X cache (k*VEC + i)   */
+        int num_cached;
 
-    ckc_value_t* s_amax;
-    ckc_value_t* total_amax;
-    ckc_value_t* safe_amax;
-    ckc_value_t* yscale;
-    ckc_value_t* inv_yscale;
+        ckc_value_t* s_amax;
+        ckc_value_t* total_amax;
+        ckc_value_t* safe_amax;
+        ckc_value_t* yscale;
+        ckc_value_t* inv_yscale;
 
-    int chunks_p1, chunks, k, i;
-    ckc_value_t* c_vec;
+        int chunks_p1, chunks, k, i;
+        ckc_value_t* c_vec;
 
-    if (b == NULL)
-    {
-        return NULL;
-    }
-    if (b->status != CKC_OK)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = CKC_SMOOTHQUANT_DEFAULT_ARCH;
-    }
-
-    if (!ckc_smoothquant_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        return (ckc_kernel_def_t*)ckc_i_set_err(
-            b, CKC_ERR_VALUE, "invalid smoothquant spec: %s", reason);
-    }
-
-    io_ty = ckc_b_io_ir_type(b, spec->dtype);
-    q_ty = ckc_b_quant_ir_type(b, spec->out_dtype);
-    if (io_ty == NULL || q_ty == NULL)
-    {
-        return NULL;
-    }
-    out_canon = ckc_sq_canon_out(spec->out_dtype);
-    qmax = ckc_sq_quant_max_abs(out_canon);
-
-    BS = spec->block_size;
-    VEC = spec->vec;
-    N = spec->n_per_block;
-    EPT = ckc_smoothquant_elems_per_thread(spec);
-
-    /* b.kernel.attrs["max_workgroup_size"] = BS */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
-
-    /* --- params --- */
-    {
-        ckc_param_opts_t opts;
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;
-        opts.noalias_set = true;
-        opts.readonly = true;
-        opts.readonly_set = true;
-        opts.align = 16;
-        opts.align_set = true;
-        X = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;
-        opts.noalias_set = true;
-        opts.readonly = true;
-        opts.readonly_set = true;
-        opts.align = 16;
-        opts.align_set = true;
-        SmScale = ckc_b_param(b, "SmScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;
-        opts.noalias_set = true;
-        opts.writeonly = true;
-        opts.writeonly_set = true;
-        opts.align = 16;
-        opts.align_set = true;
-        QY = ckc_b_param(b, "QY", ckc_ptr_type(b, q_ty, "global"), &opts);
-
-        if (spec->save_yscale)
+        if (b == NULL)
         {
+            return NULL;
+        }
+        if (b->status != CKC_OK)
+        {
+            return NULL;
+        }
+        if (arch == NULL)
+        {
+            arch = CKC_SMOOTHQUANT_DEFAULT_ARCH;
+        }
+
+        if (!ckc_smoothquant_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            return (ckc_kernel_def_t*)ckc_i_set_err(
+                b, CKC_ERR_VALUE, "invalid smoothquant spec: %s", reason);
+        }
+
+        io_ty = ckc_b_io_ir_type(b, spec->dtype);
+        q_ty = ckc_b_quant_ir_type(b, spec->out_dtype);
+        if (io_ty == NULL || q_ty == NULL)
+        {
+            return NULL;
+        }
+        out_canon = ckc_sq_canon_out(spec->out_dtype);
+        qmax = ckc_sq_quant_max_abs(out_canon);
+
+        BS = spec->block_size;
+        VEC = spec->vec;
+        N = spec->n_per_block;
+        EPT = ckc_smoothquant_elems_per_thread(spec);
+
+        /* b.kernel.attrs["max_workgroup_size"] = BS */
+        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
+
+        /* --- params --- */
+        {
+            ckc_param_opts_t opts;
+
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
+            opts.readonly_set = true;
+            opts.align = 16;
+            opts.align_set = true;
+            X = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
+
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
+            opts.readonly_set = true;
+            opts.align = 16;
+            opts.align_set = true;
+            SmScale = ckc_b_param(b, "SmScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+
             memset(&opts, 0, sizeof(opts));
             opts.noalias = true;
             opts.noalias_set = true;
             opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align = 4;
+            opts.align = 16;
             opts.align_set = true;
-            YScale = ckc_b_param(b, "YScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
-        }
+            QY = ckc_b_param(b, "QY", ckc_ptr_type(b, q_ty, "global"), &opts);
 
-        (void)ckc_b_param(b, "M", ckc_i32(), NULL);
-        (void)ckc_b_param(b, "N", ckc_i32(), NULL);
-        eps = ckc_b_param(b, "eps", ckc_f32(), NULL);
-    }
-
-    tid = ckc_b_thread_id_x(b);
-    row = ckc_b_block_id_x(b);
-
-    /* --- views & tile windows --- */
-    if (ckc_sq_make_packed_view(&x_view, X, N, io_ty) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_sq_make_packed_view(&qy_view, QY, N, q_ty) != CKC_OK)
-    {
-        return NULL;
-    }
-    {
-        int sm_shape[1];
-        sm_shape[0] = N;
-        if (ckc_make_global_view(&sm_view, SmScale, sm_shape, 1, ckc_f32(), NULL) != CKC_OK)
-        {
-            return NULL;
-        }
-    }
-    {
-        int lengths[2];
-        ckc_value_t* x_origin[2];
-        ckc_value_t* qy_origin[2];
-        lengths[0] = 1;
-        lengths[1] = N;
-        x_origin[0] = row;
-        x_origin[1] = ckc_b_const_i32(b, 0);
-        if (ckc_make_tile_window(&x_tile, &x_view, lengths, x_origin, 2) != CKC_OK)
-        {
-            return NULL;
-        }
-        qy_origin[0] = row;
-        qy_origin[1] = ckc_b_const_i32(b, 0);
-        if (ckc_make_tile_window(&qy_tile, &qy_view, lengths, qy_origin, 2) != CKC_OK)
-        {
-            return NULL;
-        }
-    }
-
-    /* LDS scratch for the block-wide amax reduction (block_size f32 words).
-     *
-     * STUB(port): make_lds_view(...).base is not yet ported; the smoothquant
-     * use only needs a block_size f32 LDS token, which ckc_b_smem_alloc
-     * provides directly. */
-    {
-        int lds_shape[1];
-        lds_shape[0] = BS;
-        lds = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_amax");
-        if (lds == NULL)
-        {
-            return NULL;
-        }
-    }
-
-    /* --- pass 1: load X through the row distribution, fold the amax --- */
-    x_dist = ckc_sq_make_row_x_distribution(b, BS, VEC, EPT);
-    if (x_dist == NULL)
-    {
-        return NULL;
-    }
-
-    /* x_dt = load_tile(b, x_tile, distribution=x_dist, ps=[[tid]])
-     *
-     * Faithful load_tile: traits pick vector_dim_y=2 / scalar_per_vector=VEC;
-     * iterate_accesses yields y_base=(0,k,0) row-major (the snake fold is a
-     * no-op since the only non-vector outer axis with len>1 is Y1, whose
-     * parity gate sums the always-zero Y0). For each access calculate_x emits
-     * the n_off reconstruction, then load_vec_as_f32 promotes the f16/bf16
-     * lanes to f32. The scalars land in the StaticDistributedTensor storage at
-     * y_to_linear((0,k,j)) = k*VEC + j -- the same cache layout pass 1/2 use. */
-    {
-        const ckc_tile_distribution_encoding_t* enc = x_dist->encoding;
-        int vec_dim_y, spv, num_acc, acc;
-        ckc_static_distributed_tensor_t* x_dt =
-            ckc_make_static_distributed_tensor(b, x_dist, io_ty);
-        if (x_dt == NULL)
-        {
-            return NULL;
-        }
-        num_cached = x_dt->num_storage;
-        cached = x_dt->storage;
-        spv = ckc_sq_pick_traits(enc, &vec_dim_y);
-        num_acc = num_cached / (spv > 0 ? spv : 1);
-
-        for (acc = 0; acc < num_acc; ++acc)
-        {
-            int y_base[3];
-            ckc_value_t* ys[3];
-            ckc_value_t* p0[1];
-            ckc_value_t* const* ps[1];
-            int ps_counts[1];
-            ckc_value_t* x_coords[2];
-            ckc_value_t* xs[CKC_SQ_MAX_VEC];
-            int yy, j;
-            /* non-vector axis is Y1 (chunk index k = acc); Y0 (M) is len 1. */
-            y_base[0] = 0;
-            y_base[1] = acc;
-            y_base[2] = 0;
-            for (yy = 0; yy < enc->num_Y; ++yy)
+            if (spec->save_yscale)
             {
-                ys[yy] = ckc_b_const_i32(b, y_base[yy]);
+                memset(&opts, 0, sizeof(opts));
+                opts.noalias = true;
+                opts.noalias_set = true;
+                opts.writeonly = true;
+                opts.writeonly_set = true;
+                opts.align = 4;
+                opts.align_set = true;
+                YScale = ckc_b_param(b, "YScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
             }
-            p0[0] = tid;
-            ps[0] = p0;
-            ps_counts[0] = 1;
-            if (!ckc_tile_distribution_calculate_x(b, x_dist, ys, enc->num_Y,
-                                                   ps, ps_counts, 1, x_coords, 2))
+
+            (void)ckc_b_param(b, "M", ckc_i32(), NULL);
+            (void)ckc_b_param(b, "N", ckc_i32(), NULL);
+            eps = ckc_b_param(b, "eps", ckc_f32(), NULL);
+        }
+
+        tid = ckc_b_thread_id_x(b);
+        row = ckc_b_block_id_x(b);
+
+        /* --- views & tile windows --- */
+        if (ckc_sq_make_packed_view(&x_view, X, N, io_ty) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_sq_make_packed_view(&qy_view, QY, N, q_ty) != CKC_OK)
+        {
+            return NULL;
+        }
+        {
+            int sm_shape[1];
+            sm_shape[0] = N;
+            if (ckc_make_global_view(&sm_view, SmScale, sm_shape, 1, ckc_f32(), NULL) != CKC_OK)
             {
                 return NULL;
             }
-            ckc_tile_window_load_vec_as_f32(b, &x_tile, x_coords, 2, spv, xs);
-            for (j = 0; j < spv; ++j)
+        }
+        {
+            int lengths[2];
+            ckc_value_t* x_origin[2];
+            ckc_value_t* qy_origin[2];
+            lengths[0] = 1;
+            lengths[1] = N;
+            x_origin[0] = row;
+            x_origin[1] = ckc_b_const_i32(b, 0);
+            if (ckc_make_tile_window(&x_tile, &x_view, lengths, x_origin, 2) != CKC_OK)
             {
-                int y_full[3];
-                y_full[0] = y_base[0];
-                y_full[1] = y_base[1];
-                y_full[2] = y_base[2];
-                y_full[vec_dim_y] = j;
-                cached[ckc_sq_y_to_linear(enc, y_full)] = xs[j];
+                return NULL;
+            }
+            qy_origin[0] = row;
+            qy_origin[1] = ckc_b_const_i32(b, 0);
+            if (ckc_make_tile_window(&qy_tile, &qy_view, lengths, qy_origin, 2) != CKC_OK)
+            {
+                return NULL;
             }
         }
-    }
 
-    chunks_p1 = EPT / VEC;
-
-    /* s_amax = b.const_f32(0.0); per chunk fold the |y|=fmax(y,-y) tree.
-     * Python emits s_amax (f32 0.0) BEFORE the pass-1 VEC const (c_vec_p1),
-     * so build s_amax first to match the constant-emission order. */
-    s_amax = ckc_b_const_f32(b, 0.0);
-    c_vec = ckc_b_const_i32(b, VEC);
-    for (k = 0; k < chunks_p1; ++k)
-    {
-        /* n_off = b.add(b.mul(const(k*BS), VEC), b.mul(tid, VEC)).
-         * Sequence the two muls explicitly: Python evaluates the const-mul
-         * before the tid-mul, and C arg-eval order is unspecified. */
-        ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
-        ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
-        ckc_value_t* n_off = ckc_b_add(b, km, tm);
-        ckc_value_t* sm_idx[1];
-        ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
-        ckc_value_t* abs_ys[CKC_SQ_MAX_VEC];
-        ckc_value_t* tf_scratch[CKC_SQ_MAX_VEC];
-        ckc_value_t* chunk_amax;
-
-        sm_idx[0] = n_off;
-        ckc_sq_view_load_vec_as_f32(b, &sm_view, sm_idx, 1, VEC, sm_scalars);
-        for (i = 0; i < VEC; ++i)
+        /* LDS scratch for the block-wide amax reduction (block_size f32 words).
+         *
+         * STUB(port): make_lds_view(...).base is not yet ported; the smoothquant
+         * use only needs a block_size f32 LDS token, which ckc_b_smem_alloc
+         * provides directly. */
         {
-            ckc_value_t* y = ckc_b_fmul(b, cached[k * VEC + i], sm_scalars[i]);
-            abs_ys[i] = ckc_b_fmax(b, y, ckc_b_fneg(b, y));
+            int lds_shape[1];
+            lds_shape[0] = BS;
+            lds = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_amax");
+            if (lds == NULL)
+            {
+                return NULL;
+            }
         }
-        chunk_amax = ckc_sq_tree_fmax(b, abs_ys, VEC, tf_scratch);
-        s_amax = ckc_b_fmax(b, s_amax, chunk_amax);
-    }
 
-    /* total_amax = block_lds_reduce(b, s_amax, lds, tid, block_size=BS, "max") */
-    total_amax = ckc_block_lds_reduce(b, s_amax, lds, tid, BS, CKC_REDUCE_MAX);
-    if (total_amax == NULL)
-    {
-        return NULL;
-    }
-
-    /* yscale = max(amax, eps) / quant_max; inv_yscale = 1 / yscale. */
-    safe_amax = ckc_b_fmax(b, total_amax, eps);
-    yscale = ckc_b_fmul(b, safe_amax, ckc_b_const_f32(b, 1.0 / qmax));
-    inv_yscale = ckc_b_rcp(b, yscale);
-
-    if (spec->save_yscale)
-    {
-        /* with b.scf_if(b.cmp_eq(tid, 0)): b.global_store(YScale, row, yscale, 4) */
-        ckc_if_t gate = ckc_b_scf_if(b, ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0)));
-        ckc_b_region_enter(b, gate.then_region);
-        ckc_b_global_store(b, YScale, row, yscale, 4);
-        ckc_b_region_leave(b);
-    }
-
-    /* --- pass 2: re-load SmScale, fuse multiply + quantise + store --- */
-    chunks = EPT / VEC;
-    c_vec = ckc_b_const_i32(b, VEC);
-
-    if (VEC == 4 || VEC == 8)
-    {
-        /* use_packed_store path: build a QY distribution identical to X, fill a
-         * StaticDistributedTensor of dtype q_ty with the already-scaled f32
-         * chunk values (the SmScale reload uses the same n_off addressing as
-         * pass 1, NOT the distribution), then store_tile applies the
-         * saturating cvt + vec_pack + one coalesced global_store_vN per
-         * access. Faithful inline port of distribution.py store_tile. */
-        ckc_tile_distribution_t* qy_dist =
-            ckc_sq_make_row_x_distribution(b, BS, VEC, EPT);
-        ckc_static_distributed_tensor_t* qy_dt;
-        const ckc_tile_distribution_encoding_t* enc;
-        int vec_dim_y, spv, num_acc, acc;
-        const char* qname = out_canon;
-        if (qy_dist == NULL)
+        /* --- pass 1: load X through the row distribution, fold the amax --- */
+        x_dist = ckc_sq_make_row_x_distribution(b, BS, VEC, EPT);
+        if (x_dist == NULL)
         {
             return NULL;
         }
-        qy_dt = ckc_make_static_distributed_tensor(b, qy_dist, q_ty);
-        if (qy_dt == NULL)
+
+        /* x_dt = load_tile(b, x_tile, distribution=x_dist, ps=[[tid]])
+         *
+         * Faithful load_tile: traits pick vector_dim_y=2 / scalar_per_vector=VEC;
+         * iterate_accesses yields y_base=(0,k,0) row-major (the snake fold is a
+         * no-op since the only non-vector outer axis with len>1 is Y1, whose
+         * parity gate sums the always-zero Y0). For each access calculate_x emits
+         * the n_off reconstruction, then load_vec_as_f32 promotes the f16/bf16
+         * lanes to f32. The scalars land in the StaticDistributedTensor storage at
+         * y_to_linear((0,k,j)) = k*VEC + j -- the same cache layout pass 1/2 use. */
         {
-            return NULL;
+            const ckc_tile_distribution_encoding_t* enc = x_dist->encoding;
+            int vec_dim_y, spv, num_acc, acc;
+            ckc_static_distributed_tensor_t* x_dt =
+                ckc_make_static_distributed_tensor(b, x_dist, io_ty);
+            if (x_dt == NULL)
+            {
+                return NULL;
+            }
+            num_cached = x_dt->num_storage;
+            cached = x_dt->storage;
+            spv = ckc_sq_pick_traits(enc, &vec_dim_y);
+            num_acc = num_cached / (spv > 0 ? spv : 1);
+
+            for (acc = 0; acc < num_acc; ++acc)
+            {
+                int y_base[3];
+                ckc_value_t* ys[3];
+                ckc_value_t* p0[1];
+                ckc_value_t* const* ps[1];
+                int ps_counts[1];
+                ckc_value_t* x_coords[2];
+                ckc_value_t* xs[CKC_SQ_MAX_VEC];
+                int yy, j;
+                /* non-vector axis is Y1 (chunk index k = acc); Y0 (M) is len 1. */
+                y_base[0] = 0;
+                y_base[1] = acc;
+                y_base[2] = 0;
+                for (yy = 0; yy < enc->num_Y; ++yy)
+                {
+                    ys[yy] = ckc_b_const_i32(b, y_base[yy]);
+                }
+                p0[0] = tid;
+                ps[0] = p0;
+                ps_counts[0] = 1;
+                if (!ckc_tile_distribution_calculate_x(b, x_dist, ys, enc->num_Y,
+                                                       ps, ps_counts, 1, x_coords, 2))
+                {
+                    return NULL;
+                }
+                ckc_tile_window_load_vec_as_f32(b, &x_tile, x_coords, 2, spv, xs);
+                for (j = 0; j < spv; ++j)
+                {
+                    int y_full[3];
+                    y_full[0] = y_base[0];
+                    y_full[1] = y_base[1];
+                    y_full[2] = y_base[2];
+                    y_full[vec_dim_y] = j;
+                    cached[ckc_sq_y_to_linear(enc, y_full)] = xs[j];
+                }
+            }
         }
-        enc = qy_dist->encoding;
-        for (k = 0; k < chunks; ++k)
+
+        chunks_p1 = EPT / VEC;
+
+        /* s_amax = b.const_f32(0.0); per chunk fold the |y|=fmax(y,-y) tree.
+         * Python emits s_amax (f32 0.0) BEFORE the pass-1 VEC const (c_vec_p1),
+         * so build s_amax first to match the constant-emission order. */
+        s_amax = ckc_b_const_f32(b, 0.0);
+        c_vec = ckc_b_const_i32(b, VEC);
+        for (k = 0; k < chunks_p1; ++k)
         {
-            /* n_off: const-mul before tid-mul (Python order). */
+            /* n_off = b.add(b.mul(const(k*BS), VEC), b.mul(tid, VEC)).
+             * Sequence the two muls explicitly: Python evaluates the const-mul
+             * before the tid-mul, and C arg-eval order is unspecified. */
             ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
             ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
             ckc_value_t* n_off = ckc_b_add(b, km, tm);
             ckc_value_t* sm_idx[1];
             ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
+            ckc_value_t* abs_ys[CKC_SQ_MAX_VEC];
+            ckc_value_t* tf_scratch[CKC_SQ_MAX_VEC];
+            ckc_value_t* chunk_amax;
+
             sm_idx[0] = n_off;
             ckc_sq_view_load_vec_as_f32(b, &sm_view, sm_idx, 1, VEC, sm_scalars);
             for (i = 0; i < VEC; ++i)
             {
-                ckc_value_t* x_f32 = cached[k * VEC + i];
-                ckc_value_t* y_f32 = ckc_b_fmul(b, x_f32, sm_scalars[i]);
-                int y_full[3];
-                y_full[0] = 0;
-                y_full[1] = k;
-                y_full[2] = i;
-                /* qy_dt.set([0, k, i], y_f32 * inv_yscale) */
-                qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)] =
-                    ckc_b_fmul(b, y_f32, inv_yscale);
+                ckc_value_t* y = ckc_b_fmul(b, cached[k * VEC + i], sm_scalars[i]);
+                abs_ys[i] = ckc_b_fmax(b, y, ckc_b_fneg(b, y));
             }
+            chunk_amax = ckc_sq_tree_fmax(b, abs_ys, VEC, tf_scratch);
+            s_amax = ckc_b_fmax(b, s_amax, chunk_amax);
         }
 
-        /* store_tile(b, qy_tile, qy_dt, ps=[[tid]]): quant dtype path. */
-        spv = ckc_sq_pick_traits(enc, &vec_dim_y);
-        num_acc = qy_dt->num_storage / (spv > 0 ? spv : 1);
-        for (acc = 0; acc < num_acc; ++acc)
+        /* total_amax = block_lds_reduce(b, s_amax, lds, tid, block_size=BS, "max") */
+        total_amax = ckc_block_lds_reduce(b, s_amax, lds, tid, BS, CKC_REDUCE_MAX);
+        if (total_amax == NULL)
         {
-            int y_base[3];
-            ckc_value_t* ys[3];
-            ckc_value_t* p0[1];
-            ckc_value_t* const* ps[1];
-            int ps_counts[1];
-            ckc_value_t* x_coords[2];
-            ckc_value_t* scalars[CKC_SQ_MAX_VEC];
-            ckc_value_t* packed;
-            int yy, j;
-            y_base[0] = 0;
-            y_base[1] = acc;
-            y_base[2] = 0;
-            for (yy = 0; yy < enc->num_Y; ++yy)
-            {
-                ys[yy] = ckc_b_const_i32(b, y_base[yy]);
-            }
-            p0[0] = tid;
-            ps[0] = p0;
-            ps_counts[0] = 1;
-            if (!ckc_tile_distribution_calculate_x(b, qy_dist, ys, enc->num_Y,
-                                                   ps, ps_counts, 1, x_coords, 2))
+            return NULL;
+        }
+
+        /* yscale = max(amax, eps) / quant_max; inv_yscale = 1 / yscale. */
+        safe_amax = ckc_b_fmax(b, total_amax, eps);
+        yscale = ckc_b_fmul(b, safe_amax, ckc_b_const_f32(b, 1.0 / qmax));
+        inv_yscale = ckc_b_rcp(b, yscale);
+
+        if (spec->save_yscale)
+        {
+            /* with b.scf_if(b.cmp_eq(tid, 0)): b.global_store(YScale, row, yscale, 4) */
+            ckc_if_t gate = ckc_b_scf_if(b, ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0)));
+            ckc_b_region_enter(b, gate.then_region);
+            ckc_b_global_store(b, YScale, row, yscale, 4);
+            ckc_b_region_leave(b);
+        }
+
+        /* --- pass 2: re-load SmScale, fuse multiply + quantise + store --- */
+        chunks = EPT / VEC;
+        c_vec = ckc_b_const_i32(b, VEC);
+
+        if (VEC == 4 || VEC == 8)
+        {
+            /* use_packed_store path: build a QY distribution identical to X, fill a
+             * StaticDistributedTensor of dtype q_ty with the already-scaled f32
+             * chunk values (the SmScale reload uses the same n_off addressing as
+             * pass 1, NOT the distribution), then store_tile applies the
+             * saturating cvt + vec_pack + one coalesced global_store_vN per
+             * access. Faithful inline port of distribution.py store_tile. */
+            ckc_tile_distribution_t* qy_dist =
+                ckc_sq_make_row_x_distribution(b, BS, VEC, EPT);
+            ckc_static_distributed_tensor_t* qy_dt;
+            const ckc_tile_distribution_encoding_t* enc;
+            int vec_dim_y, spv, num_acc, acc;
+            const char* qname = out_canon;
+            if (qy_dist == NULL)
             {
                 return NULL;
             }
-            for (j = 0; j < spv; ++j)
+            qy_dt = ckc_make_static_distributed_tensor(b, qy_dist, q_ty);
+            if (qy_dt == NULL)
             {
-                int y_full[3];
-                y_full[0] = y_base[0];
-                y_full[1] = y_base[1];
-                y_full[2] = y_base[2];
-                y_full[vec_dim_y] = j;
-                scalars[j] = qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)];
+                return NULL;
             }
-            packed = ckc_sq_pack_quant_local(b, scalars, spv, q_ty, qname);
-            ckc_tile_window_store_vec(b, &qy_tile, x_coords, 2, packed, spv);
-        }
-    }
-    else
-    {
-        /* VEC == 2: per-element scalar quant + store fallback. */
-        for (k = 0; k < chunks; ++k)
-        {
-            /* n_off: const-mul before tid-mul (Python order). */
-            ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
-            ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
-            ckc_value_t* n_off = ckc_b_add(b, km, tm);
-            ckc_value_t* sm_idx[1];
-            ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
-            sm_idx[0] = n_off;
-            ckc_sq_view_load_vec_as_f32(b, &sm_view, sm_idx, 1, VEC, sm_scalars);
-            for (i = 0; i < VEC; ++i)
+            enc = qy_dist->encoding;
+            for (k = 0; k < chunks; ++k)
             {
-                ckc_value_t* x_f32 = cached[k * VEC + i];
-                ckc_value_t* y_f32 = ckc_b_fmul(b, x_f32, sm_scalars[i]);
-                ckc_value_t* q =
-                    ckc_sq_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype);
-                ckc_value_t* col = ckc_b_add(b, n_off, ckc_b_const_i32(b, i));
-                ckc_value_t* local_idx[2];
-                local_idx[0] = ckc_b_const_i32(b, 0);
-                local_idx[1] = col;
-                /* qy_tile.store_scalar(b, 0, col, value=q) */
-                ckc_tile_window_store_scalar(b, &qy_tile, local_idx, 2, q, 0);
+                /* n_off: const-mul before tid-mul (Python order). */
+                ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
+                ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
+                ckc_value_t* n_off = ckc_b_add(b, km, tm);
+                ckc_value_t* sm_idx[1];
+                ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
+                sm_idx[0] = n_off;
+                ckc_sq_view_load_vec_as_f32(b, &sm_view, sm_idx, 1, VEC, sm_scalars);
+                for (i = 0; i < VEC; ++i)
+                {
+                    ckc_value_t* x_f32 = cached[k * VEC + i];
+                    ckc_value_t* y_f32 = ckc_b_fmul(b, x_f32, sm_scalars[i]);
+                    int y_full[3];
+                    y_full[0] = 0;
+                    y_full[1] = k;
+                    y_full[2] = i;
+                    /* qy_dt.set([0, k, i], y_f32 * inv_yscale) */
+                    qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)] =
+                        ckc_b_fmul(b, y_f32, inv_yscale);
+                }
             }
-        }
-    }
 
-    if (b->status != CKC_OK)
-    {
-        return NULL;
-    }
-    return b->kernel;
+            /* store_tile(b, qy_tile, qy_dt, ps=[[tid]]): quant dtype path. */
+            spv = ckc_sq_pick_traits(enc, &vec_dim_y);
+            num_acc = qy_dt->num_storage / (spv > 0 ? spv : 1);
+            for (acc = 0; acc < num_acc; ++acc)
+            {
+                int y_base[3];
+                ckc_value_t* ys[3];
+                ckc_value_t* p0[1];
+                ckc_value_t* const* ps[1];
+                int ps_counts[1];
+                ckc_value_t* x_coords[2];
+                ckc_value_t* scalars[CKC_SQ_MAX_VEC];
+                ckc_value_t* packed;
+                int yy, j;
+                y_base[0] = 0;
+                y_base[1] = acc;
+                y_base[2] = 0;
+                for (yy = 0; yy < enc->num_Y; ++yy)
+                {
+                    ys[yy] = ckc_b_const_i32(b, y_base[yy]);
+                }
+                p0[0] = tid;
+                ps[0] = p0;
+                ps_counts[0] = 1;
+                if (!ckc_tile_distribution_calculate_x(b, qy_dist, ys, enc->num_Y,
+                                                       ps, ps_counts, 1, x_coords, 2))
+                {
+                    return NULL;
+                }
+                for (j = 0; j < spv; ++j)
+                {
+                    int y_full[3];
+                    y_full[0] = y_base[0];
+                    y_full[1] = y_base[1];
+                    y_full[2] = y_base[2];
+                    y_full[vec_dim_y] = j;
+                    scalars[j] = qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)];
+                }
+                packed = ckc_sq_pack_quant_local(b, scalars, spv, q_ty, qname);
+                ckc_tile_window_store_vec(b, &qy_tile, x_coords, 2, packed, spv);
+            }
+        }
+        else
+        {
+            /* VEC == 2: per-element scalar quant + store fallback. */
+            for (k = 0; k < chunks; ++k)
+            {
+                /* n_off: const-mul before tid-mul (Python order). */
+                ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
+                ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
+                ckc_value_t* n_off = ckc_b_add(b, km, tm);
+                ckc_value_t* sm_idx[1];
+                ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
+                sm_idx[0] = n_off;
+                ckc_sq_view_load_vec_as_f32(b, &sm_view, sm_idx, 1, VEC, sm_scalars);
+                for (i = 0; i < VEC; ++i)
+                {
+                    ckc_value_t* x_f32 = cached[k * VEC + i];
+                    ckc_value_t* y_f32 = ckc_b_fmul(b, x_f32, sm_scalars[i]);
+                    ckc_value_t* q =
+                        ckc_sq_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype);
+                    ckc_value_t* col = ckc_b_add(b, n_off, ckc_b_const_i32(b, i));
+                    ckc_value_t* local_idx[2];
+                    local_idx[0] = ckc_b_const_i32(b, 0);
+                    local_idx[1] = col;
+                    /* qy_tile.store_scalar(b, 0, col, value=q) */
+                    ckc_tile_window_store_scalar(b, &qy_tile, local_idx, 2, q, 0);
+                }
+            }
+        }
+
+        if (b->status != CKC_OK)
+        {
+            return NULL;
+        }
+        return b->kernel;
+    });
 }
 
 ckc_kernel_def_t* ckc_build_smoothquant_new(ckc_ir_builder_t* b,
                                             const ckc_smoothquant_spec_t* spec,
                                             const char* arch)
 {
-    char name[CKC_SQ_NAME_CAP];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[CKC_SQ_NAME_CAP];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_smoothquant_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_smoothquant(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_smoothquant_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_smoothquant(b, spec, arch);
+
+    });
 }
 
 /* --------------------------------------------------------------- grid */

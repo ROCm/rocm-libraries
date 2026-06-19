@@ -20,28 +20,26 @@
 #include <string.h>
 
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h"
+#include "ckc/error.hpp"
 #include "ckc/ir.h"
 
 /* ----------------------------------------------------------------- helpers */
 
-/* Set the builder's sticky error (first failure wins) and return NULL. Mirrors
- * the private set-err but binds only to ckc/ir.h's public struct fields
- * (status + err). */
-static void* ckc_attn2_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary catches it and records status + message on the builder, so the
+ * C ABI is unchanged. [[noreturn]] keeps the existing
+ * `return (T*)ckc_attn2_set_err(...)` call sites valid -- the cast/return is
+ * simply never reached. */
+[[noreturn]] static void* ckc_attn2_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
-    if(b == NULL)
-    {
-        return NULL;
-    }
-    if(b->status == CKC_OK)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        vsnprintf(b->err, (size_t)CKC_ERR_MSG_CAP, fmt, ap);
-        va_end(ap);
-        b->status = st;
-    }
-    return NULL;
+    (void)b;
+    char msg[CKC_ERR_MSG_CAP];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    msg[sizeof(msg) - 1] = '\0';
+    ckc::raise_status(st, msg);
 }
 
 /* ------------------------------------------------------- softcap (log2-domain) */

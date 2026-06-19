@@ -7,23 +7,25 @@
  */
 
 #include "ckc/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
+#include "ckc/error.hpp"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
 
 #include <stdio.h>
 #include <string.h>
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ------------------------------------------------------------------ helpers */
 
 /* Record a Python ValueError text on the sticky-error builder. Mirrors the
  * idiom used by the rest of the attention port. A dead/NULL builder is a no-op. */
-static void ckc__fastkv_regp_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary catches it and records status + message on the builder, so the
+ * C ABI is unchanged. [[noreturn]] keeps the existing call sites' trailing
+ * return valid -- it is simply never reached. */
+[[noreturn]] static void ckc__fastkv_regp_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
 {
-    if (b == NULL)
-        return;
-    if (b->status != CKC_OK) /* sticky: keep the first failure */
-        return;
-    b->status = st;
-    snprintf(b->err, (size_t)CKC_ERR_MSG_CAP, "%s", msg ? msg : "");
+    (void)b;
+    ckc::raise_status(st, msg ? msg : "");
 }
 
 /* gfx950 UnifiedAttention2DTiledSpec.kernel_name() (ck_dsl/instances/gfx950/
@@ -271,72 +273,74 @@ bool ckc_gfx950_supports_fastkv_register_p_2d(
 ckc_kernel_def_t* ckc_build_unified_attention_2d_fastkv_register_p(
     ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch)
 {
-    ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t proxy;
-    ckc_attention_tiled_2d_spec_t built;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t proxy;
+        ckc_attention_tiled_2d_spec_t built;
 
-    if (b == NULL || spec == NULL)
-        return NULL;
-    if (b->status != CKC_OK) /* dead builder: no-op */
-        return NULL;
+        if (b == NULL || spec == NULL)
+            return NULL;
+        if (b->status != CKC_OK) /* dead builder: no-op */
+            return NULL;
 
-    /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
-    if (!spec->use_fast_paged_kv_desc)
-    {
-        ckc__fastkv_regp_set_err(
-            b, CKC_ERR_VALUE,
-            "fastKV register-P experiment requires use_fast_paged_kv_desc");
-        return NULL;
-    }
-    /* if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32): raise ... */
-    if (!(spec->use_mfma_32x32 && spec->use_transposed_qk_32x32))
-    {
-        ckc__fastkv_regp_set_err(b, CKC_ERR_VALUE,
-                                 "fastKV register-P experiment requires transposed R4");
-        return NULL;
-    }
-    /* if spec.kv_storage_dtype is not None: raise ValueError(...) */
-    if (spec->kv_storage_dtype != NULL)
-    {
-        ckc__fastkv_regp_set_err(
-            b, CKC_ERR_VALUE,
-            "fastKV register-P experiment does not support FP8 KV cache");
-        return NULL;
-    }
-
-    /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)
-     *
-     * The proxy forwards every attribute to the wrapped spec except the
-     * use_register_pv @property, which it forces True. The C tiled builder reads
-     * a plain spec struct, so apply the single proxy override (use_register_pv ->
-     * true) onto a copy and pass that through. ``arch`` NULL == Python "gfx950";
-     * the tiled builder defaults NULL to its own arch and threads it onward. */
-    proxy = ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(spec);
-    built = proxy.spec;
-    built.use_register_pv =
-        ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_use_register_pv(&proxy);
-
-    /* The proxy overrides kernel_name() -> "<wrapped.kernel_name()>_fastkv_regp"
-     * (Python _FastKvRegisterPProxy.kernel_name). The tiled builder names the
-     * kernel from b->kernel->name (set by the caller's ckc_ir_builder_init seed),
-     * so rename the builder's kernel to the proxy name BEFORE building -- the name
-     * flows into the @Klds/@Vlds globals and the kernel symbol. */
-    if (b->kernel != NULL)
-    {
-        char base[1024];
-        char full[1056];
-        /* base = self._spec.kernel_name() over the WRAPPED (original) spec, whose
-         * use_register_pv is the spec's own value (False) -- the proxy's True
-         * override is NOT reflected in the kernel name (Python proxy delegates
-         * kernel_name to the wrapped spec, then appends "_fastkv_regp"). Use the
-         * gfx950 part list, not the gfx942 ckc_attention_tiled_2d_spec_kernel_name. */
-        if (ckc__fastkv_gfx950_base_name(spec, base, sizeof(base)) == CKC_OK &&
-            ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_kernel_name(
-                base, full, sizeof(full), NULL) == CKC_OK)
+        /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
+        if (!spec->use_fast_paged_kv_desc)
         {
-            b->kernel->name = ckc_arena_strdup(&b->arena, full);
+            ckc__fastkv_regp_set_err(
+                b, CKC_ERR_VALUE,
+                "fastKV register-P experiment requires use_fast_paged_kv_desc");
+            return NULL;
         }
-    }
+        /* if not (spec.use_mfma_32x32 and spec.use_transposed_qk_32x32): raise ... */
+        if (!(spec->use_mfma_32x32 && spec->use_transposed_qk_32x32))
+        {
+            ckc__fastkv_regp_set_err(b, CKC_ERR_VALUE,
+                                     "fastKV register-P experiment requires transposed R4");
+            return NULL;
+        }
+        /* if spec.kv_storage_dtype is not None: raise ValueError(...) */
+        if (spec->kv_storage_dtype != NULL)
+        {
+            ckc__fastkv_regp_set_err(
+                b, CKC_ERR_VALUE,
+                "fastKV register-P experiment does not support FP8 KV cache");
+            return NULL;
+        }
 
-    return ckc_build_unified_attention_2d_tiled_scalar(
-        b, &built, (arch != NULL) ? arch : "gfx950");
+        /* return build_unified_attention_2d_tiled(_FastKvRegisterPProxy(spec), arch)
+         *
+         * The proxy forwards every attribute to the wrapped spec except the
+         * use_register_pv @property, which it forces True. The C tiled builder reads
+         * a plain spec struct, so apply the single proxy override (use_register_pv ->
+         * true) onto a copy and pass that through. ``arch`` NULL == Python "gfx950";
+         * the tiled builder defaults NULL to its own arch and threads it onward. */
+        proxy = ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(spec);
+        built = proxy.spec;
+        built.use_register_pv =
+            ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_use_register_pv(&proxy);
+
+        /* The proxy overrides kernel_name() -> "<wrapped.kernel_name()>_fastkv_regp"
+         * (Python _FastKvRegisterPProxy.kernel_name). The tiled builder names the
+         * kernel from b->kernel->name (set by the caller's ckc_ir_builder_init seed),
+         * so rename the builder's kernel to the proxy name BEFORE building -- the name
+         * flows into the @Klds/@Vlds globals and the kernel symbol. */
+        if (b->kernel != NULL)
+        {
+            char base[1024];
+            char full[1056];
+            /* base = self._spec.kernel_name() over the WRAPPED (original) spec, whose
+             * use_register_pv is the spec's own value (False) -- the proxy's True
+             * override is NOT reflected in the kernel name (Python proxy delegates
+             * kernel_name to the wrapped spec, then appends "_fastkv_regp"). Use the
+             * gfx950 part list, not the gfx942 ckc_attention_tiled_2d_spec_kernel_name. */
+            if (ckc__fastkv_gfx950_base_name(spec, base, sizeof(base)) == CKC_OK &&
+                ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_kernel_name(
+                    base, full, sizeof(full), NULL) == CKC_OK)
+            {
+                b->kernel->name = ckc_arena_strdup(&b->arena, full);
+            }
+        }
+
+        return ckc_build_unified_attention_2d_tiled_scalar(
+            b, &built, (arch != NULL) ? arch : "gfx950");
+    });
 }

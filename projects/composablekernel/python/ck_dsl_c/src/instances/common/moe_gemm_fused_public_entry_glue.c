@@ -50,6 +50,7 @@
 #include "ckc/instance_moe_gemm_fused_internal.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* SignatureBuilder / sig_entry */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  GATE+UP+SILU  BUILD ENTRY   (Python build_moe_gate_up_silu_gemm)
@@ -106,22 +107,25 @@ ckc_kernel_def_t* ckc_build_moe_gate_up_silu_gemm_new(
     const ckc_moe_gate_up_silu_gemm_spec_t* spec,
     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    /* b = IRBuilder(spec.kernel_name()) */
-    if (ckc_moe_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_gate_up_silu_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        /* b = IRBuilder(spec.kernel_name()) */
+        if (ckc_moe_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_gate_up_silu_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *
@@ -178,22 +182,25 @@ ckc_kernel_def_t* ckc_build_moe_interleaved_gate_up_silu_gemm_new(
     const ckc_moe_interleaved_gate_up_silu_gemm_spec_t* spec,
     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_interleaved_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name))
-        != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_interleaved_gate_up_silu_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_interleaved_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name))
+            != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_interleaved_gate_up_silu_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *
@@ -247,21 +254,24 @@ ckc_kernel_def_t* ckc_build_moe_down_reduce_gemm_new(
     const ckc_moe_down_reduce_gemm_spec_t* spec,
     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_down_reduce_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_down_reduce_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_down_reduce_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_down_reduce_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *
@@ -323,23 +333,26 @@ ckc_kernel_def_t* ckc_build_moe_down_silu_reduce_gemm_new(
     const ckc_moe_down_silu_reduce_gemm_spec_t* spec,
     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    /* b = IRBuilder(spec.kernel_name()); the build entry re-inits with the
-     * converted down-reduce name, matching the Python fresh-builder delegation. */
-    if (ckc_moe_down_silu_reduce_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_down_silu_reduce_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        /* b = IRBuilder(spec.kernel_name()); the build entry re-inits with the
+         * converted down-reduce name, matching the Python fresh-builder delegation. */
+        if (ckc_moe_down_silu_reduce_gemm_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_down_silu_reduce_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

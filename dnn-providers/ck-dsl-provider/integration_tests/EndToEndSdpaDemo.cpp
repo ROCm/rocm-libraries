@@ -61,18 +61,24 @@ int main(int argc, char** argv) {
         .set_name("ckdsl_sdpa");
     graph.set_preferred_engine_id_ext(std::string("CK_DSL_ATTENTION_ENGINE"));
 
-    // BSHD: dims [B,S,H,D], contiguous.
+    // hipDNN SDPA tensors are *logical* BHSD: dims [B,H,S,D]. The ck_dsl kernel is
+    // BSHD-native (S stored outside H), so we declare logical [B,H,S,D] dims but
+    // with *physical* BSHD strides (the H axis is contiguous-er than S): for Q the
+    // memory order is [b][s][h][d], i.e. stride(B)=S*H*D, stride(H)=D, stride(S)=
+    // H*D, stride(D)=1. The plugin's stride(S)>stride(H) detector then selects the
+    // BSHD-native kernel; host buffers below are filled in this same [b][s][h][d]
+    // order.
     auto Q = Graph::tensor(TensorAttributes()
-                               .set_dim({B, S, NQH, HD})
-                               .set_stride({S * NQH * HD, NQH * HD, HD, 1})
+                               .set_dim({B, NQH, S, HD})
+                               .set_stride({S * NQH * HD, HD, NQH * HD, 1})
                                .set_uid(1));
     auto K = Graph::tensor(TensorAttributes()
-                               .set_dim({B, S, NKVH, HD})
-                               .set_stride({S * NKVH * HD, NKVH * HD, HD, 1})
+                               .set_dim({B, NKVH, S, HD})
+                               .set_stride({S * NKVH * HD, HD, NKVH * HD, 1})
                                .set_uid(2));
     auto V = Graph::tensor(TensorAttributes()
-                               .set_dim({B, S, NKVH, HD})
-                               .set_stride({S * NKVH * HD, NKVH * HD, HD, 1})
+                               .set_dim({B, NKVH, S, HD})
+                               .set_stride({S * NKVH * HD, HD, NKVH * HD, 1})
                                .set_uid(3));
 
     SdpaAttributes attrs;
@@ -80,8 +86,8 @@ int main(int argc, char** argv) {
     attrs.causal_mask = true;
     auto [O, stats] = graph.sdpa(Q, K, V, std::move(attrs));
     O->set_output(true)
-        .set_dim({B, S, NQH, HD})
-        .set_stride({S * NQH * HD, NQH * HD, HD, 1})
+        .set_dim({B, NQH, S, HD})
+        .set_stride({S * NQH * HD, HD, NQH * HD, 1})
         .set_uid(4);
 
     FE_CHECK(graph.build(handle));
@@ -93,7 +99,7 @@ int main(int argc, char** argv) {
     std::mt19937 rng(123);
     std::normal_distribution<float> nd(0.f, 1.f);
     std::vector<fp16> Qh((size_t)S * NQH * HD), Kh((size_t)S * NKVH * HD),
-        Vh((size_t)S * NKVH * HD), Oh((size_t)S * NQH * HD, fp16(0));
+        Vh((size_t)S * NKVH * HD), Oh((size_t)S * NQH * HD, fp16(0.f));
     for (auto& x : Qh) x = (fp16)(nd(rng) * 0.5f);
     for (auto& x : Kh) x = (fp16)(nd(rng) * 0.5f);
     for (auto& x : Vh) x = (fp16)(nd(rng) * 0.5f);

@@ -32,6 +32,7 @@
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Lowered-symbol name
@@ -266,62 +267,64 @@ static void ckc_md_owner_register(ckc_kernel_def_t* kernel,
 ckc_kernel_def_t* ckc_build_gemm_multi_d(ckc_gemm_multi_d_spec_t* spec,
                                          const char* arch)
 {
-    ckc_ir_builder_t* b;
-    ckc_arena_t* arena;
-    ckc_kernel_def_t* kernel;
-    char name_buf[512];
+    return ckc::guard_builder((ckc_ir_builder_t*)nullptr, [&]() -> ckc_kernel_def_t* {
+        ckc_ir_builder_t* b;
+        ckc_arena_t* arena;
+        ckc_kernel_def_t* kernel;
+        char name_buf[512];
 
-    if (spec == NULL)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = "gfx950";
-    }
+        if (spec == NULL)
+        {
+            return NULL;
+        }
+        if (arch == NULL)
+        {
+            arch = "gfx950";
+        }
 
-    /* The builder must be created with base_renamed.kernel_name() (the universal
-     * build does not re-init it), matching the Python where build_universal_gemm
-     * lowers under the renamed base spec's kernel symbol. */
-    if (ckc_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
-    {
-        return NULL;
-    }
+        /* The builder must be created with base_renamed.kernel_name() (the universal
+         * build does not re-init it), matching the Python where build_universal_gemm
+         * lowers under the renamed base spec's kernel symbol. */
+        if (ckc_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
+        {
+            return NULL;
+        }
 
-    b = (ckc_ir_builder_t*)calloc(1, sizeof(*b));
-    arena = (ckc_arena_t*)calloc(1, sizeof(*arena));
-    if (b == NULL || arena == NULL)
-    {
-        free(b);
-        free(arena);
-        return NULL;
-    }
-    if (ckc_arena_init(arena, 0) != 0)
-    {
-        free(b);
-        free(arena);
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name_buf) != CKC_OK)
-    {
-        ckc_arena_destroy(arena);
-        free(b);
-        free(arena);
-        return NULL;
-    }
+        b = (ckc_ir_builder_t*)calloc(1, sizeof(*b));
+        arena = (ckc_arena_t*)calloc(1, sizeof(*arena));
+        if (b == NULL || arena == NULL)
+        {
+            free(b);
+            free(arena);
+            return NULL;
+        }
+        if (ckc_arena_init(arena, 0) != 0)
+        {
+            free(b);
+            free(arena);
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name_buf) != CKC_OK)
+        {
+            ckc_arena_destroy(arena);
+            free(b);
+            free(arena);
+            return NULL;
+        }
 
-    kernel = ckc_build_gemm_multi_d_into(b, arena, spec, arch);
-    if (kernel == NULL)
-    {
-        ckc_ir_builder_free(b);
-        ckc_arena_destroy(arena);
-        free(b);
-        free(arena);
-        return NULL;
-    }
+        kernel = ckc_build_gemm_multi_d_into(b, arena, spec, arch);
+        if (kernel == NULL)
+        {
+            ckc_ir_builder_free(b);
+            ckc_arena_destroy(arena);
+            free(b);
+            free(arena);
+            return NULL;
+        }
 
-    ckc_md_owner_register(kernel, b, arena);
-    return kernel;
+        ckc_md_owner_register(kernel, b, arena);
+        return kernel;
+    });
 }
 
 void ckc_gemm_multi_d_kernel_free(ckc_kernel_def_t* kernel)

@@ -21,6 +21,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* --------------------------------------------------------------------------- *
  * Local copies of the Python module-level constants (kept here so the validity
@@ -323,159 +324,161 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_mfma(ckc_ir_builder_t* b_unused,
                                           const ckc_fmha_mfma_spec_t* spec,
                                           const char* arch)
 {
-    /* NOTE: this instance owns its FmhaKernelBuilder (which embeds its own
-     * IRBuilder), matching the Python build that constructs the FmhaKernelBuilder
-     * internally. The `b_unused` parameter exists for signature parity with the
-     * documented CALL PATTERN / sibling entry points; the kernel returned is owned
-     * by the static-lifetime builder below. To keep the kernel alive past this
-     * call without an owning builder, callers should use the lower-to-llvm
-     * convenience (which owns its builder for the whole lower). */
-    (void)b_unused;
-    {
-        char name_buf[256];
-        ckc_fmha_common_spec_t common;
-        const ckc_archtarget_t* target;
-        int wave_size;
-        ckc_fmha_kernel_builder_t kb;
-        ckc_ir_builder_t* b;
-        ckc_value_t* seqlen_q;
-        ckc_value_t* seqlen_k;
-        ckc_value_t* head_idx;
-        ckc_value_t* kv_head_idx;
-        ckc_value_t* batch_idx;
-        ckc_value_t* q_tile_idx;
-        ckc_value_t* q_tile_local;
-        ckc_value_t* batch_row_q;
-        ckc_value_t* k_batch_offset;
-        ckc_value_t* v_batch_offset;
-        ckc_value_t* causal_ctx;
-        ckc_value_t* q_pos_base;
-        bool masked;
-        ckc_mfma_attn_params_t p;
-        ckc_status_t st;
-        ckc_kernel_def_t* kernel;
-
-        if (spec == NULL)
+    return ckc::guard_builder((ckc_ir_builder_t*)nullptr, [&]() -> ckc_kernel_def_t* {
+        /* NOTE: this instance owns its FmhaKernelBuilder (which embeds its own
+         * IRBuilder), matching the Python build that constructs the FmhaKernelBuilder
+         * internally. The `b_unused` parameter exists for signature parity with the
+         * documented CALL PATTERN / sibling entry points; the kernel returned is owned
+         * by the static-lifetime builder below. To keep the kernel alive past this
+         * call without an owning builder, callers should use the lower-to-llvm
+         * convenience (which owns its builder for the whole lower). */
+        (void)b_unused;
         {
-            return NULL;
+            char name_buf[256];
+            ckc_fmha_common_spec_t common;
+            const ckc_archtarget_t* target;
+            int wave_size;
+            ckc_fmha_kernel_builder_t kb;
+            ckc_ir_builder_t* b;
+            ckc_value_t* seqlen_q;
+            ckc_value_t* seqlen_k;
+            ckc_value_t* head_idx;
+            ckc_value_t* kv_head_idx;
+            ckc_value_t* batch_idx;
+            ckc_value_t* q_tile_idx;
+            ckc_value_t* q_tile_local;
+            ckc_value_t* batch_row_q;
+            ckc_value_t* k_batch_offset;
+            ckc_value_t* v_batch_offset;
+            ckc_value_t* causal_ctx;
+            ckc_value_t* q_pos_base;
+            bool masked;
+            ckc_mfma_attn_params_t p;
+            ckc_status_t st;
+            ckc_kernel_def_t* kernel;
+
+            if (spec == NULL)
+            {
+                return NULL;
+            }
+            if (arch == NULL)
+            {
+                arch = "gfx950";
+            }
+
+            /* 1. validity gate (Python raises ValueError on reject). */
+            if (!ckc_fmha_mfma_is_valid_spec(spec, arch, NULL, 0))
+            {
+                return NULL;
+            }
+
+            common = fmha_mfma_common(spec);
+
+            /* 2. wave_size from the target. */
+            target = ckc_archtarget_from_gfx(arch);
+            if (target == NULL)
+            {
+                return NULL;
+            }
+            wave_size = target->wave_size;
+
+            /* 3. FmhaKernelBuilder(spec.kernel_name(), common). */
+            if (ckc_fmha_mfma_kernel_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
+            {
+                return NULL;
+            }
+            st = ckc_fmha_kernel_builder_init(&kb, name_buf, &common);
+            if (st != CKC_OK)
+            {
+                return NULL;
+            }
+
+            ckc_fmha_kernel_builder_block_size(&kb, wave_size); /* one wave per CTA */
+            fmha_declare_params(&kb);
+            ckc_fmha_kernel_builder_decode_grid(&kb, /*num_queries_per_kv*/ -1,
+                                                /*has_batch_axis*/ true, NULL, NULL, NULL);
+
+            b = ckc_fmha_kernel_builder_builder(&kb);
+
+            seqlen_q = ckc_fmha_kernel_builder_scalar(&kb, "seqlen_q");
+            seqlen_k = ckc_fmha_kernel_builder_scalar(&kb, "seqlen_k");
+            head_idx = kb.head_idx;
+            kv_head_idx = kb.kv_head_idx;
+            batch_idx = kb.batch_idx;
+
+            /* 4. q_tile_idx (reuses block_id_x); q_tile_local = q_tile_idx * BLOCK_M. */
+            q_tile_idx = kb.q_token;
+            q_tile_local = ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M));
+
+            /* 5. per-batch shifts.
+             *   batch_row_q     = batch_idx * seqlen_q
+             *   k_batch_offset  = (batch_idx * seqlen_k) * stride_k_token
+             *   v_batch_offset  = (batch_idx * seqlen_k) * stride_v_token */
+            batch_row_q = ckc_b_mul(b, batch_idx, seqlen_q);
+            k_batch_offset = ckc_b_mul(
+                b, ckc_b_mul(b, batch_idx, seqlen_k),
+                ckc_fmha_kernel_builder_stride_token(&kb, "k"));
+            v_batch_offset = ckc_b_mul(
+                b, ckc_b_mul(b, batch_idx, seqlen_k),
+                ckc_fmha_kernel_builder_stride_token(&kb, "v"));
+
+            causal_ctx = ckc_b_const_i32(b, 0); /* self-attention: no cache offset */
+
+            /* 6. q_pos_base = q_tile_local if masked else None. */
+            masked = (common.mask_mode == CKC_FMHA_MASK_CAUSAL ||
+                      common.mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW);
+            q_pos_base = masked ? q_tile_local : NULL;
+
+            /* 7. mfma_attention_fwd_inner_body(...). */
+            memset(&p, 0, sizeof(p));
+            p.Q = ckc_fmha_kernel_builder_tensor(&kb, "Q");
+            p.K = ckc_fmha_kernel_builder_tensor(&kb, "K");
+            p.V = ckc_fmha_kernel_builder_tensor(&kb, "V");
+            p.O = ckc_fmha_kernel_builder_tensor(&kb, "O");
+            p.head_size = common.shape.head_size;
+            p.seqlen_k = seqlen_k;
+            /* q_tile_base = local Q row + per-batch row shift. */
+            p.q_tile_base = ckc_b_add(b, q_tile_local, batch_row_q);
+            p.q_pos_base = q_pos_base;
+            p.head_idx = head_idx;
+            p.kv_head_idx = kv_head_idx;
+            p.stride_q_token = ckc_fmha_kernel_builder_stride_token(&kb, "q");
+            p.stride_q_head = ckc_fmha_kernel_builder_stride_head(&kb, "q");
+            p.stride_k_token = ckc_fmha_kernel_builder_stride_token(&kb, "k");
+            p.stride_k_head = ckc_fmha_kernel_builder_stride_head(&kb, "k");
+            p.stride_v_token = ckc_fmha_kernel_builder_stride_token(&kb, "v");
+            p.stride_v_head = ckc_fmha_kernel_builder_stride_head(&kb, "v");
+            p.stride_o_token = ckc_fmha_kernel_builder_stride_token(&kb, "o");
+            p.stride_o_head = ckc_fmha_kernel_builder_stride_head(&kb, "o");
+            p.scale_log2 = ckc_fmha_kernel_builder_scalar(&kb, "scale_log2");
+            p.dtype = common.dtype;
+            p.mask_mode = fmha_to_attn_mask(common.mask_mode);
+            p.sliding_window = common.sliding_window;
+            p.causal_ctx_offset = causal_ctx;
+            p.k_token_offset_elems = k_batch_offset;
+            p.v_token_offset_elems = v_batch_offset;
+            p.arch = arch;
+
+            (void)ckc_mfma_attention_fwd_inner_body(b, &p);
+
+            /* b.ret() */
+            ckc_b_ret(b);
+
+            kernel = ckc_fmha_kernel_builder_kernel(&kb);
+            if (ckc_ir_builder_status(b) != CKC_OK)
+            {
+                ckc_fmha_kernel_builder_free(&kb);
+                return NULL;
+            }
+            /* The kernel is owned by kb's embedded IRBuilder. Callers that need it to
+             * outlive this call should use ckc_fmha_fwd_mfma_lower_to_llvm (which keeps
+             * the builder alive for the whole lower) or the verify/fix harness, which
+             * re-builds through the lower path. We intentionally do NOT free kb here so
+             * the returned pointer stays valid for an immediate same-scope lower; the
+             * harness owns the lifetime. */
+            return kernel;
         }
-        if (arch == NULL)
-        {
-            arch = "gfx950";
-        }
-
-        /* 1. validity gate (Python raises ValueError on reject). */
-        if (!ckc_fmha_mfma_is_valid_spec(spec, arch, NULL, 0))
-        {
-            return NULL;
-        }
-
-        common = fmha_mfma_common(spec);
-
-        /* 2. wave_size from the target. */
-        target = ckc_archtarget_from_gfx(arch);
-        if (target == NULL)
-        {
-            return NULL;
-        }
-        wave_size = target->wave_size;
-
-        /* 3. FmhaKernelBuilder(spec.kernel_name(), common). */
-        if (ckc_fmha_mfma_kernel_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
-        {
-            return NULL;
-        }
-        st = ckc_fmha_kernel_builder_init(&kb, name_buf, &common);
-        if (st != CKC_OK)
-        {
-            return NULL;
-        }
-
-        ckc_fmha_kernel_builder_block_size(&kb, wave_size); /* one wave per CTA */
-        fmha_declare_params(&kb);
-        ckc_fmha_kernel_builder_decode_grid(&kb, /*num_queries_per_kv*/ -1,
-                                            /*has_batch_axis*/ true, NULL, NULL, NULL);
-
-        b = ckc_fmha_kernel_builder_builder(&kb);
-
-        seqlen_q = ckc_fmha_kernel_builder_scalar(&kb, "seqlen_q");
-        seqlen_k = ckc_fmha_kernel_builder_scalar(&kb, "seqlen_k");
-        head_idx = kb.head_idx;
-        kv_head_idx = kb.kv_head_idx;
-        batch_idx = kb.batch_idx;
-
-        /* 4. q_tile_idx (reuses block_id_x); q_tile_local = q_tile_idx * BLOCK_M. */
-        q_tile_idx = kb.q_token;
-        q_tile_local = ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M));
-
-        /* 5. per-batch shifts.
-         *   batch_row_q     = batch_idx * seqlen_q
-         *   k_batch_offset  = (batch_idx * seqlen_k) * stride_k_token
-         *   v_batch_offset  = (batch_idx * seqlen_k) * stride_v_token */
-        batch_row_q = ckc_b_mul(b, batch_idx, seqlen_q);
-        k_batch_offset = ckc_b_mul(
-            b, ckc_b_mul(b, batch_idx, seqlen_k),
-            ckc_fmha_kernel_builder_stride_token(&kb, "k"));
-        v_batch_offset = ckc_b_mul(
-            b, ckc_b_mul(b, batch_idx, seqlen_k),
-            ckc_fmha_kernel_builder_stride_token(&kb, "v"));
-
-        causal_ctx = ckc_b_const_i32(b, 0); /* self-attention: no cache offset */
-
-        /* 6. q_pos_base = q_tile_local if masked else None. */
-        masked = (common.mask_mode == CKC_FMHA_MASK_CAUSAL ||
-                  common.mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW);
-        q_pos_base = masked ? q_tile_local : NULL;
-
-        /* 7. mfma_attention_fwd_inner_body(...). */
-        memset(&p, 0, sizeof(p));
-        p.Q = ckc_fmha_kernel_builder_tensor(&kb, "Q");
-        p.K = ckc_fmha_kernel_builder_tensor(&kb, "K");
-        p.V = ckc_fmha_kernel_builder_tensor(&kb, "V");
-        p.O = ckc_fmha_kernel_builder_tensor(&kb, "O");
-        p.head_size = common.shape.head_size;
-        p.seqlen_k = seqlen_k;
-        /* q_tile_base = local Q row + per-batch row shift. */
-        p.q_tile_base = ckc_b_add(b, q_tile_local, batch_row_q);
-        p.q_pos_base = q_pos_base;
-        p.head_idx = head_idx;
-        p.kv_head_idx = kv_head_idx;
-        p.stride_q_token = ckc_fmha_kernel_builder_stride_token(&kb, "q");
-        p.stride_q_head = ckc_fmha_kernel_builder_stride_head(&kb, "q");
-        p.stride_k_token = ckc_fmha_kernel_builder_stride_token(&kb, "k");
-        p.stride_k_head = ckc_fmha_kernel_builder_stride_head(&kb, "k");
-        p.stride_v_token = ckc_fmha_kernel_builder_stride_token(&kb, "v");
-        p.stride_v_head = ckc_fmha_kernel_builder_stride_head(&kb, "v");
-        p.stride_o_token = ckc_fmha_kernel_builder_stride_token(&kb, "o");
-        p.stride_o_head = ckc_fmha_kernel_builder_stride_head(&kb, "o");
-        p.scale_log2 = ckc_fmha_kernel_builder_scalar(&kb, "scale_log2");
-        p.dtype = common.dtype;
-        p.mask_mode = fmha_to_attn_mask(common.mask_mode);
-        p.sliding_window = common.sliding_window;
-        p.causal_ctx_offset = causal_ctx;
-        p.k_token_offset_elems = k_batch_offset;
-        p.v_token_offset_elems = v_batch_offset;
-        p.arch = arch;
-
-        (void)ckc_mfma_attention_fwd_inner_body(b, &p);
-
-        /* b.ret() */
-        ckc_b_ret(b);
-
-        kernel = ckc_fmha_kernel_builder_kernel(&kb);
-        if (ckc_ir_builder_status(b) != CKC_OK)
-        {
-            ckc_fmha_kernel_builder_free(&kb);
-            return NULL;
-        }
-        /* The kernel is owned by kb's embedded IRBuilder. Callers that need it to
-         * outlive this call should use ckc_fmha_fwd_mfma_lower_to_llvm (which keeps
-         * the builder alive for the whole lower) or the verify/fix harness, which
-         * re-builds through the lower path. We intentionally do NOT free kb here so
-         * the returned pointer stays valid for an immediate same-scope lower; the
-         * harness owns the lifetime. */
-        return kernel;
-    }
+    });
 }
 
 /* --------------------------------------------------------------------------- *

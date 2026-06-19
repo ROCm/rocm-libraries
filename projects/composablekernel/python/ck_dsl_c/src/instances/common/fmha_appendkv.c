@@ -32,6 +32,7 @@
 #include "ckc/helper_ck_dsl.helpers.rotary.h"                 /* rotary helpers     */
 #include "ckc/helper_ck_dsl.helpers.spec.h"                   /* ceil_div_grid, sig */
 #include "ckc/ir_internal.h"                                  /* ckc_i_set_err      */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* CK Tile's appendkv default policy reads 16 bytes at a time => _VEC = 8 for
  * f16 / bf16 (the same shape buffer_load_dwordx4 lowers to). */
@@ -493,141 +494,143 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv(ckc_ir_builder_t* b,
                                               const ckc_fmha_appendkv_spec_t* spec,
                                               const char* arch)
 {
-    int H;
-    int BS;
-    const char* dtype;
-    const ckc_type_t* ty;
-    char reason[200];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        int H;
+        int BS;
+        const char* dtype;
+        const ckc_type_t* ty;
+        char reason[200];
 
-    ckc_value_t* K_new;
-    ckc_value_t* V_new;
-    ckc_value_t* K_cache;
-    ckc_value_t* V_cache;
-    ckc_value_t* seqlen_kv;
-    ckc_value_t* cu_seqlens_new;
-    ckc_value_t* cos_table = NULL;
-    ckc_value_t* sin_table = NULL;
-    ckc_value_t* total_new_q;
-    ckc_value_t* batch_param;
-    ckc_value_t* stride_in_token;
-    ckc_value_t* stride_in_head;
-    ckc_value_t* stride_cache_token;
-    ckc_value_t* stride_cache_head;
+        ckc_value_t* K_new;
+        ckc_value_t* V_new;
+        ckc_value_t* K_cache;
+        ckc_value_t* V_cache;
+        ckc_value_t* seqlen_kv;
+        ckc_value_t* cu_seqlens_new;
+        ckc_value_t* cos_table = NULL;
+        ckc_value_t* sin_table = NULL;
+        ckc_value_t* total_new_q;
+        ckc_value_t* batch_param;
+        ckc_value_t* stride_in_token;
+        ckc_value_t* stride_in_head;
+        ckc_value_t* stride_cache_token;
+        ckc_value_t* stride_cache_head;
 
-    ckc_value_t* tid;
-    ckc_value_t* bid;
-    ckc_value_t* kv_head_idx;
-    ckc_value_t* new_token;
-    ckc_value_t* in_bounds;
+        ckc_value_t* tid;
+        ckc_value_t* bid;
+        ckc_value_t* kv_head_idx;
+        ckc_value_t* new_token;
+        ckc_value_t* in_bounds;
 
-    if (b == NULL || spec == NULL)
-    {
-        if (b != NULL)
+        if (b == NULL || spec == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "build_fmha_fwd_appendkv: null spec");
+            if (b != NULL)
+            {
+                ckc_i_set_err(b, CKC_ERR_VALUE, "build_fmha_fwd_appendkv: null spec");
+            }
+            return NULL;
         }
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = "gfx950";
-    }
-
-    /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError */
-    if (!ckc_fmha_appendkv_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "invalid fmha_appendkv spec: %s", reason);
-        return NULL;
-    }
-
-    H = spec->common.shape.head_size;
-    BS = spec->block_size;
-    dtype = spec->common.dtype;
-    ty = ckc_io_ir_type(dtype);
-
-    /* b = IRBuilder(spec.kernel_name())  -- caller already did this.
-     * b.kernel.attrs["max_workgroup_size"] = BS */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
-
-    /* K_new/V_new: ptr<ty,global>, noalias, readonly, align=16. */
-    {
-        ckc_param_opts_t opts;
-        const ckc_type_t* ptr_ty = ckc_ptr_type(b, ty, "global");
-        const ckc_type_t* ptr_i32 = ckc_ptr_type(b, ckc_i32(), "global");
-        const ckc_type_t* ptr_f32 = ckc_ptr_type(b, ckc_f32(), "global");
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;  opts.noalias_set = true;
-        opts.readonly = true; opts.readonly_set = true;
-        opts.align = 16;      opts.align_set = true;
-        K_new = ckc_b_param(b, "K_new", ptr_ty, &opts);
-        V_new = ckc_b_param(b, "V_new", ptr_ty, &opts);
-
-        /* K_cache/V_cache: ptr<ty,global>, noalias, align=16 (no readonly). */
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true; opts.noalias_set = true;
-        opts.align = 16;     opts.align_set = true;
-        K_cache = ckc_b_param(b, "K_cache", ptr_ty, &opts);
-        V_cache = ckc_b_param(b, "V_cache", ptr_ty, &opts);
-
-        /* seqlen_kv/cu_seqlens_new: ptr<i32,global>, noalias, readonly, align=4. */
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;  opts.noalias_set = true;
-        opts.readonly = true; opts.readonly_set = true;
-        opts.align = 4;       opts.align_set = true;
-        seqlen_kv = ckc_b_param(b, "seqlen_kv", ptr_i32, &opts);
-        cu_seqlens_new = ckc_b_param(b, "cu_seqlens_new", ptr_i32, &opts);
-
-        /* cos_table/sin_table (rotary only): ptr<f32,global>, readonly, align=4. */
-        if (spec->has_rotary)
+        if (arch == NULL)
         {
+            arch = "gfx950";
+        }
+
+        /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError */
+        if (!ckc_fmha_appendkv_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            ckc_i_set_err(b, CKC_ERR_VALUE, "invalid fmha_appendkv spec: %s", reason);
+            return NULL;
+        }
+
+        H = spec->common.shape.head_size;
+        BS = spec->block_size;
+        dtype = spec->common.dtype;
+        ty = ckc_io_ir_type(dtype);
+
+        /* b = IRBuilder(spec.kernel_name())  -- caller already did this.
+         * b.kernel.attrs["max_workgroup_size"] = BS */
+        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
+
+        /* K_new/V_new: ptr<ty,global>, noalias, readonly, align=16. */
+        {
+            ckc_param_opts_t opts;
+            const ckc_type_t* ptr_ty = ckc_ptr_type(b, ty, "global");
+            const ckc_type_t* ptr_i32 = ckc_ptr_type(b, ckc_i32(), "global");
+            const ckc_type_t* ptr_f32 = ckc_ptr_type(b, ckc_f32(), "global");
+
             memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;  opts.noalias_set = true;
+            opts.readonly = true; opts.readonly_set = true;
+            opts.align = 16;      opts.align_set = true;
+            K_new = ckc_b_param(b, "K_new", ptr_ty, &opts);
+            V_new = ckc_b_param(b, "V_new", ptr_ty, &opts);
+
+            /* K_cache/V_cache: ptr<ty,global>, noalias, align=16 (no readonly). */
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true; opts.noalias_set = true;
+            opts.align = 16;     opts.align_set = true;
+            K_cache = ckc_b_param(b, "K_cache", ptr_ty, &opts);
+            V_cache = ckc_b_param(b, "V_cache", ptr_ty, &opts);
+
+            /* seqlen_kv/cu_seqlens_new: ptr<i32,global>, noalias, readonly, align=4. */
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;  opts.noalias_set = true;
             opts.readonly = true; opts.readonly_set = true;
             opts.align = 4;       opts.align_set = true;
-            cos_table = ckc_b_param(b, "cos_table", ptr_f32, &opts);
-            sin_table = ckc_b_param(b, "sin_table", ptr_f32, &opts);
+            seqlen_kv = ckc_b_param(b, "seqlen_kv", ptr_i32, &opts);
+            cu_seqlens_new = ckc_b_param(b, "cu_seqlens_new", ptr_i32, &opts);
+
+            /* cos_table/sin_table (rotary only): ptr<f32,global>, readonly, align=4. */
+            if (spec->has_rotary)
+            {
+                memset(&opts, 0, sizeof(opts));
+                opts.readonly = true; opts.readonly_set = true;
+                opts.align = 4;       opts.align_set = true;
+                cos_table = ckc_b_param(b, "cos_table", ptr_f32, &opts);
+                sin_table = ckc_b_param(b, "sin_table", ptr_f32, &opts);
+            }
         }
-    }
 
-    /* total_new_q = b.param("total_new_q", I32)
-     * _batch = b.param("batch", I32)
-     * stride_in_token/head, stride_cache_token/head = b.param(..., I32) */
-    total_new_q = ckc_b_param(b, "total_new_q", ckc_i32(), NULL);
-    batch_param = ckc_b_param(b, "batch", ckc_i32(), NULL);
-    (void)batch_param; /* ABI-only, mirrors Python `_batch` */
-    stride_in_token = ckc_b_param(b, "stride_in_token", ckc_i32(), NULL);
-    stride_in_head = ckc_b_param(b, "stride_in_head", ckc_i32(), NULL);
-    stride_cache_token = ckc_b_param(b, "stride_cache_token", ckc_i32(), NULL);
-    stride_cache_head = ckc_b_param(b, "stride_cache_head", ckc_i32(), NULL);
+        /* total_new_q = b.param("total_new_q", I32)
+         * _batch = b.param("batch", I32)
+         * stride_in_token/head, stride_cache_token/head = b.param(..., I32) */
+        total_new_q = ckc_b_param(b, "total_new_q", ckc_i32(), NULL);
+        batch_param = ckc_b_param(b, "batch", ckc_i32(), NULL);
+        (void)batch_param; /* ABI-only, mirrors Python `_batch` */
+        stride_in_token = ckc_b_param(b, "stride_in_token", ckc_i32(), NULL);
+        stride_in_head = ckc_b_param(b, "stride_in_head", ckc_i32(), NULL);
+        stride_cache_token = ckc_b_param(b, "stride_cache_token", ckc_i32(), NULL);
+        stride_cache_head = ckc_b_param(b, "stride_cache_head", ckc_i32(), NULL);
 
-    /* tid = b.thread_id_x(); bid = b.block_id_x(); kv_head_idx = b.block_id_y()
-     * new_token = b.add(b.mul(bid, b.const_i32(BS)), tid) */
-    tid = ckc_b_thread_id_x(b);
-    bid = ckc_b_block_id_x(b);
-    kv_head_idx = ckc_b_block_id_y(b);
-    new_token = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, BS)), tid);
+        /* tid = b.thread_id_x(); bid = b.block_id_x(); kv_head_idx = b.block_id_y()
+         * new_token = b.add(b.mul(bid, b.const_i32(BS)), tid) */
+        tid = ckc_b_thread_id_x(b);
+        bid = ckc_b_block_id_x(b);
+        kv_head_idx = ckc_b_block_id_y(b);
+        new_token = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, BS)), tid);
 
-    /* in_bounds = b.cmp_lt(new_token, total_new_q)
-     * with b.scf_if(in_bounds): _appendkv_body(...) */
-    in_bounds = ckc_b_cmp_lt(b, new_token, total_new_q);
-    {
-        ckc_if_t gate = ckc_b_scf_if(b, in_bounds);
-        ckc_b_region_enter(b, gate.then_region);
-        ckc_appendkv_body(b, spec, H, dtype, new_token, kv_head_idx, K_new, V_new,
-                          K_cache, V_cache, seqlen_kv, cu_seqlens_new, cos_table,
-                          sin_table, stride_in_token, stride_in_head,
-                          stride_cache_token, stride_cache_head);
-        ckc_b_region_leave(b);
-    }
+        /* in_bounds = b.cmp_lt(new_token, total_new_q)
+         * with b.scf_if(in_bounds): _appendkv_body(...) */
+        in_bounds = ckc_b_cmp_lt(b, new_token, total_new_q);
+        {
+            ckc_if_t gate = ckc_b_scf_if(b, in_bounds);
+            ckc_b_region_enter(b, gate.then_region);
+            ckc_appendkv_body(b, spec, H, dtype, new_token, kv_head_idx, K_new, V_new,
+                              K_cache, V_cache, seqlen_kv, cu_seqlens_new, cos_table,
+                              sin_table, stride_in_token, stride_in_head,
+                              stride_cache_token, stride_cache_head);
+            ckc_b_region_leave(b);
+        }
 
-    /* b.ret(); return b.kernel */
-    ckc_b_ret(b);
+        /* b.ret(); return b.kernel */
+        ckc_b_ret(b);
 
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    return b->kernel;
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        return b->kernel;
+    });
 }
 
 /* ===================================================================== *
@@ -638,21 +641,24 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv_new(ckc_ir_builder_t* b,
                                                   const ckc_fmha_appendkv_spec_t* spec,
                                                   const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_fmha_appendkv_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_fmha_fwd_appendkv(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_fmha_appendkv_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_fmha_fwd_appendkv(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

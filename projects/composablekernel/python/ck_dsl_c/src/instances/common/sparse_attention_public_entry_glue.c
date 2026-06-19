@@ -42,6 +42,7 @@
 #include "ckc/lower_llvm.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ----- small helper: best-effort copy of a reason / diagnostic string. ----- */
 static void sparse_set_err(char* err, size_t err_cap, const char* msg)
@@ -80,41 +81,43 @@ ckc_kernel_def_t* ckc_build_jenga_sparse_attention(ckc_ir_builder_t* b_unused,
                                                    const ckc_jenga_sparse_spec_t* spec,
                                                    const char* arch)
 {
-    ckc_jenga_sparse_ctx_t ctx;
-    ckc_kernel_def_t* kernel;
+    return ckc::guard_builder((ckc_ir_builder_t*)nullptr, [&]() -> ckc_kernel_def_t* {
+        ckc_jenga_sparse_ctx_t ctx;
+        ckc_kernel_def_t* kernel;
 
-    (void)b_unused; /* reserved for signature parity; the driver owns its builder */
+        (void)b_unused; /* reserved for signature parity; the driver owns its builder */
 
-    if (spec == NULL)
-    {
-        return NULL;
-    }
+        if (spec == NULL)
+        {
+            return NULL;
+        }
 
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.spec = spec;
-    ctx.arch = (arch != NULL) ? arch : "gfx950";
-    ctx.s = spec->common;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.spec = spec;
+        ctx.arch = (arch != NULL) ? arch : "gfx950";
+        ctx.s = spec->common;
 
-    /* Prologue: validity gate + FmhaKernelBuilder init + params + grid + the
-     * q_tile_base / q_block_idx / mask_row_base decode. Returns false (with the
-     * builder / sticky error set, if any) on a rejected spec. */
-    if (!ckc_jenga_prologue(&ctx))
-    {
-        ckc_fmha_kernel_builder_free(&ctx.kb);
-        return NULL;
-    }
+        /* Prologue: validity gate + FmhaKernelBuilder init + params + grid + the
+         * q_tile_base / q_block_idx / mask_row_base decode. Returns false (with the
+         * builder / sticky error set, if any) on a rejected spec. */
+        if (!ckc_jenga_prologue(&ctx))
+        {
+            ckc_fmha_kernel_builder_free(&ctx.kb);
+            return NULL;
+        }
 
-    /* LDS staging: tid + stage_jenga_mask_to_lds + sync + tiles_per_block_k. */
-    ckc_jenga_stage_mask(&ctx);
+        /* LDS staging: tid + stage_jenga_mask_to_lds + sync + tiles_per_block_k. */
+        ckc_jenga_stage_mask(&ctx);
 
-    /* Inner body + b.ret(); returns kb.kernel (NULL on any builder error). */
-    kernel = ckc_jenga_emit_body(&ctx);
-    if (kernel == NULL || ckc_ir_builder_status(ctx.b) != CKC_OK)
-    {
-        ckc_fmha_kernel_builder_free(&ctx.kb);
-        return NULL;
-    }
-    return kernel;
+        /* Inner body + b.ret(); returns kb.kernel (NULL on any builder error). */
+        kernel = ckc_jenga_emit_body(&ctx);
+        if (kernel == NULL || ckc_ir_builder_status(ctx.b) != CKC_OK)
+        {
+            ckc_fmha_kernel_builder_free(&ctx.kb);
+            return NULL;
+        }
+        return kernel;
+    });
 }
 
 /* --------------------------------------------------------------------------- *
@@ -131,36 +134,38 @@ ckc_kernel_def_t* ckc_build_vsa_sparse_attention(ckc_ir_builder_t* b_unused,
                                                  const ckc_vsa_sparse_spec_t* spec,
                                                  const char* arch)
 {
-    ckc_vsa_sparse_ctx_t ctx;
-    ckc_kernel_def_t* kernel;
+    return ckc::guard_builder((ckc_ir_builder_t*)nullptr, [&]() -> ckc_kernel_def_t* {
+        ckc_vsa_sparse_ctx_t ctx;
+        ckc_kernel_def_t* kernel;
 
-    (void)b_unused;
+        (void)b_unused;
 
-    if (spec == NULL)
-    {
-        return NULL;
-    }
+        if (spec == NULL)
+        {
+            return NULL;
+        }
 
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.spec = spec;
-    ctx.arch = (arch != NULL) ? arch : "gfx950";
-    ctx.s = spec->common;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.spec = spec;
+        ctx.arch = (arch != NULL) ? arch : "gfx950";
+        ctx.s = spec->common;
 
-    if (!ckc_vsa_prologue(&ctx))
-    {
-        ckc_fmha_kernel_builder_free(&ctx.kb);
-        return NULL;
-    }
+        if (!ckc_vsa_prologue(&ctx))
+        {
+            ckc_fmha_kernel_builder_free(&ctx.kb);
+            return NULL;
+        }
 
-    ckc_vsa_stage_bitmap(&ctx);
+        ckc_vsa_stage_bitmap(&ctx);
 
-    kernel = ckc_vsa_emit_body(&ctx);
-    if (kernel == NULL || ckc_ir_builder_status(ctx.b) != CKC_OK)
-    {
-        ckc_fmha_kernel_builder_free(&ctx.kb);
-        return NULL;
-    }
-    return kernel;
+        kernel = ckc_vsa_emit_body(&ctx);
+        if (kernel == NULL || ckc_ir_builder_status(ctx.b) != CKC_OK)
+        {
+            ckc_fmha_kernel_builder_free(&ctx.kb);
+            return NULL;
+        }
+        return kernel;
+    });
 }
 
 /* --------------------------------------------------------------------------- *

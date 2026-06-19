@@ -116,7 +116,6 @@ void ckc_ll_yield_push(ckc_lower_t *L) {
         (ll_yield_frame_t *)ckc_arena_alloc(&L->arena, sizeof *frame);
     if (!frame) {
         ckc_ll_fail(L, CKC_ERR_OOM, "yield_push: arena OOM");
-        return;
     }
     ckc_vec_init(frame);
     int rc = 0;
@@ -197,7 +196,6 @@ void ckc_ll_lower_vector_reduce(ckc_lower_t *L, const ckc_op_t *op,
     const ckc_type_t *vec_ty = v->type;
     if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector reduce: not a vector operand");
-        return;
     }
     int count = vec_ty->count;
     const ckc_type_t *elem_ty = vec_ty->elem;
@@ -278,7 +276,6 @@ static void _op_vector_cmp(ckc_lower_t *L, const ckc_op_t *op) {
         llvm_pred = "ne";
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY, "vector.cmp: unknown pred %s", pred);
-        return;
     }
     const ckc_value_t *a = op->operands[0];
     const ckc_value_t *b = op->operands[1];
@@ -299,7 +296,6 @@ static void _op_vector_smax(ckc_lower_t *L, const ckc_op_t *op) {
     if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR || !vec_ty->elem ||
         !vec_ty->elem->name) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.smax: not an int vector");
-        return;
     }
     int count = vec_ty->count;
     const char *ename = vec_ty->elem->name; /* "i16" -> width "16" */
@@ -384,7 +380,6 @@ static void _op_vector_fma(ckc_lower_t *L, const ckc_op_t *op) {
     if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR || !vec_ty->elem ||
         !vec_ty->elem->name) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector_fma: not a vector");
-        return;
     }
     int count = vec_ty->count;
     const char *elem_name = vec_ty->elem->name;
@@ -392,7 +387,6 @@ static void _op_vector_fma(ckc_lower_t *L, const ckc_op_t *op) {
           strcmp(elem_name, "f32") == 0)) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                     "vector_fma: unsupported element type %s", elem_name);
-        return;
     }
     const char *intrin_key =
         ckc_arena_printf(&L->arena, "fmuladd.v%d%s", count, elem_name);
@@ -435,7 +429,6 @@ static void _op_vector_max(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_type_t *vec_ty = a->type;
     if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.max: not a vector");
-        return;
     }
     int count = vec_ty->count;
     const ckc_type_t *elem_ty = vec_ty->elem;
@@ -449,7 +442,6 @@ static void _op_vector_max(ckc_lower_t *L, const ckc_op_t *op) {
         (const char **)ckc_arena_alloc(&L->arena, sizeof(const char *) * count);
     if (!vals && count > 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "vector.max: arena OOM");
-        return;
     }
     for (int i = 0; i < count; i++) {
         const char *ea = ckc_ll_fresh(L, "vmax.a");
@@ -504,7 +496,6 @@ static void _op_vector_reduce_max(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_type_t *vec_ty = v->type;
     if (!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.reduce_max: not a vector");
-        return;
     }
     int count = vec_ty->count;
     const ckc_type_t *elem_ty = vec_ty->elem;
@@ -614,7 +605,6 @@ static void _op_vector_pack(ckc_lower_t *L, const ckc_op_t *op) {
     const ckc_type_t *result_ty = res->type;
     if (!result_ty || result_ty->kind != CKC_TYPE_VECTOR) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.pack: result not a vector");
-        return;
     }
     const char *vec_ty = ckc_ll_llvm_type(L, result_ty);
     const char *elem_ty = ckc_ll_llvm_type(L, result_ty->elem);
@@ -661,7 +651,6 @@ static void _op_vector_concat(ckc_lower_t *L, const ckc_op_t *op) {
     if (!a_ty || a_ty->kind != CKC_TYPE_VECTOR || !b_ty ||
         b_ty->kind != CKC_TYPE_VECTOR) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.concat: not a vector");
-        return;
     }
     int a_n = a_ty->count;
     int b_n = b_ty->count;
@@ -943,7 +932,6 @@ void ckc_ll_lower_normal_for(ckc_lower_t *L, const ckc_op_t *op) {
     const char *iv_name = ckc_attr_get_str(&op->attrs, "iv");
     if (!iv_name) {
         ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
-        return;
     }
     const char *iv_ty = ckc_ll_llvm_type(L, lower->type);
 
@@ -1007,7 +995,6 @@ void ckc_ll_lower_normal_for(ckc_lower_t *L, const ckc_op_t *op) {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "scf.for expected %d yielded values, got %d",
                     (int)num_iter, n_yield);
-        return;
     }
 
     ckc_ll_block_emitf(L, latch, "  %%iv.next.%s = add nsw %s %s, %s",
@@ -1083,7 +1070,6 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
     const char *iv_name = ckc_attr_get_str(&op->attrs, "iv");
     if (!iv_name) {
         ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
-        return;
     }
     const ckc_region_t *body = op->regions[0];
 
@@ -1095,7 +1081,6 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
             &L->arena, sizeof(const char *) * (size_t)num_iter);
         if (!current_iter_values) {
             ckc_ll_fail(L, CKC_ERR_OOM, "unrolled_for: arena OOM");
-            return;
         }
         for (int i = 0; i < (int)num_iter; i++) {
             current_iter_values[i] = ckc_ll_operand(L, op->operands[3 + i]);
@@ -1107,7 +1092,6 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
     int64_t step_val = ckc_ll_eval_constant(L, step);
     if (step_val == 0) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "unrolled_for: zero step");
-        return;
     }
     int64_t trip_count = (upper_val - lower_val) / step_val;
 
@@ -1177,7 +1161,6 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
             &L->arena, sizeof(ll_rename_t) * (size_t)(max_renames > 0 ? max_renames : 1));
         if (!renames) {
             ckc_ll_fail(L, CKC_ERR_OOM, "unrolled_for: arena OOM");
-            return;
         }
         int n_renames = 0;
 
@@ -1243,7 +1226,6 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t *L, const ckc_op_t *op) {
             ckc_ll_fail(L, CKC_ERR_VALUE,
                         "scf.for expected %d yielded values, got %d",
                         (int)num_iter, n_yield);
-            return;
         }
         for (int i = 0; i < (int)num_iter; i++) {
             current_iter_values[i] =
@@ -1307,7 +1289,6 @@ static void ll_block_replace(ckc_lower_t *L, ckc_ll_block_t *blk,
         char *out = (char *)ckc_arena_alloc(&L->arena, out_len + 1);
         if (!out) {
             ckc_ll_fail(L, CKC_ERR_OOM, "scf.if: back-patch arena OOM");
-            return;
         }
         char *w = out;
         const char *s = line;

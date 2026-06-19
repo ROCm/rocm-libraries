@@ -83,6 +83,8 @@ def compile_kernel(
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     capture_ir_text: bool = True,
     optimize_ir: bool = False,
+    backend: Optional[str] = None,
+    spec: Optional[object] = None,
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
@@ -97,6 +99,18 @@ def compile_kernel(
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
     discarded.
+
+    `backend` selects which engine produces the lowered AMDGPU ``.ll``:
+    ``"python"`` (native, the default and byte-identical to historical
+    behaviour), ``"cpp"`` (route through the C++ engine binding), or
+    ``"both"`` (lower with both and assert byte-equality, returning the
+    Python result). When unset, the ``CK_DSL_BACKEND`` environment
+    variable is consulted, else ``"python"``. Routing to the cpp/both
+    engines requires the instance-level ``spec`` (the C++ engine lowers
+    from the spec, not the post-IR ``KernelDef``); pass it via ``spec``.
+    Only the universal-GEMM family is wired to the cpp engine today; any
+    other ``spec`` type raises a clear error rather than silently
+    diverging.
     """
     if arch is not None:
         from ..core.arch import ArchTarget
@@ -119,7 +133,9 @@ def compile_kernel(
     t_pass = time.perf_counter()
     ir_text = print_ir(kernel) if capture_ir_text else ""
     t1 = time.perf_counter()
-    llvm_text = lower_kernel_to_llvm(kernel, arch=_lower_arch)
+    llvm_text = _lower_llvm_via_backend(
+        kernel, arch=_lower_arch, backend=backend, spec=spec
+    )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
         llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
@@ -143,6 +159,40 @@ def compile_kernel(
         pass_stats=pass_stats,
         isa=isa,
     )
+
+
+def _lower_llvm_via_backend(
+    kernel: KernelDef,
+    *,
+    arch: Optional[str],
+    backend: Optional[str],
+    spec: Optional[object],
+) -> str:
+    """Produce the AMDGPU ``.ll`` text through the selected backend.
+
+    The default (``backend`` unset and ``CK_DSL_BACKEND`` unset, resolving
+    to ``"python"``) calls the native lowerer directly with no behaviour
+    change. ``"cpp"``/``"both"`` route through the C++ engine binding and
+    require the instance-level ``spec``; ``"both"`` additionally asserts
+    the two engines agree before returning the Python result.
+    """
+    from ..core.backend import BACKEND_PYTHON, lower_universal_gemm, resolve_backend
+
+    chosen = resolve_backend(backend)
+    if chosen == BACKEND_PYTHON:
+        # Native path -- byte-identical to the historical default.
+        return lower_kernel_to_llvm(kernel, arch=arch)
+
+    if spec is None:
+        raise ValueError(
+            f"compile_kernel(backend={chosen!r}) needs the instance-level spec "
+            "to route through the C++ engine (it lowers from the spec, not the "
+            "post-IR KernelDef); pass spec=<UniversalGemmSpec>."
+        )
+
+    _arch = arch or "gfx950"
+    result = lower_universal_gemm(spec, arch=_arch, backend=chosen)
+    return result.llvm_text
 
 
 def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:

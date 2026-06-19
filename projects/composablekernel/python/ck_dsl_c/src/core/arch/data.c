@@ -656,6 +656,10 @@ static const ckc_mma_op_t k_mma_gfx942[] = {
 
 /* ----------------------------- gfx950 (CDNA) ----------------------------- */
 static const ckc_mma_op_t k_mma_gfx950[] = {
+    {"mma", "fp32", "fp32", "fp32", 16, 16, 4, "mfma_f32_16x16x4_f32",
+     1, 1, 4, 64, &lm_mfma_16x16x4_f32_a, &lm_mfma_16x16x4_f32_b, &lm_mfma_16x16x4_f32_c},
+    {"mma", "fp32", "fp32", "fp32", 32, 32, 2, "mfma_f32_32x32x2_f32",
+     1, 1, 16, 64, &lm_mfma_32x32x2_f32_a, &lm_mfma_32x32x2_f32_b, &lm_mfma_32x32x2_f32_c},
     {"mma", "fp16", "fp16", "fp32", 16, 16, 16, "mfma_f32_16x16x16_f16",
      4, 4, 4, 64, &lm_mfma_16x16x16_a, &lm_mfma_16x16x16_b, &lm_mfma_16x16x16_c},
     {"mma", "fp16", "fp16", "fp32", 16, 16, 32, "mfma_f32_16x16x32_f16",
@@ -668,6 +672,10 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      4, 4, 4, 64, &lm_mfma_16x16x16_a, &lm_mfma_16x16x16_b, &lm_mfma_16x16x16_c},
     {"mma", "bf16", "bf16", "fp32", 16, 16, 32, "mfma_f32_16x16x32_bf16",
      8, 8, 4, 64, NULL, NULL, &lm_mfma_16x16x32_c},
+    {"mma", "bf16", "bf16", "fp32", 32, 32, 8, "mfma_f32_32x32x8_bf16",
+     4, 4, 16, 64, &lm_mfma_32x32x8_a, &lm_mfma_32x32x8_b, &lm_mfma_32x32x8_c},
+    {"mma", "bf16", "bf16", "fp32", 32, 32, 16, "mfma_f32_32x32x16_bf16",
+     8, 8, 16, 64, NULL, NULL, &lm_mfma_32x32x16_c},
     {"mma", "fp8e4m3", "fp8e4m3", "fp32", 16, 16, 32, "mfma_f32_16x16x32_fp8",
      8, 8, 4, 64, NULL, NULL, &lm_mfma_16x16x32_c},
     {"mma", "fp8e4m3", "fp8e4m3", "fp32", 32, 32, 16, "mfma_f32_32x32x16_fp8",

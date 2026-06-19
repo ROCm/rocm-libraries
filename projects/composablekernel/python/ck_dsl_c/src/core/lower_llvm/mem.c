@@ -264,7 +264,6 @@ static void op_memref_cooperative_global_store(ckc_lower_t *L,
     if (!ll_is_vec(values->type)) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                     "cooperative_global_store requires vector values");
-        return;
     }
     elem_ty = ckc_ll_llvm_type(L, values->type->elem);
     addr_elem_ty = ll_is_vec(addrs->type)
@@ -555,7 +554,6 @@ static void op_tile_global_ptr_add(ckc_lower_t *L, const ckc_op_t *op) {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "tile.global_ptr_add offset must be i32 or i64, got %s",
                     off_ty);
-        return;
     }
     ckc_ll_emitf(L,
         "  %s = getelementptr inbounds i8, ptr addrspace(1) %s, i64 %s",
@@ -587,7 +585,6 @@ static void op_tile_buffer_rsrc(ckc_lower_t *L, const ckc_op_t *op) {
             ckc_ll_fail(L, CKC_ERR_VALUE,
                         "tile.buffer_rsrc num_bytes must be i32 or i64, got %s",
                         nb_ty);
-            return;
         }
         nb_text = ckc_arena_printf(&L->arena, "i64 %s", nb_arg);
     } else {

@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error.hpp" /* ckc::Error boundary translation */
 #include "ckc/ir.h"
 #include "ckc/lower_hip.h"
 #include "ckc/lower_hip_internal.h"
@@ -119,23 +120,24 @@ const char *const CKC_HIP_PROLOGUE =
 /* ============================== error / liveness ===================== */
 
 bool ckc_h_live(const ckc_h_lowerer_t *lw) {
-    return lw && lw->status == CKC_OK;
+    /* Internal ops raise on failure rather than latching a sticky status, so a
+     * reachable non-NULL lowerer is always usable; this is now a NULL guard. */
+    return lw != NULL;
 }
 
-ckc_status_t ckc_h_fail(ckc_h_lowerer_t *lw, ckc_status_t st, const char *fmt, ...) {
+[[noreturn]] ckc_status_t ckc_h_fail(ckc_h_lowerer_t *lw, ckc_status_t st, const char *fmt, ...) {
+    /* Format the reason once (bounded exactly like the legacy sink), then raise.
+     * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
+     * the lowerer boundary (ckc_lower_kernel_to_hip) and translated back into the
+     * status code, so the extern "C" ABI is unchanged. */
+    (void)lw; /* the lowerer no longer carries a sticky error; we raise instead */
+    char buf[CKC_ERR_MSG_CAP];
     va_list ap;
-    if (!lw) {
-        return st;
-    }
-    if (lw->status != CKC_OK) {
-        /* first failure wins */
-        return lw->status;
-    }
-    lw->status = st;
     va_start(ap, fmt);
-    vsnprintf(lw->err, sizeof(lw->err), fmt, ap);
+    vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    return lw->status;
+    buf[sizeof buf - 1] = '\0';
+    ckc::raise_status(st, buf);
 }
 
 /* ============================== emission / indent ==================== */
@@ -764,62 +766,59 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t *b,
         h_smem_release(&lw);
         return CKC_ERR_OOM;
     }
-    for (i = 0; i < kernel->num_params; i++) {
-        const ckc_param_t *p = kernel->params[i];
-        const char *t = ckc_h_type_to_hip(&lw, p->type);
-        if (!ckc_h_live(&lw)) {
-            break;
-        }
-        if (i > 0) {
-            ckc_strbuf_append(&sig, ", ");
-        }
-        if (strchr(t, '*') != NULL) {
-            ckc_strbuf_appendf(&sig, "%s __restrict__ %s", t, p->name);
-        } else {
-            ckc_strbuf_appendf(&sig, "%s %s", t, p->name);
-        }
-    }
 
-    if (!ckc_h_live(&lw)) {
+    /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
+     * signature buffer and smem registry slot are always released, then
+     * translate it into the legacy status code (keeping the extern "C" ABI
+     * unchanged). */
+    try {
+        for (i = 0; i < kernel->num_params; i++) {
+            const ckc_param_t *p = kernel->params[i];
+            const char *t = ckc_h_type_to_hip(&lw, p->type);
+            if (i > 0) {
+                ckc_strbuf_append(&sig, ", ");
+            }
+            if (strchr(t, '*') != NULL) {
+                ckc_strbuf_appendf(&sig, "%s __restrict__ %s", t, p->name);
+            } else {
+                ckc_strbuf_appendf(&sig, "%s %s", t, p->name);
+            }
+        }
+
+        /* ---- lower the body ---- */
+        ckc_h_lower_region(&lw, kernel->body);
+
+        /* ---- assemble parts (Python parts list joined with '\n') ---- */
+        if (include_prologue) {
+            ckc_strbuf_append(out, CKC_HIP_PROLOGUE);
+            ckc_strbuf_append_char(out, '\n');
+        }
+        /* head */
+        ckc_strbuf_appendf(out,
+                           "extern \"C\" __global__ __launch_bounds__(%d)\n"
+                           "void %s(%s)\n{",
+                           launch_bounds, kernel->name ? kernel->name : "",
+                           ckc_strbuf_cstr(&sig));
+
+        /* smem block (only if non-empty, like Python `if smem_block`). */
+        for (li = 0; li < lw.smem_decls.len; li++) {
+            ckc_strbuf_append_char(out, '\n');
+            ckc_strbuf_append(out, lw.smem_decls.data[li]);
+        }
+
+        /* body block (always appended, joined with '\n'). */
+        for (li = 0; li < lw.lines.len; li++) {
+            ckc_strbuf_append_char(out, '\n');
+            ckc_strbuf_append(out, lw.lines.data[li]);
+        }
+
+        /* closing brace */
+        ckc_strbuf_append(out, "\n}");
+    } catch (const ckc::Error &e) {
         ckc_strbuf_free(&sig);
         h_smem_release(&lw);
-        return lw.status;
+        return e.code();
     }
-
-    /* ---- lower the body ---- */
-    ckc_h_lower_region(&lw, kernel->body);
-    if (!ckc_h_live(&lw)) {
-        ckc_strbuf_free(&sig);
-        h_smem_release(&lw);
-        return lw.status;
-    }
-
-    /* ---- assemble parts (Python parts list joined with '\n') ---- */
-    if (include_prologue) {
-        ckc_strbuf_append(out, CKC_HIP_PROLOGUE);
-        ckc_strbuf_append_char(out, '\n');
-    }
-    /* head */
-    ckc_strbuf_appendf(out,
-                       "extern \"C\" __global__ __launch_bounds__(%d)\n"
-                       "void %s(%s)\n{",
-                       launch_bounds, kernel->name ? kernel->name : "",
-                       ckc_strbuf_cstr(&sig));
-
-    /* smem block (only if non-empty, like Python `if smem_block`). */
-    for (li = 0; li < lw.smem_decls.len; li++) {
-        ckc_strbuf_append_char(out, '\n');
-        ckc_strbuf_append(out, lw.smem_decls.data[li]);
-    }
-
-    /* body block (always appended, joined with '\n'). */
-    for (li = 0; li < lw.lines.len; li++) {
-        ckc_strbuf_append_char(out, '\n');
-        ckc_strbuf_append(out, lw.lines.data[li]);
-    }
-
-    /* closing brace */
-    ckc_strbuf_append(out, "\n}");
 
     ckc_strbuf_free(&sig);
     h_smem_release(&lw);

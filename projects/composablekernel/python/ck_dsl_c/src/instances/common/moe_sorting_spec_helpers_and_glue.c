@@ -39,6 +39,7 @@
 #include "ckc/instance_moe_sorting.h"
 #include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  MoeSortingSpec value/property surface (IR-free).
@@ -769,84 +770,96 @@ ckc_kernel_def_t* ckc_build_moe_sort_histogram_new(ckc_ir_builder_t* b,
                                                    const ckc_moe_sorting_spec_t* spec,
                                                    const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_sorting_spec_kernel_name(spec, "hist", name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_sort_histogram(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_sorting_spec_kernel_name(spec, "hist", name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_sort_histogram(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_sort_scan_new(ckc_ir_builder_t* b,
                                               const ckc_moe_sorting_spec_t* spec,
                                               const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_sorting_spec_kernel_name(spec, "scan", name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_sort_scan(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_sorting_spec_kernel_name(spec, "scan", name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_sort_scan(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_sort_scatter_new(ckc_ir_builder_t* b,
                                                  const ckc_moe_sorting_spec_t* spec,
                                                  const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_sorting_spec_kernel_name(spec, "scatter", name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_sort_scatter(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_sorting_spec_kernel_name(spec, "scatter", name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_sort_scatter(b, spec, arch);
+
+    });
 }
 
 ckc_kernel_def_t* ckc_build_moe_sort_persistent_new(ckc_ir_builder_t* b,
                                                     const ckc_moe_sorting_spec_t* spec,
                                                     const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_moe_sorting_spec_kernel_name(spec, "persistent", name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_moe_sort_persistent(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_moe_sorting_spec_kernel_name(spec, "persistent", name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_moe_sort_persistent(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

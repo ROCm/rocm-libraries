@@ -31,7 +31,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s <config_index 0..5>\n", argv[0]);
         return 2;
     }
-    (void)argv; /* index does not affect the emitted IR */
+
+    /* The index does not affect the emitted IR (M/N/K are runtime args), but the
+     * valid config range is 0..5 to match the Python emitter; reject beyond it so
+     * the harness sees a shared end-of-range. */
+    int idx = atoi(argv[1]);
+    if (idx < 0 || idx > 5) {
+        fprintf(stderr, "unknown config index %d\n", idx);
+        return 2;
+    }
 
     ckc_wmma_gemm_iu8_dequant_spec_t spec =
         ckc_wmma_gemm_iu8_dequant_spec_default();

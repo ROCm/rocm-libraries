@@ -42,6 +42,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Local helpers
@@ -418,81 +419,83 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
     const ckc_attention_tiled_2d_spec_t* spec,
     const char* arch)
 {
-    ckc_gfx942_attn2d_build_ctx_t ctx;
-    ckc_kernel_def_t* kernel;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gfx942_attn2d_build_ctx_t ctx;
+        ckc_kernel_def_t* kernel;
 
-    if (b == NULL || spec == NULL)
-        return NULL;
+        if (b == NULL || spec == NULL)
+            return NULL;
 
-    /* Re-entrancy: clear every cross-build static this generator caches against
-     * the previous build's (now-freed) arena before emitting build N. Without
-     * this, the lazily-built _C32_DIST distribution and the REGISTER_PV scratch
-     * carry dangling pointers from build N-1 into the new IR (a NULL operand to
-     * warp_shuffle_xor on the second call). The generator is invoked once per
-     * workspace-query and once per buildPlan, per graph, so this runs many times
-     * per process. (_scalar_new funnels here too.) */
-    ckc_attn2d_c32_dist_reset();
-    ckc_gfx942_attn2d_reset_softmax_scratch();
+        /* Re-entrancy: clear every cross-build static this generator caches against
+         * the previous build's (now-freed) arena before emitting build N. Without
+         * this, the lazily-built _C32_DIST distribution and the REGISTER_PV scratch
+         * carry dangling pointers from build N-1 into the new IR (a NULL operand to
+         * warp_shuffle_xor on the second call). The generator is invoked once per
+         * workspace-query and once per buildPlan, per graph, so this runs many times
+         * per process. (_scalar_new funnels here too.) */
+        ckc_attn2d_c32_dist_reset();
+        ckc_gfx942_attn2d_reset_softmax_scratch();
 
-    /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
-     * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
-     * smem_alloc, SSA constants, KV-loop bounds + the online-softmax iter-arg
-     * carry. On any reject it sets b's sticky error and returns false. */
-    memset(&ctx, 0, sizeof(ctx));
-    if (!ckc_gfx942_attn2d_build_ctx_init(&ctx, b, spec, arch))
-        return NULL;
+        /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
+         * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
+         * smem_alloc, SSA constants, KV-loop bounds + the online-softmax iter-arg
+         * carry. On any reject it sets b's sticky error and returns false. */
+        memset(&ctx, 0, sizeof(ctx));
+        if (!ckc_gfx942_attn2d_build_ctx_init(&ctx, b, spec, arch))
+            return NULL;
 
-    /* The emission order below mirrors the single linear Python emitter exactly
-     * (the byte-identity contract is on the lowered .ll, so the IR op stream must
-     * be produced in Python source order):
-     *
-     *   q_load (1913) -> tile bounds + softmax iter-arg inits (1982-2161) ->
-     *   pre-loop K/V buffer descriptors (2163-2351) -> Q VGPR gather (3426-3592)
-     *   -> tile-0 K prefetch + cur_buf carry (3591, 3606-3607) -> LICM hoist
-     *   (3609-3688) -> kv_step (3689) -> scf.for KV loop (5050-5052) ->
-     *   epilogue (5054-5287).
-     */
+        /* The emission order below mirrors the single linear Python emitter exactly
+         * (the byte-identity contract is on the lowered .ll, so the IR op stream must
+         * be produced in Python source order):
+         *
+         *   q_load (1913) -> tile bounds + softmax iter-arg inits (1982-2161) ->
+         *   pre-loop K/V buffer descriptors (2163-2351) -> Q VGPR gather (3426-3592)
+         *   -> tile-0 K prefetch + cur_buf carry (3591, 3606-3607) -> LICM hoist
+         *   (3609-3688) -> kv_step (3689) -> scf.for KV loop (5050-5052) ->
+         *   epilogue (5054-5287).
+         */
 
-    /* 1. Cooperatively stage Q[BLOCK_M, HD] global -> LDS (lines 1913-1980). */
-    ckc_gfx942_attn2d_emit_q_load(&ctx);
+        /* 1. Cooperatively stage Q[BLOCK_M, HD] global -> LDS (lines 1913-1980). */
+        ckc_gfx942_attn2d_emit_q_load(&ctx);
 
-    /* 2. max_seq_prefix_len -> tile_start/tile_end + online-softmax m/l/acc carry
-     *    inits + named iter_args (lines 1982-2161). */
-    ckc_gfx942_attn2d_emit_loop_bounds_and_inits(&ctx);
+        /* 2. max_seq_prefix_len -> tile_start/tile_end + online-softmax m/l/acc carry
+         *    inits + named iter_args (lines 1982-2161). */
+        ckc_gfx942_attn2d_emit_loop_bounds_and_inits(&ctx);
 
-    /* 3. Pre-loop: build K/V buffer descriptors (lines 2163-2351). */
-    ckc_gfx942_attn2d_emit_preloop(&ctx);
+        /* 3. Pre-loop: build K/V buffer descriptors (lines 2163-2351). */
+        ckc_gfx942_attn2d_emit_preloop(&ctx);
 
-    /* 4. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
-    ckc_gfx942_attn2d_emit_q_gather(&ctx);
+        /* 4. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
+        ckc_gfx942_attn2d_emit_q_gather(&ctx);
 
-    /* 5. tile-0 K prefetch into buffer 0 + ("cur_buf", 0) carry append (3591,
-     *    3606-3607). */
-    ckc_gfx942_attn2d_emit_preloop_prefetch(&ctx);
+        /* 5. tile-0 K prefetch into buffer 0 + ("cur_buf", 0) carry append (3591,
+         *    3606-3607). */
+        ckc_gfx942_attn2d_emit_preloop_prefetch(&ctx);
 
-    /* 6. LICM hoist of the per-reg row/pos/head/mask invariants (3609-3688). */
-    ckc_gfx942_attn2d_emit_licm_hoist(&ctx);
+        /* 6. LICM hoist of the per-reg row/pos/head/mask invariants (3609-3688). */
+        ckc_gfx942_attn2d_emit_licm_hoist(&ctx);
 
-    /* 7. kv_step const (3689). */
-    ckc_gfx942_attn2d_emit_kv_step(&ctx);
+        /* 7. kv_step const (3689). */
+        ckc_gfx942_attn2d_emit_kv_step(&ctx);
 
-    /* 8. KV-loop: build the scf.for over [tile_start, tile_end) with the named
-     *    online-softmax carry and run one full KV-tile body inside it (5050-5052).
-     *    drive_kv_loop returns the loop handle whose results are the rewritten
-     *    carry the epilogue consumes; mirror them into ctx.out_carry. */
-    ckc_for_t kvloop = ckc_gfx942_attn2d_drive_kv_loop(&ctx);
-    if (kvloop.op != NULL)
-    {
-        for (int i = 0; i < kvloop.op->num_results; ++i)
-            ctx.out_carry[i] = kvloop.op->results[i];
-        ctx.out_carry_count = kvloop.op->num_results;
-    }
+        /* 8. KV-loop: build the scf.for over [tile_start, tile_end) with the named
+         *    online-softmax carry and run one full KV-tile body inside it (5050-5052).
+         *    drive_kv_loop returns the loop handle whose results are the rewritten
+         *    carry the epilogue consumes; mirror them into ctx.out_carry. */
+        ckc_for_t kvloop = ckc_gfx942_attn2d_drive_kv_loop(&ctx);
+        if (kvloop.op != NULL)
+        {
+            for (int i = 0; i < kvloop.op->num_results; ++i)
+                ctx.out_carry[i] = kvloop.op->results[i];
+            ctx.out_carry_count = kvloop.op->num_results;
+        }
 
-    /* 9. Epilogue: drain async copies, read loop results, normalize + store;
-     * returns b->kernel on success (lines 5054-5287). */
-    kernel = ckc_gfx942_attn2d_emit_epilogue(&ctx);
+        /* 9. Epilogue: drain async copies, read loop results, normalize + store;
+         * returns b->kernel on success (lines 5054-5287). */
+        kernel = ckc_gfx942_attn2d_emit_epilogue(&ctx);
 
-    return ckc_ir_builder_ok(b) ? kernel : NULL;
+        return ckc_ir_builder_ok(b) ? kernel : NULL;
+    });
 }
 
 /* ===================================================================== *
@@ -618,14 +621,16 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar_new(
     const ckc_attention_tiled_2d_spec_t* spec,
     const char* arch)
 {
-    char kname[1024];
-    if (b == NULL || spec == NULL)
-        return NULL;
-    if (ckc__attn2d_kernel_name(spec, kname, sizeof(kname)) != CKC_OK)
-        return NULL;
-    if (ckc_ir_builder_init(b, kname) != CKC_OK)
-        return NULL;
-    return ckc_build_unified_attention_2d_tiled_scalar(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char kname[1024];
+        if (b == NULL || spec == NULL)
+            return NULL;
+        if (ckc__attn2d_kernel_name(spec, kname, sizeof(kname)) != CKC_OK)
+            return NULL;
+        if (ckc_ir_builder_init(b, kname) != CKC_OK)
+            return NULL;
+        return ckc_build_unified_attention_2d_tiled_scalar(b, spec, arch);
+    });
 }
 
 /* Public wrapper over the static spec.kernel_name() port, so the fastKV

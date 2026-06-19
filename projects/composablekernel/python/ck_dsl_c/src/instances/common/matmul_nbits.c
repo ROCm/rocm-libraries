@@ -25,6 +25,7 @@
 #include "ckc/instance_matmul_nbits.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* The decode-GEMV peer header
  * (helper_ck_dsl.instances.common._matmul_nbits_decode_gemv.h) is intentionally
@@ -488,72 +489,74 @@ ckc_kernel_def_t* ckc_build_matmul_nbits(ckc_ir_builder_t* b,
                                          const ckc_matmul_nbits_spec_t* spec,
                                          const char* arch)
 {
-    char reason[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char reason[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = CKC_MATMUL_NBITS_V1_ARCH; /* "gfx1151" */
-    }
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (arch == NULL)
+        {
+            arch = CKC_MATMUL_NBITS_V1_ARCH; /* "gfx1151" */
+        }
 
-    /* ok, reason = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if (!ckc_matmul_nbits_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        char msg[384];
-        snprintf(msg, sizeof(msg), "invalid matmul_nbits spec for %s: %s", arch, reason);
-        /* Surface the Python ValueError on the sticky-error builder. */
+        /* ok, reason = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
+        if (!ckc_matmul_nbits_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            char msg[384];
+            snprintf(msg, sizeof(msg), "invalid matmul_nbits spec for %s: %s", arch, reason);
+            /* Surface the Python ValueError on the sticky-error builder. */
+            if (b->status == CKC_OK)
+            {
+                b->status = CKC_ERR_VALUE;
+                ckc_mnb_copy_msg(b->err, sizeof(b->err), msg);
+            }
+            return NULL;
+        }
+
+        /* if spec.family in ("large_n", "skinny_n"): */
+        if (spec->family != NULL &&
+            (strcmp(spec->family, "large_n") == 0 || strcmp(spec->family, "skinny_n") == 0))
+        {
+            if (spec->optimized)
+            {
+                return ckc_build_large_n_opt_matmul_nbits(b, spec, arch);
+            }
+            return ckc_build_large_n_matmul_nbits(b, spec, arch);
+        }
+
+        /* if spec.family == "decode_gemv": */
+        if (spec->family != NULL && strcmp(spec->family, "decode_gemv") == 0)
+        {
+            ckc_matmul_nbits_decode_gemv_spec_t dgv;
+            const char* scale_wire = NULL;
+
+            if (ckc_matmul_nbits_scale_wire_dtype(spec->scale_dtype, &scale_wire) != CKC_OK)
+            {
+                return NULL;
+            }
+            memset(&dgv, 0, sizeof(dgv));
+            dgv.N = spec->N;
+            dgv.K = spec->K;
+            dgv.group_size = spec->group_size;
+            dgv.block_size = spec->block_size;
+            dgv.scale_wire =
+                (strcmp(scale_wire, "f16") == 0) ? CKC_NBITS_SCALE_F16 : CKC_NBITS_SCALE_F32;
+            return ckc_build_decode_gemv_matmul_nbits(b, &dgv, arch);
+        }
+
+        /* Unreachable: validate_common_spec already rejects unknown families. */
         if (b->status == CKC_OK)
         {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "unknown family %s",
+                     spec->family != NULL ? spec->family : "(null)");
             b->status = CKC_ERR_VALUE;
             ckc_mnb_copy_msg(b->err, sizeof(b->err), msg);
         }
         return NULL;
-    }
-
-    /* if spec.family in ("large_n", "skinny_n"): */
-    if (spec->family != NULL &&
-        (strcmp(spec->family, "large_n") == 0 || strcmp(spec->family, "skinny_n") == 0))
-    {
-        if (spec->optimized)
-        {
-            return ckc_build_large_n_opt_matmul_nbits(b, spec, arch);
-        }
-        return ckc_build_large_n_matmul_nbits(b, spec, arch);
-    }
-
-    /* if spec.family == "decode_gemv": */
-    if (spec->family != NULL && strcmp(spec->family, "decode_gemv") == 0)
-    {
-        ckc_matmul_nbits_decode_gemv_spec_t dgv;
-        const char* scale_wire = NULL;
-
-        if (ckc_matmul_nbits_scale_wire_dtype(spec->scale_dtype, &scale_wire) != CKC_OK)
-        {
-            return NULL;
-        }
-        memset(&dgv, 0, sizeof(dgv));
-        dgv.N = spec->N;
-        dgv.K = spec->K;
-        dgv.group_size = spec->group_size;
-        dgv.block_size = spec->block_size;
-        dgv.scale_wire =
-            (strcmp(scale_wire, "f16") == 0) ? CKC_NBITS_SCALE_F16 : CKC_NBITS_SCALE_F32;
-        return ckc_build_decode_gemv_matmul_nbits(b, &dgv, arch);
-    }
-
-    /* Unreachable: validate_common_spec already rejects unknown families. */
-    if (b->status == CKC_OK)
-    {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "unknown family %s",
-                 spec->family != NULL ? spec->family : "(null)");
-        b->status = CKC_ERR_VALUE;
-        ckc_mnb_copy_msg(b->err, sizeof(b->err), msg);
-    }
-    return NULL;
+    });
 }
 
 /* ===================================================================== *
@@ -564,21 +567,24 @@ ckc_kernel_def_t* ckc_build_matmul_nbits_new(ckc_ir_builder_t* b,
                                              const ckc_matmul_nbits_spec_t* spec,
                                              const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_matmul_nbits_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_matmul_nbits(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_matmul_nbits_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_matmul_nbits(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

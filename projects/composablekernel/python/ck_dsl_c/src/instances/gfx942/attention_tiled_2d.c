@@ -34,30 +34,26 @@
 #include <string.h>
 
 #include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h"
+#include "ckc/error.hpp"
 #include "ckc/ir.h"
 
 /* ------------------------------------------------------------- error latch */
 
-static void* ckc_attn2d_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
+ * entry boundary catches it and records status + message on the builder, so the
+ * C ABI is unchanged. [[noreturn]] keeps the existing
+ * `return (T*)ckc_attn2d_set_err(...)` call sites valid -- the cast/return is
+ * simply never reached. */
+[[noreturn]] static void* ckc_attn2d_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
-    if(b == NULL)
-    {
-        return NULL;
-    }
-    if(b->status == CKC_OK)
-    {
-        va_list ap;
-        va_start(ap, fmt);
-        vsnprintf(b->err, (size_t)CKC_ERR_MSG_CAP, fmt, ap);
-        va_end(ap);
-        b->status = st;
-    }
-    return NULL;
-}
-
-static bool ckc_attn2d_live(const ckc_ir_builder_t* b)
-{
-    return b != NULL && b->status == CKC_OK;
+    (void)b;
+    char msg[CKC_ERR_MSG_CAP];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    msg[sizeof(msg) - 1] = '\0';
+    ckc::raise_status(st, msg);
 }
 
 static bool ckc_streq(const char* a, const char* c)
@@ -222,7 +218,9 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b, const ckc_attenti
     int block_m;
     int t_eff;
 
-    if(!ckc_attn2d_live(b))
+    /* Internal builder ops raise on failure, so a reachable builder here is
+     * always in the OK state; only the NULL guard remains. */
+    if(b == NULL)
     {
         return false;
     }
@@ -434,7 +432,7 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
                                                      const ckc_attention_tiled_2d_spec_t* spec,
                                                      ckc_unified_attention_2d_tiled_config_t* out)
 {
-    if(!ckc_attn2d_live(b))
+    if(b == NULL)
     {
         return false;
     }
@@ -524,7 +522,7 @@ static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
     {
         return g_c32_dist;
     }
-    if(!ckc_attn2d_live(b))
+    if(b == NULL)
     {
         return NULL;
     }
@@ -562,7 +560,7 @@ ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int e
     int ps_counts[1];
     ckc_value_t* out_x[2];
 
-    if(!ckc_attn2d_live(b))
+    if(b == NULL)
     {
         return NULL;
     }
@@ -613,7 +611,7 @@ ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n
     ckc_value_t* out_x[2];
     ckc_value_t* col;
 
-    if(!ckc_attn2d_live(b))
+    if(b == NULL)
     {
         return NULL;
     }

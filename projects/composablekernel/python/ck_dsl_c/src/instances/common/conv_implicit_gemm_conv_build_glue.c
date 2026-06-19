@@ -54,6 +54,7 @@
 #include "ckc/instance_conv_implicit_gemm_internal.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  make_buffer_resource(b, ptr, num_bytes) (helpers/tensor_view.py)
@@ -573,21 +574,24 @@ ckc_kernel_def_t* ckc_build_implicit_gemm_conv_new(ckc_ir_builder_t* b,
                                                    const char* arch,
                                                    const ckc_conv_build_overrides_t* overrides)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_implicit_gemm_conv(b, spec, arch, overrides);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_implicit_gemm_conv(b, spec, arch, overrides);
+
+    });
 }
 
 /* ===================================================================== *

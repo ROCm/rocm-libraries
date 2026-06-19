@@ -70,7 +70,6 @@ static void _op_tile_readfirstlane(ckc_lower_t *L, const ckc_op_t *op)
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY,
                     "tile.readfirstlane: unsupported type '%s'", tyname);
-        return;
     }
     ckc_ll_need(L, intrinsic_key);
     ckc_ll_emitf(L,
@@ -96,7 +95,6 @@ static void _op_tile_pin_sgpr(ckc_lower_t *L, const ckc_op_t *op)
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY,
                     "tile.pin_sgpr: unsupported type '%s'", tyname);
-        return;
     }
     ckc_ll_emitf(L, "  %s = call %s asm \"\", \"=s,0\"(%s %s)",
                  ll_result_name(op), ty, ty, ckc_ll_operand(L, v));
@@ -224,7 +222,6 @@ static void _op_tile_ds_swizzle_xor(ckc_lower_t *L, const ckc_op_t *op)
     const ckc_value_t *data;
     if (!ckc_attr_get_int(&op->attrs, "xor_mask", &xor_mask)) {
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.ds_swizzle_xor: missing 'xor_mask'");
-        return;
     }
     offset = (xor_mask << 10) | 0x1F;
     data = op->operands[0];
@@ -260,7 +257,6 @@ static void _op_tile_mov_dpp(ckc_lower_t *L, const ckc_op_t *op)
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY,
                     "tile.mov_dpp: missing 'row_shr'/'row_shl'");
-        return;
     }
 
     data_s = ckc_ll_operand(L, data);
@@ -336,7 +332,6 @@ static void _op_tile_byte_perm(ckc_lower_t *L, const ckc_op_t *op)
     const char *b_s;
     if (!ckc_attr_get_int(&op->attrs, "sel", &sel)) {
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.byte_perm: missing 'sel'");
-        return;
     }
     sel_u = (uint32_t)((uint64_t)sel & 0xFFFFFFFFu);
     ckc_ll_need(L, "amdgcn.perm");
@@ -378,7 +373,6 @@ static void ll_ds_read_tr16(ckc_lower_t *L, const ckc_op_t *op,
     /* getelementptr inbounds <agg>, ptr addrspace(3) <g>, i32 0, i32 <idx>... */
     if (ckc_strbuf_init(&gep, 64) != 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "ds_read_tr16: strbuf OOM");
-        return;
     }
     ckc_strbuf_appendf(&gep,
                        "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
@@ -389,7 +383,6 @@ static void ll_ds_read_tr16(ckc_lower_t *L, const ckc_op_t *op,
     if (gep.oom) {
         ckc_strbuf_free(&gep);
         ckc_ll_fail(L, CKC_ERR_OOM, "ds_read_tr16: strbuf OOM");
-        return;
     }
     ckc_ll_emit(L, ckc_strbuf_cstr(&gep));
     ckc_strbuf_free(&gep);
@@ -440,7 +433,6 @@ static void _op_tile_ds_read_tr_b8(ckc_lower_t *L, const ckc_op_t *op)
 
     if (ckc_strbuf_init(&gep, 64) != 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
-        return;
     }
     ckc_strbuf_appendf(&gep,
                        "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
@@ -451,7 +443,6 @@ static void _op_tile_ds_read_tr_b8(ckc_lower_t *L, const ckc_op_t *op)
     if (gep.oom) {
         ckc_strbuf_free(&gep);
         ckc_ll_fail(L, CKC_ERR_OOM, "ds_read_tr_b8: strbuf OOM");
-        return;
     }
     ckc_ll_emit(L, ckc_strbuf_cstr(&gep));
     ckc_strbuf_free(&gep);
@@ -491,12 +482,10 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
     raw_template = ckc_attr_get_str(&op->attrs, "template");
     if (raw_template == NULL) {
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.inline_asm: missing 'template'");
-        return;
     }
     constraints = ckc_attr_get_str(&op->attrs, "constraints");
     if (constraints == NULL) {
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.inline_asm: missing 'constraints'");
-        return;
     }
     template_esc = ckc_ll_escape_asm_string(L, raw_template);
 
@@ -506,7 +495,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
     /* Build the typed operand list. */
     if (ckc_strbuf_init(&args, 64) != 0) {
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-        return;
     }
     for (i = 0; i < op->num_operands; ++i) {
         if (i != 0) {
@@ -517,7 +505,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
     if (args.oom) {
         ckc_strbuf_free(&args);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-        return;
     }
     arglist = ckc_strbuf_cstr(&args);
 
@@ -525,7 +512,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
     if (ckc_strbuf_init(&asm_expr, 64) != 0) {
         ckc_strbuf_free(&args);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-        return;
     }
     ckc_strbuf_appendf(&asm_expr, "asm%s \"%s\", \"%s\"(%s)",
                        flag_str, template_esc, constraints, arglist);
@@ -533,7 +519,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
         ckc_strbuf_free(&args);
         ckc_strbuf_free(&asm_expr);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-        return;
     }
     asm_str = ckc_strbuf_cstr(&asm_expr);
 
@@ -547,7 +532,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
             ckc_strbuf_free(&args);
             ckc_strbuf_free(&asm_expr);
             ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-            return;
         }
         ckc_strbuf_append(&struct_ty, "{ ");
         for (i = 0; i < op->num_results; ++i) {
@@ -563,7 +547,6 @@ static void _op_tile_inline_asm(ckc_lower_t *L, const ckc_op_t *op)
             ckc_strbuf_free(&asm_expr);
             ckc_strbuf_free(&struct_ty);
             ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
-            return;
         }
         st = ckc_strbuf_cstr(&struct_ty);
         tmp = ckc_ll_fresh(L, "asmcl");

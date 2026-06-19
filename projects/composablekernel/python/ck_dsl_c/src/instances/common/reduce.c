@@ -25,6 +25,7 @@
 #include "ckc/helper_ck_dsl.helpers.distribution.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* The reduce-distribution helpers (make_reduce_tile_distribution_encoding,
  * make_static_distributed_tensor, block_tile_reduce_sync) and the
@@ -304,230 +305,232 @@ ckc_kernel_def_t* ckc_build_reduce2d(ckc_ir_builder_t* b,
                                      const ckc_reduce2d_spec_t* spec,
                                      const char* arch)
 {
-    char reason[CKC_ERR_MSG_CAP];
-    const ckc_type_t* io_ty;
-    int BS;
-    int VEC;
-    int N;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char reason[CKC_ERR_MSG_CAP];
+        const ckc_type_t* io_ty;
+        int BS;
+        int VEC;
+        int N;
 
-    ckc_value_t* X;
-    ckc_value_t* Y;
-    ckc_value_t* tid;
-    ckc_value_t* row;
+        ckc_value_t* X;
+        ckc_value_t* Y;
+        ckc_value_t* tid;
+        ckc_value_t* row;
 
-    ckc_tensor_view_t x_view;
-    ckc_tile_window_t x_tile;
-    ckc_value_t* lds;
+        ckc_tensor_view_t x_view;
+        ckc_tile_window_t x_tile;
+        ckc_value_t* lds;
 
-    ckc_reduce_combine_t combine;
-    ckc_value_t* acc;
-    ckc_reduce2d_body_ctx_t bctx;
-    ckc_value_t* total;
+        ckc_reduce_combine_t combine;
+        ckc_value_t* acc;
+        ckc_reduce2d_body_ctx_t bctx;
+        ckc_value_t* total;
 
-    (void)arch; /* Python build_reduce2d takes no arch. */
+        (void)arch; /* Python build_reduce2d takes no arch. */
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-
-    /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
-    if (!ckc_reduce2d_is_valid_spec(spec, reason, sizeof(reason)))
-    {
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid reduce2d spec: %s", reason);
-        return NULL;
-    }
-
-    /* io_ty = io_ir_type(spec.dtype) */
-    io_ty = ckc_b_io_ir_type(b, spec->dtype);
-    if (io_ty == NULL)
-    {
-        return NULL;
-    }
-
-    BS = spec->block_size;
-    VEC = spec->vec;
-    N = spec->n_per_block;
-
-    /* b.kernel.attrs["max_workgroup_size"] = BS */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
-
-    /* X = b.param("X", PtrType(io_ty,"global"), noalias, readonly, align16)
-     * Y = b.param("Y", PtrType(io_ty,"global"), noalias, writeonly, align16)
-     * M = b.param("M", I32); _ = b.param("N", I32) */
-    {
-        ckc_param_opts_t opts;
-        const ckc_type_t* ptr_elem = ckc_ptr_type(b, io_ty, "global");
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;
-        opts.noalias_set = true;
-        opts.readonly = true;
-        opts.readonly_set = true;
-        opts.align = 16;
-        opts.align_set = true;
-        X = ckc_b_param(b, "X", ptr_elem, &opts);
-
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias = true;
-        opts.noalias_set = true;
-        opts.writeonly = true;
-        opts.writeonly_set = true;
-        opts.align = 16;
-        opts.align_set = true;
-        Y = ckc_b_param(b, "Y", ptr_elem, &opts);
-
-        (void)ckc_b_param(b, "M", ckc_i32(), NULL);
-        (void)ckc_b_param(b, "N", ckc_i32(), NULL);
-    }
-
-    /* tid = b.thread_id_x(); row = b.block_id_x() */
-    tid = ckc_b_thread_id_x(b);
-    row = ckc_b_block_id_x(b);
-
-    /* x_view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=io_ty)
-     *   == make_global_view(X, (1, N), io_ty) with packed strides. */
-    {
-        int shape2[2];
-        shape2[0] = 1;
-        shape2[1] = N;
-        if (ckc_make_global_view(&x_view, X, shape2, 2, io_ty, NULL) != CKC_OK)
-        {
-            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "reduce2d: make_global_view failed");
-            return NULL;
-        }
-    }
-
-    /* x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, const_i32(0))) */
-    {
-        int lens2[2];
-        ckc_value_t* origin2[2];
-        lens2[0] = 1;
-        lens2[1] = N;
-        origin2[0] = row;
-        origin2[1] = ckc_b_const_i32(b, 0);
-        if (ckc_make_tile_window(&x_tile, &x_view, lens2, origin2, 2) != CKC_OK)
-        {
-            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "reduce2d: make_tile_window failed");
-            return NULL;
-        }
-    }
-
-    /* lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
-     *   == smem_alloc(F32, [BS], "lds_red"); .base is the smem token. */
-    {
-        int lds_shape[1];
-        lds_shape[0] = BS;
-        lds = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_red");
-    }
-
-    /* Pick f32 identity + combiner per op. */
-    if (strcmp(spec->op, "sum") == 0 || strcmp(spec->op, "mean") == 0)
-    {
-        acc = ckc_b_const_f32(b, 0.0);
-        combine = CKC_REDUCE_SUM;
-    }
-    else if (strcmp(spec->op, "max") == 0)
-    {
-        acc = ckc_b_const_f32(b, CKC_REDUCE_NEG_INF_F32);
-        combine = CKC_REDUCE_MAX;
-    }
-    else if (strcmp(spec->op, "min") == 0)
-    {
-        acc = ckc_b_const_f32(b, CKC_REDUCE_POS_INF_F32);
-        combine = CKC_REDUCE_MIN;
-    }
-    else if (strcmp(spec->op, "prod") == 0)
-    {
-        acc = ckc_b_const_f32(b, 1.0);
-        combine = CKC_REDUCE_PROD;
-    }
-    else
-    {
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "unsupported reduce op '%s'", spec->op);
-        return NULL;
-    }
-
-    /* sweep_row_chunks(b, x_tile, tid=tid, block_size=BS, vec=VEC,
-     *                  elems_per_thread=spec.elems_per_thread, body=body)
-     * The body threads acc through the bctx cell (Python `nonlocal acc`). */
-    bctx.combine = combine;
-    bctx.acc = acc;
-    (void)ckc_sweep_row_chunks(b, &x_tile,
-                               tid,
-                               BS, VEC,
-                               ckc_reduce2d_elems_per_thread(spec),
-                               NULL, /* row=None (origin already pinned) */
-                               ckc_reduce2d_sweep_body, &bctx,
-                               false /* cache=False */);
-    acc = bctx.acc;
-
-    /* Cross-thread reduction. */
-    if (spec->block_size % spec->wave_size == 0 &&
-        (combine == CKC_REDUCE_SUM || combine == CKC_REDUCE_MAX))
-    {
-        /* red_dist = _make_row_reduce_distribution(spec)
-         * reduced  = make_static_distributed_tensor(red_dist, dtype=F32)
-         * reduced.storage[0] = acc
-         * block_tile_reduce_sync(b, reduced, combine, lds_buf=lds, tid, wave_size)
-         * total = reduced.storage[0] */
-        const ckc_tile_distribution_t* red_dist;
-        ckc_static_distributed_tensor_t* reduced;
-
-        red_dist = ckc_reduce2d_make_row_reduce_distribution(b, spec);
-        if (red_dist == NULL)
+        if (b == NULL || spec == NULL)
         {
             return NULL;
         }
-        reduced = ckc_make_static_distributed_tensor(b, red_dist, ckc_f32());
-        if (reduced == NULL || reduced->num_storage < 1)
+
+        /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
+        if (!ckc_reduce2d_is_valid_spec(spec, reason, sizeof(reason)))
         {
-            (void)ckc_i_set_err(b, CKC_ERR_VALUE,
-                                "reduce2d: empty distributed tensor");
+            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid reduce2d spec: %s", reason);
             return NULL;
         }
-        reduced->storage[0] = acc;
-        ckc_block_tile_reduce_sync(b, reduced, combine, lds, tid, spec->wave_size);
-        total = reduced->storage[0];
-    }
-    else if (spec->block_size % spec->wave_size == 0)
-    {
-        /* min / prod: hand-built wave-XOR prologue. */
-        total = ckc_block_lds_reduce_with_wave_prologue(b, acc, lds, tid,
-                                                        spec->block_size,
-                                                        combine,
-                                                        spec->wave_size);
-    }
-    else
-    {
-        /* full LDS tree. */
-        total = ckc_block_lds_reduce(b, acc, lds, tid, BS, combine);
-    }
 
-    /* if spec.op == "mean": total = total * rcp(const_f32(float(N))) */
-    if (strcmp(spec->op, "mean") == 0)
-    {
-        total = ckc_b_fmul(b, total, ckc_b_rcp(b, ckc_b_const_f32(b, (double)N)));
-    }
+        /* io_ty = io_ir_type(spec.dtype) */
+        io_ty = ckc_b_io_ir_type(b, spec->dtype);
+        if (io_ty == NULL)
+        {
+            return NULL;
+        }
 
-    /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):
-     *     store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
-    {
-        ckc_if_t iff = ckc_b_scf_if(b, ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0)));
-        ckc_b_region_enter(b, iff.then_region);
-        ckc_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
-        ckc_b_region_leave(b);
-    }
+        BS = spec->block_size;
+        VEC = spec->vec;
+        N = spec->n_per_block;
 
-    /* return b.kernel  (Python build_reduce2d returns b.kernel WITHOUT an
-     * explicit cf.return; the trailing ret void is appended at lowering time,
-     * so do NOT emit ckc_b_ret here -- matches the Python IR byte-for-byte). */
+        /* b.kernel.attrs["max_workgroup_size"] = BS */
+        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
 
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    return b->kernel;
+        /* X = b.param("X", PtrType(io_ty,"global"), noalias, readonly, align16)
+         * Y = b.param("Y", PtrType(io_ty,"global"), noalias, writeonly, align16)
+         * M = b.param("M", I32); _ = b.param("N", I32) */
+        {
+            ckc_param_opts_t opts;
+            const ckc_type_t* ptr_elem = ckc_ptr_type(b, io_ty, "global");
+
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
+            opts.readonly_set = true;
+            opts.align = 16;
+            opts.align_set = true;
+            X = ckc_b_param(b, "X", ptr_elem, &opts);
+
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
+            opts.writeonly_set = true;
+            opts.align = 16;
+            opts.align_set = true;
+            Y = ckc_b_param(b, "Y", ptr_elem, &opts);
+
+            (void)ckc_b_param(b, "M", ckc_i32(), NULL);
+            (void)ckc_b_param(b, "N", ckc_i32(), NULL);
+        }
+
+        /* tid = b.thread_id_x(); row = b.block_id_x() */
+        tid = ckc_b_thread_id_x(b);
+        row = ckc_b_block_id_x(b);
+
+        /* x_view = make_naive_tensor_view_packed(X, shape=(1, N), dtype=io_ty)
+         *   == make_global_view(X, (1, N), io_ty) with packed strides. */
+        {
+            int shape2[2];
+            shape2[0] = 1;
+            shape2[1] = N;
+            if (ckc_make_global_view(&x_view, X, shape2, 2, io_ty, NULL) != CKC_OK)
+            {
+                (void)ckc_i_set_err(b, CKC_ERR_VALUE, "reduce2d: make_global_view failed");
+                return NULL;
+            }
+        }
+
+        /* x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, const_i32(0))) */
+        {
+            int lens2[2];
+            ckc_value_t* origin2[2];
+            lens2[0] = 1;
+            lens2[1] = N;
+            origin2[0] = row;
+            origin2[1] = ckc_b_const_i32(b, 0);
+            if (ckc_make_tile_window(&x_tile, &x_view, lens2, origin2, 2) != CKC_OK)
+            {
+                (void)ckc_i_set_err(b, CKC_ERR_VALUE, "reduce2d: make_tile_window failed");
+                return NULL;
+            }
+        }
+
+        /* lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_red").base
+         *   == smem_alloc(F32, [BS], "lds_red"); .base is the smem token. */
+        {
+            int lds_shape[1];
+            lds_shape[0] = BS;
+            lds = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_red");
+        }
+
+        /* Pick f32 identity + combiner per op. */
+        if (strcmp(spec->op, "sum") == 0 || strcmp(spec->op, "mean") == 0)
+        {
+            acc = ckc_b_const_f32(b, 0.0);
+            combine = CKC_REDUCE_SUM;
+        }
+        else if (strcmp(spec->op, "max") == 0)
+        {
+            acc = ckc_b_const_f32(b, CKC_REDUCE_NEG_INF_F32);
+            combine = CKC_REDUCE_MAX;
+        }
+        else if (strcmp(spec->op, "min") == 0)
+        {
+            acc = ckc_b_const_f32(b, CKC_REDUCE_POS_INF_F32);
+            combine = CKC_REDUCE_MIN;
+        }
+        else if (strcmp(spec->op, "prod") == 0)
+        {
+            acc = ckc_b_const_f32(b, 1.0);
+            combine = CKC_REDUCE_PROD;
+        }
+        else
+        {
+            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "unsupported reduce op '%s'", spec->op);
+            return NULL;
+        }
+
+        /* sweep_row_chunks(b, x_tile, tid=tid, block_size=BS, vec=VEC,
+         *                  elems_per_thread=spec.elems_per_thread, body=body)
+         * The body threads acc through the bctx cell (Python `nonlocal acc`). */
+        bctx.combine = combine;
+        bctx.acc = acc;
+        (void)ckc_sweep_row_chunks(b, &x_tile,
+                                   tid,
+                                   BS, VEC,
+                                   ckc_reduce2d_elems_per_thread(spec),
+                                   NULL, /* row=None (origin already pinned) */
+                                   ckc_reduce2d_sweep_body, &bctx,
+                                   false /* cache=False */);
+        acc = bctx.acc;
+
+        /* Cross-thread reduction. */
+        if (spec->block_size % spec->wave_size == 0 &&
+            (combine == CKC_REDUCE_SUM || combine == CKC_REDUCE_MAX))
+        {
+            /* red_dist = _make_row_reduce_distribution(spec)
+             * reduced  = make_static_distributed_tensor(red_dist, dtype=F32)
+             * reduced.storage[0] = acc
+             * block_tile_reduce_sync(b, reduced, combine, lds_buf=lds, tid, wave_size)
+             * total = reduced.storage[0] */
+            const ckc_tile_distribution_t* red_dist;
+            ckc_static_distributed_tensor_t* reduced;
+
+            red_dist = ckc_reduce2d_make_row_reduce_distribution(b, spec);
+            if (red_dist == NULL)
+            {
+                return NULL;
+            }
+            reduced = ckc_make_static_distributed_tensor(b, red_dist, ckc_f32());
+            if (reduced == NULL || reduced->num_storage < 1)
+            {
+                (void)ckc_i_set_err(b, CKC_ERR_VALUE,
+                                    "reduce2d: empty distributed tensor");
+                return NULL;
+            }
+            reduced->storage[0] = acc;
+            ckc_block_tile_reduce_sync(b, reduced, combine, lds, tid, spec->wave_size);
+            total = reduced->storage[0];
+        }
+        else if (spec->block_size % spec->wave_size == 0)
+        {
+            /* min / prod: hand-built wave-XOR prologue. */
+            total = ckc_block_lds_reduce_with_wave_prologue(b, acc, lds, tid,
+                                                            spec->block_size,
+                                                            combine,
+                                                            spec->wave_size);
+        }
+        else
+        {
+            /* full LDS tree. */
+            total = ckc_block_lds_reduce(b, acc, lds, tid, BS, combine);
+        }
+
+        /* if spec.op == "mean": total = total * rcp(const_f32(float(N))) */
+        if (strcmp(spec->op, "mean") == 0)
+        {
+            total = ckc_b_fmul(b, total, ckc_b_rcp(b, ckc_b_const_f32(b, (double)N)));
+        }
+
+        /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):
+         *     store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
+        {
+            ckc_if_t iff = ckc_b_scf_if(b, ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0)));
+            ckc_b_region_enter(b, iff.then_region);
+            ckc_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
+            ckc_b_region_leave(b);
+        }
+
+        /* return b.kernel  (Python build_reduce2d returns b.kernel WITHOUT an
+         * explicit cf.return; the trailing ret void is appended at lowering time,
+         * so do NOT emit ckc_b_ret here -- matches the Python IR byte-for-byte). */
+
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        return b->kernel;
+    });
 }
 
 /* ===================================================================== *
@@ -537,20 +540,22 @@ ckc_kernel_def_t* ckc_build_reduce2d_new(ckc_ir_builder_t* b,
                                          const ckc_reduce2d_spec_t* spec,
                                          const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_reduce2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_reduce2d(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_reduce2d_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_reduce2d(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *

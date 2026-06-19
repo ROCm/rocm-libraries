@@ -141,7 +141,8 @@ typedef enum ckc_attr_kind
     CKC_ATTR_FLOAT,   /* double   (fp constant value, fill)                  */
     CKC_ATTR_STR,     /* const char* (ity, pred, op_id, elem, elem_type,...) */
     CKC_ATTR_BOOL,    /* bool     (pure, unroll, elide_trailing_barrier,...) */
-    CKC_ATTR_LIST     /* nested attr list (scf.for iter_args metadata)       */
+    CKC_ATTR_LIST,    /* nested attr list (scf.for iter_args metadata)       */
+    CKC_ATTR_INT_LIST /* list of bare ints, e.g. agpr_alloc (0,0)            */
 } ckc_attr_kind_t;
 
 struct ckc_attr_map; /* forward: a list element is itself a small attr map */
@@ -160,6 +161,11 @@ typedef struct ckc_attr_value
             struct ckc_attr_map** items; /* arena array of maps               */
             int count;
         } list;
+        struct
+        {
+            int64_t* ints; /* arena array of bare ints (l:[ i:.., .. ])      */
+            int count;
+        } ilist;
     } u;
 } ckc_attr_value_t;
 
@@ -541,6 +547,9 @@ void ckc_attr_set_int(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, i
 void ckc_attr_set_float(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, double v);
 void ckc_attr_set_str(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, const char* v);
 void ckc_attr_set_bool(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, bool v);
+/* Set a list of bare ints (serialized as l:[ i:v0, i:v1, ... ]). */
+void ckc_attr_set_int_list(
+    ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, const int64_t* vals, int count);
 /* Returns the entry for `key`, or NULL if absent. */
 const ckc_attr_value_t* ckc_attr_get(const ckc_attr_map_t* m, const char* key);
 bool ckc_attr_get_int(const ckc_attr_map_t* m, const char* key, int64_t* out);

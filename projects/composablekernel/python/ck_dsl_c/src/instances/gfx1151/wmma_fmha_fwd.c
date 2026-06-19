@@ -26,6 +26,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 #define WMMA_FMHA_DEFAULT_NAME "ck_dsl_wmma_fmha_fwd"
 #define WMMA_FMHA_DEFAULT_ARCH "gfx1151"
@@ -393,29 +394,31 @@ ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
                                           const ckc_wmma_fmha_fwd_spec_t* spec,
                                           const char* arch)
 {
-    char reason[CKC_ERR_MSG_CAP];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char reason[CKC_ERR_MSG_CAP];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (arch == NULL)
-    {
-        arch = WMMA_FMHA_DEFAULT_ARCH;
-    }
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (arch == NULL)
+        {
+            arch = WMMA_FMHA_DEFAULT_ARCH;
+        }
 
-    /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if (!ckc_wmma_fmha_fwd_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid wmma_fmha_fwd spec: %s", reason);
-        return NULL;
-    }
+        /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
+        if (!ckc_wmma_fmha_fwd_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        {
+            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid wmma_fmha_fwd spec: %s", reason);
+            return NULL;
+        }
 
-    if (wmma_emit_body(b, spec, arch) != CKC_OK)
-    {
-        return NULL;
-    }
-    return b->kernel;
+        if (wmma_emit_body(b, spec, arch) != CKC_OK)
+        {
+            return NULL;
+        }
+        return b->kernel;
+    });
 }
 
 /* --------------------------------------------------------------------------- *

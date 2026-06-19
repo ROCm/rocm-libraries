@@ -56,6 +56,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -391,150 +392,155 @@ ckc_kernel_def_t* ckc_build_permute(ckc_ir_builder_t* b,
                                     const ckc_permute_spec_t* spec,
                                     const char* arch)
 {
-    const ckc_type_t* io_ty;
-    const ckc_type_t* ptr_ty;
-    int total;
-    int vec;
-    const ckc_tensor_descriptor_t* in_desc;
-    ckc_value_t* X;
-    ckc_value_t* Y;
-    ckc_param_opts_t xopts;
-    ckc_param_opts_t yopts;
-    ckc_value_t* tid;
-    ckc_value_t* bid;
-    ckc_value_t* thread_out_base;
-    char reason[160];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        const ckc_type_t* io_ty;
+        const ckc_type_t* ptr_ty;
+        int total;
+        int vec;
+        const ckc_tensor_descriptor_t* in_desc;
+        ckc_value_t* X;
+        ckc_value_t* Y;
+        ckc_param_opts_t xopts;
+        ckc_param_opts_t yopts;
+        ckc_value_t* tid;
+        ckc_value_t* bid;
+        ckc_value_t* thread_out_base;
+        char reason[160];
 
-    if (b == NULL || spec == NULL) return NULL;
-    if (arch == NULL) arch = "gfx950";
+        if (b == NULL || spec == NULL) return NULL;
+        if (arch == NULL) arch = "gfx950";
 
-    /* is_valid_spec gate -> ValueError on reject. */
-    if (!ckc_permute_is_valid_spec(spec, arch, reason, sizeof(reason)))
-    {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "invalid permute spec: %s", reason);
-        return NULL;
-    }
-
-    io_ty = ckc_b_io_ir_type(b, spec->dtype);
-    if (io_ty == NULL) return NULL;
-    total = ckc_permute_total_elements(spec);
-    vec = ckc_permute_vec_width(spec);
-
-    /* in_desc = _build_offset_descriptor(spec) */
-    in_desc = permute_build_offset_descriptor(b, spec);
-    if (in_desc == NULL) return NULL;
-
-    /* kernel.attrs["max_workgroup_size"] = block_size. (The builder was already
-     * init'd with the spec's kernel_name() by the caller.) */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
-
-    /* PtrType(io_ty, "global"). */
-    ptr_ty = ckc_ptr_type(b, io_ty, "global");
-
-    /* X: noalias=True, readonly=True, align=16. */
-    memset(&xopts, 0, sizeof(xopts));
-    xopts.noalias = true;  xopts.noalias_set = true;
-    xopts.readonly = true; xopts.readonly_set = true;
-    xopts.align = 16;      xopts.align_set = true;
-    xopts.addr_space = NULL;
-    X = ckc_b_param(b, "X", ptr_ty, &xopts);
-
-    /* Y: noalias=True, writeonly=True, align=16. */
-    memset(&yopts, 0, sizeof(yopts));
-    yopts.noalias = true;   yopts.noalias_set = true;
-    yopts.writeonly = true; yopts.writeonly_set = true;
-    yopts.align = 16;       yopts.align_set = true;
-    yopts.addr_space = NULL;
-    Y = ckc_b_param(b, "Y", ptr_ty, &yopts);
-
-    /* make_global_view over X/Y emits NO IR; the global-space load/store methods
-     * are inlined below as the identical builder primitives. */
-
-    tid = ckc_b_thread_id_x(b);
-    bid = ckc_b_block_id_x(b);
-    /* thread_out_base = add(mul(bid, const_i32(block_size)), tid). */
-    thread_out_base = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
-
-    if (vec > 1)
-    {
-        /* Vectorised path. */
-        ckc_value_t* out_idx_base = ckc_b_mul(b, thread_out_base, ckc_b_const_i32(b, vec));
-        ckc_value_t* c_total = ckc_b_const_i32(b, total);
-        ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx_base, c_total);
-        ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
-        ckc_b_region_enter(b, iff.then_region);
+        /* is_valid_spec gate -> ValueError on reject. */
+        if (!ckc_permute_is_valid_spec(spec, arch, reason, sizeof(reason)))
         {
-            const char* in_names[1];
-            ckc_value_t* in_values[1];
-            ckc_value_t* src_offset = NULL;
-            ckc_value_t* _valid = NULL;
-            ckc_value_t* x_vec;
-            in_names[0] = "out_idx";
-            in_values[0] = out_idx_base;
-            /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx_base) */
-            if (!ckc_transforms_descriptor_offset(b, in_desc, in_names, in_values, 1,
-                                                  &src_offset, &_valid))
-            {
-                ckc_b_region_leave(b);
-                return NULL;
-            }
-            (void)_valid;
-            /* X_view.load_vec_at(b, src_offset, n=vec) over global == global_load_vN. */
-            x_vec = ckc_b_global_load_vN(b, X, src_offset, io_ty, vec, 0);
-            /* Y_view.store_vec_at(b, out_idx_base, x_vec, n=vec) == global_store_vN. */
-            ckc_b_global_store_vN(b, Y, out_idx_base, x_vec, vec, 0);
+            ckc_i_set_err(b, CKC_ERR_VALUE, "invalid permute spec: %s", reason);
+            return NULL;
         }
-        ckc_b_region_leave(b);
-    }
-    else
-    {
-        /* Scalar fallback path. */
-        ckc_value_t* out_idx = thread_out_base;
-        ckc_value_t* c_total = ckc_b_const_i32(b, total);
-        ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx, c_total);
-        ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
-        ckc_b_region_enter(b, iff.then_region);
-        {
-            const char* in_names[1];
-            ckc_value_t* in_values[1];
-            ckc_value_t* src_offset = NULL;
-            ckc_value_t* _valid = NULL;
-            ckc_value_t* val;
-            in_names[0] = "out_idx";
-            in_values[0] = out_idx;
-            /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx) */
-            if (!ckc_transforms_descriptor_offset(b, in_desc, in_names, in_values, 1,
-                                                  &src_offset, &_valid))
-            {
-                ckc_b_region_leave(b);
-                return NULL;
-            }
-            (void)_valid;
-            /* X_view.load_scalar_at(b, src_offset) over global:
-             *   f16  -> global_load_f16; bf16 -> global_load_bf16. */
-            if (strcmp(spec->dtype, "f16") == 0)
-                val = ckc_b_global_load_f16(b, X, src_offset, 0);
-            else
-                val = ckc_b_global_load_bf16(b, X, src_offset, 0);
-            /* Y_view.store_scalar_at(b, out_idx, val) over global == global_store. */
-            ckc_b_global_store(b, Y, out_idx, val, 0);
-        }
-        ckc_b_region_leave(b);
-    }
 
-    if (ckc_ir_builder_status(b) != CKC_OK) return NULL;
-    return b->kernel;
+        io_ty = ckc_b_io_ir_type(b, spec->dtype);
+        if (io_ty == NULL) return NULL;
+        total = ckc_permute_total_elements(spec);
+        vec = ckc_permute_vec_width(spec);
+
+        /* in_desc = _build_offset_descriptor(spec) */
+        in_desc = permute_build_offset_descriptor(b, spec);
+        if (in_desc == NULL) return NULL;
+
+        /* kernel.attrs["max_workgroup_size"] = block_size. (The builder was already
+         * init'd with the spec's kernel_name() by the caller.) */
+        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
+
+        /* PtrType(io_ty, "global"). */
+        ptr_ty = ckc_ptr_type(b, io_ty, "global");
+
+        /* X: noalias=True, readonly=True, align=16. */
+        memset(&xopts, 0, sizeof(xopts));
+        xopts.noalias = true;  xopts.noalias_set = true;
+        xopts.readonly = true; xopts.readonly_set = true;
+        xopts.align = 16;      xopts.align_set = true;
+        xopts.addr_space = NULL;
+        X = ckc_b_param(b, "X", ptr_ty, &xopts);
+
+        /* Y: noalias=True, writeonly=True, align=16. */
+        memset(&yopts, 0, sizeof(yopts));
+        yopts.noalias = true;   yopts.noalias_set = true;
+        yopts.writeonly = true; yopts.writeonly_set = true;
+        yopts.align = 16;       yopts.align_set = true;
+        yopts.addr_space = NULL;
+        Y = ckc_b_param(b, "Y", ptr_ty, &yopts);
+
+        /* make_global_view over X/Y emits NO IR; the global-space load/store methods
+         * are inlined below as the identical builder primitives. */
+
+        tid = ckc_b_thread_id_x(b);
+        bid = ckc_b_block_id_x(b);
+        /* thread_out_base = add(mul(bid, const_i32(block_size)), tid). */
+        thread_out_base = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
+
+        if (vec > 1)
+        {
+            /* Vectorised path. */
+            ckc_value_t* out_idx_base = ckc_b_mul(b, thread_out_base, ckc_b_const_i32(b, vec));
+            ckc_value_t* c_total = ckc_b_const_i32(b, total);
+            ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx_base, c_total);
+            ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
+            ckc_b_region_enter(b, iff.then_region);
+            {
+                const char* in_names[1];
+                ckc_value_t* in_values[1];
+                ckc_value_t* src_offset = NULL;
+                ckc_value_t* _valid = NULL;
+                ckc_value_t* x_vec;
+                in_names[0] = "out_idx";
+                in_values[0] = out_idx_base;
+                /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx_base) */
+                if (!ckc_transforms_descriptor_offset(b, in_desc, in_names, in_values, 1,
+                                                      &src_offset, &_valid))
+                {
+                    ckc_b_region_leave(b);
+                    return NULL;
+                }
+                (void)_valid;
+                /* X_view.load_vec_at(b, src_offset, n=vec) over global == global_load_vN. */
+                x_vec = ckc_b_global_load_vN(b, X, src_offset, io_ty, vec, 0);
+                /* Y_view.store_vec_at(b, out_idx_base, x_vec, n=vec) == global_store_vN. */
+                ckc_b_global_store_vN(b, Y, out_idx_base, x_vec, vec, 0);
+            }
+            ckc_b_region_leave(b);
+        }
+        else
+        {
+            /* Scalar fallback path. */
+            ckc_value_t* out_idx = thread_out_base;
+            ckc_value_t* c_total = ckc_b_const_i32(b, total);
+            ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx, c_total);
+            ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
+            ckc_b_region_enter(b, iff.then_region);
+            {
+                const char* in_names[1];
+                ckc_value_t* in_values[1];
+                ckc_value_t* src_offset = NULL;
+                ckc_value_t* _valid = NULL;
+                ckc_value_t* val;
+                in_names[0] = "out_idx";
+                in_values[0] = out_idx;
+                /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx) */
+                if (!ckc_transforms_descriptor_offset(b, in_desc, in_names, in_values, 1,
+                                                      &src_offset, &_valid))
+                {
+                    ckc_b_region_leave(b);
+                    return NULL;
+                }
+                (void)_valid;
+                /* X_view.load_scalar_at(b, src_offset) over global:
+                 *   f16  -> global_load_f16; bf16 -> global_load_bf16. */
+                if (strcmp(spec->dtype, "f16") == 0)
+                    val = ckc_b_global_load_f16(b, X, src_offset, 0);
+                else
+                    val = ckc_b_global_load_bf16(b, X, src_offset, 0);
+                /* Y_view.store_scalar_at(b, out_idx, val) over global == global_store. */
+                ckc_b_global_store(b, Y, out_idx, val, 0);
+            }
+            ckc_b_region_leave(b);
+        }
+
+        if (ckc_ir_builder_status(b) != CKC_OK) return NULL;
+        return b->kernel;
+    });
 }
 
 ckc_kernel_def_t* ckc_build_permute_new(ckc_ir_builder_t* b,
                                         const ckc_permute_spec_t* spec,
                                         const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL) return NULL;
-    if (ckc_permute_kernel_name(spec, name, sizeof(name)) != CKC_OK) return NULL;
-    if (ckc_ir_builder_init(b, name) != CKC_OK) return NULL;
-    return ckc_build_permute(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL) return NULL;
+        if (ckc_permute_kernel_name(spec, name, sizeof(name)) != CKC_OK) return NULL;
+        if (ckc_ir_builder_init(b, name) != CKC_OK) return NULL;
+        return ckc_build_permute(b, spec, arch);
+
+    });
 }
 
 /* ----------------------------------------------------------------- permute_grid */

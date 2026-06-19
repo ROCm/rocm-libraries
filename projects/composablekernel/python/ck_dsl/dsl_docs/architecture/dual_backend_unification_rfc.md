@@ -377,6 +377,46 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ---
 
+### WS18 — Adversarial code review & hardening [dynamic workflows; feeds WS8]
+
+**Premise.** A comprehensive review + hardening of **all** code this program produced/touched — broader than WS3-hardening (which was `-Werror`+sanitizers on the C engine alone). Run as **dynamic workflows**: fan out finders per (dimension × area) → **adversarially verify** each finding (independent refuters, default-refuted, majority vote — kills noise) → synthesize confirmed issues → fix → re-verify. Every fix harness-gated (`run_diff`/golden/numeric unchanged, tests green).
+
+**Areas (all):** the C++ engine (`core/ir`, lowerers, instances, helpers), Python `ck_dsl` (core, helpers, instances, dispatch, heuristics, `backend.py`, `ir_serialize`/`verify`), the provider (runtime, engines, plans, dispatcher, comgr, ml_heuristic), the `ckc_engine` bindings, the differential harness itself, the alola CI scripts.
+
+**Dimensions (one workflow wave each, fanned across areas, adversarially verified):** (1) correctness/logic (esp. the recent conv rename/3d, sched-suppression, datalayout, atoms, agpr_alloc); (2) memory/resource/lifetime safety (arena ownership, leaks, UAF, the RAII conversion); (3) error-handling + edge cases + OOM + boundary shapes; (4) **security/input-validation** (comgr `.ll` feed, kernarg packing bounds, the IR parser, provider ParamParsers, C-JIT); (5) API/ABI correctness (`extern "C"` boundary, exceptions-across-ABI shims, version gating); (6) concurrency/reentrancy (launcher FIFO, multi-stream, runtime cache, harness parallelism); (7) byte-identity + determinism invariants (the `vsnprintf` core, arena-order determinism); (8) perf/quality (non-blocking).
+
+**Cadence.** An **early partial pass** can run now on the stable verified components (harness, dispatch, serializer/verifier, reconciled engine, bindings); a **final comprehensive pass** after WS10/WS16/WS17 stabilize. **AC:** adversarially-confirmed issue inventory with fixes landed + harness-green; security surfaces fuzzed; no unhandled OOM/edge/ABI hazards; perf findings logged.
+
+---
+
+### WS17 — Boilerplate reduction [after WS10/WS16; byte-identity gated]
+
+**Principle.** Cut **mechanical** duplication without collapsing the deliberate **1:1 Python↔C instance correspondence** (load-bearing for parity) or hurting readability/over-abstracting. Every change **byte-identity gated** (`run_diff` ll/ir + L5 golden unchanged) + tests green. Refactors *stable* code once, so it sequences after the engine settles. Complements WS10 (which already removes void*/sticky-error/manual `vec`+`strbuf` boilerplate via C++ idioms — not re-done here).
+
+- **W1 Parity-emitter consolidation.** The 63 `tests/parity/*_emit.{c,py}` pairs are near-identical (`main` + `make_cfg` + ll/ir/verify dispatch). Replace with a **shared table-driven driver** (one C + one Python), each family providing only its config table + build entry. Biggest single cut. Gate: `run_diff` identical.
+- **W2 C instance-builder skeleton.** Factor the repeated `_spec_default/_finalize/_kernel_name/_is_valid_spec/build_*/_lower_to_llvm` scaffolding into macros/helpers (or templates post-C++), only where it doesn't damage the mirror.
+- **W3 Binding-glue reduction.** Macro/template-generate WS16's per-family binding + `spec_to_dict` (a registration macro + spec-field descriptors) instead of ~145 hand copies.
+- **W4 Script/registry DRY.** Delete redundant `run_*.sh` (superseded by `run_diff.py`); unify dispatch registries + `lever_spaces`; shared tolerance/reference tables; shared sbatch templates.
+- **W5 Duplication audit.** Similarity scan across `src/instances`+helpers+Python instances; cut safe copy-paste, report intentional parity anchors.
+
+**AC.** Measurable duplication reduction, **zero output change** (golden holds), tests green, 1:1 structure + readability preserved, no over-abstraction. Feeds WS13 (docs reflect simpler structure) and the WS8 soak.
+
+---
+
+### WS16 — Extend the cpp binding to the full instance catalog [after WS10; feeds WS12/WS8]
+
+**Objective.** The `ckc_engine` pybind binding + `backend.py` dispatch currently cover **universal GEMM only**. Until they cover **every** instance family, `CK_DSL_BACKEND=cpp|both` and the IR-seam cpp-lowerer path are GEMM-only. WS16 extends the binding to the **whole catalog** (~145 builders).
+
+**Scope (every family with a C builder).** GEMM (universal ✓, batched, grouped, multi_d/abd, streamk, mfma, flatmm, block_scale, mx, matmul_nbits, batched_contraction, wsp3); conv (implicit_gemm, direct_grouped, img2col, deep_fused_conv_pool); attention (unified, all fmha_*, sage, sparse, tiled_2d/3d per arch); MoE (fused_moe, fused_moe_e2e, moe_fused_mega(_fp8), moe_gemm_fused, moe_sorting, moe_smoothquant, topk_softmax); norm (layernorm2d, rmsnorm2d, add_rmsnorm2d_*); elementwise/reduce/pooling/transpose/permute/smoothquant; RDNA wmma_*; per-arch variants.
+
+**Per family.** (1) `ckc_engine.<fam>_lower_llvm`/`_serialize_ir`/`_verify`/`_is_valid` over the extern-`C` entry points; (2) a `<fam>_spec_to_dict` converter (each family's spec dataclass↔C struct — the bulk of the work); (3) a `lower_<fam>(spec,arch,backend)` dispatch entry mirroring `lower_universal_gemm`. The python/cpp/both + `BackendMismatch` diff machinery is family-agnostic and reused as-is.
+
+**Validation per family.** binding-cpp `.ll` == the C engine's own `.ll` (faithful exposure; compare vs the family's parity emitter) AND == Python where they match. (Post-reconciliation the C engine matches *target* Python for the reconciled families, so `both` vs *current* Python legitimately diverges there until the merge.)
+
+**AC.** `CK_DSL_BACKEND=cpp` lowers every family; `both` runs for every family (GREEN where C-engine==Python). **Fan-out by family-group.** Sequenced after WS10 (stable idiomatic engine + extern-`C` ABI); feeds WS12 (cpp lowerer path) and the WS8 soak (full-catalog differential).
+
+---
+
 ### WS14 / WS15 — Stratified, multi-arch CI [sequence after WS13]
 
 **Premise.** The library spans no-GPU logic, comgr compilation, GPU numeric execution, integration layers, and performance — so CI must be **stratified** and **multi-arch**. Today: Tier-0 strong (`run_diff` ll/ir is pure text-gen; dispatch/verify/serialize units), Tier-2 partial (gfx950-only numeric), Tiers 1/4/5 + all multi-arch numeric missing.

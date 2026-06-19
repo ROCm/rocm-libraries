@@ -252,6 +252,14 @@ static bool attr_value_eq(const ckc_attr_value_t *x, const ckc_attr_value_t *y)
         }
         return true;
     }
+    case CKC_ATTR_INT_LIST: {
+        int i;
+        if (x->u.ilist.count != y->u.ilist.count) return false;
+        for (i = 0; i < x->u.ilist.count; i++) {
+            if (x->u.ilist.ints[i] != y->u.ilist.ints[i]) return false;
+        }
+        return true;
+    }
     }
     return false;
 }

@@ -32,4 +32,12 @@ target_link_libraries(ck_dsl_runtime INTERFACE hip::host ${AMD_COMGR_LIB})
 if(CK_DSL_RUNTIME_BUILD_TESTS)
     add_executable(ck_dsl_runtime_test tests/test_runtime.cpp)
     target_link_libraries(ck_dsl_runtime_test PRIVATE ck_dsl_runtime)
+
+    # Host-only unit tests for the runtime's pure (GPU-free, comgr-free) host
+    # logic: manifest parse, kernarg packing/bounds, grid geometry, dispatcher
+    # ranking, artifact-store indexing. Runs on any host (no device required).
+    add_executable(ck_dsl_runtime_hostonly_test tests/test_runtime_hostonly.cpp)
+    target_link_libraries(ck_dsl_runtime_hostonly_test PRIVATE ck_dsl_runtime)
+    enable_testing()
+    add_test(NAME ck_dsl_runtime_hostonly_test COMMAND ck_dsl_runtime_hostonly_test)
 endif()

@@ -57,6 +57,12 @@ from .ir import (
     Value,
     VectorType,
 )
+from .backend import (
+    BackendError,
+    BackendMismatch,
+    lower_universal_gemm,
+    resolve_backend,
+)
 from .ir_print import print_ir
 from .ir_serialize import (
     canonical_equal,
@@ -97,6 +103,10 @@ __all__ = [
     "Type",
     "Value",
     "VectorType",
+    "BackendError",
+    "BackendMismatch",
+    "lower_universal_gemm",
+    "resolve_backend",
     "print_ir",
     "serialize",
     "parse",

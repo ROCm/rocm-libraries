@@ -130,9 +130,23 @@ if(CK_DSL_PROVIDER_BUILD_TESTS)
     target_include_directories(ck_dsl_attn_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(ck_dsl_attn_layout_test
         PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk ck_dsl_runtime hip::host)
+
+    # Host-only fuzz/robustness test for all three param parsers. Feeds
+    # randomized + edge-case hipDNN graph flatbuffers through the parsers and
+    # asserts no crash / OOB (clean parse or std::exception only). No GPU.
+    add_executable(ck_dsl_param_fuzz_test
+        integration_tests/ParamParserFuzzTest.cpp
+        src/engines/CkDslParamParser.cpp
+        src/engines/CkDslAttnParamParser.cpp
+        src/engines/CkDslConvParamParser.cpp)
+    target_include_directories(ck_dsl_param_fuzz_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(ck_dsl_param_fuzz_test
+        PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk ck_dsl_runtime hip::host)
+
     enable_testing()
     add_test(NAME ck_dsl_gemm_blayout_test COMMAND ck_dsl_gemm_blayout_test)
     add_test(NAME ck_dsl_attn_layout_test COMMAND ck_dsl_attn_layout_test)
+    add_test(NAME ck_dsl_param_fuzz_test COMMAND ck_dsl_param_fuzz_test)
 endif()
 
 if(DEFINED HIPDNN_BUILD_PLUGIN_ENGINE_DIR)

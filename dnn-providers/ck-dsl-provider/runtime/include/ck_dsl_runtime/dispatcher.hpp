@@ -206,9 +206,15 @@ class Dispatcher {
             // Baked conv kernels have fixed problem dims encoded in manifest["conv"]
             // as [N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW]. If the array is
             // absent the kernel is shape-generic (C-JIT path); accept all shapes.
-            if (!m.raw.has("conv")) return true;
+            if (!m.raw.has("conv") || !m.raw.at("conv").is_array()) return true;
             const auto& arr = m.raw.at("conv").as_array();
             if (arr.size() < 13) return true;
+            // A baked-conv array must be all numeric; a malformed entry (string /
+            // null) would otherwise throw from as_int() during selection. Treat a
+            // non-numeric entry as "shape-generic" (accept) rather than crashing
+            // the dispatcher mid-rank.
+            for (const auto& e : arr)
+                if (!e.is_number()) return true;
             return p.conv_N == arr[0].as_int() && p.Hi == arr[1].as_int() &&
                    p.Wi == arr[2].as_int() && p.conv_C == arr[3].as_int() &&
                    p.conv_K == arr[4].as_int() && p.Y == arr[5].as_int() &&

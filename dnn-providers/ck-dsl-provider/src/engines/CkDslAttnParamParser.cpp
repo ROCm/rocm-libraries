@@ -88,8 +88,8 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     // Get() on a null/short vector is an out-of-bounds read in release builds.
     // Throw a clear error instead; isApplicable() catches it and declines.
     // Mirrors the rank checks in CkDslParamParser::parseGemmGraph.
-    if (qd == nullptr || kd == nullptr || vd == nullptr || qd->size() < 4 ||
-        kd->size() < 4 || vd->size() < 4)
+    if (qd == nullptr || kd == nullptr || vd == nullptr || qd->size() < 4 || kd->size() < 4 ||
+        vd->size() < 4)
         throw std::runtime_error("CkDslAttn: expected rank-4 [B,H,S,D] Q/K/V dims");
     // hipDNN SDPA tensors are *logical* BHSD: dims are [B, H, S, D] (matching the
     // asm_sdpa engine and the benchmark graph naming bN_hN_sN_dN). Read the
@@ -122,8 +122,7 @@ ParsedAttnParams parseSdpaGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
         // make the stride-order comparison meaningless, so treat them like
         // absent strides and fall back to the conservative kernel-native default
         // (not BHSD). Mirrors detectBLayout's `stride <= 0 -> Unknown` guard.
-        p.is_bhsd =
-            (stride_h > 0 && stride_s > 0) && isPhysicalBhsdLayout(stride_h, stride_s);
+        p.is_bhsd = (stride_h > 0 && stride_s > 0) && isPhysicalBhsdLayout(stride_h, stride_s);
     } else {
         p.is_bhsd = false;
     }
@@ -153,6 +152,14 @@ ck_dsl::Problem buildProblem(const ParsedAttnParams& p, const std::string& arch)
     prob.hdim_q = p.hdim_q;
     prob.hdim_v = p.hdim_v;
     prob.mask_type = p.mask_type;
+    // Path-selection inputs (mirror UnifiedAttentionProblem). The 2d-vs-3d gate in
+    // the dispatcher uses total_q and num_seqs; for a dense (non-ragged) SDPA
+    // graph these are batch*seqlen_q and batch respectively. Leaving them at their
+    // defaults (0) made the dispatcher fall back to total_q=seqlen_q, num_seqs=1,
+    // which under-counts the q-block grid for B>1 and could mis-route the path.
+    prob.total_q = p.batch * p.seqlen_q;
+    prob.num_seqs = p.batch;
+    prob.sliding_window = (p.mask_type == 3) ? 1 : 0;  // window mask -> forces 2d
     return prob;
 }
 

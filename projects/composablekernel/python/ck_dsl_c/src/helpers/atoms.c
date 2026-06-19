@@ -20,12 +20,14 @@
  * Static reproduction of the MfmaAtom factory class-methods, in the EXACT order
  * of the Python MFMA_ATOMS tuple:
  *
- *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
- *                  + MFMA_MX_ATOMS
+ *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS
+ *                  + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
  *
  *   MFMA_F16_ATOMS  = (f16_4x4x4, f16_16x16x16, f16_16x16x32,
  *                      f16_32x32x8, f16_32x32x16)
- *   MFMA_BF16_ATOMS = (bf16_16x16x16, bf16_16x16x32, bf16_32x32x16)
+ *   MFMA_F32_ATOMS  = (f32_16x16x4, f32_32x32x2)
+ *   MFMA_BF16_ATOMS = (bf16_16x16x16, bf16_16x16x32, bf16_32x32x8,
+ *                      bf16_32x32x16)
  *   MFMA_FP8_ATOMS  = (fp8_16x16x32, fp8_32x32x16, bf8_16x16x32,
  *                      bf8_32x32x16, fp8_16x16x128)
  *   MFMA_MX_ATOMS   = (fp4_16x16x128, fp6_16x16x96)
@@ -45,9 +47,13 @@ static const ckc_mfma_atom_t CKC_MFMA_ATOMS[] = {
     {16, 16, 32, 8, 8, 4, "f16", "f32", "mfma_f32_16x16x32_f16"},
     {32, 32, 8, 4, 4, 16, "f16", "f32", "mfma_f32_32x32x8_f16"},
     {32, 32, 16, 8, 8, 16, "f16", "f32", "mfma_f32_32x32x16_f16"},
+    /* ---- MFMA_F32_ATOMS (#8348) ---- */
+    {16, 16, 4, 1, 1, 4, "fp32", "f32", "mfma_f32_16x16x4_f32"},
+    {32, 32, 2, 1, 1, 16, "fp32", "f32", "mfma_f32_32x32x2_f32"},
     /* ---- MFMA_BF16_ATOMS ---- */
     {16, 16, 16, 4, 4, 4, "bf16", "f32", "mfma_f32_16x16x16_bf16"},
     {16, 16, 32, 8, 8, 4, "bf16", "f32", "mfma_f32_16x16x32_bf16"},
+    {32, 32, 8, 4, 4, 16, "bf16", "f32", "mfma_f32_32x32x8_bf16"},
     {32, 32, 16, 8, 8, 16, "bf16", "f32", "mfma_f32_32x32x16_bf16"},
     /* ---- MFMA_FP8_ATOMS ---- */
     {16, 16, 32, 8, 8, 4, "fp8e4m3", "f32", "mfma_f32_16x16x32_fp8"},
@@ -67,6 +73,7 @@ static const ckc_mfma_atom_t CKC_MFMA_ATOMS[] = {
  *     fp8 -> fp8e4m3, fp8e4m3 -> fp8e4m3,
  *     bf8 -> bf8e5m2, bf8e5m2 -> bf8e5m2,
  *     f16 -> f16, fp16 -> f16,
+ *     f32 -> fp32, fp32 -> fp32, float -> fp32,
  *     bf16 -> bf16, bfloat16 -> bf16.
  * Any key not in the table maps to itself (Python dict.get(dtype, dtype)). */
 static const char* ckc_canon_dtype(const char* dtype)
@@ -82,6 +89,9 @@ static const char* ckc_canon_dtype(const char* dtype)
         {"bf8e5m2", "bf8e5m2"},
         {"f16", "f16"},
         {"fp16", "f16"},
+        {"f32", "fp32"},
+        {"fp32", "fp32"},
+        {"float", "fp32"},
         {"bf16", "bf16"},
         {"bfloat16", "bf16"},
     };

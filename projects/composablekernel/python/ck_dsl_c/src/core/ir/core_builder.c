@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error.hpp"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h"
 #include "ckc/vec.h"
@@ -36,22 +37,45 @@ bool ckc_i_live(const ckc_ir_builder_t *b) {
     return b != NULL && b->status == CKC_OK;
 }
 
-void *ckc_i_set_err(ckc_ir_builder_t *b, ckc_status_t st, const char *fmt, ...) {
-    if (b == NULL) {
-        return NULL;
-    }
-    /* First failure wins: preserve an existing sticky error. */
-    if (b->status != CKC_OK) {
-        return NULL;
-    }
-    b->status = (st == CKC_OK) ? CKC_ERR_VALUE : st;
-
+/* Raise the failure as a ckc::Error (mirroring the Python `raise`). The throw
+ * unwinds to the public entry boundary (ckc_build_*_new / the build workers /
+ * ckc_ir_parse / the core lowerer), which catches it via ckc::guard_* and records
+ * status + message on the builder, so the extern "C" ABI is unchanged. The
+ * builder's arena is bulk-freed by the entry's ckc_ir_builder_free, so unwinding
+ * past in-progress builder calls leaks nothing (every node is arena-owned).
+ * [[noreturn]] with the void* return type keeps every existing call site valid:
+ * both `return (T*)ckc_i_set_err(...)` and the bare `ckc_i_set_err(...);` forms
+ * compile unchanged -- the cast/return that follows is simply never reached. */
+[[noreturn]] void *ckc_i_set_err(ckc_ir_builder_t *b, ckc_status_t st, const char *fmt, ...) {
+    (void)b;
+    char msg[CKC_ERR_MSG_CAP];
     if (fmt != NULL) {
         va_list ap;
         va_start(ap, fmt);
-        vsnprintf(b->err, sizeof(b->err), fmt, ap);
+        (void)vsnprintf(msg, sizeof(msg), fmt, ap);
         va_end(ap);
-        b->err[sizeof(b->err) - 1] = '\0';
+        msg[sizeof(msg) - 1] = '\0';
+    } else {
+        msg[0] = '\0';
+    }
+    ckc::raise_status((st == CKC_OK) ? CKC_ERR_VALUE : st, msg);
+}
+
+void *ckc_i_set_err_msg(ckc_ir_builder_t *b, ckc_status_t code, const char *msg) {
+    if (b == NULL) {
+        return NULL;
+    }
+    /* A thrown ckc::Error is the authoritative failure: record it even if a
+     * sticky status was already set, so the reported message matches the throw
+     * site (the throw aborts before any later set_err could overwrite it). */
+    b->status = (code == CKC_OK) ? CKC_ERR_VALUE : code;
+    if (msg != NULL) {
+        size_t n = strlen(msg);
+        if (n >= sizeof(b->err)) {
+            n = sizeof(b->err) - 1;
+        }
+        memcpy(b->err, msg, n);
+        b->err[n] = '\0';
     } else {
         b->err[0] = '\0';
     }

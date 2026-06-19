@@ -20,6 +20,7 @@
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n_opt.h"
 #include "ckc/ir.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* getattr(b, wp.wmma_op) -- dispatch the WMMA atom by its IRBuilder method name.
  * Only the two names _wmma_params can ever produce are handled; an unknown name
@@ -497,15 +498,18 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits_new(ckc_ir_builder_t* b,
                                                          const ckc_matmul_nbits_spec_t* spec,
                                                          const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (ckc_matmul_nbits_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_large_n_opt_matmul_nbits(b, spec, arch);
+        if (ckc_matmul_nbits_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_large_n_opt_matmul_nbits(b, spec, arch);
+
+    });
 }

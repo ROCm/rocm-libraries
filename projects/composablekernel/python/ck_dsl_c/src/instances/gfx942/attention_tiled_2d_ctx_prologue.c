@@ -316,8 +316,11 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
     ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", THREADS);
     if(spec->has_waves_per_eu)
         ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
-    if(spec->use_agpr_alloc_zero)
-        ckc_attr_set_int(b, &b->kernel->attrs, "agpr_alloc", 0); /* (0, 0) */
+    if(spec->use_agpr_alloc_zero) {
+        /* (0, 0) -- serialized as the bare-int list l:[ i:0, i:0 ] */
+        const int64_t agpr_zero[2] = {0, 0};
+        ckc_attr_set_int_list(b, &b->kernel->attrs, "agpr_alloc", agpr_zero, 2);
+    }
 
     /* ---- parameter declarations (lines 1329-1369) ---- */
     {

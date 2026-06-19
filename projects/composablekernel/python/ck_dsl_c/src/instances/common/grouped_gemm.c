@@ -16,6 +16,7 @@
 
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error helper) */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  ckc_grouped_gemm_spec_default
@@ -217,21 +218,24 @@ ckc_kernel_def_t* ckc_build_grouped_gemm_new(ckc_ir_builder_t* b,
                                              const ckc_grouped_gemm_spec_t* spec,
                                              const char* arch)
 {
-    char name[256];
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_grouped_gemm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_grouped_gemm(b, spec, arch);
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_grouped_gemm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_grouped_gemm(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *
@@ -295,44 +299,47 @@ ckc_kernel_def_t* ckc_build_grouped_gemm_single_launch(
 ckc_kernel_def_t* ckc_build_grouped_gemm_single_launch_new(
     ckc_ir_builder_t* b, const ckc_grouped_gemm_spec_t* spec, const char* arch)
 {
-    ckc_gemm_universal_spec_t u;
-    char name[256];
-    const char* base_name;
-    size_t blen, slen;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gemm_universal_spec_t u;
+        char name[256];
+        const char* base_name;
+        size_t blen, slen;
 
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-
-    /* Compute the single-launch kernel name = <base kernel_name>_single_launch.
-     * Python: build_grouped_gemm_single_launch(spec).name on the renamed spec.
-     * The kernel name is derived from the (renamed) UniversalGemmSpec. */
-    u = ckc_grouped_gemm_to_universal_spec(spec);
-    base_name = (u.name != NULL) ? u.name : "";
-    blen = strlen(base_name);
-    slen = strlen("_single_launch");
-    if (blen + slen >= sizeof(name))
-    {
-        return NULL;
-    }
-    memcpy(name, base_name, blen);
-    memcpy(name + blen, "_single_launch", slen + 1);
-    u.name = name;
-    u.batched = true;
-
-    {
-        char kname[256];
-        if (ckc_gemm_universal_kernel_name(&u, kname, sizeof(kname)) != CKC_OK)
+        if (b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if (ckc_ir_builder_init(b, kname) != CKC_OK)
+
+        /* Compute the single-launch kernel name = <base kernel_name>_single_launch.
+         * Python: build_grouped_gemm_single_launch(spec).name on the renamed spec.
+         * The kernel name is derived from the (renamed) UniversalGemmSpec. */
+        u = ckc_grouped_gemm_to_universal_spec(spec);
+        base_name = (u.name != NULL) ? u.name : "";
+        blen = strlen(base_name);
+        slen = strlen("_single_launch");
+        if (blen + slen >= sizeof(name))
         {
             return NULL;
         }
-    }
-    return ckc_build_grouped_gemm_single_launch(b, spec, arch);
+        memcpy(name, base_name, blen);
+        memcpy(name + blen, "_single_launch", slen + 1);
+        u.name = name;
+        u.batched = true;
+
+        {
+            char kname[256];
+            if (ckc_gemm_universal_kernel_name(&u, kname, sizeof(kname)) != CKC_OK)
+            {
+                return NULL;
+            }
+            if (ckc_ir_builder_init(b, kname) != CKC_OK)
+            {
+                return NULL;
+            }
+        }
+        return ckc_build_grouped_gemm_single_launch(b, spec, arch);
+
+    });
 }
 
 /* ===================================================================== *

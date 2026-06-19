@@ -33,6 +33,7 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
 #include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* File-local integer formatter (used for arena-stable acc names). Defined at
  * the bottom of this TU; forward-declared here so the driver can call it. */
@@ -1338,20 +1339,24 @@ ckc_kernel_def_t* ckc_build_universal_gemm_new(ckc_ir_builder_t* b,
                                                const ckc_gemm_universal_spec_t* spec,
                                                const char* arch)
 {
-    char name[256];
-    if (b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if (ckc_gemm_universal_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if (ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_universal_gemm(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
+        if (b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if (ckc_gemm_universal_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if (ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_universal_gemm(b, spec, arch);
+
+
+    });
 }
 
 /* ===================================================================== *

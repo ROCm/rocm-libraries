@@ -74,6 +74,7 @@
 #include "ckc/instance_gfx942_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_3d_internal.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define CKC_ATTN3D950_MFMA_M 16
@@ -828,76 +829,78 @@ ckc_kernel_def_t* ckc_build_unified_attention_3d_tiled_gfx950(
     const ckc_unified_attention_3d_tiled_spec_t* spec,
     const char* arch)
 {
-    ckc_gfx950_attention_tiled_3d_build_ctx_t ctx;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gfx950_attention_tiled_3d_build_ctx_t ctx;
 
-    if (b == NULL)
-    {
-        return NULL;
-    }
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    if (spec == NULL)
-    {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "build_unified_attention_3d_tiled_gfx950: NULL spec");
-        return NULL;
-    }
-
-    /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
-     * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
-    if (b->kernel != NULL)
-    {
-        char name[256];
-        if (ckc_gfx950_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
+        if (b == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE,
-                          "build_unified_attention_3d_tiled_gfx950: kernel_name encode failed");
             return NULL;
         }
-        b->kernel->name = ckc_arena_strdup(&b->arena, name);
-        if (b->kernel->name == NULL)
+        if (!ckc_ir_builder_ok(b))
         {
-            ckc_i_set_err(b, CKC_ERR_OOM, "attn_tiled_3d: OOM kernel name");
             return NULL;
         }
-    }
-
-    if (!ckc_gfx950_attention_tiled_3d_ctx_init(
-            &ctx, b, CKC_GFX950_ATTN_TILED_3D_SEGMENT, spec, NULL, arch))
-    {
-        return NULL;
-    }
-
-    /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
-    if (b->kernel != NULL)
-    {
-        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx.cfg.THREADS);
-        /* waves_per_eu when set (lines 304-305). */
-        if (spec->has_waves_per_eu)
+        if (spec == NULL)
         {
-            ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            ckc_i_set_err(b, CKC_ERR_VALUE, "build_unified_attention_3d_tiled_gfx950: NULL spec");
+            return NULL;
         }
-    }
 
-    /* ---- phase functions in Python execution order ----
-     * declare_params (310-358) -> emit_prologue (360-534; emits the early
-     * seg_start_tile_pos>=seq_len zero-fill via emit_early_zero_fill and the
-     * Q->LDS feed via emit_q_to_lds in order) -> emit_loop_init (536-718; builds
-     * carry inits, emits emit_async_infra + paged-KV desc + first K load) ->
-     * online-softmax scf.for emit_softmax_loop (720-898) -> segment-workspace
-     * epilogue emit_epilogue (900-948). */
-    ckc_gfx950_attention_tiled_3d_declare_params(&ctx);
-    ckc_gfx950_attention_tiled_3d_emit_prologue(&ctx);
-    ckc_gfx950_attention_tiled_3d_emit_loop_init(&ctx);
-    ckc_gfx950_attention_tiled_3d_emit_softmax_loop(&ctx);
-    ckc_gfx950_attention_tiled_3d_emit_epilogue(&ctx);
+        /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
+         * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
+        if (b->kernel != NULL)
+        {
+            char name[256];
+            if (ckc_gfx950_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
+            {
+                ckc_i_set_err(b, CKC_ERR_VALUE,
+                              "build_unified_attention_3d_tiled_gfx950: kernel_name encode failed");
+                return NULL;
+            }
+            b->kernel->name = ckc_arena_strdup(&b->arena, name);
+            if (b->kernel->name == NULL)
+            {
+                ckc_i_set_err(b, CKC_ERR_OOM, "attn_tiled_3d: OOM kernel name");
+                return NULL;
+            }
+        }
 
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    return b->kernel; /* return b.kernel (line 950) */
+        if (!ckc_gfx950_attention_tiled_3d_ctx_init(
+                &ctx, b, CKC_GFX950_ATTN_TILED_3D_SEGMENT, spec, NULL, arch))
+        {
+            return NULL;
+        }
+
+        /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
+        if (b->kernel != NULL)
+        {
+            ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx.cfg.THREADS);
+            /* waves_per_eu when set (lines 304-305). */
+            if (spec->has_waves_per_eu)
+            {
+                ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            }
+        }
+
+        /* ---- phase functions in Python execution order ----
+         * declare_params (310-358) -> emit_prologue (360-534; emits the early
+         * seg_start_tile_pos>=seq_len zero-fill via emit_early_zero_fill and the
+         * Q->LDS feed via emit_q_to_lds in order) -> emit_loop_init (536-718; builds
+         * carry inits, emits emit_async_infra + paged-KV desc + first K load) ->
+         * online-softmax scf.for emit_softmax_loop (720-898) -> segment-workspace
+         * epilogue emit_epilogue (900-948). */
+        ckc_gfx950_attention_tiled_3d_declare_params(&ctx);
+        ckc_gfx950_attention_tiled_3d_emit_prologue(&ctx);
+        ckc_gfx950_attention_tiled_3d_emit_loop_init(&ctx);
+        ckc_gfx950_attention_tiled_3d_emit_softmax_loop(&ctx);
+        ckc_gfx950_attention_tiled_3d_emit_epilogue(&ctx);
+
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        return b->kernel; /* return b.kernel (line 950) */
+    });
 }
 
 /* ===================================================================== *
@@ -908,70 +911,72 @@ ckc_kernel_def_t* ckc_build_unified_attention_reduce_tiled_gfx950(
     const ckc_unified_attention_reduce_tiled_spec_t* spec,
     const char* arch)
 {
-    ckc_gfx950_attention_tiled_3d_build_ctx_t ctx;
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        ckc_gfx950_attention_tiled_3d_build_ctx_t ctx;
 
-    if (b == NULL)
-    {
-        return NULL;
-    }
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    if (spec == NULL)
-    {
-        ckc_i_set_err(b, CKC_ERR_VALUE,
-                      "build_unified_attention_reduce_tiled_gfx950: NULL spec");
-        return NULL;
-    }
-
-    if (b->kernel != NULL)
-    {
-        char name[256];
-        if (ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(spec, name, sizeof(name)) <
-            0)
+        if (b == NULL)
+        {
+            return NULL;
+        }
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        if (spec == NULL)
         {
             ckc_i_set_err(b, CKC_ERR_VALUE,
-                          "attn_reduce_tiled_gfx950: kernel_name encode failed");
+                          "build_unified_attention_reduce_tiled_gfx950: NULL spec");
             return NULL;
         }
-        b->kernel->name = ckc_arena_strdup(&b->arena, name);
-        if (b->kernel->name == NULL)
+
+        if (b->kernel != NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_OOM, "attn_reduce_tiled_gfx950: OOM kernel name");
+            char name[256];
+            if (ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(spec, name, sizeof(name)) <
+                0)
+            {
+                ckc_i_set_err(b, CKC_ERR_VALUE,
+                              "attn_reduce_tiled_gfx950: kernel_name encode failed");
+                return NULL;
+            }
+            b->kernel->name = ckc_arena_strdup(&b->arena, name);
+            if (b->kernel->name == NULL)
+            {
+                ckc_i_set_err(b, CKC_ERR_OOM, "attn_reduce_tiled_gfx950: OOM kernel name");
+                return NULL;
+            }
+        }
+
+        if (!ckc_gfx950_attention_tiled_3d_ctx_init(
+                &ctx, b, CKC_GFX950_ATTN_TILED_3D_REDUCE, NULL, spec, arch))
+        {
             return NULL;
         }
-    }
 
-    if (!ckc_gfx950_attention_tiled_3d_ctx_init(
-            &ctx, b, CKC_GFX950_ATTN_TILED_3D_REDUCE, NULL, spec, arch))
-    {
-        return NULL;
-    }
-
-    /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 1015). */
-    if (b->kernel != NULL)
-    {
-        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx.cfg.THREADS);
-        if (spec->has_waves_per_eu)
+        /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 1015). */
+        if (b->kernel != NULL)
         {
-            ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx.cfg.THREADS);
+            if (spec->has_waves_per_eu)
+            {
+                ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            }
         }
-    }
 
-    /* ---- reduce phase functions in Python execution order ----
-     * declare + prologue (1019-1080) -> pass1 max (1082-1105) -> pass2 combine
-     * (1107-1132) -> pass3 normalize (1134-1162). */
-    ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(&ctx);
-    ckc_gfx950_attention_tiled_3d_reduce_max_pass(&ctx);
-    ckc_gfx950_attention_tiled_3d_reduce_combine_pass(&ctx);
-    ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(&ctx);
+        /* ---- reduce phase functions in Python execution order ----
+         * declare + prologue (1019-1080) -> pass1 max (1082-1105) -> pass2 combine
+         * (1107-1132) -> pass3 normalize (1134-1162). */
+        ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(&ctx);
+        ckc_gfx950_attention_tiled_3d_reduce_max_pass(&ctx);
+        ckc_gfx950_attention_tiled_3d_reduce_combine_pass(&ctx);
+        ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(&ctx);
 
-    if (!ckc_ir_builder_ok(b))
-    {
-        return NULL;
-    }
-    return b->kernel; /* return b.kernel (line 1164) */
+        if (!ckc_ir_builder_ok(b))
+        {
+            return NULL;
+        }
+        return b->kernel; /* return b.kernel (line 1164) */
+    });
 }
 
 /* ===================================================================== *

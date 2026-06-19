@@ -60,14 +60,17 @@ typedef struct ckc_h_lowerer
 
 /* --------------------------------------------------------- error / liveness */
 
-/* Set the lowerer's sticky error (first failure wins) and return its status.
- * printf-style; message copied into lw->err (truncated). No-op if already
- * failed. Handlers use this for the Python raise NotImplementedError/RuntimeError
- * paths. Returns the (now non-OK) lw->status for convenient `return ckc_h_fail(...)`. */
-ckc_status_t ckc_h_fail(ckc_h_lowerer_t* lw, ckc_status_t st, const char* fmt, ...);
+/* Raise the failure as a ckc::Error (mirroring the Python raise
+ * NotImplementedError/RuntimeError paths); printf-style. [[noreturn]]: it never
+ * returns -- the throw unwinds to the lowerer boundary in core.c, which
+ * translates it back into the status code, so the extern "C" ABI is unchanged.
+ * The ckc_status_t return type is retained so existing `return ckc_h_fail(...)`
+ * call sites stay valid -- the returned value is simply never produced. */
+[[noreturn]] ckc_status_t ckc_h_fail(ckc_h_lowerer_t* lw, ckc_status_t st, const char* fmt, ...);
 
-/* True iff the lowerer is still OK (no prior failure). Every handler/_emit
- * fast-paths on this so a failed lowerer makes the rest a no-op. */
+/* True iff the lowerer is usable. Internal ops now raise on failure rather than
+ * latching a sticky status, so on any reachable path a non-NULL lowerer is OK;
+ * this collapses to a NULL guard. */
 bool ckc_h_live(const ckc_h_lowerer_t* lw);
 
 /* --------------------------------------------------------- emission / indent */

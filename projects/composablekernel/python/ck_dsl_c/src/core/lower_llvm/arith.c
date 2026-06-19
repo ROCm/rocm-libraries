@@ -133,7 +133,6 @@ static void _op_arith_fabs(ckc_lower_t *L, const ckc_op_t *op) {
     if (llvm_ty == NULL) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "fabs: unsupported FP type %s",
                     ty_name ? ty_name : "(null)");
-        return;
     }
     char key[32];
     snprintf(key, sizeof key, "fabs.%s", ty_name);
@@ -157,7 +156,6 @@ static void _op_arith_fma(ckc_lower_t *L, const ckc_op_t *op) {
     if (llvm_ty == NULL) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "fma: unsupported FP type %s",
                     ty_name ? ty_name : "(null)");
-        return;
     }
     char key[32];
     snprintf(key, sizeof key, "fmuladd.%s", ty_name);
@@ -186,7 +184,6 @@ static void ll_fminmax3(ckc_lower_t *L, const ckc_op_t *op,
     if (llvm_ty == NULL) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "%s3: unsupported FP type %s",
                     intrin, ty_name ? ty_name : "(null)");
-        return;
     }
     char key[32];
     snprintf(key, sizeof key, "%s.%s", intrin, ty_name);
@@ -238,7 +235,6 @@ static void _op_arith_cmp(ckc_lower_t *L, const ckc_op_t *op) {
         llvm_pred = "ne";
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY, "arith.cmp: unknown pred %s", pred);
-        return;
     }
     const ckc_value_t *a = op->operands[0];
     const ckc_value_t *b = op->operands[1];
@@ -279,7 +275,6 @@ static void ll_fminmax(ckc_lower_t *L, const ckc_op_t *op, const char *intrin) {
     if (llvm_ty == NULL) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "%s: unsupported FP type %s",
                     intrin, ty_name ? ty_name : "(null)");
-        return;
     }
     char key[32];
     snprintf(key, sizeof key, "%s.%s", intrin, ty_name);
@@ -465,7 +460,6 @@ static void ll_math_f32_unary(ckc_lower_t *L, const ckc_op_t *op,
     if (!(v->type && v->type->name && strcmp(v->type->name, "f32") == 0)) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "math.%s currently supports f32",
                     op_label);
-        return;
     }
     ckc_ll_need(L, key);
     ckc_ll_emitf(L,

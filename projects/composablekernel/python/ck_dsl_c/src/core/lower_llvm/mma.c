@@ -62,7 +62,6 @@ static const char *mma_result_name(ckc_lower_t *L, const ckc_op_t *op) {
         ckc_ll_fail(L, CKC_ERR_VALUE,
                     "%s: expected exactly one result, got %d",
                     op->name ? op->name : "tile.mma", op->num_results);
-        return "%__err";
     }
     return op->results[0]->name;
 }
@@ -83,7 +82,6 @@ static void _op_tile_mma(ckc_lower_t *L, const ckc_op_t *op) {
     op_id = ckc_attr_get_str(&op->attrs, "op_id");
     if (!op_id) {
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.mma: missing op_id attribute");
-        return;
     }
 
     /* f16 / bf16 dense */
@@ -269,7 +267,6 @@ static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id) {
     if (op->num_operands != 3) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands",
                     op->name ? op->name : "tile.mma");
-        return;
     }
 
     /* Integer WMMA (iu8/iu4) is checked first, mirroring
@@ -291,7 +288,6 @@ static void _emit_wmma(ckc_lower_t *L, const ckc_op_t *op, const char *op_id) {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL,
                     "WMMA op 'tile.%s' not yet wired for %s", op_id,
                     L->backend ? L->backend->gfx : "(rdna)");
-        return;
     }
 
     a = op->operands[0];
@@ -577,7 +573,6 @@ void ckc_ll_lower_mfma_fp8_bf8(ckc_lower_t *L, const ckc_op_t *op,
     }
     if (op->num_operands != 3) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        return;
     }
     a = op->operands[0];
     b = op->operands[1];
@@ -639,7 +634,6 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(ckc_lower_t *L,
     }
     if (op->num_operands != 5) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 5 operands", op->name);
-        return;
     }
     a = op->operands[0];
     b = op->operands[1];
@@ -684,7 +678,6 @@ static void _op_tile_mfma_f32_16x16x128_fp4(ckc_lower_t *L, const ckc_op_t *op) 
     }
     if (op->num_operands != 3) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        return;
     }
     a = op->operands[0];
     b = op->operands[1];
@@ -724,7 +717,6 @@ static void _op_tile_mfma_f32_16x16x96_fp6(ckc_lower_t *L, const ckc_op_t *op) {
     }
     if (op->num_operands != 3) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        return;
     }
     a = op->operands[0];
     b = op->operands[1];
@@ -767,7 +759,6 @@ static void _op_tile_mfma_f32_16x16x128_fp8(ckc_lower_t *L, const ckc_op_t *op) 
     }
     if (op->num_operands != 3) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        return;
     }
     a = op->operands[0];
     b = op->operands[1];
@@ -814,14 +805,12 @@ static void _op_tile_register_p_from_qk_c(ckc_lower_t *L, const ckc_op_t *op) {
     }
     if (op->num_operands != 1) {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 1 operand", op->name);
-        return;
     }
     qk_c = op->operands[0];
     target = ckc_attr_get_str(&op->attrs, "target_dtype");
     if (!target) {
         ckc_ll_fail(L, CKC_ERR_KEY,
                     "register_p_from_qk_c: missing target_dtype attribute");
-        return;
     }
     if (strcmp(target, "f16") == 0) {
         target_llvm = "half";
@@ -830,7 +819,6 @@ static void _op_tile_register_p_from_qk_c(ckc_lower_t *L, const ckc_op_t *op) {
     } else {
         ckc_ll_fail(L, CKC_ERR_KEY,
                     "register_p_from_qk_c: bad target_dtype '%s'", target);
-        return;
     }
 
     /* Extract 16 f32 cells, fptrunc the first 8 in canonical order. */
