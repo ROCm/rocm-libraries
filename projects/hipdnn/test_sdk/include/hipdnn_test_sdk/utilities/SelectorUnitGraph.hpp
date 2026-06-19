@@ -3,8 +3,8 @@
 
 #pragma once
 
-// GPU-free unit-test graph helper for the autotune match-key SELECTORS
-// (hipdnn_frontend::detail::getCoreOperationName / getMatchKeyTensors).
+// GPU-free unit-test graph helper for the autotune match-key selector
+// (hipdnn_frontend::detail::getAutotuneConfigMatchKey).
 //
 // This is a DIFFERENT layer than GraphExecuteTestKit: there is no device, no
 // buffers, no variant pack. A selector unit test only needs (1) a real op graph

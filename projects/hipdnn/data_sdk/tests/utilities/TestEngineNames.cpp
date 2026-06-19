@@ -151,6 +151,48 @@ TEST_F(TestEngineNames, EnsureAllEngineNameToIdsBehaveTheSame)
     }
 }
 
+TEST_F(TestEngineNames, EngineNameOrIdParsesRegisteredName)
+{
+    EXPECT_EQ(engineNameOrIdToId(MIOPEN_ENGINE_NAME), MIOPEN_ENGINE_ID);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdPrefersRegisteredNumericName)
+{
+    [[maybe_unused]] static const EngineRegistrar s_numericEngine("8675309");
+
+    EXPECT_TRUE(isEngineNameRegistered("8675309"));
+    EXPECT_EQ(engineNameOrIdToId("8675309"), engineNameToId("8675309"));
+    EXPECT_NE(engineNameOrIdToId("8675309"), 8675309);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdParsesDecimalId)
+{
+    EXPECT_EQ(engineNameOrIdToId("12345"), 12345);
+    EXPECT_EQ(engineNameOrIdToId("-18"), -18);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdParsesPlusSignedDecimalId)
+{
+    EXPECT_EQ(engineNameOrIdToId("+12345"), 12345);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdTreatsBarePlusAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId("+"), engineNameToId("+"));
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdParsesHexId)
+{
+    EXPECT_EQ(engineNameOrIdToId("0x0000000000003039"), 12345);
+    EXPECT_EQ(engineNameOrIdToId("0xffffffffffffffee"), -18);
+}
+
+TEST_F(TestEngineNames, EngineNameOrIdTreatsLeadingWhitespaceAsName)
+{
+    EXPECT_EQ(engineNameOrIdToId(" 12345"), engineNameToId(" 12345"));
+    EXPECT_NE(engineNameOrIdToId(" 12345"), 12345);
+}
+
 TEST_F(TestEngineNames, MacroSingleArgGeneratesCorrectName)
 {
     // Single-argument form: _NAME should be the stringified identifier
@@ -236,6 +278,8 @@ TEST_F(TestEngineNames, EngineNameOrIdToIdTreatsWhitespaceAsNameCharacter)
     // internal whitespace all force the FNV-1a name path (matching engineNameToId
     // on the untrimmed string), and an all-whitespace or empty string is a name.
     EXPECT_EQ(engineNameOrIdToId(" 123"), engineNameToId(" 123"));
+    EXPECT_EQ(engineNameOrIdToId("\t123"), engineNameToId("\t123"));
+    EXPECT_EQ(engineNameOrIdToId("\n123"), engineNameToId("\n123"));
     EXPECT_EQ(engineNameOrIdToId("123 "), engineNameToId("123 "));
     EXPECT_EQ(engineNameOrIdToId("1 2 3"), engineNameToId("1 2 3"));
     EXPECT_EQ(engineNameOrIdToId("   "), engineNameToId("   "));

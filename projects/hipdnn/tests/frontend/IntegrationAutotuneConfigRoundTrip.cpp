@@ -1,74 +1,114 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// GPU-only end-to-end round-trip test for the autotune config file.
-//
-// One real conv graph is autotuned (restricted to a single tunable engine A so
-// the winner is deterministic) and the winner is written to a JSON config. A
-// fresh graph then loads that config via HIPDNN_HEUR_CONFIG_PATH and build()
-// re-selects the engine. The discriminator is the engine-ID FLIP: with the file
-// as-written the backend selects A; after rewriting the file's engine_name to a
-// different candidate B, a fresh build() selects B. Selection tracking the file
-// content across two engines (the only thing that changed) proves the config
-// drove the choice.
-//
-// Engine IDs are compared (not name strings): get_plan_name() returns the
-// frontend's lowercase hex form for unregistered test-plugin IDs; feeding that
-// back through engineNameOrIdToId recovers the int64 ID. Frontend API only.
+#include "AutotuneIntegrationFixture.hpp"
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
-#include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <memory>
-#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
-#include "AutotuneIntegrationFixture.hpp"
-#include "test_plugins/TestPluginEngineIdMap.hpp"
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <nlohmann/json.hpp>
+#endif
 
 using namespace hipdnn_frontend;
-using namespace hipdnn_frontend::graph;
-using namespace hipdnn_data_sdk::utilities;
+using hipdnn_test_sdk::utilities::OperationType;
 
 namespace
 {
 
-class IntegrationAutotuneConfigRoundTrip : public hipdnn_tests::AutotuneIntegrationFixture
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
+
+class GraphTensorBundle
+{
+public:
+    explicit GraphTensorBundle(graph::Graph& graph, float fillValue = 1.0f)
+    {
+        const auto addTensor = [&](const std::shared_ptr<graph::TensorAttributes>& tensorAttr) {
+            if(!tensorAttr || tensorAttr->get_is_virtual() || !tensorAttr->has_uid())
+            {
+                return;
+            }
+            if(_variantPack.count(tensorAttr->get_uid()) != 0)
+            {
+                return;
+            }
+
+            auto tensor = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(
+                tensorAttr->get_dim(), tensorAttr->get_stride());
+            tensor->fillWithValue(fillValue);
+            _variantPack[tensorAttr->get_uid()] = tensor->memory().deviceData();
+            _tensors.push_back(std::move(tensor));
+        };
+
+        graph.visit([&](graph::INode& node) {
+            for(const auto& tensor : node.getNodeInputTensorAttributes())
+            {
+                addTensor(tensor);
+            }
+            for(const auto& tensor : node.getNodeOutputTensorAttributes())
+            {
+                addTensor(tensor);
+            }
+        });
+    }
+
+    const std::unordered_map<int64_t, void*>& variantPack() const
+    {
+        return _variantPack;
+    }
+
+private:
+    std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::Tensor<float>>> _tensors;
+    std::unordered_map<int64_t, void*> _variantPack;
+};
+
+struct ConfigRoundTripCase
+{
+    OperationType op;
+    const char* expectedOpName;
+    std::vector<std::pair<std::string, int64_t>> expectedCriteria;
+    std::vector<const char*> expectedTensorIds;
+};
+
+class IntegrationAutotuneConfigRoundTrip : public hipdnn_tests::AutotuneIntegrationFixture,
+                                           public ::testing::WithParamInterface<ConfigRoundTripCase>
 {
 protected:
     void SetUp() override
     {
         AutotuneIntegrationFixture::SetUp();
-        // The base SetUp() may GTEST_SKIP() when no device is present; that does
-        // not unwind into this frame, so guard before touching anything else.
+
         if(IsSkipped())
         {
             return;
         }
 
-        // The shared frontend-test main() pins HIPDNN_HEUR_POLICY_ORDER to just
-        // the TestGoodHeuristic policy, which excludes SelectionHeuristic::Config
-        // and means HIPDNN_HEUR_CONFIG_PATH is never consulted during build().
-        // This round-trip test exists specifically to verify that config content
-        // drives engine selection, so restore the production default order with
-        // SelectionHeuristic::Config FIRST. When the config matches the conv node
-        // the Config policy reorders the candidate engines (preferred first) and
-        // the outer policy loop stops there; SelectionHeuristic::StaticOrdering is
-        // the canonical fallback that enumerates the engine-plugin candidates when
-        // Config declines. The candidate set (engines A and B) comes from the
-        // engine plugin, not from any heuristic plugin, so dropping the test
-        // heuristic from this order does not lose either candidate. The override
-        // is restored to whatever main() set in TearDown via the scoped setter.
+        _configFile = std::filesystem::temp_directory_path()
+                      / ("hipdnn_autotune_config_roundtrip_" + std::to_string(sCounter.fetch_add(1))
+                         + ".json");
         _policyOrderEnv.emplace("HIPDNN_HEUR_POLICY_ORDER",
                                 "SelectionHeuristic::Config,SelectionHeuristic::StaticOrdering");
     }
@@ -78,121 +118,291 @@ protected:
         std::error_code ec;
         std::filesystem::remove(_configFile, ec);
         hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_HEUR_CONFIG_PATH");
-        // Restore HIPDNN_HEUR_POLICY_ORDER to the value the shared main() set so
-        // sibling tests in this binary are not affected by this test's override.
+
         _policyOrderEnv.reset();
         AutotuneIntegrationFixture::TearDown();
     }
 
-    // Rewrites engine_overrides[0]["engine_name"] in the config file to a new
-    // value (read-modify-write). The value is written as a plain string so a
-    // decimal literal exercises the Stage-1 decimal-parse branch.
+    static std::shared_ptr<graph::Graph> buildGraph(OperationType op)
+    {
+        return std::make_shared<graph::Graph>(
+            hipdnn_test_sdk::utilities::FrontendGraphFactory::create(op));
+    }
+
+    void buildGraphAndBundle(OperationType op,
+                             std::shared_ptr<graph::Graph>& graph,
+                             std::optional<GraphTensorBundle>& bundle)
+    {
+        graph = buildGraph(op);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph->build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        bundle.emplace(*graph);
+    }
+
+    void buildGraphAndGetSelectedEngineId(OperationType op,
+                                          const std::string& configPath,
+                                          int64_t& outEngineId)
+    {
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
+
+        auto graph = buildGraph(op);
+        auto result = graph->build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        std::string planName;
+        result = graph->get_plan_name(planName);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
+    }
     void rewriteFirstEngineName(const std::string& newEngineName)
     {
         std::ifstream in(_configFile);
         ASSERT_TRUE(in.is_open()) << "Could not open config file for rewrite: " << _configFile;
-        nlohmann::json j;
-        in >> j;
+        nlohmann::json json;
+        in >> json;
         in.close();
 
-        ASSERT_TRUE(j.contains("engine_overrides"));
-        ASSERT_FALSE(j["engine_overrides"].empty());
-        j["engine_overrides"][0]["engine_name"] = newEngineName;
+        ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
+        ASSERT_FALSE(json[config_json::ENGINE_OVERRIDES].empty());
+        json[config_json::ENGINE_OVERRIDES][0][config_json::ENGINE_NAME] = newEngineName;
 
         std::ofstream out(_configFile, std::ios::trunc);
         ASSERT_TRUE(out.is_open()) << "Could not open config file for write: " << _configFile;
-        out << j.dump(2);
-        out.close();
+        out << json.dump(2) << '\n';
     }
 
-    std::filesystem::path _configFile
-        = std::filesystem::temp_directory_path() / "test_autotune_config_round_trip.json";
+    void reverseFirstEntryTensors()
+    {
+        std::ifstream in(_configFile);
+        ASSERT_TRUE(in.is_open()) << "Could not open config file for tensor rewrite: "
+                                  << _configFile;
+        nlohmann::json json;
+        in >> json;
+        in.close();
 
-    // Scoped override of HIPDNN_HEUR_POLICY_ORDER so SelectionHeuristic::Config
-    // is active during build(); save/restore is handled by the setter's lifetime.
+        ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
+        ASSERT_FALSE(json[config_json::ENGINE_OVERRIDES].empty());
+        auto& tensors = json[config_json::ENGINE_OVERRIDES][0][config_json::TENSORS];
+        ASSERT_TRUE(tensors.is_array());
+        std::reverse(tensors.begin(), tensors.end());
+
+        std::ofstream out(_configFile, std::ios::trunc);
+        ASSERT_TRUE(out.is_open()) << "Could not open config file for write: " << _configFile;
+        out << json.dump(2) << '\n';
+    }
+
+    void assertConfigEntryMatchesCase(const ConfigRoundTripCase& testCase)
+    {
+        std::ifstream in(_configFile);
+        ASSERT_TRUE(in.is_open()) << "Config file was not created: " << _configFile;
+        nlohmann::json json;
+        in >> json;
+
+        ASSERT_TRUE(json.contains(config_json::ENGINE_OVERRIDES));
+        ASSERT_TRUE(json.contains(config_json::VERSION));
+        EXPECT_EQ(json[config_json::VERSION], config_version::CURRENT);
+        ASSERT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
+        const auto& entry = json[config_json::ENGINE_OVERRIDES][0];
+        EXPECT_EQ(entry[config_json::OP], testCase.expectedOpName);
+        ASSERT_TRUE(entry.contains(config_json::TENSORS));
+        ASSERT_EQ(entry[config_json::TENSORS].size(), testCase.expectedTensorIds.size());
+        for(size_t i = 0; i < testCase.expectedTensorIds.size(); ++i)
+        {
+            const auto& tensor = entry[config_json::TENSORS][i];
+            ASSERT_TRUE(tensor.contains(config_json::TENSOR_ID));
+            ASSERT_TRUE(tensor[config_json::TENSOR_ID].is_string());
+            EXPECT_EQ(tensor[config_json::TENSOR_ID], testCase.expectedTensorIds[i]);
+        }
+
+        nlohmann::json expectedCriteria = nlohmann::json::object();
+        for(const auto& [key, value] : testCase.expectedCriteria)
+        {
+            expectedCriteria[key] = value;
+        }
+        if(expectedCriteria.empty())
+        {
+            EXPECT_FALSE(entry.contains(config_json::CRITERIA));
+        }
+        else
+        {
+            ASSERT_TRUE(entry.contains(config_json::CRITERIA));
+            EXPECT_EQ(entry[config_json::CRITERIA], expectedCriteria);
+        }
+    }
+
+    std::filesystem::path _configFile;
     std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _policyOrderEnv;
+    static std::atomic<uint64_t> sCounter;
 };
 
-TEST_F(IntegrationAutotuneConfigRoundTrip, EngineIdFlipsWithConfigContent)
+std::atomic<uint64_t> IntegrationAutotuneConfigRoundTrip::sCounter{0};
+
+TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfigFile)
 {
+    const auto& testCase = GetParam();
     const int64_t engineAId = hipdnn_tests::plugin_constants::engineId<AutotunePlugin>();
     const int64_t engineBId = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineB>();
     ASSERT_NE(engineAId, engineBId);
 
-    // The kit builds both the write graph (Phase 1) and the read graphs (Phases
-    // 2a/2b) from the same op, so their autotune match keys agree.
-    const auto op = hipdnn_test_sdk::utilities::OperationType::CONV_FORWARD;
-
-    // ── Phase 1: autotune (single tunable engine A) -> write config ──────────
     {
-        std::shared_ptr<Graph> graph;
-        std::optional<hipdnn_test_sdk::utilities::GraphTensorBundle> bundle;
-        buildGraphAndBundle(op, graph, bundle);
+        std::shared_ptr<graph::Graph> graph;
+        std::optional<GraphTensorBundle> bundle;
+        buildGraphAndBundle(testCase.op, graph, bundle);
 
         auto result = graph->add_all_engines();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        int64_t maxWs = 0;
-        result = graph->get_estimated_max_workspace_size(maxWs);
+        int64_t maxWorkspaceSize = 0;
+        result = graph->get_estimated_max_workspace_size(maxWorkspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        const Workspace workspace(static_cast<size_t>(maxWs));
+        const hipdnn_data_sdk::utilities::Workspace workspace(
+            static_cast<size_t>(maxWorkspaceSize));
 
         AutotuneConfig config;
         config.mode = TuneMode::AUTO;
         config.strategy = AutotuneStrategy::SINGLE_SHOT;
         config.warmupIterations = 1;
-        // Single tunable engine -> deterministic winner == A, so the writer
-        // emits A's engine_name into the file.
         config.engineIdFilter = {engineAId};
 
         const AutotuneStorageConfig storageConfig{_configFile, false};
-
         std::vector<AutotuneResult> results;
         result = graph->autotune(_handle,
                                  bundle->variantPack(),
                                  workspace.get(),
-                                 maxWs,
+                                 maxWorkspaceSize,
                                  config,
                                  storageConfig,
                                  &results);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        // The "writer emits A" assumption is checked, not assumed.
-        ASSERT_EQ(results.size(), 1u) << "Filter should select exactly 1 engine";
+        ASSERT_EQ(results.size(), 1u);
         EXPECT_EQ(results[0].engineId, engineAId);
-
-        // Minimal content check (detailed op/tensor content is the Stage 3 job).
-        ASSERT_TRUE(std::filesystem::exists(_configFile))
-            << "Config file was not created at '" << _configFile << "'";
-        std::ifstream in(_configFile);
-        ASSERT_TRUE(in.is_open());
-        nlohmann::json j;
-        ASSERT_NO_THROW(in >> j);
-        ASSERT_TRUE(j.contains("engine_overrides"));
-        ASSERT_FALSE(j["engine_overrides"].empty());
+        assertConfigEntryMatchesCase(testCase);
+        reverseFirstEntryTensors();
     }
 
-    // ── Phase 2a: assert-A-as-written (do NOT modify the file) ───────────────
-    // Exercises the writer's actual hex-fallback output through the Stage-1
-    // hex-parse path end-to-end.
     {
         int64_t selectedId = 0;
-        buildGraphAndGetSelectedEngineId(op, _configFile.string(), selectedId);
-        EXPECT_EQ(selectedId, engineAId)
-            << "Backend should select engine A as written by the autotune writer";
+        buildGraphAndGetSelectedEngineId(testCase.op, _configFile.string(), selectedId);
+        EXPECT_EQ(selectedId, engineAId) << "Backend should select the engine written by autotune";
     }
 
-    // ── Phase 2b: flip to engine B (plain decimal literal) ───────────────────
-    // Decimal literal also covers the Stage-1 decimal-parse branch.
     {
         rewriteFirstEngineName(std::to_string(engineBId));
-
         int64_t selectedId = 0;
-        buildGraphAndGetSelectedEngineId(op, _configFile.string(), selectedId);
+        buildGraphAndGetSelectedEngineId(testCase.op, _configFile.string(), selectedId);
         EXPECT_EQ(selectedId, engineBId)
-            << "Backend selection should flip to engine B after rewriting the config";
+            << "Backend selection should follow modified config content";
     }
 }
 
+std::vector<ConfigRoundTripCase> configRoundTripCases()
+{
+    std::vector<ConfigRoundTripCase> cases{
+        {OperationType::CONV_FORWARD,
+         config_op::CONV_FPROP,
+         {},
+         {config_tensor::X, config_tensor::W}},
+        {OperationType::CONV_BACKWARD_DATA,
+         config_op::CONV_DGRAD,
+         {},
+         {config_tensor::DY, config_tensor::W}},
+        {OperationType::CONV_BACKWARD_WEIGHTS,
+         config_op::CONV_WGRAD,
+         {},
+         {config_tensor::X, config_tensor::DY}},
+        {OperationType::CONV_FWD_BIAS_ACTIV,
+         config_op::CONV_FPROP,
+         {},
+         {config_tensor::X, config_tensor::W}},
+        {OperationType::MATMUL, config_op::MATMUL, {}, {config_tensor::A, config_tensor::B}},
+        {OperationType::BATCHNORM_TRAINING,
+         config_op::BATCHNORM_TRAINING,
+         {},
+         {config_tensor::X, config_tensor::SCALE, config_tensor::BIAS, config_tensor::EPSILON}},
+        {OperationType::BATCHNORM_INFERENCE,
+         config_op::BATCHNORM_INFERENCE,
+         {},
+         {config_tensor::X,
+          config_tensor::MEAN,
+          config_tensor::INV_VARIANCE,
+          config_tensor::SCALE,
+          config_tensor::BIAS}},
+        {OperationType::BATCHNORM_INFERENCE_VARIANCE_EXT,
+         config_op::BATCHNORM_INFERENCE_VARIANCE_EXT,
+         {},
+         {config_tensor::X,
+          config_tensor::MEAN,
+          config_tensor::VARIANCE,
+          config_tensor::SCALE,
+          config_tensor::BIAS,
+          config_tensor::EPSILON}},
+        {OperationType::BATCHNORM_BACKWARD,
+         config_op::BATCHNORM_BACKWARD,
+         {},
+         {config_tensor::DY, config_tensor::X, config_tensor::SCALE}},
+        {OperationType::LAYERNORM,
+         config_op::LAYERNORM,
+         {{config_criterion::NORM_FWD_PHASE, HIPDNN_NORM_FWD_INFERENCE}},
+         {config_tensor::X, config_tensor::SCALE, config_tensor::BIAS, config_tensor::EPSILON}},
+        {OperationType::RMSNORM,
+         config_op::RMSNORM,
+         {{config_criterion::NORM_FWD_PHASE, HIPDNN_NORM_FWD_INFERENCE}},
+         {config_tensor::X, config_tensor::SCALE, config_tensor::EPSILON}},
+        {OperationType::RMSNORM_BACKWARD,
+         config_op::RMSNORM_BACKWARD,
+         {},
+         {config_tensor::DY, config_tensor::X, config_tensor::SCALE, config_tensor::INV_RMS}},
+        {OperationType::REDUCTION,
+         config_op::REDUCTION,
+         {{config_criterion::REDUCTION_MODE, HIPDNN_REDUCE_TENSOR_ADD}},
+         {config_tensor::INPUT}},
+        {OperationType::RESAMPLE_FWD,
+         config_op::RESAMPLE_FWD,
+         {{config_criterion::RESAMPLE_MODE, HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING},
+          {config_criterion::PADDING_MODE, HIPDNN_PADDING_ZERO_PAD}},
+         {config_tensor::X}},
+        {OperationType::POINTWISE_UNARY,
+         config_op::POINTWISE,
+         {{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_RELU_FWD}},
+         {config_tensor::IN_0}},
+        {OperationType::POINTWISE_BINARY,
+         config_op::POINTWISE,
+         {{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_ADD}},
+         {config_tensor::IN_0, config_tensor::IN_1}},
+    };
+
+#ifdef HIPDNN_ENABLE_SDPA
+    cases.push_back({OperationType::SDPA_FORWARD,
+                     config_op::SDPA_FWD,
+                     {},
+                     {config_tensor::Q, config_tensor::K, config_tensor::V}});
+    cases.push_back({OperationType::SDPA_BACKWARD,
+                     config_op::SDPA_BWD,
+                     {},
+                     {config_tensor::Q,
+                      config_tensor::K,
+                      config_tensor::V,
+                      config_tensor::O,
+                      config_tensor::DO,
+                      config_tensor::STATS}});
+#endif
+
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(SupportedOps,
+                         IntegrationAutotuneConfigRoundTrip,
+                         ::testing::ValuesIn(configRoundTripCases()),
+                         [](const ::testing::TestParamInfo<ConfigRoundTripCase>& info) {
+                             return hipdnn_test_sdk::utilities::operationTypeToString(
+                                 info.param.op);
+                         });
+
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 } // namespace

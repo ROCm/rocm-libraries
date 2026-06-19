@@ -1,154 +1,441 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 #pragma once
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+#include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/NodeType.hpp>
+#include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleFwdNode.hpp>
+#ifdef HIPDNN_ENABLE_SDPA
+#include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
+#endif
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_frontend::detail
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
-/// Determine the core operation name written to the autotune config file for a
-/// graph (passed as its root INode). Priority: convolution/GEMM/SDPA (highest)
-/// > normalization > pointwise (lowest); the graph name is the fallback when no
-/// recognized operation is found. Reconstructed through the public node
-/// traversal API (INode::visit + getNodeType + graph_attributes) so no friend
-/// or new accessor is required.
-inline std::string getCoreOperationName(const graph::INode& root)
+using AutotuneConfigCriteria = std::vector<std::pair<std::string, int64_t>>;
+
+struct AutotuneConfigMatchTensor
 {
-    // Priority levels: 0 = default/unknown, 1 = pointwise, 2 = normalization,
-    // 3 = conv/matmul/SDPA
-    int bestPriority = 0;
-    std::string bestName;
+    std::string_view tensorId;
+    std::shared_ptr<graph::TensorAttributes> tensor;
 
-    root.visit([&](const graph::INode& node) {
-        if(bestPriority == 3)
-        {
-            // Short-circuit: can't do better than priority 3.
-            return;
-        }
+    graph::TensorAttributes* operator->() const
+    {
+        return tensor.get();
+    }
+};
 
-        int priority = 0;
-        std::string name;
-        switch(node.getNodeType())
-        {
-        case graph::NodeType::CONVOLUTION_FPROP:
-            priority = 3;
-            name = "conv_fprop";
-            break;
-        case graph::NodeType::CONVOLUTION_DGRAD:
-            priority = 3;
-            name = "conv_dgrad";
-            break;
-        case graph::NodeType::CONVOLUTION_WGRAD:
-            priority = 3;
-            name = "conv_wgrad";
-            break;
-        default:
-            break;
-        }
+struct AutotuneConfigMatchKey
+{
+    std::string opName;
+    AutotuneConfigCriteria criteria;
+    std::vector<AutotuneConfigMatchTensor> tensors;
+};
 
-        if(priority > bestPriority)
-        {
-            bestPriority = priority;
-            bestName = std::move(name);
-        }
-    });
+struct PrioritizedAutotuneConfigMatchKey
+{
+    int priority = 0;
+    AutotuneConfigMatchKey key;
+};
 
-    return bestPriority > 0 ? bestName : std::string(root.graph_attributes.get_name());
+inline bool appendRequiredMatchTensor(AutotuneConfigMatchKey& key,
+                                      std::string_view tensorId,
+                                      const std::shared_ptr<graph::TensorAttributes>& tensor)
+{
+    if(!tensor)
+    {
+        return false;
+    }
+    key.tensors.push_back(AutotuneConfigMatchTensor{tensorId, tensor});
+    return true;
 }
 
-/// Append a tensor to @p out when it participates in the match key: non-null,
-/// has an assigned UID, and is not virtual (intermediate). Mirrors the
-/// non-virtual / has_uid filter the backend index applies to physical tensors.
-inline void appendMatchKeyTensor(std::vector<std::shared_ptr<graph::TensorAttributes>>& out,
-                                 const std::shared_ptr<graph::TensorAttributes>& tensor)
+inline void appendOptionalMatchTensor(AutotuneConfigMatchKey& key,
+                                      std::string_view tensorId,
+                                      const std::shared_ptr<graph::TensorAttributes>& tensor)
 {
-    if(tensor && tensor->has_uid() && !tensor->get_is_virtual())
+    if(tensor)
     {
-        out.push_back(tensor);
+        key.tensors.push_back(AutotuneConfigMatchTensor{tensorId, tensor});
     }
 }
 
-/// Collect the ordered match-key tensors for a graph (passed as its root INode)
-/// written to the autotune config file.
-///
-/// CANONICAL-TENSOR-ORDER: for every operation the match-key tensor order is
-/// the op's flatbuffer `*_attributes.fbs` INPUT-field declaration order with the
-/// output field(s) dropped; the match is POSITIONAL (index-by-index). This rule
-/// MUST stay in lockstep with the backend reader that consumes these tensors:
-/// `hipdnn_backend::heuristics::config::matchOverrideConfig` (the conv dispatch)
-/// in `backend/src/heuristics/config/ConfigBuiltIn.cpp`. Any change to the
-/// per-op set/order here MUST be mirrored there and vice versa.
-///
-/// Convolution (output excluded, exactly 2 inputs each):
-///   - conv_fprop → (x, w)
-///   - conv_dgrad → (dy, w)
-///   - conv_wgrad → (x, dy)
-///
-/// Each operation supported for config round-trip has an explicit op-aware
-/// branch above; the branch defines its canonical match-key tensor set/order. An
-/// operation with NO op-aware branch (e.g. a reduction, or a ternary pointwise)
-/// is intentionally unsupported for config round-trip: it produces an EMPTY match
-/// key and therefore never matches a backend config rule.
-inline std::vector<std::shared_ptr<graph::TensorAttributes>>
-    getMatchKeyTensors(const graph::INode& root)
+template <typename T>
+inline bool addCriterion(AutotuneConfigMatchKey& key,
+                         std::string_view criterionName,
+                         const std::optional<T>& criterionValue)
 {
-    std::vector<std::shared_ptr<graph::TensorAttributes>> result;
+    if(!criterionValue.has_value())
+    {
+        return false;
+    }
+    key.criteria.emplace_back(std::string(criterionName), static_cast<int64_t>(*criterionValue));
+    return true;
+}
 
-    // Op-aware selection: the first node matching an op-aware branch wins and
-    // emits its tensors in the canonical order above; `handled` then stops the
-    // visit. A graph with no recognized op leaves `handled` false and `result`
-    // empty.
-    bool handled = false;
+inline std::optional<PrioritizedAutotuneConfigMatchKey>
+    getAutotuneConfigMatchKeyForNode(const graph::INode& node)
+{
+    AutotuneConfigMatchKey key;
+
+    switch(node.getNodeType())
+    {
+    case graph::NodeType::CONVOLUTION_FPROP:
+    {
+        const auto& conv = static_cast<const graph::ConvolutionFpropNode&>(node);
+        key.opName = config_op::CONV_FPROP;
+        if(!appendRequiredMatchTensor(key, config_tensor::X, conv.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::W, conv.attributes.get_w()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+    }
+    case graph::NodeType::CONVOLUTION_DGRAD:
+    {
+        const auto& conv = static_cast<const graph::ConvolutionDgradNode&>(node);
+        key.opName = config_op::CONV_DGRAD;
+        if(!appendRequiredMatchTensor(key, config_tensor::DY, conv.attributes.get_dy())
+           || !appendRequiredMatchTensor(key, config_tensor::W, conv.attributes.get_w()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+    }
+    case graph::NodeType::CONVOLUTION_WGRAD:
+    {
+        const auto& conv = static_cast<const graph::ConvolutionWgradNode&>(node);
+        key.opName = config_op::CONV_WGRAD;
+        if(!appendRequiredMatchTensor(key, config_tensor::X, conv.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::DY, conv.attributes.get_dy()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+    }
+#ifdef HIPDNN_ENABLE_SDPA
+    case graph::NodeType::SDPA_FWD:
+    {
+        const auto& sdpa = static_cast<const graph::SdpaFwdNode&>(node);
+        key.opName = config_op::SDPA_FWD;
+        if(!appendRequiredMatchTensor(key, config_tensor::Q, sdpa.attributes.get_q())
+           || !appendRequiredMatchTensor(key, config_tensor::K, sdpa.attributes.get_k())
+           || !appendRequiredMatchTensor(key, config_tensor::V, sdpa.attributes.get_v()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(key, config_tensor::SCALE, sdpa.attributes.get_attn_scale());
+        appendOptionalMatchTensor(key, config_tensor::ATTN_MASK, sdpa.attributes.get_bias());
+        appendOptionalMatchTensor(key, config_tensor::SEQ_LEN_Q, sdpa.attributes.get_seq_len_q());
+        appendOptionalMatchTensor(key, config_tensor::SEQ_LEN_KV, sdpa.attributes.get_seq_len_kv());
+        appendOptionalMatchTensor(key, config_tensor::SEED, sdpa.attributes.get_seed());
+        appendOptionalMatchTensor(key, config_tensor::OFFSET, sdpa.attributes.get_offset());
+        appendOptionalMatchTensor(
+            key, config_tensor::DROPOUT_MASK, sdpa.attributes.get_dropout_mask());
+        appendOptionalMatchTensor(
+            key, config_tensor::DROPOUT_SCALE, sdpa.attributes.get_dropout_scale());
+        appendOptionalMatchTensor(
+            key, config_tensor::PAGE_TABLE_K, sdpa.attributes.get_page_table_k());
+        appendOptionalMatchTensor(
+            key, config_tensor::PAGE_TABLE_V, sdpa.attributes.get_page_table_v());
+        appendOptionalMatchTensor(key, config_tensor::BLOCK_MASK, sdpa.attributes.get_block_mask());
+        appendOptionalMatchTensor(key, config_tensor::SINK_TOKEN, sdpa.attributes.get_sink_token());
+        appendOptionalMatchTensor(key, config_tensor::DESCALE_Q, sdpa.attributes.get_descale_q());
+        appendOptionalMatchTensor(key, config_tensor::DESCALE_K, sdpa.attributes.get_descale_k());
+        appendOptionalMatchTensor(key, config_tensor::DESCALE_V, sdpa.attributes.get_descale_v());
+        appendOptionalMatchTensor(key, config_tensor::DESCALE_S, sdpa.attributes.get_descale_s());
+        appendOptionalMatchTensor(key, config_tensor::SCALE_S, sdpa.attributes.get_scale_s());
+        appendOptionalMatchTensor(key, config_tensor::SCALE_O, sdpa.attributes.get_scale_o());
+        return PrioritizedAutotuneConfigMatchKey{60, std::move(key)};
+    }
+    case graph::NodeType::SDPA_BWD:
+    {
+        const auto& sdpa = static_cast<const graph::SdpaBwdNode&>(node);
+        key.opName = config_op::SDPA_BWD;
+        if(!appendRequiredMatchTensor(key, config_tensor::Q, sdpa.attributes.get_q())
+           || !appendRequiredMatchTensor(key, config_tensor::K, sdpa.attributes.get_k())
+           || !appendRequiredMatchTensor(key, config_tensor::V, sdpa.attributes.get_v())
+           || !appendRequiredMatchTensor(key, config_tensor::O, sdpa.attributes.get_o())
+           || !appendRequiredMatchTensor(key, config_tensor::DO, sdpa.attributes.get_do())
+           || !appendRequiredMatchTensor(key, config_tensor::STATS, sdpa.attributes.get_stats()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(key, config_tensor::SCALE, sdpa.attributes.get_attn_scale());
+        appendOptionalMatchTensor(key, config_tensor::ATTN_MASK, sdpa.attributes.get_bias());
+        appendOptionalMatchTensor(key, config_tensor::SEQ_LEN_Q, sdpa.attributes.get_seq_len_q());
+        appendOptionalMatchTensor(key, config_tensor::SEQ_LEN_KV, sdpa.attributes.get_seq_len_kv());
+        appendOptionalMatchTensor(key, config_tensor::SEED, sdpa.attributes.get_seed());
+        appendOptionalMatchTensor(key, config_tensor::OFFSET, sdpa.attributes.get_offset());
+        appendOptionalMatchTensor(
+            key, config_tensor::DROPOUT_MASK, sdpa.attributes.get_dropout_mask());
+        appendOptionalMatchTensor(
+            key, config_tensor::DROPOUT_SCALE, sdpa.attributes.get_dropout_scale());
+        appendOptionalMatchTensor(
+            key, config_tensor::DROPOUT_SCALE_INV, sdpa.attributes.get_dropout_scale_inv());
+        return PrioritizedAutotuneConfigMatchKey{60, std::move(key)};
+    }
+#endif
+    case graph::NodeType::MATMUL:
+    {
+        const auto& matmul = static_cast<const graph::MatmulNode&>(node);
+        key.opName = config_op::MATMUL;
+        if(!appendRequiredMatchTensor(key, config_tensor::A, matmul.attributes.get_a())
+           || !appendRequiredMatchTensor(key, config_tensor::B, matmul.attributes.get_b()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{50, std::move(key)};
+    }
+    case graph::NodeType::BATCHNORM:
+    {
+        const auto& batchnorm = static_cast<const graph::BatchnormNode&>(node);
+        key.opName = config_op::BATCHNORM_TRAINING;
+        if(!appendRequiredMatchTensor(key, config_tensor::X, batchnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::SCALE, batchnorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(key, config_tensor::BIAS, batchnorm.attributes.get_bias())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::EPSILON, batchnorm.attributes.get_epsilon()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(
+            key, config_tensor::PREV_RUNNING_MEAN, batchnorm.attributes.get_prev_running_mean());
+        appendOptionalMatchTensor(key,
+                                  config_tensor::PREV_RUNNING_VARIANCE,
+                                  batchnorm.attributes.get_prev_running_variance());
+        appendOptionalMatchTensor(
+            key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
+        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+    }
+    case graph::NodeType::BATCHNORM_INFERENCE:
+    {
+        const auto& batchnorm = static_cast<const graph::BatchnormInferenceNode&>(node);
+        key.opName = config_op::BATCHNORM_INFERENCE;
+        if(!appendRequiredMatchTensor(key, config_tensor::X, batchnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::MEAN, batchnorm.attributes.get_mean())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::INV_VARIANCE, batchnorm.attributes.get_inv_variance())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::SCALE, batchnorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(key, config_tensor::BIAS, batchnorm.attributes.get_bias()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+    }
+    case graph::NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT:
+    {
+        const auto& batchnorm = static_cast<const graph::BatchnormInferenceNodeVarianceExt&>(node);
+        key.opName = config_op::BATCHNORM_INFERENCE_VARIANCE_EXT;
+        if(!appendRequiredMatchTensor(key, config_tensor::X, batchnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::MEAN, batchnorm.attributes.get_mean())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::VARIANCE, batchnorm.attributes.get_variance())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::SCALE, batchnorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(key, config_tensor::BIAS, batchnorm.attributes.get_bias())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::EPSILON, batchnorm.attributes.get_epsilon()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+    }
+    case graph::NodeType::BATCHNORM_BACKWARD:
+    {
+        const auto& batchnorm = static_cast<const graph::BatchnormBackwardNode&>(node);
+        key.opName = config_op::BATCHNORM_BACKWARD;
+        if(!appendRequiredMatchTensor(key, config_tensor::DY, batchnorm.attributes.get_dy())
+           || !appendRequiredMatchTensor(key, config_tensor::X, batchnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::SCALE, batchnorm.attributes.get_scale()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(key, config_tensor::MEAN, batchnorm.attributes.get_mean());
+        appendOptionalMatchTensor(
+            key, config_tensor::INV_VARIANCE, batchnorm.attributes.get_inv_variance());
+        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+    }
+    case graph::NodeType::LAYER_NORM:
+    {
+        const auto& layernorm = static_cast<const graph::LayerNormNode&>(node);
+        key.opName = config_op::LAYERNORM;
+        if(!addCriterion(key,
+                         config_criterion::NORM_FWD_PHASE,
+                         toBackendNormFwdPhase(layernorm.attributes.get_forward_phase()))
+           || !appendRequiredMatchTensor(key, config_tensor::X, layernorm.attributes.get_x())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::SCALE, layernorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(key, config_tensor::BIAS, layernorm.attributes.get_bias())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::EPSILON, layernorm.attributes.get_epsilon()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+    }
+    case graph::NodeType::RMS_NORM:
+    {
+        const auto& rmsnorm = static_cast<const graph::RMSNormNode&>(node);
+        key.opName = config_op::RMSNORM;
+        if(!addCriterion(key,
+                         config_criterion::NORM_FWD_PHASE,
+                         toBackendNormFwdPhase(rmsnorm.attributes.get_forward_phase()))
+           || !appendRequiredMatchTensor(key, config_tensor::X, rmsnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::SCALE, rmsnorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::EPSILON, rmsnorm.attributes.get_epsilon()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(key, config_tensor::BIAS, rmsnorm.attributes.get_bias());
+        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+    }
+    case graph::NodeType::RMS_NORM_BACKWARD:
+    {
+        const auto& rmsnorm = static_cast<const graph::RMSNormBackwardNode&>(node);
+        key.opName = config_op::RMSNORM_BACKWARD;
+        if(!appendRequiredMatchTensor(key, config_tensor::DY, rmsnorm.attributes.get_dy())
+           || !appendRequiredMatchTensor(key, config_tensor::X, rmsnorm.attributes.get_x())
+           || !appendRequiredMatchTensor(key, config_tensor::SCALE, rmsnorm.attributes.get_scale())
+           || !appendRequiredMatchTensor(
+               key, config_tensor::INV_RMS, rmsnorm.attributes.get_inv_rms()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+    }
+    case graph::NodeType::REDUCTION:
+    {
+        const auto& reduction = static_cast<const graph::ReductionNode&>(node);
+        const auto mode = reduction.attributes.get_mode();
+        key.opName = config_op::REDUCTION;
+        if(!mode.has_value()
+           || !addCriterion(key, config_criterion::REDUCTION_MODE, toBackendReductionMode(*mode))
+           || !appendRequiredMatchTensor(key, config_tensor::INPUT, reduction.attributes.get_x()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{20, std::move(key)};
+    }
+    case graph::NodeType::RESAMPLE_FWD:
+    {
+        const auto& resample = static_cast<const graph::ResampleFwdNode&>(node);
+        const auto paddingMode = toBackendPaddingMode(resample.attributes.get_padding_mode());
+        key.opName = config_op::RESAMPLE_FWD;
+        if(!addCriterion(key,
+                         config_criterion::RESAMPLE_MODE,
+                         toBackendResampleMode(resample.attributes.get_resample_mode()))
+           || !addCriterion(key,
+                            config_criterion::PADDING_MODE,
+                            paddingMode.has_value() ? std::optional<int64_t>(*paddingMode)
+                                                    : std::optional<int64_t>(0))
+           || !appendRequiredMatchTensor(key, config_tensor::X, resample.attributes.get_x()))
+        {
+            return std::nullopt;
+        }
+        return PrioritizedAutotuneConfigMatchKey{20, std::move(key)};
+    }
+    case graph::NodeType::POINTWISE:
+    {
+        const auto& pointwise = static_cast<const graph::PointwiseNode&>(node);
+        key.opName = config_op::POINTWISE;
+        if(!addCriterion(key,
+                         config_criterion::POINTWISE_MODE,
+                         toBackendPointwiseMode(pointwise.attributes.get_mode()))
+           || !appendRequiredMatchTensor(
+               key, config_tensor::IN_0, pointwise.attributes.get_input_0()))
+        {
+            return std::nullopt;
+        }
+        appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
+        appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
+        return PrioritizedAutotuneConfigMatchKey{10, std::move(key)};
+    }
+    case graph::NodeType::UNKNOWN:
+    case graph::NodeType::BLOCK_SCALE_QUANTIZE:
+    case graph::NodeType::BLOCK_SCALE_DEQUANTIZE:
+    case graph::NodeType::CUSTOM_OP:
+#ifndef HIPDNN_ENABLE_SDPA
+    case graph::NodeType::SDPA_FWD:
+    case graph::NodeType::SDPA_BWD:
+#endif
+    default:
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
+inline std::optional<AutotuneConfigMatchKey>
+    getAutotuneConfigMatchKey(const std::vector<std::shared_ptr<graph::INode>>& nodes)
+{
+    std::optional<AutotuneConfigMatchKey> bestKey;
+    int bestPriority = 0;
+
+    for(const auto& node : nodes)
+    {
+        if(!node)
+        {
+            continue;
+        }
+        auto candidate = getAutotuneConfigMatchKeyForNode(*node);
+        if(candidate.has_value() && candidate->priority > bestPriority)
+        {
+            bestPriority = candidate->priority;
+            bestKey = std::move(candidate->key);
+        }
+    }
+
+    return bestKey;
+}
+
+inline std::optional<AutotuneConfigMatchKey> getAutotuneConfigMatchKey(const graph::INode& root)
+{
+    std::optional<AutotuneConfigMatchKey> bestKey;
+    int bestPriority = 0;
+
     root.visit([&](const graph::INode& node) {
-        if(handled)
+        auto candidate = getAutotuneConfigMatchKeyForNode(node);
+        if(candidate.has_value() && candidate->priority > bestPriority)
         {
-            return;
-        }
-        switch(node.getNodeType())
-        {
-        case graph::NodeType::CONVOLUTION_FPROP:
-        {
-            const auto& conv = static_cast<const graph::ConvolutionFpropNode&>(node);
-            appendMatchKeyTensor(result, conv.attributes.get_x());
-            appendMatchKeyTensor(result, conv.attributes.get_w());
-            handled = true;
-            break;
-        }
-        case graph::NodeType::CONVOLUTION_DGRAD:
-        {
-            const auto& conv = static_cast<const graph::ConvolutionDgradNode&>(node);
-            appendMatchKeyTensor(result, conv.attributes.get_dy());
-            appendMatchKeyTensor(result, conv.attributes.get_w());
-            handled = true;
-            break;
-        }
-        case graph::NodeType::CONVOLUTION_WGRAD:
-        {
-            const auto& conv = static_cast<const graph::ConvolutionWgradNode&>(node);
-            appendMatchKeyTensor(result, conv.attributes.get_x());
-            appendMatchKeyTensor(result, conv.attributes.get_dy());
-            handled = true;
-            break;
-        }
-        default:
-            break;
+            bestPriority = candidate->priority;
+            bestKey = std::move(candidate->key);
         }
     });
 
-    // An op with no op-aware branch above leaves `handled` false and `result`
-    // empty: an unsupported op produces an EMPTY match key (it never matches a
-    // backend config rule).
-    return result;
+    return bestKey;
 }
 
 } // namespace hipdnn_frontend::detail
