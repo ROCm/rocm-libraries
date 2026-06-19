@@ -87,21 +87,11 @@ public:
                     output = scan_op(t, output);
             }
 
-#if !ROCPRIM_TARGET_SPIRV
-            if constexpr(!ROCPRIM_IS_GENERIC())
+            if constexpr(VirtualWaveSize > 32)
             {
-                static_assert(VirtualWaveSize <= 32,
-                              "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-            }
-            else
-#endif
-            {
-                if constexpr(VirtualWaveSize > 32)
-                {
-                    ROCPRIM_PRINT_ERROR_ONCE(
-                        "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-                    return;
-                }
+                ROCPRIM_PRINT_ERROR_ONCE(
+                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                return;
             }
         }
         else
