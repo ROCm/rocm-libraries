@@ -79,7 +79,10 @@ class jthread {
     /// Constructs a joinable jthread with explicit width (1..max_width()).
     /// Forwards to `cuda::thread`'s width-taking constructor.
     template <class Fn_t, class... Args_t>
-    __host__ __device__ explicit jthread(uint32_t width, Fn_t&& typed_fn, Args_t&&... args)
+    __host__ explicit jthread(uint32_t width, Fn_t&& typed_fn, Args_t&&... args)
+        : __thread_(width, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
+    template <class Fn_t, class... Args_t>
+    __device__ explicit jthread(uint32_t width, Fn_t&& typed_fn, Args_t&&... args)
         : __thread_(width, ::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
 
     /// Convenience constructor (width = 1) — std::thread drop-in.
@@ -92,7 +95,12 @@ class jthread {
     template <class Fn_t, class... Args_t,
               ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>
                               && !::std::is_same_v<::std::remove_cv_t<::std::remove_reference_t<Fn_t>>, jthread>, bool> = true>
-    __host__ __device__ explicit jthread(Fn_t&& typed_fn, Args_t&&... args)
+    __host__ explicit jthread(Fn_t&& typed_fn, Args_t&&... args)
+        : __thread_(::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
+    template <class Fn_t, class... Args_t,
+              ::std::enable_if_t<!::std::is_arithmetic_v<::std::remove_reference_t<Fn_t>>
+                              && !::std::is_same_v<::std::remove_cv_t<::std::remove_reference_t<Fn_t>>, jthread>, bool> = true>
+    __device__ explicit jthread(Fn_t&& typed_fn, Args_t&&... args)
         : __thread_(::std::forward<Fn_t>(typed_fn), ::std::forward<Args_t>(args)...) {}
 
     /// Destructor: auto-joins if joinable.
