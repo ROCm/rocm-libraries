@@ -1725,8 +1725,8 @@ struct WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4
 
     static constexpr index_t kScaleGranularity = 32;
 
-    // To get unity scale: 2^(kDefaultScale - 127) = 1.0
-    static constexpr index_t kDefaultScale = 0x7F7F7F7F;
+    // Four packed e8m0 unity scales: 2^(bias - bias) = 1.0.
+    static constexpr index_t kDefaultScale = numeric_traits<e8m0_t>::bias * 0x01010101;
 
     // c_vec += a_vec * b_vec
     template <typename... Params>
@@ -1844,6 +1844,8 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x64_f8f6f4
     static constexpr index_t kCM1PerLane = 4;
 
     static constexpr index_t kScaleGranularity = 32;
+    // Four packed e8m0 unity scales: 2^(bias - bias) = 1.0.
+    static constexpr index_t kDefaultScale = numeric_traits<e8m0_t>::bias * 0x01010101;
 
     // c_vec += a_vec * b_vec
     template <typename... Params>
@@ -1915,19 +1917,19 @@ struct WarpGemmAttributeMfmaImpl_f32_32x32x64_f8f6f4
         return c_vec;
     }
 
-    // c_vec += a_vec * b_vec
+    // c_vec += a_vec * b_vec (unscaled, uses default unity scale)
     template <typename... Params>
     CK_TILE_DEVICE void
     operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
-        operator()<Params...>(c_vec, a_vec, 0, b_vec, 0);
+        operator()<Params...>(c_vec, a_vec, kDefaultScale, b_vec, kDefaultScale);
     }
 
-    // c_vec = a_vec * b_vec
+    // c_vec = a_vec * b_vec (unscaled, uses default unity scale)
     template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
-        return operator()<Params...>(a_vec, 0, b_vec, 0);
+        return operator()<Params...>(a_vec, kDefaultScale, b_vec, kDefaultScale);
     }
 };
 
@@ -2112,9 +2114,8 @@ struct WarpGemmAttributeMfmaImpl_i32_16x16x64_i8
         DISPATCH_MFMA_CTRL_("v_mfma_i32_16x16x64_i8", Ctrl)
         else
         {
-#if defined(__gfx95__)
-            c_vec = __builtin_amdgcn_mfma_i32_16x16x64_i8(
-                bit_cast<int64_t>(a_vec), bit_cast<int64_t>(b_vec), c_vec, 0, 0, 0);
+#if defined(__gfx950__)
+            c_vec = __builtin_amdgcn_mfma_i32_16x16x64_i8(a_vec, b_vec, c_vec, 0, 0, 0);
 #else
             ck_tile::ignore = c_vec;
             ck_tile::ignore = a_vec;

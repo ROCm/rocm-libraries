@@ -102,7 +102,8 @@ def get_kernel_key(kernel):
 
 def merge_kernel_list(kernels, all_precisions):
     """Merge precision and architecture lists with kernel list. 
-    Check for duplicated kernel and invalid precision/arch entries."""
+    Check for duplicated kernel and invalid precision/arch entries.
+    Ensures that the batch ranges of the kernels are non-overlapping."""
 
     r, d = list(), dict()
 
@@ -112,17 +113,12 @@ def merge_kernel_list(kernels, all_precisions):
     lds_size_err_msg = "Error: invalid lds_size_bytes in kernel configuration: \n"
     arch_err_msg = "Error: invalid architecture in kernel configuration: \n"
     prec_err_msg = "Error: invalid precision in kernel configuration: \n"
-    dup_err_msg = "Error: duplicated entry in kernel configuration: \n"
     batch_err_msg = "Error: invalid batch in kernel configuration: \n"
     batch_range_err_msg = "Error: invalid batch range in kernel configuration: \n"
 
-    get_batch_range = lambda kernel, min_batch, max_batch: range(
-        kernel.batch_low
-        if hasattr(kernel, 'batch_low') else min_batch, kernel.batch_high
-        if hasattr(kernel, 'batch_high') else max_batch)
-
-    is_empty_batch = lambda kernel: (not hasattr(kernel, 'batch_low') and
-                                     not hasattr(kernel, 'batch_high'))
+    batch_low_default = 1
+    batch_high_default = sys.maxsize
+    get_batch_range = lambda kernel: range(kernel.batch_low, kernel.batch_high)
 
     for kernel in kernels:
         if hasattr(kernel, 'precision'):
@@ -159,22 +155,21 @@ def merge_kernel_list(kernels, all_precisions):
                 # default lds size to 64KiB
                 kernel.lds_size_bytes = config_arch.lds_config.SIZE_64KiB.value
 
-        if hasattr(kernel, 'batch_low'):
-            if not (isinstance(kernel.batch_low, int)
-                    and kernel.batch_low >= 0):
-                print(batch_err_msg + str(kernel))
-                sys.exit(1)
-
-        if hasattr(kernel, 'batch_high'):
-            if not (isinstance(kernel.batch_high, int)
-                    and kernel.batch_high >= 0):
-                print(batch_err_msg + str(kernel))
-                sys.exit(1)
-
-        if hasattr(kernel, 'batch_low') and hasattr(kernel, 'batch_high'):
-            if kernel.batch_low > kernel.batch_high:
-                print(batch_range_err_msg + str(kernel))
-                sys.exit(1)
+        if not hasattr(kernel, 'batch_low'):
+            kernel.batch_low = batch_low_default
+        if not hasattr(kernel, 'batch_high'):
+            kernel.batch_high = batch_high_default
+        if not (isinstance(kernel.batch_low, int)
+                and kernel.batch_low >= batch_low_default):
+            print(batch_err_msg + str(kernel))
+            sys.exit(1)
+        if not (isinstance(kernel.batch_high, int)
+                and kernel.batch_high >= batch_low_default):
+            print(batch_err_msg + str(kernel))
+            sys.exit(1)
+        if kernel.batch_low > kernel.batch_high:
+            print(batch_range_err_msg + str(kernel))
+            sys.exit(1)
 
         for a in archs:
             if a not in all_archs:
@@ -192,31 +187,24 @@ def merge_kernel_list(kernels, all_precisions):
                 key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
                        kernel_cpy.transform_type)
 
-                min_batch = 1
-                max_batch = sys.maxsize
-
+                # check if the key is already in the dictionary
                 if key not in d:
+                    # if the key is not in the dictionary, add it to the dictionary
                     d[key] = list()
-                    if not is_empty_batch(kernel_cpy):
-                        d[key].append(
-                            get_batch_range(kernel_cpy, min_batch, max_batch))
+                    # add the batch to the list
+                    d[key].append(get_batch_range(kernel_cpy))
 
                     r.append(kernel_cpy)
                 else:
-                    if not d[key] and is_empty_batch(kernel_cpy):
-                        print(dup_err_msg + str(kernel))
-                        sys.exit(1)
-                    else:
-                        new_range = get_batch_range(kernel_cpy, min_batch,
-                                                    max_batch)
-                        for curr_range in d[key]:
-                            # check if the new range intersects with the current range
-                            if new_range.start <= curr_range.stop and new_range.stop >= curr_range.start:
-                                print(batch_range_err_msg + str(kernel))
-                                sys.exit(1)
-                        # New range is disjoint with the current ranges, so add it to the list
-                        d[key].append(new_range)
-                        r.append(kernel_cpy)
+                    new_range = get_batch_range(kernel_cpy)
+                    for curr_range in d[key]:
+                        # check if the new range intersects with the current range
+                        if new_range.start <= curr_range.stop and new_range.stop >= curr_range.start:
+                            print(batch_range_err_msg + str(kernel))
+                            sys.exit(1)
+                    # New range is disjoint with the current ranges, so add it to the list
+                    d[key].append(new_range)
+                    r.append(kernel_cpy)
 
     return r
 
@@ -463,12 +451,14 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             transform_type = f_pp_1.meta.transform_type
             scheme = f_pp_1.meta.scheme
             arch_name = f_pp_1.meta.gcn_arch_name
+            batch_low = f_pp_1.meta.batch_low
+            batch_high = f_pp_1.meta.batch_high
             key = Call(name='PPFMKey',
                        arguments=ArgumentList(
                            length[0], length[1], length[2],
                            precisions[precision],
-                           transform_types[transform_type], scheme,
-                           'pp_kernel_1.get_kernel_config()',
+                           transform_types[transform_type], scheme, batch_low,
+                           batch_high, 'pp_kernel_1.get_kernel_config()',
                            'pp_kernel_2.get_kernel_config()',
                            ''.join(['"', arch_name, '"']))).inline()
             piece_contents[curr_file] += function_map.insert_pp(

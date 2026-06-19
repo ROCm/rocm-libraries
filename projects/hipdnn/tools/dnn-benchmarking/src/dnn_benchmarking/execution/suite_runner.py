@@ -422,6 +422,7 @@ def _run_timed_pytorch_row(
         try:
             from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
             from ..execution.pytorch_executor import PyTorchCudaExecutor
+            from . import pytorch_ops
 
             bench_config = BenchmarkConfig(
                 graph_path=graph_path,
@@ -475,6 +476,9 @@ def _run_timed_pytorch_row(
 
             if role == "reference":
                 result.correctness = _reference_row_correctness(config)
+                warnings = pytorch_ops.get_reference_warnings(graph_json)
+                if warnings:
+                    result.warnings = warnings
             else:
                 rtol, atol = _fallback_tolerance_for_config(config)
                 result.correctness = CorrectnessResult(

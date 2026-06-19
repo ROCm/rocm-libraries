@@ -225,6 +225,17 @@ inline bool isReturn(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_endpgm;
 }
 
+// Last real (non-pseudo) instruction in a block, or nullptr if the block is
+// label-only. Walks back from the terminator, skipping trailing pseudos
+// (label / asm directive).
+inline StinkyInstruction* lastRealInst(BasicBlock& bb) {
+    for (IRBase* n = bb.getTerminator(); n; n = n->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(n);
+        if (inst && !isPseudoInst(inst)) return inst;
+    }
+    return nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // True16 half-selectors
 // ---------------------------------------------------------------------------
@@ -792,99 +803,69 @@ class InsertWaitAluPassImpl : public Pass {
             return true;  // no real in-region content reachable -> true exit
         };
 
-        // Scope-exit via control transfer to an out-of-region target. After
-        // LongBranchLowering stamps LabelData on a long branch, CFGBuilder wires
-        // an edge to the target; if that target's real IR is outside the
-        // extracted scope it becomes an empty placeholder BB. The source BB then
-        // still has a successor, so the no-successor fallback below misses it.
-        // Detect "branch/long-branch whose successor is a true exit placeholder"
-        // and drop mode2 BEFORE the terminator so the exit path runs in mode0.
-        for (BasicBlock& bb : func) {
-            if (bbsWithExitDisable.count(&bb)) continue;
-            bool exitsRegion = false;
-            for (BasicBlock* succ : bb.getSuccessors()) {
-                if (succ && isExitPlaceholder(*succ)) {
-                    exitsRegion = true;
-                    break;
-                }
-            }
-            if (!exitsRegion) continue;
-            StinkyInstruction* tail = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst || isPseudoInst(inst)) continue;
-                tail = inst;
-            }
-            if (!tail) continue;
-            // If the BB branches out (tail is a branch / long-branch), the disable
-            // must precede the terminator. If it falls through to the out-of-region
-            // placeholder (tail is an ordinary instruction), the disable goes
-            // AFTER the tail — at the very end of the BB — so that ALL incoming
-            // paths (fall-through AND any long-branch that targets this BB's label,
-            // landing after an earlier same-BB disable) flow through it before
-            // leaving the region.
-            const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
-            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
-            bbsWithExitDisable.insert(&bb);
-        }
-        // Region-exit fallback: any BB with no in-region successor leaves the
-        // mode2 scope and needs a disable. Two flavors:
-        //   * exits via a control-transfer terminator — a long-branch-out
-        //     (s_setpc_b64 carrying LabelData to an out-of-region label, which
-        //     CFGBuilder gave no in-region successor) or an s_branch/s_cbranch to
-        //     an out-of-region label. The disable must go BEFORE that terminator
-        //     so it runs on the way out.
-        //   * genuine fall-off at the natural end of the region — the disable
-        //     goes after the tail.
-        // (mode2->mode0 is HW-free, so a redundant disable here is harmless.)
+        // Region-exit disables: one mode0 per edge leaving the mode2 region, none
+        // on in-region edges. Never disable before a conditional branch (it would
+        // clobber the in-region edge); conditional exits converge at the boundary label.
+        std::unordered_set<BasicBlock*> coveredAtLabel;
         for (BasicBlock& bb : func) {
             if (bbsWithExitDisable.count(&bb)) continue;
             if (!bb.getSuccessors().empty()) continue;
-            StinkyInstruction* tail = nullptr;
-            StinkyInstruction* labelAnchor = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-                if (isPseudoInst(inst)) {
-                    if (!labelAnchor && inst->getUnifiedOpcode() == GFX::LABEL) labelAnchor = inst;
-                    continue;
-                }
-                tail = inst;
-            }
+            StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
                 const bool tailExits =
                     isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
                 work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
+                bbsWithExitDisable.insert(&bb);
                 continue;
             }
-            // Label-only trailing BB (e.g. the --to-label boundary BB in
-            // label-scoped runs). Anchor mode=0 *before* the label so it
-            // executes on the way into the scope-exit marker, matching the
-            // pipeline-path placement of "mode=0 right before s_endpgm".
-            //
-            // Skip if the BB is unreachable — every predecessor terminates
-            // with a return (s_endpgm). That covers the pipeline-path trailing
-            // `label_ASM_End:` that follows `s_endpgm`, where the disable
-            // would be dead code after the kernel has already exited.
+            // Label-only BB. Skip if unreachable — every predecessor terminates
+            // with a return (s_endpgm), e.g. a trailing `label_ASM_End:` after
+            // `s_endpgm`, where the disable would be dead code.
+            StinkyInstruction* labelAnchor = nullptr;
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && inst->getUnifiedOpcode() == GFX::LABEL) {
+                    labelAnchor = inst;
+                    break;
+                }
+            }
             if (labelAnchor) {
                 bool reachable = bb.getPredecessors().empty();
                 for (BasicBlock* pred : bb.getPredecessors()) {
-                    StinkyInstruction* predTail = nullptr;
-                    for (auto it = pred->begin(); it != pred->end(); ++it) {
-                        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                        if (!inst || isPseudoInst(inst)) continue;
-                        predTail = inst;
-                    }
+                    StinkyInstruction* predTail = lastRealInst(*pred);
                     if (!predTail || !isReturn(*predTail)) {
                         reachable = true;
                         break;
                     }
                 }
                 if (reachable) {
-                    work.push_back({&bb, labelAnchor, /*value=*/0, /*insertAfter=*/false});
+                    work.push_back({&bb, labelAnchor, /*value=*/0, /*insertAfter=*/true});
+                    bbsWithExitDisable.insert(&bb);
+                    coveredAtLabel.insert(&bb);
                 }
             }
+        }
+        // Pass B — unconditional out-transfer (s_branch / s_setpc) not already
+        // covered by Pass A: disable before the terminator. Conditional branches
+        // are never disabled here (their exit converges at the label, Pass A).
+        for (BasicBlock& bb : func) {
+            if (bbsWithExitDisable.count(&bb)) continue;
+            StinkyInstruction* tail = lastRealInst(bb);
+            if (!tail) continue;
+            if (isConditionalBranch(*tail)) continue;
+            BasicBlock* exitSucc = nullptr;
+            for (BasicBlock* succ : bb.getSuccessors()) {
+                if (succ && isExitPlaceholder(*succ)) {
+                    exitSucc = succ;
+                    break;
+                }
+            }
+            if (!exitSucc) continue;
+            if (coveredAtLabel.count(exitSucc)) continue;
+            const bool tailTransfers =
+                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
+            bbsWithExitDisable.insert(&bb);
         }
         for (const auto& w : work) {
             IRBase* insertBefore = nullptr;
