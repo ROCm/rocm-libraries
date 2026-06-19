@@ -530,21 +530,20 @@ class WaitGROp(BaseOp):
     wait_gr_counts: Optional[WaitGRCounts] = None
     has_sync: bool = False
     adjustVmcnt: bool = True
-    # Authoritative rationale for force_drain (referenced from the emitter and
-    # from _merge_preops):
+    # S6 (force_drain removed): the emitter always emits the precise per-tensor
+    # vmcnt(wait_gr_counts) for every wait_gr, including StreamK wrap / cross-iter
+    # LRs. There is no longer a force_drain override to vmcnt(0).
     #
-    # When True the emitter ignores wait_gr_counts and emits a full vmcnt(0)
-    # drain (all outstanding global reads must retire). It is set for StreamK
-    # wrap / cross-iter LRs, where no precise static wait count is correct:
-    # StreamK splits K across workgroups at runtime, so the number of in-flight
-    # GR atoms between the producing buffer_load and the consumer is
-    # grid-dependent and any static per-tensor count can be too weak (stale LDS).
-    #
-    # It is kept as a distinct flag rather than a bare count of 0 so that (a) the
-    # precise per-tensor estimate in wait_gr_counts survives for diagnostics, and
-    # (b) the min-count merge in _merge_preops cannot silently weaken the drain
-    # back to a partial vmcnt and re-introduce the wrap-LR race.
-    force_drain: bool = False
+    # The prior force_drain rationale claimed the wrap-LR inflight set was
+    # grid-dependent so any static count could be too weak (stale LDS). After
+    # S3/E3-b that premise no longer holds: the per-uid global term rides the
+    # MUBUF offset12 immediate and the data SRD advances exactly once per MT, so
+    # there is no sub-MT SRD state and StreamK truncation can only occur at
+    # MacroTile granularity. The per-(tensor,uid) inflight set feeding a consumer
+    # LR is therefore a pure function of the logical schedule, independent of the
+    # grid (§1.3 / s3/e3b/STRIDE_MAPPING_PROOF.md). The static vmcnt(count) is
+    # exact under partial-tile truncation; this was proven on hardware with the
+    # grid-variant StreamK partial-final-K-tile matrix (s4_s6/s6/gpu/).
 
     def __post_init__(self):
         self.kind = 'wait_gr'
@@ -2229,51 +2228,42 @@ class LogicalScheduler:
                                         or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
                             counts = self._compute_inflight_loads(
                                 pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
-                            # StreamK wrap-LR race fix (multi-DU only): wrap /
-                            # cross-iter consumers (mtIteration > 0, or a GR dep
-                            # with mt_offset != 0) read an LDS buffer across an
-                            # iteration boundary. Under StreamK (pgr == 1) the
-                            # only correct static wait for these is a full
-                            # vmcnt(0) drain, so flag the op force_drain rather
-                            # than emitting `counts`. See WaitGROp.force_drain for
-                            # the full rationale.
+                            # S6 (force_drain removed): every wait_gr — including
+                            # a StreamK wrap / cross-iter consumer (mtIteration > 0,
+                            # or a GR dep with mt_offset != 0) — emits the precise
+                            # per-(tensor,uid) inflight vmcnt(counts).  These used
+                            # to be forced to a full vmcnt(0) drain because the
+                            # inflight set was thought grid-dependent.  After
+                            # S3/E3-b the per-uid global term rides the offset12
+                            # immediate and the data SRD advances once per MT, so
+                            # there is no sub-MT SRD state and StreamK truncation is
+                            # MacroTile-granular: the inflight set is a pure
+                            # function of the logical schedule, independent of the
+                            # grid (§1.3 / s3/e3b/STRIDE_MAPPING_PROOF.md).  Proven
+                            # on hardware with the grid-variant StreamK
+                            # partial-final-K-tile matrix (s4_s6/s6/gpu/).
                             any_wrap = (lr.mtIteration > 0
                                         or any(d.mt_offset != 0 for d in gr_deps))
-                            force_drain = (self.config.pgr == 1 and any_wrap)
-                            # S5: codify the invariants S6 relies on (the drain
-                            # stays ON here — these asserts emit nothing, so the
-                            # assembly is byte-identical). force_drain is the
-                            # StreamK wrap/cross-iter drain and is set on the
-                            # multi-DU pgr==1 path only; the single-DU / pgr>=2
-                            # rail never drains, so dropping the flag in S6 is
-                            # multi-DU-only and byte-identical elsewhere.
-                            assert (not force_drain) or self.config.pgr == 1, (
-                                "force_drain must be pgr==1 only (single-DU / "
-                                "pgr>=2 rail must stay byte-identical)")
-                            # The count carried on a force_drain wrap-LR is the
-                            # authoritative per-(tensor,uid) inflight set S6 will
-                            # emit once the drain is dropped (vmcnt(count)).  It
-                            # must be schedule-static: a pure function of the
-                            # logical schedule with no grid / StreamK input, so a
-                            # single static count is exact even under partial-tile
-                            # truncation (see §1.3 / STRIDE_MAPPING_PROOF).  Assert
-                            # determinism so a future change that smuggles grid
-                            # state into the count is caught before S6 trusts it.
-                            if force_drain:
+                            if any_wrap:
+                                # A wrap-LR must carry a count, and that count must
+                                # be deterministic.  The recompute-equality check
+                                # below only proves the count is a pure function of
+                                # the in-memory logical schedule (it takes no grid /
+                                # StreamK argument); grid-independence itself rests
+                                # on §1.3 / STRIDE_MAPPING_PROOF and the GPU proof,
+                                # NOT on this assert.
                                 assert counts is not None, (
-                                    "force_drain wrap-LR must carry the precise "
-                                    "schedule-static count for S6")
+                                    "wrap-LR must carry a per-(tensor,uid) count")
                                 _recheck = self._compute_inflight_loads(
                                     pi, lr.subIterK_slot,
                                     wait_dep.ref.tensor, wait_dep)
                                 assert _recheck == counts, (
-                                    "wait_gr inflight count is not schedule-static "
-                                    f"(recompute {_recheck} != {counts}); S6's "
+                                    "wait_gr inflight count is not deterministic "
+                                    f"(recompute {_recheck} != {counts}); the "
                                     "static vmcnt(count) would be unsound")
                             lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                       has_sync=True,
-                                                      adjustVmcnt=is_cross,
-                                                      force_drain=force_drain))
+                                                      adjustVmcnt=is_cross))
                         else:
                             cross_set = set(id(d) for d in cross)
                             is_cross = id(dep) in cross_set
@@ -2479,15 +2469,9 @@ class LogicalScheduler:
                         if getattr(op.wait_gr_counts, t) > 0]
                     setattr(merged_counts, t, min(vals) if vals else 0)
                 adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
-            # Preserve force_drain across the merge: a drain is the strictest
-            # possible wait, so if any merged op requested it the merged op must
-            # drain too (see WaitGROp.force_drain).
-            merged_force_drain = any(
-                getattr(op, 'force_drain', False) for op, _ in wait_gr_by_lr)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
                                    has_sync=has_wait_gr_sync,
-                                   adjustVmcnt=adjust,
-                                   force_drain=merged_force_drain))
+                                   adjustVmcnt=adjust))
         result.extend(others)
         return result
 

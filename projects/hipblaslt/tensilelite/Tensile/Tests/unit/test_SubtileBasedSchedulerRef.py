@@ -1459,8 +1459,10 @@ def test_320x320_bf16_preloop_1x5_offset_all():
 # scale tensors a GR k-granularity larger than their per-uid k-window, so
 # SchedulerConfig.__post_init__ expands numSubIterK and sets numUnroll>1. These
 # golden dep-path dumps lock the current multi-DU schedule (including the
-# force_drain "wait_gr(0)" and the uid-tagged wrap-around GRs) before any
-# future scheduler refactor.
+# wrap-LR "wait_gr(0)" entries — wraps whose per-(tensor,uid) inflight count is
+# all-zero — and the uid-tagged wrap-around GRs) before any future scheduler
+# refactor. The dep-path dump renders the carried count, so it is unchanged by
+# S6's drain removal (which only flips the emitted vmcnt for non-zero counts).
 #
 # LDS double-buffer-reuse hazard: in a wait_gr slot the next-iteration GRs are
 # chained after the last post-barrier LR (so they share the wait_gr path rather
@@ -1680,7 +1682,7 @@ MAINLOOP (dependency paths):
 def test_256x256_mxfp8_multi_du_partition_remainder():
     """Golden dep-path for the 256x256 MXFP8 multi-DU schedule with an uneven
     N partition (remainder_last -> [6, 2]). Exercises the multi-DU
-    remainder-last partition split and the force_drain wait_gr(0)."""
+    remainder-last partition split and the wrap-LR wait_gr(0)."""
     cfg = make_256x256_mxfp8_multi_du(partitionSizeN=6)
     assert cfg.partitionSizesN == [6, 2]
     assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
