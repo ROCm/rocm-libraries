@@ -20,22 +20,26 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(::std::declval<const ::std::jthread&>().get_id()));
+// Divergence from std::jthread::get_id(): hip::jthread::get_id forwards to
+// hip::thread::get_id(uint32_t index), which can throw std::out_of_range on host
+// when index >= width. Marking it noexcept would convert such throws into
+// std::terminate, so we intentionally diverge and assert non-noexcept here.
+static_assert(!noexcept(::std::declval<const hip::jthread&>().get_id()));
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__  
   // Does not represent a thread
   {
-    const ::std::jthread jt;
-    ::std::same_as<::std::jthread::id> decltype(auto) result = jt.get_id();
-    assert(result == ::std::jthread::id());
+    const hip::jthread jt;
+    ::std::same_as<hip::jthread::id> decltype(auto) result = jt.get_id();
+    assert(result == hip::jthread::id());
   }
-
   // Represents a thread
   {
-    const ::std::jthread jt                                = support::make_test_jthread([] {});
-    ::std::same_as<::std::jthread::id> decltype(auto) result = jt.get_id();
-    assert(result != ::std::jthread::id());
+    const hip::jthread jt                                = support::make_test_jthread([] {});
+    ::std::same_as<hip::jthread::id> decltype(auto) result = jt.get_id();
+    assert(result != hip::jthread::id());
   }
-
+#endif  
   return 0;
 }

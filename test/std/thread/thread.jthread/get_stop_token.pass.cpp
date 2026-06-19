@@ -23,13 +23,13 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(::std::declval<const ::std::jthread&>().get_stop_token()));
+static_assert(noexcept(::std::declval<const hip::jthread&>().get_stop_token()));
 
 int main(int, char**) {
   // Represents a thread
   {
-    ::std::jthread jt                                 = support::make_test_jthread([] {});
-    auto ss                                         = jt.get_stop_source();
+    hip::jthread jt                                     = support::make_test_jthread([] () {});
+    auto ss                                             = jt.get_stop_source();
     ::std::same_as<::std::stop_token> decltype(auto) st = ::std::as_const(jt).get_stop_token();
 
     assert(st.stop_possible());
@@ -40,7 +40,7 @@ int main(int, char**) {
 
   // Does not represent a thread
   {
-    const ::std::jthread jt{};
+    const hip::jthread jt{};
     ::std::same_as<::std::stop_token> decltype(auto) st = jt.get_stop_token();
 
     assert(!st.stop_possible());

@@ -12,28 +12,31 @@
 
 // [[nodiscard]] bool joinable() const noexcept;
 
-#include <atomic>
 #include <cassert>
 #include <concepts>
+#include <hip/atomic>
 #include <hip/thread>
+#include <hip/std/memory>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(::std::declval<const ::std::jthread&>().joinable()));
+static_assert(noexcept(::std::declval<const hip::jthread&>().joinable()));
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__   
   // Default constructed
   {
-    const ::std::jthread jt;
+    const hip::jthread jt;
     ::std::same_as<bool> decltype(auto) result = jt.joinable();
     assert(!result);
   }
 
   // Non-default constructed
   {
-    const ::std::jthread jt                    = support::make_test_jthread([] {});
+    const hip::jthread jt                      = support::make_test_jthread([] () {});
     ::std::same_as<bool> decltype(auto) result = jt.joinable();
     assert(result);
   }
@@ -41,13 +44,15 @@ int main(int, char**) {
   // Non-default constructed
   // the thread of execution has not finished
   {
-    ::std::atomic_bool done                    = false;
-    const ::std::jthread jt                    = support::make_test_jthread([&done] { done.wait(false); });
+    auto done_ptr                = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    hip::std::atomic<bool>& done = *done_ptr;
+    const hip::jthread jt        = support::make_test_jthread([&done] {
+      hip::std::atomic_wait(&done, false);
+    });
     ::std::same_as<bool> decltype(auto) result = jt.joinable();
-    done                                     = true;
-    done.notify_all();
+    done                                       = true;
     assert(result);
   }
-
+#endif  
   return 0;
 }

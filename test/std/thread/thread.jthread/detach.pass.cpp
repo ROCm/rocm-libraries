@@ -12,26 +12,30 @@
 
 // void detach();
 
-#include <atomic>
 #include <cassert>
-#include <hip/std/chrono>
 #include <concepts>
-#include <functional>
-#include <optional>
-#include <system_error>
+#include <hip/atomic>
+#include <hip/std/chrono>
+#include <hip/std/memory>
+#include <hip/std/optional>
 #include <hip/thread>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Effects: The thread represented by *this continues execution without the calling thread blocking.
   {
-    ::std::atomic_bool start{false};
-    ::std::atomic_bool done{false};
-    ::std::optional<::std::jthread> jt = support::make_test_jthread([&start, &done] {
-      start.wait(false);
+    auto start_ptr = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto done_ptr  = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto& start    = *start_ptr;
+    auto& done     = *done_ptr;
+
+    hip::std::optional<hip::jthread> jt = support::make_test_jthread([&start, &done] () {
+      hip::std::atomic_wait(&start, false);
       done = true;
     });
 
@@ -42,24 +46,23 @@ int main(int, char**) {
 
     // The other thread continues execution
     start = true;
-    start.notify_all();
     while (!done) {
     }
   }
 
   // Postconditions: get_id() == id().
   {
-    ::std::jthread jt = support::make_test_jthread([] {});
-    assert(jt.get_id() != ::std::jthread::id());
+    hip::jthread jt = support::make_test_jthread([] () {});
+    assert(jt.get_id() != hip::jthread::id());
     jt.detach();
-    assert(jt.get_id() == ::std::jthread::id());
+    assert(jt.get_id() == hip::jthread::id());
   }
 
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
   // Throws: system_error when an exception is required ([thread.req.exception]).
   // invalid_argument - if the thread is not joinable.
   {
-    ::std::jthread jt;
+    hip::jthread jt;
     try {
       jt.detach();
       assert(false);
@@ -69,6 +72,7 @@ int main(int, char**) {
   }
 #endif
 
-  hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
+  hip::this_thread::sleep_for(hip::std::chrono::milliseconds{2});
+#endif
   return 0;
 }

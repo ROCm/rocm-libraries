@@ -16,5 +16,5 @@
 #include <hip/thread>
 #include <type_traits>
 
-static_assert(!::std::is_copy_constructible_v<::std::jthread>);
-static_assert(!::std::is_copy_assignable_v<::std::jthread>);
+static_assert(!::std::is_copy_constructible_v<::hip::jthread>);
+static_assert(!::std::is_copy_assignable_v<::hip::jthread>);
