@@ -2537,10 +2537,11 @@ class LogicalScheduler:
         module = insertLRSwapWaitAlu(module, writer, kernel)
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
         module = setMatrixAReuse(module, writer, kernel)
-        # PGR=0 reuses one LR offset set every iteration, so the swap v_xor can
-        # overwrite an offset VGPR while an in-flight ds_read still uses it as
-        # its address; expert scheduling mode disables the hardware check for
-        # this WAR.  PGR>=1 double-buffers the offsets and is unaffected.
+        # PGR=0 has no prefetch: the ds_read of an LR offset sits right before
+        # the swap v_xor that overwrites it, so the xor can clobber the offset
+        # while the read is still in flight (expert scheduling mode drops the
+        # hardware check for this WAR).  PGR>=1 prefetch hoists the swap ahead
+        # of the next reads (with a dscnt drain between), so it cannot race.
         if self.config.pgr == 0 and label.startswith("MAINLOOP"):
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
         return module
