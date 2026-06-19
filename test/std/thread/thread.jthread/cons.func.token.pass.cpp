@@ -8,6 +8,7 @@
 //
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: hipthreads-no-stop-token
 // XFAIL: availability-synchronization_library-missing
 
 // template<class F, class... Args>
