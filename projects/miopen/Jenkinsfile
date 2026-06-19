@@ -336,9 +336,9 @@ def runAsanTests(String gpuLabel, String gfxFamily) {
                                 MIOPEN_USER_DB_PATH=${env.WORKSPACE}/${env.MIOPEN_DIR}/build/test/gtest \\
                                 ctest -R miopen_gtest_full_suite \\
                                       --test-dir \${ROCM_PATH}/bin/MIOpen \\
-                                      --output-on-failure
+                                      --output-on-failure -V
                                 echo \$? > \$SHARD_LOGS_DIR/asan_shard_\$i.exit
-                            ) 2>&1 | tee \$SHARD_LOGS_DIR/asan_shard_\$i.log | sed "s/^/[shard \$i] /" &
+                            ) 2>&1 | stdbuf -oL -eL tee \$SHARD_LOGS_DIR/asan_shard_\$i.log | stdbuf -oL sed "s/^/[shard \$i] /" &
                             pids+=(\$!)
                         done
                         for pid in "\${pids[@]}"; do
