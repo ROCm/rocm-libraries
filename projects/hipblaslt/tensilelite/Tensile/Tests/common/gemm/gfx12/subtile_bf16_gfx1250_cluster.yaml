@@ -55,8 +55,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
         - PreloadKernArgs: [False]
-        # Clustered launch enables the cluster-scope barrier automatically
-        # (subtile derives ClusterBarrier from ClusterDim + TDM; no multicast).
+        # Clustered launch (ClusterDim != [1,1]) automatically enables both the
+        # cluster-scope barrier and TDM multicast for subtile; both are derived.
         - ClusterDim: [[2, 2]]
       BenchmarkForkParameters:
       JoinParameters:
