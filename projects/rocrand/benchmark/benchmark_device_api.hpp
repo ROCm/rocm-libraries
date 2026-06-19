@@ -882,7 +882,8 @@ struct device_api_benchmark : public primbench::benchmark_interface
     {
         const auto& stream = state.stream;
 
-        const size_t items = state.size;
+        // Pad items s.t. it is always divisible by 4 to account for vectorization.
+        const size_t items = (state.size + 0b11) & ~size_t(0b11);
 
         primbench::log("Creating generator");
         m_generator.create();
