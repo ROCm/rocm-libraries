@@ -2927,6 +2927,17 @@ Tests:
   beta: [ 0.0, 1.0 ]
   gpu_arch: '90a'
 
+- name: matmul_multithread_stream
+  category: nightly
+  function:
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  threads_streams: *common_threads_streams
+  gpu_arch: '9(42|50)'
+
 # Subtile MXFP4 tests (gfx950)
 # All use preswizzled scales (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
 # Build: ./install.sh -dck -a gfx950
