@@ -284,112 +284,18 @@ namespace TensileLite
 
             // Cancel any pending async resets and invalidate alt buffers
             // (e.g., when switching to a new problem whose data differs).
-            void cancelAsyncReset()
-            {
-                auto const oldActiveSlot  = m_ring.activeSlot();
-                bool const hadPendingWork = m_ring.hasPendingWork();
+            void cancelAsyncReset();
 
-                if(hadPendingWork)
-                    syncCopyStream();
-
-                m_ring.cancel();
-
-                // Restore the cached slot-0 aliases before clearing alternate-ring
-                // storage.  We capture the old active slot up front so this still
-                // happens even when no sync was needed.
-                if(oldActiveSlot != 0)
-                {
-                    activateRingSlot(0);
-                }
-                // Clear alt ring slots so initializeAltBufferSets re-runs for the
-                // new problem.  Without this, the guard in initializeAltBufferSets
-                // (!m_gpuPtrsRing[1].empty()) would short-circuit and leave stale
-                // data from the previous problem's layout in the alt slots.
-                for(size_t i = 1; i < MAX_BUFFER_SETS; i++)
-                {
-                    m_gpuPtrsRing[i].clear();
-                    m_gpuBatchPtrsRing[i].clear();
-                    m_cachedInputsRing[i].reset();
-                    m_swizzleUploadStaging[i].clear();
-                }
-                m_batchInitProblem = nullptr;
-                m_altSlotsReady = false;
-            }
-
-            void syncCopyStream()
-            {
-                if(m_copyStream)
-                    HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
-            }
+            void syncCopyStream();
 
             // Insert a GPU-side dependency between m_copyStream and computeStream
             // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
-            void waitCopyDone(hipStream_t computeStream)
-            {
-                if(!m_ring.needsCopyBarrier())
-                    return;
-                HIP_CHECK_EXC(hipStreamWaitEvent(
-                    computeStream, m_copyDoneEvents[m_ring.activeSlot()], 0));
-                m_ring.markBarrierWaited();
-            }
+            void waitCopyDone(hipStream_t computeStream);
 
             // Kick off async reset of the next free buffer slot in the ring
             // on m_copyStream.  The caller must waitCopyDone() before
             // using the buffer (done in main.cpp before benchmark_runs).
-            void beginAsyncReset(ContractionProblem const* problem)
-            {
-                if(!ringEligible())
-                    return;
-                auto targetIdx = m_ring.nextPrimeSlot();
-                if(!targetIdx)
-                    return; // all non-active slots already have pending DMA
-                size_t const targetSlot = *targetIdx;
-
-                // Warm path: this target slot's input tensors have already
-                // been prepared for the current problem, either by the
-                // initial active-slot preparation or by
-                // initializeAltBufferSets/fillSlot for alternate slots.
-                // Skipping output reset is safe only when the run does not need
-                // initialized D/output sentinels for validation; in that case
-                // the next GEMM dispatch is expected to define every D element
-                // that will be observed.
-                // Do not treat D overwrite as a universal invariant:
-                // validation-sensitive reuse must reset output tensors before
-                // recording copy completion. Record a no-op event as a sync
-                // marker.
-                if(m_altSlotsReady)
-                {
-                    if(m_warmOutputResetRequired)
-                    {
-                        ScopedTimer resetTimer("async_reset_warm_resetoutput");
-                        resetOutputsForRingSlot(targetSlot, problem);
-                    }
-                    HIP_CHECK_EXC(
-                        hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
-                    m_ring.markSlotPrimed();
-                    return;
-                }
-
-                // Fill target slot directly — no save/restore of working state.
-                {
-                    ScopedTimer prepTimer("async_reset_prepare");
-                    if(auto gemmProblem
-                       = dynamic_cast<ContractionProblemGemm const*>(problem))
-                        fillSlot(targetSlot, *gemmProblem, m_copyStream);
-                    else if(auto groupedProblem
-                            = dynamic_cast<ContractionProblemGroupedGemm const*>(
-                                problem))
-                    {
-                        assertGroupedRingFastPathInvariant(*groupedProblem);
-                        fillSlot(
-                            targetSlot, groupedProblem->gemms[0], m_copyStream);
-                    }
-                }
-
-                HIP_CHECK_EXC(
-                    hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
-                m_ring.markSlotPrimed();
-            }
+            void beginAsyncReset(ContractionProblem const* problem);
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputs(ContractionProblemGroupedGemm const& problem)
@@ -1229,40 +1135,7 @@ namespace TensileLite
                     && (!m_warmOutputResetRequired || m_keepPristineCopyOnGPU);
             }
 
-            void resetOutputsForRingSlot(size_t targetSlot, ContractionProblem const* problem)
-            {
-                SlotGuard guard(m_vdata, targetSlot);
-
-                auto localMaxElements = m_maxElements;
-                auto localOffsets     = m_groupedOffsets;
-                if(localMaxElements.size() < m_vdata.size())
-                    localMaxElements.resize(m_vdata.size());
-                if(localOffsets.size() < m_vdata.size())
-                    localOffsets.resize(m_vdata.size());
-
-                if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
-                {
-                    resetOutput(m_gpuPtrsRing[targetSlot],
-                                m_gpuBatchPtrsRing[targetSlot],
-                                localMaxElements,
-                                localOffsets,
-                                *gemmProblem,
-                                hipMemcpyDeviceToDevice,
-                                m_copyStream);
-                }
-                else if(auto groupedProblem
-                        = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
-                {
-                    assertGroupedRingFastPathInvariant(*groupedProblem);
-                    resetOutput(m_gpuPtrsRing[targetSlot],
-                                m_gpuBatchPtrsRing[targetSlot],
-                                localMaxElements,
-                                localOffsets,
-                                groupedProblem->gemms[0],
-                                hipMemcpyDeviceToDevice,
-                                m_copyStream);
-                }
-            }
+            void resetOutputsForRingSlot(size_t targetSlot, ContractionProblem const* problem);
 
             uint8_t** pinnedBatchStagingSlice(size_t bufferSlot, size_t tensorIdx) const
             {
@@ -1294,28 +1167,10 @@ namespace TensileLite
                 return m_pinnedBatchStaging + slotOffset;
             }
 
-            void activateRingSlot(size_t slot)
-            {
-                for(auto& vd : m_vdata)
-                    for(auto& [dt, pu] : vd.pristine)
-                    {
-                        pu.gpuInput.current = pu.gpuInput.buffers[slot];
-                        pu.gpuInput.batch   = pu.gpuInput.batchBufs[slot];
-                    }
-                m_gpuPtrs        = m_gpuPtrsRing[slot];
-                m_gpuBatchPtrs   = m_gpuBatchPtrsRing[slot];
-                m_cachedGPUInputs = m_cachedInputsRing[slot];
-            }
+            void activateRingSlot(size_t slot);
 
             // Advance to the next buffer in the ring.
-            void advanceBuffer()
-            {
-                auto newActiveSlot = m_ring.advance();
-                assert(newActiveSlot.has_value());
-                activateRingSlot(*newActiveSlot);
-                // The new active slot may have an outstanding DMA on m_copyStream;
-                // require waitCopyDone before the compute stream reads it.
-            }
+            void advanceBuffer();
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputsInternal(ContractionProblemGemm const& problem,
