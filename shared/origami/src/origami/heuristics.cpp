@@ -428,42 +428,23 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K with a
-  //              large free dim
+  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
   // ========================================================================
   // Subtile kernels are not competitive when the reduction dimension is small
-  // (K < 512) and either free dimension is large (M > 1024 or N > 1024). Force
-  // their latency to the maximum (rank_configs drops max-latency configs) in
-  // that regime. Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
-  //
-  // A single heuristic_key_t ANDs all of its fields, so the (M > 1024 OR
-  // N > 1024) condition is expressed as two entries: if either matches, the
-  // merged params set reject = true. (min_m = 1025 matches M > 1024.)
+  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
   {
     heuristic_params_t reject_params;
     reject_params.reject = true;
 
-    // K < 512 AND M > 1024
-    heuristic_key_t key_m;
-    key_m.arch        = hardware_t::architecture_t::gfx950;
-    key_m.mi_dtype    = data_type_t::BFloat16;
-    key_m.a_transpose = transpose_t::T;
-    key_m.b_transpose = transpose_t::N;
-    key_m.subtile     = true;
-    key_m.max_k       = 511;
-    key_m.min_m       = 1025;
-    add_entry(key_m, reject_params);
-
-    // K < 512 AND N > 1024
-    heuristic_key_t key_n;
-    key_n.arch        = hardware_t::architecture_t::gfx950;
-    key_n.mi_dtype    = data_type_t::BFloat16;
-    key_n.a_transpose = transpose_t::T;
-    key_n.b_transpose = transpose_t::N;
-    key_n.subtile     = true;
-    key_n.max_k       = 511;
-    key_n.min_n       = 1025;
-    add_entry(key_n, reject_params);
+    // K < 512
+    heuristic_key_t key;
+    key.arch        = hardware_t::architecture_t::gfx950;
+    key.mi_dtype    = data_type_t::BFloat16;
+    key.a_transpose = transpose_t::T;
+    key.b_transpose = transpose_t::N;
+    key.subtile     = true;
+    key.max_k       = 511;
+    add_entry(key, reject_params);
   }
 }
 
