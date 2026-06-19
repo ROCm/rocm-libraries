@@ -41,8 +41,12 @@ namespace
     //
     // Both behaviors are opt-in via environment variables so default runs are
     // byte-for-byte unchanged:
-    //   ROCSPARSE_TEST_TRIM_POOL=1  -> hipMemPoolTrimTo(pool, 0) after each test
-    //   ROCSPARSE_TEST_VRAM_LOG=1   -> log device free/used + pool reserved/test
+    //   ROCSPARSE_TEST_TRIM_POOL=1    -> hipMemPoolTrimTo(pool, 0) after each test
+    //   ROCSPARSE_TEST_VRAM_LOG=1     -> log device free/used + pool reserved/test
+    //   ROCSPARSE_TEST_DEVICE_RESET=1 -> hipDeviceReset() after each test (heavy:
+    //                                    tears down the whole context, so the next
+    //                                    test re-initializes from scratch; expect a
+    //                                    large wall-time cost. Diagnostic only.)
     void rocsparse_test_pool_maintenance(const testing::TestInfo& test_info)
     {
         static const bool trim = []() {
@@ -53,39 +57,95 @@ namespace
             const char* e = getenv("ROCSPARSE_TEST_VRAM_LOG");
             return e && atoi(e) != 0;
         }();
+        static const bool device_reset = []() {
+            const char* e = getenv("ROCSPARSE_TEST_DEVICE_RESET");
+            return e && atoi(e) != 0;
+        }();
 
-        if(!trim && !vram_log)
+        if(!trim && !vram_log && !device_reset)
         {
             return;
         }
 
-        hipMemPool_t pool;
-        if(hipDeviceGetDefaultMemPool(&pool, 0) != hipSuccess)
+        if(trim || vram_log)
         {
+            hipMemPool_t pool;
+            if(hipDeviceGetDefaultMemPool(&pool, 0) == hipSuccess)
+            {
+                if(trim)
+                {
+                    (void)hipMemPoolTrimTo(pool, 0);
+                }
+
+                if(vram_log)
+                {
+                    size_t   free_b = 0, total_b = 0;
+                    uint64_t reserved = 0, used = 0;
+                    (void)hipMemGetInfo(&free_b, &total_b);
+                    (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved);
+                    (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used);
+                    fprintf(stderr,
+                            "[vram] %s.%s free=%zuMB used=%zuMB pool_reserved=%lluMB pool_used=%lluMB\n",
+                            test_info.test_suite_name(),
+                            test_info.name(),
+                            free_b / 1048576u,
+                            (total_b - free_b) / 1048576u,
+                            (unsigned long long)(reserved / 1048576u),
+                            (unsigned long long)(used / 1048576u));
+                }
+            }
+        }
+
+        if(device_reset)
+        {
+            (void)hipDeviceReset();
+        }
+    }
+
+    // One-shot, always-on VRAM diagnostics emitted once at program start (before
+    // any test runs). Cheap (microseconds) and unconditional so every CI lane
+    // (all architectures / operating systems) reports:
+    //   1. baseline device memory at startup (does the card start ~full?), and
+    //   2. a reliability self-check: allocate a known size and confirm that
+    //      hipMemGetInfo actually reflects the change. Some platforms (notably
+    //      Windows/WDDM) can report misleading free-memory values, which makes
+    //      per-test VRAM numbers untrustworthy; this flags that explicitly.
+    void rocsparse_test_vram_startup_diagnostics()
+    {
+        size_t free_b = 0, total_b = 0;
+        if(hipMemGetInfo(&free_b, &total_b) != hipSuccess)
+        {
+            fprintf(stderr, "[vram-init] hipMemGetInfo failed\n");
             return;
         }
+        fprintf(stderr,
+                "[vram-init] baseline total=%zuMB free=%zuMB used=%zuMB\n",
+                total_b / 1048576u,
+                free_b / 1048576u,
+                (total_b - free_b) / 1048576u);
 
-        if(trim)
+        constexpr size_t probe_bytes = static_cast<size_t>(256) * 1048576u; // 256 MiB
+        void*            ptr         = nullptr;
+        const hipError_t alloc_status = hipMalloc(&ptr, probe_bytes);
+        if(alloc_status != hipSuccess)
         {
-            (void)hipMemPoolTrimTo(pool, 0);
-        }
-
-        if(vram_log)
-        {
-            size_t   free_b = 0, total_b = 0;
-            uint64_t reserved = 0, used = 0;
-            (void)hipMemGetInfo(&free_b, &total_b);
-            (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved);
-            (void)hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used);
             fprintf(stderr,
-                    "[vram] %s.%s free=%zuMB used=%zuMB pool_reserved=%lluMB pool_used=%lluMB\n",
-                    test_info.test_suite_name(),
-                    test_info.name(),
-                    (total_b - free_b) / 1048576u,
-                    free_b / 1048576u,
-                    (unsigned long long)(reserved / 1048576u),
-                    (unsigned long long)(used / 1048576u));
+                    "[vram-init] self-check: hipMalloc(256MB) failed: %s\n",
+                    hipGetErrorString(alloc_status));
+            return;
         }
+
+        size_t free_after = 0, total_after = 0;
+        (void)hipMemGetInfo(&free_after, &total_after);
+        const long long delta = static_cast<long long>(free_b) - static_cast<long long>(free_after);
+        fprintf(stderr,
+                "[vram-init] self-check: alloc=256MB free_before=%zuMB free_after=%zuMB "
+                "delta=%lldMB tracking=%s\n",
+                free_b / 1048576u,
+                free_after / 1048576u,
+                delta / 1048576,
+                (delta >= static_cast<long long>(200u * 1048576u)) ? "ok" : "SUSPECT");
+        (void)hipFree(ptr);
     }
 } // namespace
 
@@ -111,6 +171,7 @@ rocsparse_clients::configurable_event_listener::~configurable_event_listener()
 void rocsparse_clients::configurable_event_listener::OnTestProgramStart(
     const testing::UnitTest& unit_test)
 {
+    rocsparse_test_vram_startup_diagnostics();
     m_eventListener->OnTestProgramStart(unit_test);
 }
 
