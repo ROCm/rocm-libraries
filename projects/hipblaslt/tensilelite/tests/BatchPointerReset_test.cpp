@@ -249,6 +249,67 @@ TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
         << ". This indicates cancelAsyncReset did not clear the warm ring.";
 }
 
+// Regression test for the lifecycle bug where cancelAsyncReset() only cleared
+// warm-ring state but left m_batchInitProblem intact. The same problem object
+// is reused for a logically different GEMM, so the pointer-identity guard in
+// prepareGPUInputsInternal() can only pass if cancelAsyncReset() also resets
+// the batch-pointer freshness cache.
+TEST(BatchPointerReset, CancelAsyncResetInvalidatesBatchPointersWithoutPreProblem)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto problem = makeBatchedProblem(32, 32, 32, BATCH);
+    auto* stableProblemAddress = &problem;
+
+    auto args = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
+
+    ClientProblemFactory factory(args);
+    DataInitialization   dataInit(args, factory);
+
+    auto inputs1 = dataInit.prepareGPUInputs(problem);
+
+    auto* ci1 = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->batchA, nullptr);
+
+    void* batchA_p1[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p1, ci1->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride1   = (uint8_t*)batchA_p1[1] - (uint8_t*)batchA_p1[0];
+    ptrdiff_t expected1 = ptrdiff_t(32 * 32);
+    EXPECT_EQ(stride1, expected1) << "Problem 1 batch pointer stride mismatch";
+
+    problem = makeBatchedProblem(64, 64, 64, BATCH);
+    ASSERT_EQ(&problem, stableProblemAddress);
+
+    dataInit.cancelAsyncReset();
+
+    auto inputs2 = dataInit.prepareGPUInputs(problem);
+
+    auto* ci2 = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+
+    void* batchA_p2[BATCH];
+    HIP_CHECK_EXC(
+        hipMemcpy(batchA_p2, ci2->batchA, BATCH * sizeof(void*), hipMemcpyDeviceToHost));
+
+    ptrdiff_t stride2   = (uint8_t*)batchA_p2[1] - (uint8_t*)batchA_p2[0];
+    ptrdiff_t expected2 = ptrdiff_t(64 * 64);
+    EXPECT_EQ(stride2, expected2)
+        << "After switching to the larger logical problem, the batch pointer "
+           "stride should reflect the new aStride (" << expected2
+        << " bytes), but got " << stride2
+        << ". This indicates cancelAsyncReset did not clear the batch-pointer cache.";
+}
+
 // ---------------------------------------------------------------------------
 // Structural invariant: switching to a different ContractionProblemGemm
 // object must trigger batch-pointer re-upload even when preProblem() is not

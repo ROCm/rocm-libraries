@@ -312,6 +312,7 @@ namespace TensileLite
                     m_cachedInputsRing[i].reset();
                     m_swizzleUploadStaging[i].clear();
                 }
+                m_batchInitProblem = nullptr;
                 m_altSlotsFilled = false;
             }
 
