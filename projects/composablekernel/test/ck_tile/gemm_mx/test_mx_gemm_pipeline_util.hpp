@@ -491,9 +491,12 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
-        // scale_b uses N as first dimension (col-major like B)
+        const index_t scale_padded_N = integer_least_multiple(
+            static_cast<index_t>(N), static_cast<index_t>(ck_tile::max(N_Tile, ScaleShuffleAlign)));
+        // Pre-shuffle interleaves 2 K-lanes (MNPack=2) with MPerXdlops=16 stride,
+        // so N must be padded to at least MNPack * NPerXdlops = 32.
         HostTensor<BScaleDataType> scale_b(
-            {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
+            {static_cast<std::size_t>(scale_padded_N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         // Fill data
@@ -555,7 +558,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         HostTensor<BScaleDataType> scale_b_shuffled(
-            {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
+            {static_cast<std::size_t>(scale_padded_N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
@@ -565,7 +568,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         ck_tile::preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
             scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
         ck_tile::preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
-            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+            scale_b.mData.data(), scale_b_shuffled.mData.data(), scale_padded_N, num_scale_k);
 #elif defined(CK_USE_GFX950)
         constexpr ck_tile::index_t MPerXdl      = M_Warp_Tile;
         constexpr ck_tile::index_t NPerXdl      = N_Warp_Tile;
@@ -590,7 +593,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2), static_cast<std::size_t>(1)});
 
         HostTensor<BScaleDataType> scale_b_shuffled(
-            {static_cast<std::size_t>(N / NXdlPackEff * 2),
+            {static_cast<std::size_t>(scale_padded_N / NXdlPackEff * 2),
              static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2)},
             {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2), static_cast<std::size_t>(1)});
 
@@ -600,13 +603,21 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         if constexpr(PipelineType == MxGemmPipelineType::WeightPreshuffle && PermuteN)
         {
             ck_tile::preShuffleScaleBufferPermuteN_gfx950<N_Warp, N_Tile, XdlMNThread>(
-                scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, true);
+                scale_b.mData.data(),
+                scale_b_shuffled.mData.data(),
+                scale_padded_N,
+                num_scale_k,
+                true);
         }
         else
         {
             ck_tile::
                 preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
-                    scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, true);
+                    scale_b.mData.data(),
+                    scale_b_shuffled.mData.data(),
+                    scale_padded_N,
+                    num_scale_k,
+                    true);
         }
 #endif
 
@@ -674,7 +685,14 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(1), static_cast<std::size_t>(num_scale_k)});
         // Copy scale_b data (our scale_b is (N, num_scale_k) row-major,
         // reference expects (num_scale_k, N) col-major, which is the same memory layout)
-        std::copy(scale_b.mData.begin(), scale_b.mData.end(), scale_b_ref.mData.begin());
+        // Truncate scale_a to actual N (not padded)
+        for(int n = 0; n < N; ++n)
+        {
+            for(int k = 0; k < num_scale_k; ++k)
+            {
+                scale_b_ref(k, n) = scale_b(n, k);
+            }
+        }
 
         // Truncate scale_a to actual M (not padded)
         HostTensor<AScaleDataType> scale_a_ref(
