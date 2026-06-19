@@ -127,11 +127,18 @@ jobs:
           # Version-matched coverage tooling, so the report job does not depend on the dist.
           cp -av "${LLVM_BIN}/llvm-profdata" "${STAGE}/bin/"
           cp -av "${LLVM_BIN}/llvm-cov" "${STAGE}/bin/"
-          # The llvm tools are dynamically linked against libLLVM; stage it next to
-          # them so the report job can run them via LD_LIBRARY_PATH.
+          # The llvm tools dynamically link libLLVM plus TheRock's bundled sysdeps
+          # (e.g. librocm_sysdeps_z). Stage the whole llvm lib dir and all sysdeps
+          # next to the tools so the report job can run them via LD_LIBRARY_PATH.
+          if [[ -d "${DIST}/lib/llvm/lib" ]]; then
+            find "${DIST}/lib/llvm/lib" -maxdepth 1 -name '*.so*' -exec cp -av {} "${STAGE}/bin/" \;
+          fi
           find "${DIST}" -type f -name 'libLLVM.so*' -exec cp -av {} "${STAGE}/bin/" \;
+          find "${DIST}" -type f -name 'librocm_sysdeps_*.so*' -exec cp -av {} "${STAGE}/bin/" \;
           echo "Staged coverage objects:"
           ls -lR "${STAGE}"
+          echo "llvm-profdata dependencies (in build env):"
+          ldd "${STAGE}/bin/llvm-profdata" || true
 
       - name: Upload coverage objects and llvm tools
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -226,11 +233,14 @@ jobs:
           REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
           mkdir -p "${REPORT_DIR}"
           chmod +x "${OBJECTS_DIR}/bin/llvm-profdata" "${OBJECTS_DIR}/bin/llvm-cov"
-          # The llvm tools are dynamically linked against the staged libLLVM.so.
+          # The llvm tools are dynamically linked against the staged libLLVM.so
+          # and TheRock's bundled sysdeps, all staged in bin/.
           export LD_LIBRARY_PATH="${OBJECTS_DIR}/bin:${LD_LIBRARY_PATH:-}"
           LLVM_PROFDATA="${OBJECTS_DIR}/bin/llvm-profdata"
           LLVM_COV="${OBJECTS_DIR}/bin/llvm-cov"
           LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
+
+          echo "llvm-profdata dependencies:"; ldd "${LLVM_PROFDATA}" || true
 
           # Object files (instrumented libraries) for llvm-cov.
           mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name "*.so*")
