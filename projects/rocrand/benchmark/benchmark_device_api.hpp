@@ -175,13 +175,19 @@ struct unrolled
         {
             ptr[0] = v;
         }
-        else
+        else if constexpr (n == 2)
         {
-#pragma unroll
-            for(int i = 0; i < n; ++i)
-            {
-                ptr[i] = v[i];
-            }
+            // HIP supports indexing vectorized types via operator[].
+            // CUDA 12.x does not.
+            ptr[0] = v.x;
+            ptr[1] = v.y;
+        }
+        else if constexpr (n == 4)
+        {
+            ptr[0] = v.x;
+            ptr[1] = v.y;
+            ptr[2] = v.z;
+            ptr[3] = v.w;
         }
     }
 };

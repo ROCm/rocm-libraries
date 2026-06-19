@@ -242,48 +242,48 @@ template<distribution D, int N, typename T>
 struct gpu_rand
 {};
 
-// This macro is used to concat two strings, this is to work around
-// a quirk when concatting two strings directly. I.e. `foo##bar`
-// doesn't always work nicely.
-#define MK_GPU_RAND_CONCAT(a, b) a##b
-
 // This macro generates the specialization.
-#define MK_GPU_RAND_API(dist, v, type, name)                                                       \
-    template<>                                                                                     \
-    struct gpu_rand<dist, v, type>                                                                 \
-    {                                                                                              \
-        static constexpr bool is_specialized = true;                                               \
-        static constexpr int  n              = v;                                                  \
-        template<typename... Ts>                                                                   \
-        __device__ auto operator()(Ts... args)                                                     \
-        {                                                                                          \
-            return DISPATCH(MK_GPU_RAND_CONCAT(roc, name), MK_GPU_RAND_CONCAT(cu, name))(args...); \
-        }                                                                                          \
+// * `template_*` is used to generate the template specialization.
+// * `name_*` is used to generate the C-style API call.
+// * `*_d` are distributions.
+// * `*_n` are vectorization widths.
+// * `*_t` are return types.
+#define MK_GPU_RAND_API(template_d, template_n, template_t, name_d, name_n, name_t) \
+    template<>                                                                      \
+    struct gpu_rand<template_d, template_n, template_t>                             \
+    {                                                                               \
+        static constexpr bool is_specialized = true;                                \
+        static constexpr int  n              = template_n;                          \
+        template<typename... Ts>                                                    \
+        __device__ auto operator()(Ts... args)                                      \
+        {                                                                           \
+            return DISPATCH(rocrand##name_d##name_t##name_n,                        \
+                            curand##name_d##name_n##name_t)(args...);               \
+        }                                                                           \
     };
 
-#define MK_GPU_RAND_API_1_2_4(dist, type, name)                 \
-    MK_GPU_RAND_API(dist, 1, type, name)                        \
-    MK_GPU_RAND_API(dist, 2, type, MK_GPU_RAND_CONCAT(name, 2)) \
-    MK_GPU_RAND_API(dist, 4, type, MK_GPU_RAND_CONCAT(name, 4))
+#define MK_GPU_RAND_API_1_2_4(dist, type, name, name_t) \
+    MK_GPU_RAND_API(dist, 1, type, name, , name_t)      \
+    MK_GPU_RAND_API(dist, 2, type, name, 2, name_t)     \
+    MK_GPU_RAND_API(dist, 4, type, name, 4, name_t)
 
 // Stamp out all `gpu_rand` structs and specializations.
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned int, rand)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned long long, rand)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, float, rand_uniform)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, double, rand_uniform_double)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, float, rand_normal)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, double, rand_normal_double)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, float, rand_log_normal)
-MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, double, rand_log_normal_double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned int, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, unsigned long long, , )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, float, _uniform, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_UNIFORM, double, _uniform, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, float, _normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, double, _normal, _double)
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, float, _log_normal, )
+MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, double, _log_normal, _double)
 
-MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, rand_poisson)
-MK_GPU_RAND_API(DISTRIBUTION_POISSON, 4, unsigned int, rand_poisson4)
-MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 1, unsigned int, rand_discrete)
-MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, rand_discrete4)
-MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 1, unsigned int, rand_discrete)
-MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 4, unsigned int, rand_discrete4)
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, _poisson, ,)
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 4, unsigned int, _poisson, 4, )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, _discrete, 4,)
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 1, unsigned int, _discrete, , )
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 4, unsigned int, _discrete, 4, )
 
-#undef MK_GPU_RAND_CONCAT
 #undef MK_GPU_RAND_API
 #undef MK_GPU_RAND_API_1_2_4
 
