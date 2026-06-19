@@ -76,9 +76,9 @@ namespace detail
 
 enum class TensorIdValidationResult
 {
-    VALID,
-    MISSING,
-    DUPLICATE
+    HIPDNN_AUTOTUNE_TENSOR_IDS_VALID,
+    HIPDNN_AUTOTUNE_TENSOR_ID_MISSING,
+    HIPDNN_AUTOTUNE_TENSOR_ID_DUPLICATE
 };
 
 inline TensorIdValidationResult validateTensorIds(size_t tensorCount,
@@ -86,7 +86,7 @@ inline TensorIdValidationResult validateTensorIds(size_t tensorCount,
 {
     if(tensorCount == 0 || tensorIds.size() < tensorCount)
     {
-        return TensorIdValidationResult::MISSING;
+        return TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_ID_MISSING;
     }
 
     std::unordered_set<std::string_view> seen;
@@ -96,15 +96,15 @@ inline TensorIdValidationResult validateTensorIds(size_t tensorCount,
         const auto& tensorId = tensorIds[i];
         if(tensorId.empty())
         {
-            return TensorIdValidationResult::MISSING;
+            return TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_ID_MISSING;
         }
         if(!seen.emplace(tensorId.data(), tensorId.size()).second)
         {
-            return TensorIdValidationResult::DUPLICATE;
+            return TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_ID_DUPLICATE;
         }
     }
 
-    return TensorIdValidationResult::VALID;
+    return TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_IDS_VALID;
 }
 
 inline std::optional<std::string_view> tensorIdOf(const nlohmann::json& tensor)
@@ -394,12 +394,12 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
 
         switch(validateTensorIds(tensorDims.size(), tensorIds))
         {
-        case TensorIdValidationResult::VALID:
+        case TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_IDS_VALID:
             break;
-        case TensorIdValidationResult::MISSING:
+        case TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_ID_MISSING:
             return {ErrorCode::INVALID_VALUE,
                     "AutotuneFileWriter: tensor IDs are required for versioned config files"};
-        case TensorIdValidationResult::DUPLICATE:
+        case TensorIdValidationResult::HIPDNN_AUTOTUNE_TENSOR_ID_DUPLICATE:
             return {ErrorCode::INVALID_VALUE,
                     "AutotuneFileWriter: tensor IDs must be unique for versioned config files"};
         default:
