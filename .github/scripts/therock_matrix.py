@@ -32,7 +32,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
-    "shared/rocroller": "blas",
+    "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
@@ -48,13 +48,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "projects_to_test": [
-            "hipblaslt",
-            "rocblas",
-            "hipblas",
-            "rocroller",
-            "tensilelite",
-        ],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "tensilelite"],
     },
     "miopen": {
         "cmake_options": [
@@ -148,6 +142,14 @@ additional_options = {
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
         "projects_to_test": ["rocwmma"],
+        "project_to_add": "blas",
+    },
+    # rocRoller is built under the BLAS umbrella but only tested when its own
+    # subtree changes. Merges into the "blas" job when a PR touches both, which
+    # avoids a redundant BLAS build and S3 artifact overlap.
+    "rocroller": {
+        "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
+        "projects_to_test": ["rocroller"],
         "project_to_add": "blas",
     },
 }
