@@ -119,7 +119,7 @@ class TileSpec:
         return out
 
 
-Pipeline = Literal["mem", "compv3", "compv4", "wsp3"]
+Pipeline = Literal["mem", "compv3", "compv4", "wsp3", "wmma_v1"]
 Scheduler = Literal["intrawave", "interwave"]
 Epilogue = Literal["default", "cshuffle"]
 
@@ -217,6 +217,16 @@ class TraitSpec:
     # store and ds_read columns -> bit-exact. Measured ~+3% on square fp16/bf16.
     # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
     lds_swizzle: bool = False
+    # compv4/compv3 schedule directives: the per-cluster s_setprio(1/0) +
+    # sched_barrier(0) fences (_mma_cluster) AND the two-stage
+    # sched_group_barrier HotLoop interleave (_emit_hotloop_schedule). On gfx950
+    # these OVER-CONSTRAIN comgr's backend scheduler -- removing them lets the
+    # hardware scheduler pack MFMAs tighter. Measured +1.9-2.5% (MfmaUtil
+    # 63->68%) on square fp16/bf16 GEMM, 200/200 GPU-event-timed cycles, relerr=0
+    # (see optimization/utilities/skills/empirical-case-studies.md, Case Study 7).
+    # None (default): arch-resolved -> hints OFF on gfx950 (take the uplift), ON
+    # elsewhere (preserve the historical emission). True/False forces the choice.
+    emit_sched_hints: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -447,18 +457,25 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
-    # WMMA (RDNA wave32) coverage is intentionally narrower than the full CDNA
-    # MFMA matrix: the unified body supports the 16x16x16 atom with the simple
-    # ``mem`` pipeline + ``default`` epilogue. The richer pipelines (compv3 /
-    # compv4 scheduler interleave, cshuffle LDS-staged C, DTLA, preshuffle)
-    # encode MFMA-shaped assumptions and are gated off until ported. CDNA keeps
-    # the full matrix.
+    # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
+    # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
+    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
+    # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
+    # interleave, cshuffle LDS-staged C, DTLA, preshuffle) encode MFMA-shaped
+    # assumptions and are gated off until ported. CDNA MFMA keeps the full
+    # matrix.
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA path supports only 16x16x16 (got {atom}) on {arch}"
-        if spec.trait.pipeline != "mem":
+        supported_atoms = {(16, 16, 16)}
+        if arch == "gfx1250":
+            supported_atoms = {(16, 16, 32)}
+        if atom not in supported_atoms:
+            supported = ", ".join(
+                f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
+            )
+            return False, f"WMMA path supports only {supported} (got {atom}) on {arch}"
+        if spec.trait.pipeline not in ("mem", "wmma_v1"):
             return False, (
-                f"WMMA path supports only the 'mem' pipeline "
+                f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
         if spec.trait.epilogue != "default":
@@ -850,6 +867,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # while consecutive rows hit different banks. Opt-in via CK_SWIZZLE; the
     # 16-half toggle preserves the 8-half load-vector alignment.
     _SWZ = spec.trait.lds_swizzle
+    # compv4 schedule-hint policy: explicit trait override wins; the default
+    # (None) takes the measured gfx950 uplift (hints OFF) and preserves the
+    # historical emission on every other arch. Gates both the per-cluster
+    # s_setprio/sched_barrier fences and the sched_group_barrier HotLoop.
+    _sched_hints = (
+        spec.trait.emit_sched_hints
+        if spec.trait.emit_sched_hints is not None
+        else (arch != "gfx950")
+    )
     # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
@@ -1461,6 +1487,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b, op, a_rows[mi], b_cols[ni], new_accs[flat]
                     )
                     flat += 1
+        # WMMA intrawave compute schedule (the simple/mem k-loop keeps the LDS
+        # store + global load in a separate barrier region, so this region holds
+        # only the operand ds_reads + WMMAs). Opt-in via the 'wmma_v1' pipeline.
+        if spec.trait.pipeline == "wmma_v1":
+            from ...helpers.schedule import SchedulePolicy, WmmaHotLoopInstList
+
+            il = WmmaHotLoopInstList.from_geometry(
+                block_size=spec.block_size,
+                m_per_block=t.tile_m,
+                n_per_block=t.tile_n,
+                k_per_block=t.tile_k,
+                m_repeat=mfmas_m,
+                n_repeat=mfmas_n,
+                m_per_wmma=t.warp_tile_m,
+                n_per_wmma=t.warp_tile_n,
+                k_per_wmma=t.warp_tile_k,
+                a_frag_len=a_per_lane,
+                b_frag_len=b_per_lane,
+                a_dtype_bytes=2,
+                b_dtype_bytes=2,
+            )
+            SchedulePolicy.for_pipeline("wmma_v1").emit_wmma_compute_schedule(b, il)
         return new_accs
 
     def emit_mfma_phase(
@@ -1562,14 +1610,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # the cluster and cannot float the surrounding ds_read/buffer_load
             # across it. Enabled with lds_swizzle (the reference-faithful mode).
             for mi in range(mfmas_m):
-                if _SWZ:
+                if _SWZ and _sched_hints:
                     b.s_setprio(1)
                 for ni in range(mfmas_n):
                     flat = mi * mfmas_n + ni
                     new_accs[flat] = _emit_mma(
                         b, op, a_rows[mi], b_cols[ni], new_accs[flat]
                     )
-                if _SWZ:
+                if _SWZ and _sched_hints:
                     b.s_setprio(0)
                     b.sched_barrier(0)
 
@@ -1594,7 +1642,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # ``sched_group_barrier`` is a pure scheduling hint -- changing only
         # its operands cannot change the kernel's numeric result, so this is
         # numerically identical to the flat-hint emission.
-        if spec.trait.pipeline in ("compv3", "compv4"):
+        if _sched_hints and spec.trait.pipeline in ("compv3", "compv4"):
             _emit_hotloop_schedule(b, spec, load_vec)
 
         return new_accs

@@ -158,9 +158,16 @@ def is_valid_spec(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Tuple[bool,
     catalog ``has_shape`` check because the per-arch catalog tracks the
     f16/bf16 GEMM warp-tile shapes rather than this fp8 block-scale atom.
     """
-    ok, reason, _target = validate_arch_and_block_size(arch, spec.block_size)
+    ok, reason, target = validate_arch_and_block_size(arch, spec.block_size)
     if not ok:
         return False, reason
+    if target.wave_size == 32:
+        return False, (
+            "block_scale_gemm is currently an MFMA low-bit path; "
+            f"{arch} exposes WMMA for expert GEMMs. WMMA block-scale "
+            "expert GEMMs are not implemented yet, so use BF16 expert "
+            "GEMMs or target gfx942/gfx950 for FP8/BF8 block-scale."
+        )
     if spec.quant_mode not in ("aquant", "bquant", "abquant"):
         return False, f"unsupported quant_mode {spec.quant_mode!r}"
     if spec.quant_mode != "abquant":

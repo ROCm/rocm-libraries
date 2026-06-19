@@ -167,8 +167,9 @@ def run_conv_manifest_problem(
             D_casted = D_casted.view(np.float32)
         else:
             D_casted = D.astype(np.float32)
-        diff_abs = np.abs(D_casted - ref_out)
-        diff_rel = diff_abs / (np.abs(ref_out) + 1e-8)  # avoid div-by-zero when ref is 0
-        return float(diff_rel.max()), int(np.count_nonzero(diff_rel > tol)), float(diff_abs.max()), int(np.count_nonzero(diff_abs > tol)), D.size
+        err = np.abs(D_casted - ref_out)
+        threshold = tol + tol * np.abs(ref_out)
+        bad = err > threshold
+        return float(err.max()), int(np.count_nonzero(bad)), D.size
 
     return make_args, grid, block, flop, bytes_xfer, check

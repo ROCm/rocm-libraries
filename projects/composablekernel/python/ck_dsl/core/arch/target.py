@@ -456,6 +456,36 @@ def _wmma_gfx12_b_16x16(builder, lane, slot):
     return k, col
 
 
+# --- gfx1250 (gfx1250) WMMA 16x16x32 lane maps (CDNA, GFX12 programming model) --
+# gfx1250 is wave32/WMMA like gfx12 RDNA but the primary fp16/bf16 atom is
+# 16x16x32 (K=32, not 16). A/B fragments are <16 x half> per lane (16 K-elements
+# each); the K dimension is split across the two lane-halves (lanes 0-15 carry
+# K 0..15, lanes 16-31 carry K 16..31). The accumulator is the same 16x16
+# column-distributed layout as gfx12 (<8 x float>, slot i -> row (l//16)*8 + i,
+# col l%16), since the output tile is still 16x16. These maps are the
+# *hypothesis* verified empirically by examples/gfx1250/wmma_probe.py.
+def _wmma_gfx1250_a_16x16x32(builder, lane, slot):
+    """gfx1250 WMMA 16x16x32 A operand (wave32): lane ``l`` holds row ``l % 16``;
+    the ``<16 x half>`` fragment slot ``i`` is K=``(l // 16) * 16 + i``. Returns
+    ``(row, k)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_half, builder.const_i32(16)), builder.const_i32(slot))
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
+    """gfx1250 WMMA 16x16x32 B operand (wave32): lane ``l`` holds col ``l % 16``;
+    the ``<16 x half>`` fragment slot ``i`` is K=``(l // 16) * 16 + i``. Returns
+    ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_half, builder.const_i32(16)), builder.const_i32(slot))
+    return k, col
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
@@ -547,6 +577,35 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "wmma_gfx12_f32_16x16x16_bf16": _FragInfo(
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),
+    # --- WMMA f16 / bf16 (wave32, gfx1250, CDNA) ----------------------
+    # K=32 atom: A/B are <16 x half> per lane (K split across lane-halves, 16
+    # each); accumulator is the same 16x16 column-distributed <8 x float> as
+    # gfx12. Lane maps verified by examples/gfx1250/wmma_probe.py.
+    "wmma_gfx1250_f32_16x16x32_f16": _FragInfo(
+        16, 16, 8, 32,
+        _wmma_gfx1250_a_16x16x32, _wmma_gfx1250_b_16x16x32, _wmma_gfx12_acc_16x16,
+    ),
+    # gfx1250 FP8/BF8 K=64 WMMA. A/B carry 32 low-bit bytes per lane presented
+    # as <8 x i32>; accumulator is the same 16x16 column-distributed <8 x float>
+    # as the f16/bf16 K=32 atom. The block-scaled GEMM kernel computes operand
+    # offsets directly (no LayoutMap), so only frag lengths + wave size are
+    # registered here; the accumulator map is shared with the f16 path.
+    "wmma_gfx1250_f32_16x16x64_fp8_fp8": _FragInfo(
+        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_gfx1250_f32_16x16x64_fp8_bf8": _FragInfo(
+        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_gfx1250_f32_16x16x64_bf8_fp8": _FragInfo(
+        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_gfx1250_f32_16x16x64_bf8_bf8": _FragInfo(
+        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
+        16, 16, 8, 32,
+        _wmma_gfx1250_a_16x16x32, _wmma_gfx1250_b_16x16x32, _wmma_gfx12_acc_16x16,
+    ),
 }
 
 
@@ -562,7 +621,9 @@ def _frag_info(op_id: str) -> _FragInfo:
 @dataclass(frozen=True)
 class MemoryCapabilities:
     has_async_lds: bool
+    has_async_global_lds: bool
     has_ds_read_tr: bool
+    has_tdm: bool
     buffer_load_max_dwords: int
 
 
@@ -706,6 +767,15 @@ class ArchTarget:
     mma: MmaCatalog
     memory: MemoryCapabilities
     limits: ResourceLimits
+    stepping: Optional[str] = None
+    matrix_path: str = "mfma"
+    has_mfma: bool = True
+    has_wmma: bool = False
+    waitcnt_model: str = "legacy"
+    barrier_model: str = "legacy"
+    requires_shader_end_padding: bool = False
+    virtual_address_bits: int = 48
+    wgp_cache_lds_shared: bool = False
 
     # --- identity ---------------------------------------------------------
     @property
@@ -792,6 +862,8 @@ def _build_target(gfx: str) -> ArchTarget:
     mma = MmaCatalog([_build_mma_op(o) for o in row["mma"]])
     mem = row["memory"]
     lim = row["limits"]
+    has_mfma = any(op.family == "mma" for op in mma.ops)
+    has_wmma = any(op.family == "wmma" for op in mma.ops)
     return ArchTarget(
         gfx=gfx,
         family=row["family"],
@@ -802,7 +874,9 @@ def _build_target(gfx: str) -> ArchTarget:
         mma=mma,
         memory=MemoryCapabilities(
             has_async_lds=mem["has_async_lds"],
+            has_async_global_lds=mem.get("has_async_global_lds", mem["has_async_lds"]),
             has_ds_read_tr=mem["has_ds_read_tr"],
+            has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
         ),
         limits=ResourceLimits(
@@ -811,6 +885,18 @@ def _build_target(gfx: str) -> ArchTarget:
             agprs=lim["agprs"],
             sgprs=lim["sgprs"],
         ),
+        stepping=row.get("stepping"),
+        matrix_path=row.get(
+            "matrix_path",
+            "wmma" if has_wmma and not has_mfma else "mfma" if has_mfma else "scalar",
+        ),
+        has_mfma=row.get("has_mfma", has_mfma),
+        has_wmma=row.get("has_wmma", has_wmma),
+        waitcnt_model=row.get("waitcnt_model", "legacy"),
+        barrier_model=row.get("barrier_model", "legacy"),
+        requires_shader_end_padding=row.get("requires_shader_end_padding", False),
+        virtual_address_bits=row.get("virtual_address_bits", 48),
+        wgp_cache_lds_shared=row.get("wgp_cache_lds_shared", False),
     )
 
 
