@@ -4,6 +4,7 @@
 target_sources(tensilelite-client-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunPolicies.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunScheduler.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"

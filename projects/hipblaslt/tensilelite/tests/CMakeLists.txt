@@ -146,6 +146,7 @@ gtest_discover_tests(batch-pointer-test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY
 
 if(TARGET tensilelite::client-common)
     add_executable(client-run-scheduler-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunPolicies_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunScheduler_test.cpp"
     )
 

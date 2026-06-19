@@ -10,16 +10,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstring>
-#include <fstream>
 #include <iostream>
-#include <limits>
 #include <stdexcept>
 #include <utility>
-
-#if defined(__linux__)
-#include <elf.h>
-#endif
 
 namespace TensileLite
 {
@@ -27,115 +20,11 @@ namespace TensileLite
     {
         namespace
         {
-#if defined(__linux__)
-            std::uintmax_t getMinKernelSizeToGwEnd(std::string const& coPath)
-            {
-                std::ifstream f(coPath, std::ios::binary);
-                if(!f)
-                    return 0;
-
-                Elf64_Ehdr eh{};
-                f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
-                if(!f
-                   || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
-                   || eh.e_ident[EI_CLASS] != ELFCLASS64)
-                    return 0;
-
-                std::vector<Elf64_Shdr> shdrs(eh.e_shnum);
-                f.seekg(eh.e_shoff);
-                f.read(reinterpret_cast<char*>(shdrs.data()),
-                       static_cast<std::streamsize>(eh.e_shnum * sizeof(Elf64_Shdr)));
-                if(!f)
-                    return 0;
-
-                Elf64_Shdr const* symSh = nullptr;
-                for(auto const& sh : shdrs)
-                {
-                    if(sh.sh_type == SHT_SYMTAB)
-                    {
-                        symSh = &sh;
-                        break;
-                    }
-                }
-
-                if(!symSh
-                   || symSh->sh_link >= shdrs.size()
-                   || symSh->sh_size == 0
-                   || symSh->sh_size % sizeof(Elf64_Sym) != 0)
-                    return 0;
-
-                auto const& strSh = shdrs[symSh->sh_link];
-
-                std::vector<char> strs(strSh.sh_size);
-                f.seekg(strSh.sh_offset);
-                f.read(strs.data(), static_cast<std::streamsize>(strSh.sh_size));
-                if(!f)
-                    return 0;
-
-                auto const            symCount = symSh->sh_size / sizeof(Elf64_Sym);
-                std::vector<Elf64_Sym> syms(symCount);
-                f.seekg(symSh->sh_offset);
-                f.read(reinterpret_cast<char*>(syms.data()),
-                       static_cast<std::streamsize>(symSh->sh_size));
-                if(!f)
-                    return 0;
-
-                std::vector<std::uint64_t> kernelStarts;
-                std::vector<std::uint64_t> gwEndAddrs;
-                for(auto const& s : syms)
-                {
-                    if(s.st_name >= strs.size())
-                        continue;
-
-                    char const*   name = &strs[s.st_name];
-                    unsigned char type = ELF64_ST_TYPE(s.st_info);
-                    unsigned char bind = ELF64_ST_BIND(s.st_info);
-
-                    if(type == STT_FUNC && bind == STB_GLOBAL)
-                        kernelStarts.push_back(s.st_value);
-                    else if(std::strcmp(name, "label_GW_End") == 0)
-                        gwEndAddrs.push_back(s.st_value);
-                }
-
-                if(kernelStarts.empty() || gwEndAddrs.empty())
-                    return 0;
-
-                std::sort(kernelStarts.begin(), kernelStarts.end());
-
-                std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
-                for(auto end : gwEndAddrs)
-                {
-                    auto it = std::upper_bound(kernelStarts.begin(), kernelStarts.end(), end);
-                    if(it == kernelStarts.begin())
-                        continue;
-
-                    std::uint64_t start = *(it - 1);
-                    if(end <= start)
-                        continue;
-
-                    auto sz = static_cast<std::uintmax_t>(end - start);
-                    if(sz < minSize)
-                        minSize = sz;
-                }
-
-                return (minSize == std::numeric_limits<std::uintmax_t>::max()) ? 0 : minSize;
-            }
-#endif // defined(__linux__)
-
             std::string problemProgressString(int problemIdx, int lastProblemIdx)
             {
                 return std::to_string(problemIdx) + "/" + std::to_string(lastProblemIdx);
             }
         } // namespace
-
-        KernelHotPathSizeFn ClientRunScheduler::defaultKernelHotPathSizeFn()
-        {
-#if defined(__linux__)
-            return [](std::string const& coPath) { return getMinKernelSizeToGwEnd(coPath); };
-#else
-            return [](std::string const&) { return std::uintmax_t{0}; };
-#endif
-        }
 
         ClientRunScheduler::ClientRunScheduler(ClientRunSchedulerConfig config,
                                                ClientRunSchedulerDependencies dependencies)
@@ -149,60 +38,23 @@ namespace TensileLite
             }
 
             if(!m_deps.callbacks.kernelHotPathSizeFn)
-                m_deps.callbacks.kernelHotPathSizeFn = defaultKernelHotPathSizeFn();
+                m_deps.callbacks.kernelHotPathSizeFn = IcacheRotationPolicy::defaultKernelHotPathSizeFn();
         }
 
-        ClientRunScheduler::AutoIcacheRotationPlan ClientRunScheduler::computeAutoIcacheRotationPlan(
-            std::vector<std::shared_ptr<ProblemInputs>> const& inputArr,
-            std::vector<std::string> const&                     codeObjectFilenames,
-            int                                                 icacheRotateSizeKB,
-            KernelHotPathSizeFn const&                          kernelHotPathSizeFn)
+        void ClientRunScheduler::maybeLoadAutoIcacheRotation(size_t inputSlotCount)
         {
-            AutoIcacheRotationPlan plan;
-            plan.extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
-
-#if defined(__linux__)
-            std::uintmax_t K = 0;
-            for(auto const& filename : codeObjectFilenames)
-            {
-                std::uintmax_t sz = kernelHotPathSizeFn ? kernelHotPathSizeFn(filename) : 0;
-                if(sz > 0 && (K == 0 || sz < K))
-                    K = sz;
-            }
-
-            int rotateSizeKB = icacheRotateSizeKB;
-            if(rotateSizeKB < 0)
-                rotateSizeKB = 0;
-
-            plan.kernelHotPathSize = K;
-            plan.cacheBudgetBytes   = std::uintmax_t(rotateSizeKB) * 2 * 1024;
-
-            if(K == 0)
-            {
-                plan.extrasFromCache = 0;
-            }
-            else if(plan.cacheBudgetBytes > K)
-            {
-                plan.extrasFromCache = static_cast<int>(plan.cacheBudgetBytes / K - 1);
-            }
-#else
-            plan.extrasFromCache = icacheRotateSizeKB;
-#endif
-
-            plan.extras = std::max(plan.extrasFromDataInit, plan.extrasFromCache);
-            return plan;
-        }
-
-        void ClientRunScheduler::maybeLoadAutoIcacheRotation(
-            std::vector<std::shared_ptr<ProblemInputs>> const& inputArr)
-        {
-            if(m_config.icacheRotateCopies != -1 || m_deps.kernelLauncher->numRotationModules() != 1)
+            if(m_config.icacheRotateCopies != -1)
                 return;
 
-            auto plan = computeAutoIcacheRotationPlan(inputArr,
-                                                      m_config.codeObjectFilenames,
-                                                      m_config.icacheRotateSizeKB,
-                                                      m_deps.callbacks.kernelHotPathSizeFn);
+            int nRotationModules = m_deps.kernelLauncher->numRotationModules();
+            if(!m_icacheRotationPolicy.shouldLoadAutoCopies(
+                   m_config.icacheRotateCopies, nRotationModules))
+                return;
+
+            auto plan = m_icacheRotationPolicy.computeAutoPlan(inputSlotCount,
+                                                               m_config.codeObjectFilenames,
+                                                               m_config.icacheRotateSizeKB,
+                                                               m_deps.callbacks.kernelHotPathSizeFn);
 
             if(plan.extras > 0)
             {
@@ -223,13 +75,13 @@ namespace TensileLite
             }
 
             std::cout << "[icache-rotate] auto extras = max("
-                      << plan.extrasFromDataInit << " from inputArr.size()-1, "
+                      << plan.extrasFromDataInit << " from inputSlotCount-1, "
                       << plan.extrasFromCache << " from " << plan.cacheBudgetBytes << "/"
                       << plan.kernelHotPathSize << ") = " << plan.extras << " (total = "
                       << (plan.extras + 1) << " modules)" << std::endl;
 #else
             std::cout << "[icache-rotate] auto extras = max("
-                      << plan.extrasFromDataInit << " from inputArr.size()-1, "
+                      << plan.extrasFromDataInit << " from inputSlotCount-1, "
                       << plan.extrasFromCache << " from --icache-rotate-size) = "
                       << plan.extras << " (total = " << (plan.extras + 1) << " modules)"
                       << std::endl;
@@ -248,7 +100,7 @@ namespace TensileLite
                     m_deps.callbacks.setIcacheFlushTimeUsFn(
                         icacheFlush ? m_config.icacheFlushTimeUs : 0.f);
 
-                    size_t rotationLaunchIdx = 0;
+                    IcacheRotationCursor rotationCursor;
 
                     for(int problemIdx = m_config.firstProblemIdx; problemIdx <= m_config.lastProblemIdx;
                         ++problemIdx)
@@ -278,21 +130,21 @@ namespace TensileLite
                         size_t warmupInvocationsForSizing = m_deps.listeners->numWarmupRuns();
                         size_t syncsForSizing              = m_deps.listeners->numSyncs();
                         size_t enqForSizing                = m_deps.listeners->numEnqueuesPerSync();
-                        size_t maxRotatingBufferNum
-                            = std::max(warmupInvocationsForSizing, syncsForSizing * enqForSizing);
+                        auto rotatingOutputPlan = m_rotatingOutputPolicy.plan(
+                            warmupInvocationsForSizing, syncsForSizing, enqForSizing);
 
                         std::vector<std::shared_ptr<ProblemInputs>> inputArr;
                         {
                             ScopedTimer timer("rotating_buffer_preparation");
                             inputArr = m_deps.dataCoordinator->prepareRotatingGPUOutput(
-                                static_cast<int32_t>(maxRotatingBufferNum),
+                                rotatingOutputPlan.maxRotatingBufferNum,
                                 problem,
                                 inputs,
                                 m_deps.stream);
                             m_deps.callbacks.deviceSynchronizeFn();
                         }
 
-                        maybeLoadAutoIcacheRotation(inputArr);
+                        maybeLoadAutoIcacheRotation(inputArr.size());
 
                         bool resetInput = true;
                         while(m_deps.solutionSource->moreSolutionsInProblem())
@@ -362,9 +214,8 @@ namespace TensileLite
                                         int nRotationModules = m_deps.kernelLauncher->numRotationModules();
                                         assert(nRotationModules > 0);
                                         auto rotateAndSelect = [&]() {
-                                            m_deps.kernelLauncher->selectRotationCopy(static_cast<int>(
-                                                rotationLaunchIdx++ % static_cast<size_t>(
-                                                    nRotationModules)));
+                                            m_deps.kernelLauncher->selectRotationCopy(
+                                                rotationCursor.nextIndex(nRotationModules));
                                         };
 
                                         {

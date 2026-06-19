@@ -7,6 +7,7 @@
 #include <Tensile/ContractionSolution_fwd.hpp>
 #include <Tensile/Tensile.hpp>
 
+#include "ClientRunPolicies.hpp"
 #include "RunListener.hpp"
 
 #include <cstdint>
@@ -25,7 +26,6 @@ namespace TensileLite
         using FlushIcacheFn   = std::function<void(uint32_t, hipStream_t)>;
         using DeviceSynchronizeFn = std::function<void()>;
         using SetIcacheFlushTimeUsFn = std::function<void(float)>;
-        using KernelHotPathSizeFn = std::function<std::uintmax_t(std::string const&)>;
 
         struct ClientRunSchedulerConfig
         {
@@ -136,25 +136,12 @@ namespace TensileLite
             ClientRunSchedulerResult run(void*& dUA, void*& dUAHost);
 
         private:
-            struct AutoIcacheRotationPlan
-            {
-                int extrasFromDataInit = 0;
-                int extrasFromCache    = 0;
-                int extras             = 0;
-                std::uintmax_t kernelHotPathSize = 0;
-                std::uintmax_t cacheBudgetBytes  = 0;
-            };
-
-            static KernelHotPathSizeFn defaultKernelHotPathSizeFn();
-            static AutoIcacheRotationPlan
-                computeAutoIcacheRotationPlan(std::vector<std::shared_ptr<ProblemInputs>> const& inputArr,
-                                              std::vector<std::string> const&                  codeObjectFilenames,
-                                              int                                              icacheRotateSizeKB,
-                                              KernelHotPathSizeFn const&                       kernelHotPathSizeFn);
-            void maybeLoadAutoIcacheRotation(std::vector<std::shared_ptr<ProblemInputs>> const& inputArr);
+            void maybeLoadAutoIcacheRotation(size_t inputSlotCount);
 
             ClientRunSchedulerConfig       m_config;
             ClientRunSchedulerDependencies m_deps;
+            RotatingOutputPolicy           m_rotatingOutputPolicy;
+            IcacheRotationPolicy          m_icacheRotationPolicy;
         };
 
     } // namespace Client
