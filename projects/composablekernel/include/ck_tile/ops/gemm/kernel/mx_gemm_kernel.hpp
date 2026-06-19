@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
+
 namespace ck_tile {
 
 template <index_t NumATensor = 1, index_t NumBTensor = 1, index_t NumDTensor = 0>

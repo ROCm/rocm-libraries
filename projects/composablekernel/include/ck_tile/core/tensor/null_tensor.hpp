@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "ck_tile/core/utility/type_traits.hpp"
+
 namespace ck_tile {
 
 struct null_tensor
