@@ -292,9 +292,9 @@ namespace
         {
         }
 
-        void cancelAsyncReset() override
+        void resetPreparedSlotsForProblem() override
         {
-            m_events.push_back("cancelAsyncReset");
+            m_events.push_back("resetPreparedSlotsForProblem");
         }
 
         std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const*) override
@@ -315,14 +315,14 @@ namespace
             return rv;
         }
 
-        void waitCopyDone(hipStream_t) override
+        void waitForPreparedSlot(hipStream_t) override
         {
-            m_events.push_back("waitCopyDone");
+            m_events.push_back("waitForPreparedSlot");
         }
 
-        void beginAsyncReset(ContractionProblem const*) override
+        void primeNextInputSlot(ContractionProblem const*) override
         {
-            m_events.push_back("beginAsyncReset");
+            m_events.push_back("primeNextInputSlot");
         }
 
         size_t rotatingSlots = 1;
@@ -579,18 +579,18 @@ TEST_F(ClientRunSchedulerTest, NoBenchmarkValidationRunExecutesWarmupAndSubmitsR
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
     EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchWarmup:"),
               (std::vector<std::string>{"empty"}));
-    EXPECT_EQ(extractEventsWithPrefix(harness.events, "beginAsyncReset"),
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "primeNextInputSlot"),
               (std::vector<std::string>{"", ""}));
 
     auto solveIdx          = indexOfEvent(harness.events, "solve");
-    auto waitCopyDoneIdx   = indexOfEvent(harness.events, "waitCopyDone");
+    auto waitForPreparedSlotIdx = indexOfEvent(harness.events, "waitForPreparedSlot");
     auto warmupLaunchIdx   = indexOfEvent(harness.events, "launchWarmup:empty");
     auto validateWarmupsIdx = indexOfEvent(harness.events, "validateWarmups");
-    auto firstResetIdx     = indexOfEvent(harness.events, "beginAsyncReset");
+    auto firstResetIdx     = indexOfEvent(harness.events, "primeNextInputSlot");
     auto postSolutionIdx   = indexOfEvent(harness.events, "postSolution");
 
     ASSERT_NE(solveIdx, harness.events.size());
-    ASSERT_NE(waitCopyDoneIdx, harness.events.size());
+    ASSERT_NE(waitForPreparedSlotIdx, harness.events.size());
     ASSERT_NE(warmupLaunchIdx, harness.events.size());
     ASSERT_NE(validateWarmupsIdx, harness.events.size());
     ASSERT_NE(firstResetIdx, harness.events.size());
@@ -598,11 +598,11 @@ TEST_F(ClientRunSchedulerTest, NoBenchmarkValidationRunExecutesWarmupAndSubmitsR
 
     auto secondReset = std::find(harness.events.begin() + firstResetIdx + 1,
                                  harness.events.end(),
-                                 "beginAsyncReset");
+                                 "primeNextInputSlot");
     ASSERT_NE(secondReset, harness.events.end());
 
-    EXPECT_LT(solveIdx, waitCopyDoneIdx);
-    EXPECT_LT(waitCopyDoneIdx, warmupLaunchIdx);
+    EXPECT_LT(solveIdx, waitForPreparedSlotIdx);
+    EXPECT_LT(waitForPreparedSlotIdx, warmupLaunchIdx);
     EXPECT_LT(warmupLaunchIdx, validateWarmupsIdx);
     EXPECT_LT(validateWarmupsIdx, firstResetIdx);
     EXPECT_LT(static_cast<size_t>(std::distance(harness.events.begin(), secondReset)),
@@ -617,7 +617,7 @@ TEST_F(ClientRunSchedulerTest, NoBenchmarkValidationRunExecutesWarmupAndSubmitsR
         harness.events.end());
     EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "preProblem"),
               harness.events.end());
-    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "cancelAsyncReset"),
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "resetPreparedSlotsForProblem"),
               harness.events.end());
     EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "prepareGPUInputs"),
               harness.events.end());
@@ -643,7 +643,7 @@ TEST_F(ClientRunSchedulerTest, NoBenchmarkValidationRunExecutesWarmupAndSubmitsR
     EXPECT_TRUE(harness.launcher.rotationSelections.empty());
 }
 
-TEST_F(ClientRunSchedulerTest, WaitCopyDonePrecedesWarmupAndBenchmarkLaunches)
+TEST_F(ClientRunSchedulerTest, WaitForPreparedSlotPrecedesWarmupAndBenchmarkLaunches)
 {
     harness.listeners.m_warmupRuns = 2;
     harness.listeners.m_syncs      = 1;
@@ -666,20 +666,20 @@ TEST_F(ClientRunSchedulerTest, WaitCopyDonePrecedesWarmupAndBenchmarkLaunches)
               (std::vector<std::string>{"empty", "empty"}));
     EXPECT_EQ(harness.launcher.rotationSelections, (std::vector<int>{0, 1}));
 
-    auto waitCopyDoneIdx = indexOfEvent(harness.events, "waitCopyDone");
+    auto waitForPreparedSlotIdx = indexOfEvent(harness.events, "waitForPreparedSlot");
     auto firstWarmupIdx   = indexOfEvent(harness.events, "launchWarmup:empty");
     auto firstBenchIdx    = indexOfEvent(harness.events, "launchBenchmark:empty");
     auto firstRotateIdx   = indexOfEvent(harness.events, "selectRotationCopy:0");
     auto postWarmupIdx    = indexOfEvent(harness.events, "postWarmup");
 
-    ASSERT_NE(waitCopyDoneIdx, harness.events.size());
+    ASSERT_NE(waitForPreparedSlotIdx, harness.events.size());
     ASSERT_NE(firstWarmupIdx, harness.events.size());
     ASSERT_NE(firstBenchIdx, harness.events.size());
     ASSERT_NE(firstRotateIdx, harness.events.size());
     ASSERT_NE(postWarmupIdx, harness.events.size());
 
-    EXPECT_LT(waitCopyDoneIdx, firstWarmupIdx);
-    EXPECT_LT(waitCopyDoneIdx, firstBenchIdx);
+    EXPECT_LT(waitForPreparedSlotIdx, firstWarmupIdx);
+    EXPECT_LT(waitForPreparedSlotIdx, firstBenchIdx);
     EXPECT_LT(postWarmupIdx, firstRotateIdx);
 }
 
@@ -708,14 +708,14 @@ TEST_F(ClientRunSchedulerTest, RequeriesListenerCountsAfterPreSolutionAndPostWar
                                   "reportProblemIndex:0",
                                   "reportProblemProgress:0/0",
                                   "preProblem",
-                                  "cancelAsyncReset",
+                                  "resetPreparedSlotsForProblem",
                                   "prepareGPUInputs",
                                   "prepareRotatingGPUOutput:1",
                                   "deviceSynchronize",
                                   "preSolution",
                                   "prepareGPUInputs",
                                   "solve",
-                                  "waitCopyDone",
+                                  "waitForPreparedSlot",
                                   "preWarmup",
                                   "launchWarmup:empty",
                                   "validateWarmups",
@@ -723,8 +723,8 @@ TEST_F(ClientRunSchedulerTest, RequeriesListenerCountsAfterPreSolutionAndPostWar
                                   "postWarmup",
                                   "preSyncs",
                                   "postSyncs",
-                                  "beginAsyncReset",
-                                  "beginAsyncReset",
+                                  "primeNextInputSlot",
+                                  "primeNextInputSlot",
                                   "postSolution",
                                   "postProblem",
                                   "postBenchmarkRun"}));
@@ -771,20 +771,20 @@ TEST_F(ClientRunSchedulerTest, BenchmarkPathDoesNotUseNoBenchmarkResetHook)
     EXPECT_EQ(result.returnCode, 0);
     EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchBenchmark:"),
               (std::vector<std::string>{"bench"}));
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "beginAsyncReset").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
     EXPECT_EQ(harness.events,
               (std::vector<std::string>{"preBenchmarkRun",
                                         "reportProblemIndex:0",
                                         "reportProblemProgress:0/0",
                                         "preProblem",
-                                        "cancelAsyncReset",
+                                        "resetPreparedSlotsForProblem",
                                         "prepareGPUInputs",
                                         "prepareRotatingGPUOutput:1",
                                         "deviceSynchronize",
                                         "preSolution",
                                         "prepareGPUInputs",
                                         "solve",
-                                        "waitCopyDone",
+                                        "waitForPreparedSlot",
                                         "preSyncs",
                                         "preEnqueues",
                                         "selectRotationCopy:0",
@@ -812,7 +812,7 @@ TEST_F(ClientRunSchedulerTest, SkipsFlushGridCallbackWhenNoBenchmarkRuns)
     EXPECT_TRUE(harness.events.empty());
 }
 
-TEST_F(ClientRunSchedulerTest, SubmitsTwoAsyncResetsAfterSuccessfulExecutedRun)
+TEST_F(ClientRunSchedulerTest, SubmitsTwoPrimeNextInputSlotCallsAfterSuccessfulExecutedRun)
 {
     harness.listeners.m_warmupRuns = 0;
     harness.listeners.m_syncs      = 0;
@@ -827,13 +827,13 @@ TEST_F(ClientRunSchedulerTest, SubmitsTwoAsyncResetsAfterSuccessfulExecutedRun)
     EXPECT_FALSE(result.exitedEarly);
     EXPECT_EQ(result.returnCode, 0);
 
-    EXPECT_EQ(extractEventsWithPrefix(harness.events, "beginAsyncReset"),
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "primeNextInputSlot"),
               (std::vector<std::string>{"", ""}));
-    auto firstReset = indexOfEvent(harness.events, "beginAsyncReset");
+    auto firstReset = indexOfEvent(harness.events, "primeNextInputSlot");
     ASSERT_NE(firstReset, harness.events.size());
     auto secondReset = std::find(harness.events.begin() + firstReset + 1,
                                  harness.events.end(),
-                                 "beginAsyncReset");
+                                 "primeNextInputSlot");
     ASSERT_NE(secondReset, harness.events.end());
     auto postSolutionIdx = indexOfEvent(harness.events, "postSolution");
     ASSERT_NE(postSolutionIdx, harness.events.size());
@@ -858,7 +858,7 @@ TEST_F(ClientRunSchedulerTest, ResetSubmissionHappensBeforePostSolutionOrNextPre
     EXPECT_EQ(result.returnCode, 0);
 
     auto prepareIndices = indicesOfEvent(harness.events, "prepareGPUInputs");
-    auto resetIndices   = indicesOfEvent(harness.events, "beginAsyncReset");
+    auto resetIndices   = indicesOfEvent(harness.events, "primeNextInputSlot");
     auto postSolutionIdx = indexOfEvent(harness.events, "postSolution");
 
     ASSERT_EQ(prepareIndices.size(), 3u);
@@ -889,16 +889,16 @@ TEST_F(ClientRunSchedulerTest, SkipsKernelFlowWhenSolutionRejected)
     EXPECT_FALSE(result.exitedEarly);
     EXPECT_EQ(result.returnCode, 0);
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "solve").empty());
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "waitCopyDone").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "waitForPreparedSlot").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchWarmup:").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "beginAsyncReset").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
     EXPECT_EQ(harness.events,
               (std::vector<std::string>{"preBenchmarkRun",
                                         "reportProblemIndex:0",
                                         "reportProblemProgress:0/0",
                                         "preProblem",
-                                        "cancelAsyncReset",
+                                        "resetPreparedSlotsForProblem",
                                         "prepareGPUInputs",
                                         "prepareRotatingGPUOutput:1",
                                         "deviceSynchronize",
@@ -922,7 +922,7 @@ TEST_F(ClientRunSchedulerTest, RuntimeErrorReportsInvalidAndPostsSolution)
     EXPECT_EQ(harness.reporter.invalidCount, 1);
     ASSERT_EQ(harness.reporter.errorMessages.size(), 1u);
     EXPECT_NE(harness.reporter.errorMessages.front().find("solve failed"), std::string::npos);
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "beginAsyncReset").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
     EXPECT_EQ(extractEventsWithPrefix(harness.events, "reportInvalid"),
               (std::vector<std::string>{""}));
     EXPECT_TRUE(std::find(harness.events.begin(), harness.events.end(), "postSolution")
@@ -952,10 +952,10 @@ TEST_F(ClientRunSchedulerTest, SelectionOnlyDoesNotRequireBenchmarkTimer)
     ASSERT_EQ(harness.flushTimeUs.size(), 1u);
     EXPECT_FLOAT_EQ(harness.flushTimeUs[0], 123.0f);
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "solve").empty());
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "waitCopyDone").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "waitForPreparedSlot").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchWarmup:").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
-    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "beginAsyncReset").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
 }
 
 TEST_F(ClientRunSchedulerTest, ExitOnErrorReturnsCappedError)

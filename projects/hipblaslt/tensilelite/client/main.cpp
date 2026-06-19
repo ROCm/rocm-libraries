@@ -931,9 +931,9 @@ namespace TensileLite
             {
             }
 
-            void cancelAsyncReset() override
+            void resetPreparedSlotsForProblem() override
             {
-                m_dataInit->cancelAsyncReset();
+                m_dataInit->resetPreparedSlotsForProblem();
             }
 
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem) override
@@ -951,14 +951,14 @@ namespace TensileLite
                     maxRotatingBufferNum, problem, std::move(inputs), stream);
             }
 
-            void waitCopyDone(hipStream_t stream) override
+            void waitForPreparedSlot(hipStream_t stream) override
             {
-                m_dataInit->waitCopyDone(stream);
+                m_dataInit->waitForPreparedSlot(stream);
             }
 
-            void beginAsyncReset(ContractionProblem const* problem) override
+            void primeNextInputSlot(ContractionProblem const* problem) override
             {
-                m_dataInit->beginAsyncReset(problem);
+                m_dataInit->primeNextInputSlot(problem);
             }
 
         private:

@@ -257,13 +257,13 @@ namespace TensileLite
                 if(m_ringPolicy.allowed && m_ring.hasAvailableSlot())
                 {
                     // The ring is only ever filled under ringEligible() (enforced in
-                    // beginAsyncReset), i.e. the explicit policy bit plus the physical
+                    // primeNextInputSlot), i.e. the explicit policy bit plus the physical
                     // state guards below.  Under those conditions the typed overloads'
                     // GuardPage flip and conditional CPU-init are both no-ops, so
                     // bypassing the dynamic_cast dispatch is exact, not approximate,
                     // for GEMM and grouped GEMM alike.  The grouped representative
                     // invariant is asserted when the slot is prepared.  Caller must
-                    // waitCopyDone() before use (main.cpp before benchmark_runs).
+                    // waitForPreparedSlot() before use (main.cpp before benchmark_runs).
                     assert(ringEligible());
                     advanceBuffer();
                     return m_cachedGPUInputs;
@@ -282,20 +282,98 @@ namespace TensileLite
                     throw std::runtime_error("Failed to cast to any ContractionProblem.");
             }
 
-            // Cancel any pending async resets and invalidate alt buffers
+            void beginProblem(ContractionProblem* const problem)
+            {
+                m_currentGemmProblem
+                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                m_currentSolution                 = nullptr;
+                m_batchPointerSignatureValid      = false;
+                m_preparedProblemSignatureValid   = false;
+            }
+
+            void beginSolution(ContractionSolution* const solution)
+            {
+                m_currentSolution = solution;
+                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
+                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
+                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // By the time beginSolution fires, main.cpp guarantees prepareGPUInputs has been
+                // called for the current problem (beginProblem → resetPreparedSlotsForProblem →
+                // prepareGPUInputs → solution loop).
+                if(m_currentSolution != nullptr && m_mxScaleFormat > 0
+                   && m_currentGemmProblem != nullptr
+                   && isMXProblemExceptF6(*m_currentGemmProblem))
+                {
+                    if(!gpuInputsPreparedFor(*m_currentGemmProblem))
+                    {
+                        assert(false);
+                        return;
+                    }
+
+                    if(shouldRefreshMXForSolution(solution, *m_currentGemmProblem))
+                    {
+                        initializeMXData(*m_currentGemmProblem);
+                        copyValidToGPUBuffer(*m_currentGemmProblem);
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   *m_currentGemmProblem,
+                                   hipMemcpyDeviceToDevice);
+                        // Sync cpuInput.current from cpuInput.valid for MX
+                        // tensors so the CPU reference reads the regenerated
+                        // data that matches what the GPU received.
+                        for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                      ContractionProblemGemm::TENSOR::B,
+                                      ContractionProblemGemm::TENSOR::MXSA,
+                                      ContractionProblemGemm::TENSOR::MXSB})
+                        {
+                            auto& desc = m_currentGemmProblem->tensors()[ti];
+                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                            if(it == m_vdata[ti].pristine.end())
+                                continue;
+                            auto& p = it->second;
+                            if(p.cpuInput.valid && p.cpuInput.current)
+                            {
+                                size_t bytes = multiplyElementSize(
+                                    p.maxElements, desc.elementBytes());
+                                std::memcpy(p.cpuInput.current.get(),
+                                            p.cpuInput.valid.get(),
+                                            bytes);
+                            }
+                        }
+                    }
+                }
+            }
+
+            void endProblem() {}
+
+            // Reset any pending async prepared slots and invalidate alt buffers
             // (e.g., when switching to a new problem whose data differs).
-            void cancelAsyncReset();
+            void resetPreparedSlotsForProblem();
+            void cancelAsyncReset()
+            {
+                resetPreparedSlotsForProblem();
+            }
 
             void syncCopyStream();
 
             // Insert a GPU-side dependency between m_copyStream and computeStream
             // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
-            void waitCopyDone(hipStream_t computeStream);
+            void waitForPreparedSlot(hipStream_t computeStream);
+            void waitCopyDone(hipStream_t computeStream)
+            {
+                waitForPreparedSlot(computeStream);
+            }
 
-            // Kick off async reset of the next free buffer slot in the ring
-            // on m_copyStream.  The caller must waitCopyDone() before
-            // using the buffer (done in main.cpp before benchmark_runs).
-            void beginAsyncReset(ContractionProblem const* problem);
+            // Prime the next free buffer slot in the ring on m_copyStream.
+            // The caller must waitForPreparedSlot() before using the buffer
+            // (done in main.cpp before benchmark_runs).
+            void primeNextInputSlot(ContractionProblem const* problem);
+            void beginAsyncReset(ContractionProblem const* problem)
+            {
+                primeNextInputSlot(problem);
+            }
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputs(ContractionProblemGroupedGemm const& problem)
@@ -793,66 +871,15 @@ namespace TensileLite
             virtual void postBenchmarkRun() override {}
             virtual void preProblem(ContractionProblem* const problem) override
             {
-                m_currentGemmProblem
-                    = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution  = nullptr;
-                m_batchPointerSignatureValid   = false;
-                m_preparedProblemSignatureValid = false;
+                beginProblem(problem);
             }
-            virtual void postProblem() override {}
+            virtual void postProblem() override
+            {
+                endProblem();
+            }
             virtual void preSolution(ContractionSolution* const solution) override
             {
-                m_currentSolution = solution;
-                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
-                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
-                // By the time preSolution fires, main.cpp guarantees prepareGPUInputs has been
-                // called for the current problem (preProblem → cancelAsyncReset → prepareGPUInputs
-                // → solution loop).
-                if(m_currentSolution != nullptr && m_mxScaleFormat > 0
-                   && m_currentGemmProblem != nullptr
-                   && isMXProblemExceptF6(*m_currentGemmProblem))
-                {
-                    if(!gpuInputsPreparedFor(*m_currentGemmProblem))
-                    {
-                        assert(false);
-                        return;
-                    }
-
-                    if(shouldRefreshMXForSolution(solution, *m_currentGemmProblem))
-                    {
-                        initializeMXData(*m_currentGemmProblem);
-                        copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyDeviceToDevice);
-                        // Sync cpuInput.current from cpuInput.valid for MX
-                        // tensors so the CPU reference reads the regenerated
-                        // data that matches what the GPU received.
-                        for(int ti : {ContractionProblemGemm::TENSOR::A,
-                                      ContractionProblemGemm::TENSOR::B,
-                                      ContractionProblemGemm::TENSOR::MXSA,
-                                      ContractionProblemGemm::TENSOR::MXSB})
-                        {
-                            auto& desc = m_currentGemmProblem->tensors()[ti];
-                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
-                            if(it == m_vdata[ti].pristine.end())
-                                continue;
-                            auto& p = it->second;
-                            if(p.cpuInput.valid && p.cpuInput.current)
-                            {
-                                size_t bytes = multiplyElementSize(
-                                    p.maxElements, desc.elementBytes());
-                                std::memcpy(p.cpuInput.current.get(),
-                                            p.cpuInput.valid.get(),
-                                            bytes);
-                            }
-                        }
-                    }
-                }
+                beginSolution(solution);
             }
             virtual void postSolution() override {}
             virtual bool needMoreRunsInSolution() const override
@@ -1278,7 +1305,7 @@ namespace TensileLite
             // agree with it.
             //
             // m_ring.hasAvailableSlot() is only a valid proxy for "safe to bypass
-            // dispatch" when this predicate holds.  Gating beginAsyncReset on
+            // dispatch" when this predicate holds.  Gating primeNextInputSlot on
             // ringEligible() makes that implication provable: the only writer that
             // increments the controller's available-slot count has already verified
             // the explicit policy bit and the physical/state guards below.
@@ -1398,8 +1425,8 @@ namespace TensileLite
             bool m_keepPristineCopyOnGPU = true;
 
             /// True after initializeAltBufferSets fills all alternate slots for the
-            /// current problem.  Cleared by cancelAsyncReset on problem change.
-            /// When set, beginAsyncReset can skip the full re-copy and use the
+            /// current problem.  Cleared by resetPreparedSlotsForProblem on problem change.
+            /// When set, primeNextInputSlot can skip the full re-copy and use the
             /// fast path (resetOutput only) for the current problem.
             bool m_altSlotsReady = false;
 

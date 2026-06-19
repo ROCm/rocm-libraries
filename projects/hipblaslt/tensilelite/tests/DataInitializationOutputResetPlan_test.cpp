@@ -375,7 +375,7 @@ TEST(DataInitializationOutputResetPlan, RingWarmNoValidationPlansNoReset)
     EXPECT_EQ(plan.targetSlot, *targetSlot);
 }
 
-TEST(DataInitializationOutputResetPlan, BeginAsyncResetStillResetsBeforeEvent)
+TEST(DataInitializationOutputResetPlan, PrimeNextInputSlotStillResetsBeforeEvent)
 {
     auto hipDevice = hasHipDeviceAndWaitValueSupport();
     if(!hipDevice)
@@ -427,7 +427,7 @@ TEST(DataInitializationOutputResetPlan, BeginAsyncResetStillResetsBeforeEvent)
     HIP_CHECK_EXC(hipEventRecord(gateEvent.get(), gateStream.get()));
     HIP_CHECK_EXC(hipStreamWaitEvent(dataInit.copyStream(), gateEvent.get(), 0));
 
-    dataInit.beginAsyncReset(&problem);
+    dataInit.primeNextInputSlot(&problem);
 
     auto warmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
     ASSERT_NE(warmInputs, nullptr);
@@ -436,7 +436,7 @@ TEST(DataInitializationOutputResetPlan, BeginAsyncResetStillResetsBeforeEvent)
     ASSERT_NE(warmCi, nullptr);
     EXPECT_EQ(warmCi->d, slotD);
 
-    dataInit.waitCopyDone(computeStream.get());
+    dataInit.waitForPreparedSlot(computeStream.get());
     EXPECT_EQ(hipEventQuery(gateEvent.get()), hipErrorNotReady);
 
     HIP_CHECK_EXC(hipStreamWriteValue32(releaseStream.get(), gateValue.get(), 1, 0));

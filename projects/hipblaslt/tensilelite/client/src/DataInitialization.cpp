@@ -4219,7 +4219,7 @@ namespace TensileLite
 
             // Store active slot state in ring[0] only on initial
             // preparation (targetStream == nullptr), not when called
-            // from beginAsyncReset where m_gpuPtrs has been moved away.
+            // from primeNextInputSlot where m_gpuPtrs has been moved away.
             if(!targetStream)
             {
                 m_gpuPtrsRing[0]      = m_gpuPtrs;
@@ -4280,7 +4280,7 @@ namespace TensileLite
             bool                          cpuInputsAlreadyCurrent)
         {
             // Early-out when m_gpuPtrsRing[1] is already populated: prevents
-            // re-initialization if called redundantly before cancelAsyncReset
+            // re-initialization if called redundantly before resetPreparedSlotsForProblem
             // has cleared the ring for a new problem.
             if(!m_hasAltBuffers || !m_gpuPtrsRing[1].empty())
                 return;
@@ -4316,12 +4316,12 @@ namespace TensileLite
             assert(newActiveSlot.has_value());
             activateRingSlot(*newActiveSlot);
             // The new active slot may have an outstanding DMA on m_copyStream;
-            // require waitCopyDone before the compute stream reads it.
+            // require waitForPreparedSlot before the compute stream reads it.
         }
 
         // Insert a GPU-side dependency between m_copyStream and computeStream
         // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
-        void DataInitialization::waitCopyDone(hipStream_t computeStream)
+        void DataInitialization::waitForPreparedSlot(hipStream_t computeStream)
         {
             if(!m_ring.needsCopyBarrier())
                 return;
@@ -4367,9 +4367,9 @@ namespace TensileLite
             }
         }
 
-        // Cancel any pending async resets and invalidate alt buffers
+        // Reset any pending prepared slots and invalidate alt buffers
         // (e.g., when switching to a new problem whose data differs).
-        void DataInitialization::cancelAsyncReset()
+        void DataInitialization::resetPreparedSlotsForProblem()
         {
             auto const oldActiveSlot  = m_ring.activeSlot();
             bool const hadPendingWork = m_ring.hasPendingWork();
@@ -4402,10 +4402,10 @@ namespace TensileLite
             m_altSlotsReady                = false;
         }
 
-        // Kick off async reset of the next free buffer slot in the ring
-        // on m_copyStream.  The caller must waitCopyDone() before
-        // using the buffer (done in main.cpp before benchmark_runs).
-        void DataInitialization::beginAsyncReset(ContractionProblem const* problem)
+        // Prime the next free buffer slot in the ring on m_copyStream.
+        // The caller must waitForPreparedSlot() before using the buffer
+        // (done in main.cpp before benchmark_runs).
+        void DataInitialization::primeNextInputSlot(ContractionProblem const* problem)
         {
             if(!ringEligible())
                 return;

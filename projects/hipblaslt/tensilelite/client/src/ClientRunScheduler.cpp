@@ -118,7 +118,7 @@ namespace TensileLite
 
                         {
                             ScopedTimer timer("cancel_async_reset");
-                            m_deps.dataCoordinator->cancelAsyncReset();
+                            m_deps.dataCoordinator->resetPreparedSlotsForProblem();
                         }
 
                         std::shared_ptr<ProblemInputs> inputs;
@@ -220,7 +220,8 @@ namespace TensileLite
 
                                         {
                                             ScopedTimer timer("wait_copy_done");
-                                            m_deps.dataCoordinator->waitCopyDone(m_deps.stream);
+                                            m_deps.dataCoordinator->waitForPreparedSlot(
+                                                m_deps.stream);
                                         }
 
                                         if(warmupInvocations > 0)
@@ -326,8 +327,8 @@ namespace TensileLite
                                         if(!ranBenchmarkEnqueue)
                                         {
                                             ScopedTimer timer("async_reset_submit");
-                                            m_deps.dataCoordinator->beginAsyncReset(problem);
-                                            m_deps.dataCoordinator->beginAsyncReset(problem);
+                                            m_deps.dataCoordinator->primeNextInputSlot(problem);
+                                            m_deps.dataCoordinator->primeNextInputSlot(problem);
                                         }
                                     }
                                 }

@@ -238,10 +238,11 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
 
     // --- Call 2: fast path (m_gpuInit=true, boundsCheck=Disable,
     //     !problemDependentData).
-    //     Simulate what main.cpp does when the problem changes: preProblem()
-    //     resets m_batchInitProblem to nullptr, so the pointer-identity check
-    //     in prepareGPUInputsInternal fires and re-uploads batch pointers.
-    dataInit.preProblem(nullptr);
+    //     Simulate what main.cpp does when the problem changes:
+    //     beginProblem(nullptr) clears the cached problem context, so the
+    //     pointer-identity check in prepareGPUInputsInternal fires and
+    //     re-uploads batch pointers.
+    dataInit.beginProblem(nullptr);
     auto inputs2 = dataInit.prepareGPUInputs(p2);
 
     auto* ci2 = dynamic_cast<ContractionInputs*>(inputs2.get());
@@ -441,7 +442,7 @@ TEST(BatchPointerReset, MXPreparedInputsAreEligibleForSolutionRefresh)
 }
 #endif
 
-TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
+TEST(BatchPointerReset, ResetPreparedSlotsForProblemClearsWarmRingBeforeProblemSwitch)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
@@ -475,11 +476,11 @@ TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
 
     auto* slot0BatchA = ci1->batchA;
 
-    dataInit.beginAsyncReset(&p1);
-    dataInit.beginAsyncReset(&p1);
+    dataInit.primeNextInputSlot(&p1);
+    dataInit.primeNextInputSlot(&p1);
 
     auto warmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
-    dataInit.waitCopyDone(nullptr);
+    dataInit.waitForPreparedSlot(nullptr);
 
     ASSERT_NE(warmInputs.get(), nullptr);
     auto* warmCi = dynamic_cast<ContractionInputs*>(warmInputs.get());
@@ -487,8 +488,8 @@ TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
     ASSERT_NE(warmCi->batchA, nullptr);
     EXPECT_NE(warmCi->batchA, slot0BatchA);
 
-    dataInit.preProblem(&p2);
-    dataInit.cancelAsyncReset();
+    dataInit.beginProblem(&p2);
+    dataInit.resetPreparedSlotsForProblem();
 
     auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
 
@@ -506,15 +507,15 @@ TEST(BatchPointerReset, CancelAsyncResetClearsWarmRingBeforeProblemSwitch)
     EXPECT_EQ(stride2, expected2)
         << "After switching to problem 2, the batch pointer stride should reflect "
            "problem 2's aStride (" << expected2 << " bytes), but got " << stride2
-        << ". This indicates cancelAsyncReset did not clear the warm ring.";
+        << ". This indicates resetPreparedSlotsForProblem did not clear the warm ring.";
 }
 
-// Regression test for the lifecycle bug where cancelAsyncReset() only cleared
-// warm-ring state but left m_batchInitProblem intact. The same problem object
-// is reused for a logically different GEMM, so the pointer-identity guard in
-// prepareGPUInputsInternal() can only pass if cancelAsyncReset() also resets
-// the batch-pointer freshness cache.
-TEST(BatchPointerReset, CancelAsyncResetInvalidatesBatchPointersWithoutPreProblem)
+// Regression test for the lifecycle bug where resetPreparedSlotsForProblem()
+// only cleared warm-ring state but left the cached problem context intact.
+// The same problem object is reused for a logically different GEMM, so the
+// pointer-identity guard in prepareGPUInputsInternal() can only pass if
+// resetPreparedSlotsForProblem() also resets the batch-pointer freshness cache.
+TEST(BatchPointerReset, ResetPreparedSlotsForProblemInvalidatesBatchPointersWithoutBeginProblem)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
@@ -549,7 +550,7 @@ TEST(BatchPointerReset, CancelAsyncResetInvalidatesBatchPointersWithoutPreProble
     problem = makeBatchedProblem(64, 64, 64, BATCH);
     ASSERT_EQ(&problem, stableProblemAddress);
 
-    dataInit.cancelAsyncReset();
+    dataInit.resetPreparedSlotsForProblem();
 
     auto inputs2 = dataInit.prepareGPUInputs(problem);
 
@@ -567,15 +568,15 @@ TEST(BatchPointerReset, CancelAsyncResetInvalidatesBatchPointersWithoutPreProble
         << "After switching to the larger logical problem, the batch pointer "
            "stride should reflect the new aStride (" << expected2
         << " bytes), but got " << stride2
-        << ". This indicates cancelAsyncReset did not clear the batch-pointer cache.";
+        << ". This indicates resetPreparedSlotsForProblem did not clear the batch-pointer cache.";
 }
 
 // ---------------------------------------------------------------------------
 // Structural invariant: switching to a different ContractionProblemGemm
-// object must trigger batch-pointer re-upload even when preProblem() is not
+// object must trigger batch-pointer re-upload even when beginProblem() is not
 // called in between.
 //
-// With the old bool m_batchInit approach, skipping preProblem() leaves
+// With the old bool m_batchInit approach, skipping beginProblem() leaves
 // m_batchInit=true, so initializeGPUBatchedInputs is skipped and the caller
 // gets batch pointers from the first problem's strides — silently wrong.
 //
@@ -583,13 +584,13 @@ TEST(BatchPointerReset, CancelAsyncResetInvalidatesBatchPointersWithoutPreProble
 // m_batchInitProblem and checks (m_batchInitProblem != &problem) in
 // prepareGPUInputsInternal.  Because p1 and p2 are distinct objects, their
 // addresses differ, so the check fires and re-uploads correctly — no
-// preProblem() needed to make it work.
+// beginProblem() needed to make it work.
 //
 // This test therefore fails with the boolean implementation and passes after
 // the pointer-identity fix.  It is the regression test for the structural
 // guarantee, not just the call-site-discipline guarantee.
 // ---------------------------------------------------------------------------
-TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
+TEST(BatchPointerReset, StructuralReinitWithoutBeginProblem)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
@@ -613,7 +614,7 @@ TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
     // First call: slow path — initialises batch pointers for p1.
     dataInit.prepareGPUInputs(p1);
 
-    // Second call: switch to p2 WITHOUT calling preProblem().
+    // Second call: switch to p2 WITHOUT calling beginProblem().
     // The structural pointer-identity check must detect the different problem
     // object and re-upload batch pointers for p2.
     auto inputs2 = dataInit.prepareGPUInputs(p2);
@@ -630,7 +631,7 @@ TEST(BatchPointerReset, StructuralReinitWithoutPreProblem)
     ptrdiff_t expected = ptrdiff_t(64 * 64); // p2's aStride in bytes
     EXPECT_EQ(stride, expected)
         << "Batch pointer stride must match p2 (" << expected
-        << " bytes) even without an intervening preProblem() call. "
+        << " bytes) even without an intervening beginProblem() call. "
            "Got " << stride << ". This means initializeGPUBatchedInputs was "
            "skipped — the structural pointer-identity guard is missing.";
 }

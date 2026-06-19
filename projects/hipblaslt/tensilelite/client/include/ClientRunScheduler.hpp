@@ -58,7 +58,7 @@ namespace TensileLite
         public:
             virtual ~RunDataCoordinator() = default;
 
-            virtual void cancelAsyncReset() = 0;
+            virtual void resetPreparedSlotsForProblem() = 0;
             virtual std::shared_ptr<ProblemInputs>
                 prepareGPUInputs(ContractionProblem const* problem) = 0;
             virtual std::vector<std::shared_ptr<ProblemInputs>>
@@ -66,8 +66,8 @@ namespace TensileLite
                                          ContractionProblem const*      problem,
                                          std::shared_ptr<ProblemInputs> inputs,
                                          hipStream_t                    stream) = 0;
-            virtual void waitCopyDone(hipStream_t stream) = 0;
-            virtual void beginAsyncReset(ContractionProblem const* problem) = 0;
+            virtual void waitForPreparedSlot(hipStream_t stream) = 0;
+            virtual void primeNextInputSlot(ContractionProblem const* problem) = 0;
         };
 
         class RunSolutionSource
