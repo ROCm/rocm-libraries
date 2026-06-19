@@ -26,8 +26,6 @@ cmd = [
     "--test-dir",
     f"{THEROCK_BIN_DIR}/hip_kernel_provider",
     "--output-on-failure",
-    "--parallel",
-    "8",
     "--timeout",
     "600",
 ]

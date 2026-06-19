@@ -20,8 +20,6 @@ cmd = [
     "--test-dir",
     f"{THEROCK_BIN_DIR}/hipblaslt_plugin",
     "--output-on-failure",
-    "--parallel",
-    "8",
     "--timeout",
     "600",
 ]
