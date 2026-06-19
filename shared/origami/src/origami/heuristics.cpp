@@ -162,7 +162,7 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
 
   // Compute arithmetic intensity for this specific problem
-  double arith     = emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
+  double arith     = gemm::emulated_tf32_arithmetic_intensity(M, N, K, static_cast<double>(a_bytes));
   double threshold = heuristic_defaults_t::TF32_ARITH_INTENSITY_THRESHOLD;
 
   // Custom kernel optimizations based on transpose mode and tile config
