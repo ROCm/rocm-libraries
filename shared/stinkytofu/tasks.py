@@ -32,15 +32,19 @@ def _check_venv():
         )
 
 
-def cmake_build_args(install_prefix=None, tests=False, python=False, examples=False):
+def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
     """Canonical cmake args for a stinkytofu build.
 
     Single source of truth for build flags — import this in downstream tasks
     (e.g. tensilelite/tasks.py) so a new required option only needs to be
     added here.
+
+    Defaults reflect the full standalone/CI build (tests, python, examples all
+    ON, shared library). Downstream callers that integrate stinkytofu (rocisa)
+    pass tests=False, python=False explicitly.
     """
     args = [
-        "-DBUILD_SHARED_LIBS=ON",
+        f"-DBUILD_SHARED_LIBS={'ON' if shared else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
         f"-DSTINKYTOFU_BUILD_EXAMPLES={'ON' if examples else 'OFF'}",
@@ -238,12 +242,7 @@ def build(
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
-        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
-        # Standalone dev build: build the example plugins (demo + exercised by the
-        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
-        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
+        *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
     ]

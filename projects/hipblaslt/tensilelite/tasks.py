@@ -122,8 +122,8 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
         f"-DROCM_PATH={rocm_s}",
         f"-DCMAKE_CXX_COMPILER={_cxx}",
         f"-DCMAKE_C_COMPILER={_cc}",
-        # examples=True: exercise the installed plugin tree (only delta from TheRock).
-        *st.cmake_build_args(install_prefix=install_prefix, examples=True),
+        # tests/python OFF for the rocisa integration build; examples ON (default).
+        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
     ]
     if shutil.which("ninja"):
         cmake_cmd.append("-G Ninja")
