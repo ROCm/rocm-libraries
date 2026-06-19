@@ -209,6 +209,14 @@ void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                            uint32_t numDeviceBuffers,
                            void* workspace) const
 {
+    // getWorkspaceSize() always reports a non-zero size for MX GEMM (the scale
+    // transpose region is reserved unconditionally), so a null workspace here is
+    // a caller contract violation. Validate before dereferencing it below.
+    PLUGIN_THROW_IF_TRUE(workspace == nullptr,
+                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                         "MxMatmulPlan::execute: workspace is null but MX GEMM requires a "
+                         "non-zero workspace (see getWorkspaceSize())");
+
     auto aBuffer
         = hipblaslt_utils::findDeviceBuffer(_params.a().uid(), deviceBuffers, numDeviceBuffers);
     auto bBuffer

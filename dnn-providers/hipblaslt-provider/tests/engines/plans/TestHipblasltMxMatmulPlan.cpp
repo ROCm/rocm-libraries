@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -201,4 +202,21 @@ TEST_F(TestGpuMxMatmulPlan, PlanReturnsValidWorkspaceSize)
     MxMatmulPlan const plan(_handle, std::move(params));
 
     EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
+}
+
+// execute() must reject a null workspace: MX GEMM always reports a non-zero
+// workspace size (the reserved scale-transpose region), so a null pointer is a
+// caller contract violation. The check runs before any device-buffer access, so
+// no real buffers are needed here.
+TEST_F(TestGpuMxMatmulPlan, ExecuteThrowsOnNullWorkspace)
+{
+    auto fb = createValidMxMatmulGraph();
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const auto attrs = getMxNodeAttrs(graph);
+
+    MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
+    MxMatmulPlan const plan(_handle, std::move(params));
+
+    EXPECT_THROW(plan.execute(_handle, nullptr, 0, nullptr),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
