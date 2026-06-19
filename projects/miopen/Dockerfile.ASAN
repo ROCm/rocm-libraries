@@ -137,6 +137,7 @@ RUN pip install -r requirements.txt
 FROM base AS therock_prebuilt
 
 ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+ARG AMDGPU_TARGETS="gfx942,gfx942:xnack+"
 ARG ASAN_ARTIFACTS_RUN_ID=25414061404
 ARG BUILD_JOBS=0
 
@@ -149,6 +150,7 @@ RUN . /opt/venv/bin/activate && \
     python build_tools/install_rocm_from_artifacts.py \
         --run-id ${ASAN_ARTIFACTS_RUN_ID} \
         --amdgpu-family ${AMDGPU_FAMILIES} \
+        --amdgpu-targets ${AMDGPU_TARGETS} \
         --tests \
         --output-dir ${ROCM_PATH}
 
@@ -254,14 +256,18 @@ ARG AMDGPU_FAMILIES=gfx94X-dcgpu
 # ASAN runtime environment — must match what the instrumented binaries expect
 ENV ROCM_PATH=/opt/rocm
 ENV PATH="${ROCM_PATH}/bin:${PATH}"
+ENV ROCM_LLVM_PATH="${ROCM_PATH}/lib/llvm"
+ENV HIP_DEVICE_LIB_PATH="${ROCM_LLVM_PATH}/amdgcn/bitcode"
 ENV HIP_PATH=${ROCM_PATH}
 ENV HIP_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
-ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib/clang/22/lib/linux:${LD_LIBRARY_PATH}"
-ENV LIBRARY_PATH="${ROCM_PATH}/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_LLVM_PATH}/lib/clang/23/lib/linux:${LD_LIBRARY_PATH}
+ENV LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_LLVM_PATH}/lib/clang/23/lib/linux:${LIBRARY_PATH}
 ENV ROCM_DEVICE_LIB_PATH="${HIP_DEVICE_LIB_PATH}"
-ENV CPLUS_INCLUDE_PATH="${ROCM_PATH}/include:${CPLUS_INCLUDE_PATH}"
-ENV CPATH="${ROCM_PATH}/include:${CPATH}"
-ENV ASAN_SYMBOLIZER_PATH="${ROCM_PATH}/llvm/bin/llvm-symbolizer"
+ENV INC=${ROCM_PATH}/include
+ENV CPLUS_INCLUDE_PATH=${INC}:${CPLUS_INCLUDE_PATH}
+ENV CPATH=${INC}:${CPATH}
+ENV CXXFLAGS="-isystem ${INC} ${CXXFLAGS}"
+ENV CPPFLAGS="-isystem ${INC} ${CPPFLAGS}"ENV ASAN_SYMBOLIZER_PATH="${ROCM_PATH}/llvm/bin/llvm-symbolizer"
 ENV ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600
 ENV HSA_XNACK=1
 ENV AMD_LOG_LEVEL=1
@@ -269,6 +275,7 @@ ENV AMD_LOG_LEVEL=1
 ENV OUTPUT_ARTIFACTS_DIR=${ROCM_PATH}
 ENV THEROCK_BIN_DIR="${ROCM_PATH}/bin"
 ENV AMDGPU_FAMILIES=${AMDGPU_FAMILIES}
+ENV AMDGPU_TARGETS=gfx942:xnack+
 ENV TEST_TYPE=full
 ENV HIP_PLATFORM=amd
 
