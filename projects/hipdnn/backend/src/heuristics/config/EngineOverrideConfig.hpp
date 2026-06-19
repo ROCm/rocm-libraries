@@ -194,9 +194,9 @@ public:
 
     explicit EngineOverrideConfig(std::vector<OperationRule> rules)
     {
-        for(size_t i = 0; i < rules.size(); ++i)
+        for(auto& rule : rules)
         {
-            indexRule(std::move(rules[i]), i);
+            indexRule(std::move(rule));
         }
     }
 
@@ -372,7 +372,7 @@ private:
         return EngineOverrideConfig(std::move(rules));
     }
 
-    void indexRule(OperationRule rule, size_t /*order*/)
+    void indexRule(OperationRule rule)
     {
         normalizeRule(rule);
         const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameOrIdToId(rule.engineName);
