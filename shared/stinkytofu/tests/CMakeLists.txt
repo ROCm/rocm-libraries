@@ -56,6 +56,8 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/SwPrefetchInsertionPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
+    unit/asm/StinkyModifiersTest.cpp
+    unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp

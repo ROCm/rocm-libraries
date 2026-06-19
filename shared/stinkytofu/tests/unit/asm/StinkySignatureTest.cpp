@@ -36,7 +36,7 @@ using namespace stinkytofu;
 
 TEST(StinkySignatureHelpers, IsaVersionToGfx) {
     EXPECT_EQ(isaVersionToGfx({12, 5, 0}), "gfx1250");
-    EXPECT_EQ(isaVersionToGfx({9, 0, 10}), "gfx90a");  // digits, not hex
+    EXPECT_EQ(isaVersionToGfx({9, 0, 10}), "gfx9010");  // stepping formatted as decimal
     EXPECT_EQ(isaVersionToGfx({11, 0, 0}), "gfx1100");
 }
 

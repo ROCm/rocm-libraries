@@ -94,8 +94,8 @@ TEST_F(StinkyRemoveWaitCntPassTest, PreservesNonWaitInstructions) {
     ASSERT_EQ(countInstructions(), 2);
     runPass();
     EXPECT_EQ(countInstructions(), 1);
-    auto& ir = *bb->begin();
-    auto* inst = dyn_cast<StinkyInstruction>(ir.getNodePtr());
+    IRBase& ir = *bb->begin();
+    auto* inst = dyn_cast<StinkyInstruction>(&ir);
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->getHwInstDesc()->unifiedOpcode, GFX::s_nop);
 }

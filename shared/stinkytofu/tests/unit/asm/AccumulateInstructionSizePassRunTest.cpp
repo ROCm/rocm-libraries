@@ -51,10 +51,10 @@ std::unique_ptr<StinkyAsmModule> makeModule() {
     return std::make_unique<StinkyAsmModule>("test", kArch, opts);
 }
 
-Function makeFunc() {
-    Function func("f");
-    BasicBlock* bb = func.createBasicBlock("entry");
+std::unique_ptr<Function> makeFunc() {
+    auto func = std::make_unique<Function>("f");
     GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    BasicBlock* bb = func->createBasicBlock("entry");
     AsmIRBuilder builder(*bb, arch);
     builder.create(getMCIDByUOp(GFX::s_nop, arch));
     builder.create(getMCIDByUOp(GFX::s_nop, arch));
@@ -66,7 +66,7 @@ Function makeFunc() {
 class AccumulateInstructionSizePassRunTest : public ::testing::Test {
    protected:
     void SetUp() override {
-        func = std::make_unique<Function>(makeFunc());
+        func = makeFunc();
         debugPath = (fs::temp_directory_path() / "stinkytofu_accum_debug.txt").string();
     }
 

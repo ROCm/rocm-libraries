@@ -37,12 +37,10 @@ using namespace stinkytofu::test;
 
 namespace {
 
-Function makeLogicalFunc(const char* name = "f") {
-    Function func(name);
+void populateLogicalFunc(Function& func) {
     BasicBlock* bb = func.createBasicBlock("entry");
     StinkyRegister v0 = vgpr(0), v1 = vgpr(1), v2 = vgpr(2);
     bb->appendIR(static_cast<IRBase*>(VAddU32(v0, v1, v2)));
-    return func;
 }
 
 }  // namespace
@@ -61,7 +59,8 @@ TEST(LogicalIRVerifierTest, FunctionWithNoInstructionsReturnsError) {
 }
 
 TEST(LogicalIRVerifierTest, ValidLogicalIRReturnsEmpty) {
-    Function func = makeLogicalFunc();
+    Function func("f");
+    populateLogicalFunc(func);
     std::string err = validateLogicalIR(func);
     EXPECT_TRUE(err.empty()) << "Unexpected error: " << err;
 }
@@ -84,7 +83,8 @@ TEST(LogicalIRVerifierTest, MixedIRReturnsError) {
 }
 
 TEST(LogicalIRVerifierTest, VerboseModeDoesNotCrash) {
-    Function func = makeLogicalFunc();
+    Function func("f");
+    populateLogicalFunc(func);
     LogicalIRVerifierConfig cfg;
     cfg.verbose = true;
     std::string err = validateLogicalIR(func, cfg);
@@ -92,7 +92,8 @@ TEST(LogicalIRVerifierTest, VerboseModeDoesNotCrash) {
 }
 
 TEST(LogicalIRVerifierTest, PassRunsSuccessfullyOnValidIR) {
-    Function func = makeLogicalFunc();
+    Function func("f");
+    populateLogicalFunc(func);
     LogicalIRVerifierConfig cfg;
     cfg.abortOnError = false;
     LogicalIRVerifierPass pass(cfg);
