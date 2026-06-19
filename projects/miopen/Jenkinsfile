@@ -272,7 +272,9 @@ def cleanupAsanImage() {
 def runAsanTests(String gpuLabel, String gfxFamily) {
     withWorkingDir {
         def variant = env.STAGE_NAME
-        def asanImage = env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE : "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
+        def asanImage = params.ASAN_IMAGE_OVERRIDE?.trim() ? params.ASAN_IMAGE_OVERRIDE
+                      : env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE
+                      : "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
         def video_id = sh(returnStdout: true, script: 'getent group video | cut -d: -f3').trim()
         def render_id = sh(returnStdout: true, script: 'getent group render | cut -d: -f3').trim()
         def dockerOpts = "--user root " +
@@ -581,6 +583,9 @@ pipeline {
         string(name: "DOCKER_IMAGE_OVERRIDE",
             defaultValue: '',
             description: "Specify a custom Docker image to use for CI for debugging")
+        string(name: "ASAN_IMAGE_OVERRIDE",
+            defaultValue: '',
+            description: "Specify a custom ASAN Docker image to use instead of rocm/miopen-dev:asan (for debugging)")
         booleanParam(
             name: "USE_SCCACHE_DOCKER",
             defaultValue: true,
