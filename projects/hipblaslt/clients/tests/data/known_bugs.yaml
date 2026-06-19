@@ -32,4 +32,8 @@ Known bugs:
   # This is a distinct defect from ROCM-25793 (verified: PR #8480 does not fix it).
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
+  #
+  # Two-PR known-bug flow (W-KNOWN-BUG): PR1 = this reproducer + quarantine;
+  # PR2 = the output-store fix that deletes this entry. Time-box: tracked by
+  # ROCM-26455; re-evaluate by the next hipBLASLt release if still unfixed.
   - { name: matmul_size_t_output_overflow_bf16_ROCM26455, function: matmul, known_bug_platforms: "gfx942, gfx950" }
