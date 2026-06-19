@@ -2478,7 +2478,7 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
         from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapWaitAlu, setMatrixAReuse, insertWmmaSrcWarWaitAlu)
+            insertLRSwapWaitAlu, setMatrixAReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -2537,12 +2537,12 @@ class LogicalScheduler:
         module = insertLRSwapWaitAlu(module, writer, kernel)
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
         module = setMatrixAReuse(module, writer, kernel)
-        # PGR=0 reuses one VGPR tile set, so the next reload can overwrite tiles
-        # the previous WMMAs still read; expert scheduling mode disables the
-        # hardware check for this, so add the waits.  PGR>=1 double-buffers and
-        # is unaffected.
+        # PGR=0 reuses one LR offset set every iteration, so the swap v_xor can
+        # overwrite an offset VGPR while an in-flight ds_read still uses it as
+        # its address; expert scheduling mode disables the hardware check for
+        # this WAR.  PGR>=1 double-buffers the offsets and is unaffected.
         if self.config.pgr == 0 and label.startswith("MAINLOOP"):
-            module = insertWmmaSrcWarWaitAlu(module, writer, kernel)
+            module = insertLRSwapWarWaitAlu(module, writer, kernel)
         return module
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):

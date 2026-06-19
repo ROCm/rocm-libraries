@@ -92,21 +92,28 @@ def insertLRSwapWaitAlu(module, writer, kernel):
   return result
 
 
-def insertWmmaSrcWarWaitAlu(module, writer, kernel):
-  """Wait for WMMA source reads before a ds_load reloads the same VGPRs.
+def insertLRSwapWarWaitAlu(module, writer, kernel):
+  """Guard the ds_read -> LR offset-swap WAR hazard.
 
-  PGR=0 reuses one VGPR tile set every iteration, so the next ds_load can
-  overwrite tiles the previous WMMAs are still reading.  Expert scheduling mode
-  disables the hardware check that would catch this, so insert the wait before
-  each ds_load.  No-op unless expert scheduling mode is active.
+  A ds_read uses an LR offset VGPR as its address source; the swap v_xor then
+  overwrites that same VGPR.  The address read is tracked by VM_VSRC, so the
+  xor must not overwrite the offset until the outstanding reads have drained.
+  In SCHED_MODE 2 the hardware no longer enforces this, and with PGR=0 (one
+  offset set, reloaded every iteration) the xor can outrun the reads.  One
+  SWaitAlu(vm_vsrc=0) drains all pending address reads, so a single wait ahead
+  of each consecutive swap-xor block is sufficient.  No-op unless SCHED_MODE 2
+  (HasWmmaArbStallBit) is active.  Returns a rebuilt Module.
   """
   if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
     return module
 
   result = Module(module.name)
+  prevWasSwap = False
   for inst in module.flatitems():
-    if isinstance(inst, LocalReadInstruction):
+    isSwap = isinstance(inst, VXorB32)
+    if isSwap and not prevWasSwap:
       result.add(SWaitAlu(vm_vsrc=0,
-                          comment="wait for WMMA src read before LDS reload (WAR)"))
+                          comment="wait for LR offset read before swap (WAR)"))
+    prevWasSwap = isSwap
     result.add(inst)
   return result
