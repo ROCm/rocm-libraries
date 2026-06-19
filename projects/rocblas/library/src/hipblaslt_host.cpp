@@ -147,6 +147,9 @@ namespace
     template <>
     constexpr auto hipblaslt_scaletype<rocblas_bfloat16> = HIP_R_32F;
 
+    template <>
+    constexpr auto hipblaslt_scaletype<int8_t> = HIP_R_32I;
+
     rocblas_status convertHipblasStatusToRocblasStatus(hipblasStatus_t status)
     {
         switch(status)
