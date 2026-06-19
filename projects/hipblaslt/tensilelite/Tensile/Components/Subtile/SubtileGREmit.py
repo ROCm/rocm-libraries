@@ -936,6 +936,15 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, uidLdsOffset=0, uidGlobal
     # -uidGlobalOffset in m0Imm cancels it out of the LDS dest (= m0 + offset12),
     # leaving the LDS placement identical to S2.
     grOffset12 = offsetK + int(uidGlobalOffset)
+    # D-G: grOffset12 is the 12-bit unsigned MUBUF offset immediate (0..4095).
+    # Today it is tiny (multi-DU: offsetK==0, uidGlobalOffset = uid*dataDUBytes,
+    # so uid_range==2 -> max 128; single-DU: uidGlobalOffset==0). This guard is a
+    # harmless tripwire that fires only if uid_range grows past ~32 or multi-DU
+    # offsetK becomes nonzero, before such a value silently truncates into m0Imm.
+    assert 0 <= grOffset12 <= 4095, (
+        f"grOffset12={grOffset12} exceeds the 12-bit MUBUF offset field "
+        f"(offsetK={offsetK}, uidGlobalOffset={int(uidGlobalOffset)}); the "
+        f"per-uid global term no longer fits offset12 and must move to the SRD.")
     m0Imm = m0Offset - grOffset12 + int(uidLdsOffset)
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=m0Imm))
     mubuf = MUBUFModifiers(offen=True, offset12=grOffset12, glc=isGlc, slc=isSlc, nt=isNT, lds=True)

@@ -2342,6 +2342,15 @@ class LogicalScheduler:
 
         if multiDU:
             for (tensor, uid), gr in last_gr.items():
+                # S4: drop the vestigial per-uid A/B GRIncOps. The data SRD is
+                # advanced exactly once per MT by the macro DU (uid_range *
+                # dataDUBytes), fired on the last uid's GRIncOp
+                # (unrollId == uid_range-1) in emit_gr_inc; earlier-uid A/B
+                # GRIncOps emit no instruction. Keep only that single MT-level
+                # GRIncOp for A/B. Scale (SA/SB) has a single uid and its GRIncOp
+                # (scale ptr update + LDS swap) is unchanged.
+                if tensor in ('A', 'B') and uid != self.config.uid_range - 1:
+                    continue
                 gr.postOps.append(GRIncOp(tensor=tensor, unrollId=uid))
 
         if self.config.pgr == 0:
