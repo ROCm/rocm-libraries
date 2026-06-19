@@ -391,27 +391,43 @@ def test_piap_cluster_dim_default_multicast_false(isa_info_map, hss_state):
     assert state.get("Multicast") is False
 
 
-def test_piap_cluster_barrier_no_cluster_dim_rejects(isa_info_map, hss_state):
-    """ClusterBarrier=True with ClusterDim=[1,1] rejects (lines 894-895)."""
+def test_piap_cluster_barrier_no_cluster_dim_cleared(isa_info_map, hss_state):
+    """ClusterBarrier is derived/cleared, not a rejectable input (lines 949-959).
+
+    ClusterBarrier is no longer validated against the input value; the derivation
+    unconditionally resets Multicast and ClusterBarrier to False, then only re-enables
+    them inside the ``ClusterDim != [1, 1]`` block. With ClusterDim=[1,1] that block is
+    skipped entirely, so a user-supplied ClusterBarrier=True is simply cleared to False
+    and the solution is NOT rejected.
+    """
     state = hss_state
     state["ClusterDim"] = [1, 1]
     state["ClusterBarrier"] = True
     state["TDMInst"] = 1
     state = _reset(state)
     _piap(state, isa_info_map)
-    # ClusterDim=[1,1] + ClusterBarrier=True should reject.
-    assert state.get("Valid") is False
+    assert state.get("Valid") is not False
+    assert state.get("ClusterBarrier") is False
+    assert state.get("Multicast") is False
 
 
-def test_piap_cluster_barrier_no_tdm_rejects(isa_info_map, hss_state):
-    """ClusterBarrier=True with TDMInst=0 rejects (lines 899-900)."""
+def test_piap_cluster_barrier_no_tdm_cleared(isa_info_map, hss_state):
+    """ClusterBarrier stays cleared when TDM is disabled (lines 957-959).
+
+    With ClusterDim=[2,1] the derivation enters the cluster block and sets Multicast,
+    but ClusterBarrier is only re-enabled when ``TDMInst != 0`` (and the ISA has the
+    cluster-barrier cap). With TDMInst=0 the user-supplied ClusterBarrier=True is left
+    cleared to False; the solution is NOT rejected.
+    """
     state = hss_state
     state["ClusterDim"] = [2, 1]
     state["ClusterBarrier"] = True
     state["TDMInst"] = 0
     state = _reset(state)
     _piap(state, isa_info_map)
-    assert state.get("Valid") is False
+    assert state.get("Valid") is not False
+    assert state.get("ClusterBarrier") is False
+    assert state.get("Multicast") is True
 
 
 # ---------------------------------------------------------------------------

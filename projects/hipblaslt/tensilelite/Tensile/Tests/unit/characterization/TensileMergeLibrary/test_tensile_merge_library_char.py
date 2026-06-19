@@ -56,15 +56,22 @@ def test_fix_size_trims_long_format():
     assert n == 1
 
 
-def test_fix_size_dedup_is_broken():
-    # LATENT BUG (pinned): the dedup dict is keyed by `(value for value in size)`
-    # -- a *generator object*, unique per entry -- so duplicates are NEVER merged.
+def test_fix_size_dedup_merges_trimmed_duplicates():
+    """Dedup now merges entries that trim to the same prefix.
+
+    The previous latent bug keyed the dedup dict by ``(value for value in size)``
+    -- a fresh generator object per entry, never equal -- so duplicates were never
+    merged. The fix materializes a tuple key (``tuple(value for value in size)``),
+    so two long-format sizes that both trim to ``[1, 2, 3, 4]`` collapse to one.
+    """
     sizes = [
         [[1, 2, 3, 4, 9, 9, 9, 9], [0, 0.5]],
         [[1, 2, 3, 4, 8, 8, 8, 8], [1, 0.6]],
     ]
     out, n = M.fixSizeInconsistencies(sizes, "base")
-    assert n == 2  # both kept despite trimming to the same prefix
+    assert n == 1
+    assert len(out) == 1
+    assert out[0][0] == [1, 2, 3, 4]
 
 
 # ---------------------------------------------------------------------------

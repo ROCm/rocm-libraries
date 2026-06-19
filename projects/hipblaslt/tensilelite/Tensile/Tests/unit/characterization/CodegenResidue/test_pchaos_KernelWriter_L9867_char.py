@@ -169,9 +169,9 @@ class TestMultipleB32FalseBranch:
 class TestMultipleB32TrueBranch:
     """TRUE branch: enableAsserts=True -> if-block at L9867 is entered.
 
-    The TRUE branch enters the if-block and proceeds to line 9870 where it
+    The TRUE branch enters the if-block and proceeds to line 10816 where it
     uses SAndB64/SAndB32 (imported in the KernelWriter module scope but not
-    in the Assert class namespace).  This causes a NameError at line 9870,
+    in the Assert class namespace).  This causes a NameError at line 10816,
     which is INSIDE the if-block — proving the predicate evaluated True and
     execution proceeded past line 9867.
 
@@ -182,7 +182,7 @@ class TestMultipleB32TrueBranch:
     def test_true_branch_enters_if_block(self):
         """multiple_b32 with enableAsserts=True enters the if-block at L9867.
 
-        Proven by the NameError at L9870 (inside the block), which would not
+        Proven by the NameError at L10816 (inside the block), which would not
         occur if the branch were not taken.
         """
         a = Assert(laneSGPRCount=2, wavefrontSize=64, enableAsserts=True)
@@ -190,25 +190,25 @@ class TestMultipleB32TrueBranch:
             a.multiple_b32(sval=None, multiple2=8, vtmp=None)
 
     def test_true_branch_exception_is_inside_if_block(self):
-        """The NameError originates at KernelWriter.py line 9870 (inside the if-block).
+        """The NameError originates at KernelWriter.py line 10816 (inside the if-block).
 
-        Line 9870 is ``SAndBX = SAndB64 if self.wavefrontSize else SAndB32``.
+        Line 10816 is ``SAndBX = SAndB64 if self.wavefrontSize else SAndB32``.
         It is the first statement INSIDE the if self.enableAsserts: block, so
         reaching it proves the predicate at L9867 evaluated True.
         """
         a = Assert(laneSGPRCount=2, wavefrontSize=64, enableAsserts=True)
         try:
             a.multiple_b32(sval=None, multiple2=8, vtmp=None)
-            pytest.fail("Expected NameError from inside the if-block at L9870")
+            pytest.fail("Expected NameError from inside the if-block at L10816")
         except NameError as exc:
             tb_frames = traceback.extract_tb(exc.__traceback__)
-            # The deepest frame must be inside KernelWriter.py at line 9870
+            # The deepest frame must be inside KernelWriter.py at line 10816
             deepest = tb_frames[-1]
             assert "KernelWriter.py" in deepest.filename, (
                 f"Deepest frame not in KernelWriter.py: {deepest.filename}"
             )
-            assert deepest.lineno == 9870, (
-                f"Expected exception at L9870 (inside if-block), got L{deepest.lineno}"
+            assert deepest.lineno == 10816, (
+                f"Expected exception at L10816 (inside if-block), got L{deepest.lineno}"
             )
 
     def test_derived_from_debug_config_true(self):
