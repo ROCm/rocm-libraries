@@ -170,15 +170,12 @@ P0 subIterK=1:
   [i59] gr
   [i60] m0
   [i61] gr
-  [i61] SAddU32
-  [i62] SAddCU32
   [i62] m0
   [i63] gr
 P0 subIterK=2:
   [i00] wait_lr
-  [i25] wait_gr(vmcnt=0)
-  [i26] sync
-  [i26] lr
+  [i26] wait_gr(vmcnt=0)
+  [i27] sync
   [i27] lr
   [i28] lr
   [i29] lr
@@ -194,22 +191,21 @@ P0 subIterK=2:
   [i39] lr
   [i40] lr
   [i41] lr
-  [i41] m0
-  [i42] gr
-  [i43] m0
-  [i44] gr
-  [i45] m0
-  [i46] gr
-  [i47] m0
-  [i48] gr
-  [i49] m0
-  [i50] gr
-  [i51] m0
-  [i52] gr
-  [i53] m0
-  [i54] gr
-  [i55] SAddU32
-  [i55] SAddCU32
+  [i42] lr
+  [i42] m0
+  [i43] gr
+  [i44] m0
+  [i45] gr
+  [i46] m0
+  [i47] gr
+  [i48] m0
+  [i49] gr
+  [i50] m0
+  [i51] gr
+  [i52] m0
+  [i53] gr
+  [i54] m0
+  [i55] gr
   [i56] TextBlock
   [i56] m0
   [i57] gr
@@ -367,9 +363,7 @@ P0 subIterK=2:
   [i01] m0
   [i02] lr
   [i02] gr
-  [i02] SAddU32
   [i03] lr
-  [i03] SAddCU32
   [i03] m0
   [i04] lr
   [i05] lr
@@ -429,16 +423,14 @@ P1 subIterK=1:
   [i15] SXorB32
 P1 subIterK=2:
   [i00] wait_lr
-  [i09] wait_gr(vmcnt=0)
-  [i10] sync
-  [i10] lr
+  [i10] wait_gr(vmcnt=0)
+  [i11] sync
   [i11] lr
-  [i11] m0
-  [i12] gr
-  [i13] m0
-  [i14] gr
-  [i15] SAddU32
-  [i15] SAddCU32
+  [i12] lr
+  [i12] m0
+  [i13] gr
+  [i14] m0
+  [i15] gr
 P1 subIterK=3:
   [i00] wait_lr
   [i01] wait_gr(vmcnt=0)
