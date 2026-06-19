@@ -165,6 +165,15 @@ struct MmaPipelineBase
         exec(a, b, c);
     }
 
+    // Entry point for dense operations: c = a * b (returns new zero-initialized accumulator).
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE auto operator()(ATensor& a, const BTensor& b) const
+    {
+        typename Derived::CWarpTensor c{};
+        exec(a, b, c);
+        return c;
+    }
+
     template <index_t opselA,
               index_t opselB,
               typename ATensor,
