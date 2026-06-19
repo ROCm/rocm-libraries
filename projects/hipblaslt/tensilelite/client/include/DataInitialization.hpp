@@ -29,6 +29,7 @@
 #include "ProgramOptions.hpp"
 #include "RingPolicy.hpp"
 #include "RingSlotController.hpp"
+#include "GpuInputSlotSet.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -950,6 +951,60 @@ namespace TensileLite
                 // Ring of buffer allocations for multi-buffering
                 std::shared_ptr<void>  buffers[MAX_BUFFER_SETS];
                 std::shared_ptr<void*> batchBufs[MAX_BUFFER_SETS];
+
+                size_t slotCount() const noexcept
+                {
+                    return sizeof(buffers) / sizeof(buffers[0]);
+                }
+
+                std::shared_ptr<void> const& dataBufferForSlot(size_t slot) const
+                {
+                    if(slot >= slotCount())
+                        throw std::out_of_range("MemoryInput data slot out of range.");
+                    return buffers[slot];
+                }
+
+                std::shared_ptr<void>& dataBufferForSlot(size_t slot)
+                {
+                    if(slot >= slotCount())
+                        throw std::out_of_range("MemoryInput data slot out of range.");
+                    return buffers[slot];
+                }
+
+                std::shared_ptr<void*> const& batchBufferForSlot(size_t slot) const
+                {
+                    if(slot >= slotCount())
+                        throw std::out_of_range("MemoryInput batch slot out of range.");
+                    return batchBufs[slot];
+                }
+
+                std::shared_ptr<void*>& batchBufferForSlot(size_t slot)
+                {
+                    if(slot >= slotCount())
+                        throw std::out_of_range("MemoryInput batch slot out of range.");
+                    return batchBufs[slot];
+                }
+
+                void activateSlot(size_t slot)
+                {
+                    current = dataBufferForSlot(slot);
+                    batch   = batchBufferForSlot(slot);
+                }
+
+                void clearAltSlots(size_t firstSlot = 1)
+                {
+                    if(firstSlot == 0)
+                        throw std::invalid_argument(
+                            "MemoryInput::clearAltSlots requires firstSlot >= 1.");
+                    if(firstSlot > slotCount())
+                        throw std::out_of_range("MemoryInput alt slot out of range.");
+
+                    for(size_t slot = firstSlot; slot < slotCount(); ++slot)
+                    {
+                        buffers[slot].reset();
+                        batchBufs[slot].reset();
+                    }
+                }
             };
 
             // Pristine unit for each allocated memory
@@ -1037,44 +1092,6 @@ namespace TensileLite
                 std::map<rocisa::DataType, PristineUnit> pristine;
             };
 
-            // RAII guard: swaps gpuInput.current/batch to a target ring slot
-            // on construction, restores on destruction.  The swap lets fillSlot
-            // reuse copyInputs/resetOutput/initializeGPUBatchedInputs (which all
-            // write to gpuInput.current) without modifying those call paths.
-            class SlotGuard
-            {
-                std::vector<VectorDataInitProperties>& m_vdata;
-                size_t                                 m_slot;
-
-            public:
-                SlotGuard(std::vector<VectorDataInitProperties>& vdata, size_t slot)
-                    : m_vdata(vdata)
-                    , m_slot(slot)
-                {
-                    for(auto& vd : m_vdata)
-                        for(auto& [dt, pu] : vd.pristine)
-                        {
-                            std::swap(pu.gpuInput.current,
-                                      pu.gpuInput.buffers[m_slot]);
-                            std::swap(pu.gpuInput.batch,
-                                      pu.gpuInput.batchBufs[m_slot]);
-                        }
-                }
-                ~SlotGuard()
-                {
-                    for(auto& vd : m_vdata)
-                        for(auto& [dt, pu] : vd.pristine)
-                        {
-                            std::swap(pu.gpuInput.current,
-                                      pu.gpuInput.buffers[m_slot]);
-                            std::swap(pu.gpuInput.batch,
-                                      pu.gpuInput.batchBufs[m_slot]);
-                        }
-                }
-                SlotGuard(const SlotGuard&)            = delete;
-                SlotGuard& operator=(const SlotGuard&) = delete;
-            };
-
             // Properties for each constants (arranged in index)
             struct ConstDataInitProperties
             {
@@ -1109,7 +1126,8 @@ namespace TensileLite
 
             void initializeGPUBatchedInputs(ContractionProblemGemm const& problem,
                                             hipStream_t                   targetStream = nullptr,
-                                            size_t                        stagingBufferSlot = 0);
+                                            size_t                        stagingBufferSlot = 0,
+                                            std::optional<size_t>         gpuTargetSlot = std::nullopt);
 
             void initializeCPUInputs(ContractionProblemGroupedGemm const& problem);
             void initializeCPUInputs(ContractionProblemGemm const& problem);
@@ -1187,9 +1205,11 @@ namespace TensileLite
                                             ContractionProblemGemm const& problem) const;
 
             TensorCopyPlan planInputCopies(ContractionProblemGemm const& problem,
-                                           hipMemcpyKind                 kind) const;
+                                           hipMemcpyKind                 kind,
+                                           std::optional<size_t>         gpuTargetSlot = std::nullopt) const;
             TensorCopyPlan planOutputResetCopyOps(ContractionProblemGemm const& problem,
-                                                  hipMemcpyKind                 kind) const;
+                                                  hipMemcpyKind                 kind,
+                                                  std::optional<size_t>         gpuTargetSlot = std::nullopt) const;
             std::vector<void*> executeTensorCopyPlan(TensorCopyPlan const& plan,
                                                      hipStream_t           d2dStream) const;
             void applyInputCopyPlanResults(TensorCopyPlan const&               plan,
@@ -1215,6 +1235,15 @@ namespace TensileLite
                             hipMemcpyKind                     kind,
                             hipStream_t                       targetStream = nullptr);
 
+            void copyInputsForSlot(std::vector<void*>&               ptrs,
+                                   std::vector<void**>&              batchPtrs,
+                                   std::vector<size_t>&              maxElements,
+                                   std::vector<std::vector<size_t>>& offsets,
+                                   ContractionProblemGemm const&     problem,
+                                   hipMemcpyKind                     kind,
+                                   size_t                            gpuTargetSlot,
+                                   hipStream_t                       targetStream = nullptr);
+
             void resetOutput(std::vector<void*>&               ptrs,
                              std::vector<void**>&              batchPtrs,
                              std::vector<size_t>&              maxElements,
@@ -1222,6 +1251,15 @@ namespace TensileLite
                              ContractionProblemGemm const&     problem,
                              hipMemcpyKind                     kind,
                              hipStream_t                       targetStream = nullptr);
+
+            void resetOutputForSlot(std::vector<void*>&               ptrs,
+                                    std::vector<void**>&              batchPtrs,
+                                    std::vector<size_t>&              maxElements,
+                                    std::vector<std::vector<size_t>>& offsets,
+                                    ContractionProblemGemm const&     problem,
+                                    hipMemcpyKind                     kind,
+                                    size_t                            gpuTargetSlot,
+                                    hipStream_t                       targetStream = nullptr);
 
             template <typename T>
             void setContractionInputs(std::vector<T*>&                      ptrs,
@@ -1262,7 +1300,8 @@ namespace TensileLite
                                    hipMemcpyKind                 copyKind,
                                    hipStream_t                   targetStream,
                                    std::vector<SwizzleUpload>*   swizzleStaging,
-                                   bool                          refreshRotatingMode1);
+                                   bool                          refreshRotatingMode1,
+                                   std::optional<size_t>         gpuTargetSlot = std::nullopt);
 
             void fillSlot(size_t                       slotIdx,
                           ContractionProblemGemm const& problem,
@@ -1391,10 +1430,8 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
-            // Ring of buffer sets
-            std::vector<void*>             m_gpuPtrsRing[MAX_BUFFER_SETS];
-            std::vector<void**>            m_gpuBatchPtrsRing[MAX_BUFFER_SETS];
-            std::shared_ptr<ProblemInputs> m_cachedInputsRing[MAX_BUFFER_SETS];
+            // Ring slot storage for GPU input metadata.
+            GpuInputSlotSet<MAX_BUFFER_SETS> m_gpuInputSlots;
             // Per-ring-slot host staging for async swizzle uploads.
             std::vector<SwizzleUpload>     m_swizzleUploadStaging[MAX_BUFFER_SETS];
 

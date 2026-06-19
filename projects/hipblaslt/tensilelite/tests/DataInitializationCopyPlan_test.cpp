@@ -61,6 +61,16 @@ namespace
             return m_groupedOffsets;
         }
 
+        bool altSlotsReady() const
+        {
+            return m_altSlotsReady;
+        }
+
+        auto const& slotState(size_t slot) const
+        {
+            return m_gpuInputSlots.at(slot);
+        }
+
         PristineUnit const& pristineUnit(size_t tensorIndex,
                                          ContractionProblemGemm const& problem) const
         {
@@ -98,6 +108,11 @@ namespace
                                                      "num-elements-to-validate",
                                                      std::any(int(1)));
         return args;
+    }
+
+    Client::po::variables_map makeRingArgs(std::vector<std::vector<size_t>> problemSizes)
+    {
+        return TensileLite::testing::buildRingArgs(std::move(problemSizes), 1);
     }
 
     Client::po::variables_map makeGuardPageBackArgs(std::vector<std::vector<size_t>> problemSizes,
@@ -472,4 +487,122 @@ TEST(DataInitializationCopyPlan, OutputResetPlanOnlyTargetsOutputs)
     EXPECT_EQ(dataInit.gpuBatchPtrs(), expectedBatchPtrs);
     EXPECT_EQ(dataInit.maxElements(), expectedMax);
     EXPECT_EQ(dataInit.groupedOffsets(), expectedOffsets);
+}
+
+TEST(DataInitializationCopyPlan, InputPlanUsesDefaultAndExplicitGpuSlots)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeRingArgs({{32, 24, 4, 16}});
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.altSlotsReady());
+
+    auto const& slot0 = dataInit.slotState(0);
+    auto const& slot1 = dataInit.slotState(1);
+    ASSERT_TRUE(slot0.populated());
+    ASSERT_TRUE(slot1.populated());
+
+    auto const defaultPlan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
+    auto const explicitPlan
+        = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice, 1);
+
+    ASSERT_EQ(defaultPlan.opsByTensor.size(), problem.tensors().size());
+    ASSERT_EQ(explicitPlan.opsByTensor.size(), problem.tensors().size());
+
+    for(size_t i = 0; i < problem.tensors().size(); ++i)
+    {
+        auto const& maybeDefault = defaultPlan.opsByTensor[i];
+        auto const& maybeExplicit = explicitPlan.opsByTensor[i];
+        ASSERT_TRUE(maybeDefault.has_value());
+        ASSERT_TRUE(maybeExplicit.has_value());
+
+        auto const& opDefault  = *maybeDefault;
+        auto const& opExplicit = *maybeExplicit;
+        auto const& pristine   = dataInit.pristineUnit(i, problem);
+
+        EXPECT_EQ(opDefault.dst, slot0.ptrs.at(i));
+        EXPECT_EQ(opDefault.dst, pristine.gpuInput.current.get());
+        EXPECT_EQ(opDefault.src, pristine.gpuInput.valid.get());
+        EXPECT_EQ(opDefault.batchPtr, slot0.batchPtrs.at(i));
+        EXPECT_EQ(opDefault.batchPtr, pristine.gpuInput.batch.get());
+
+        EXPECT_EQ(opExplicit.dst, slot1.ptrs.at(i));
+        EXPECT_EQ(opExplicit.src, pristine.gpuInput.valid.get());
+        EXPECT_EQ(opExplicit.batchPtr, slot1.batchPtrs.at(i));
+        EXPECT_NE(opExplicit.dst, opDefault.dst);
+        EXPECT_NE(opExplicit.batchPtr, opDefault.batchPtr);
+    }
+}
+
+TEST(DataInitializationCopyPlan, OutputResetPlanUsesDefaultAndExplicitGpuSlots)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeRingArgs({{32, 24, 4, 16}});
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.altSlotsReady());
+
+    auto const& slot0 = dataInit.slotState(0);
+    auto const& slot1 = dataInit.slotState(1);
+    ASSERT_TRUE(slot0.populated());
+    ASSERT_TRUE(slot1.populated());
+
+    auto const defaultPlan = dataInit.planOutputResetCopyOps(problem, hipMemcpyDeviceToDevice);
+    auto const explicitPlan
+        = dataInit.planOutputResetCopyOps(problem, hipMemcpyDeviceToDevice, 1);
+
+    ASSERT_EQ(defaultPlan.opsByTensor.size(), problem.tensors().size());
+    ASSERT_EQ(explicitPlan.opsByTensor.size(), problem.tensors().size());
+
+    for(size_t i = 0; i < problem.tensors().size(); ++i)
+    {
+        auto const& desc = problem.tensors().at(i);
+        auto const& maybeDefault = defaultPlan.opsByTensor[i];
+        auto const& maybeExplicit = explicitPlan.opsByTensor[i];
+
+        if(!desc.isOutput())
+        {
+            EXPECT_FALSE(maybeDefault.has_value());
+            EXPECT_FALSE(maybeExplicit.has_value());
+            continue;
+        }
+
+        ASSERT_TRUE(maybeDefault.has_value());
+        ASSERT_TRUE(maybeExplicit.has_value());
+
+        auto const& opDefault  = *maybeDefault;
+        auto const& opExplicit = *maybeExplicit;
+        auto const& pristine   = dataInit.pristineUnit(i, problem);
+
+        EXPECT_EQ(opDefault.dst, slot0.ptrs.at(i));
+        EXPECT_EQ(opDefault.src, pristine.gpuInput.valid.get());
+        EXPECT_EQ(opDefault.batchPtr, slot0.batchPtrs.at(i));
+        EXPECT_EQ(opDefault.batchPtr, pristine.gpuInput.batch.get());
+
+        EXPECT_EQ(opExplicit.dst, slot1.ptrs.at(i));
+        EXPECT_EQ(opExplicit.src, pristine.gpuInput.valid.get());
+        EXPECT_EQ(opExplicit.batchPtr, slot1.batchPtrs.at(i));
+        EXPECT_NE(opExplicit.dst, opDefault.dst);
+        EXPECT_NE(opExplicit.batchPtr, opDefault.batchPtr);
+    }
 }

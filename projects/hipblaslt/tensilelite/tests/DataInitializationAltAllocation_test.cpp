@@ -52,8 +52,9 @@ namespace
 
             for(size_t slot = 1; slot < MAX_BUFFER_SETS; ++slot)
             {
-                if(!m_gpuPtrsRing[slot].empty() || !m_gpuBatchPtrsRing[slot].empty()
-                   || m_cachedInputsRing[slot])
+                auto const& slotState = m_gpuInputSlots.at(slot);
+                if(slotState.populated() || !slotState.batchPtrs.empty()
+                   || slotState.cachedInputs)
                     return false;
             }
 

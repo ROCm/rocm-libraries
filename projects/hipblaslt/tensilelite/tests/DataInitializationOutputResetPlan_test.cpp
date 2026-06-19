@@ -163,14 +163,19 @@ namespace
             return m_ring.nextPrimeSlot();
         }
 
+        auto const& ringSlot(size_t slot) const
+        {
+            return m_gpuInputSlots.at(slot);
+        }
+
         void* ringTensorPtr(size_t slot, size_t tensorIndex) const
         {
-            return m_gpuPtrsRing[slot].at(tensorIndex);
+            return ringSlot(slot).ptrs.at(tensorIndex);
         }
 
         void* ringBatchPtr(size_t slot, size_t tensorIndex) const
         {
-            return m_gpuBatchPtrsRing[slot].at(tensorIndex);
+            return ringSlot(slot).batchPtrs.at(tensorIndex);
         }
 
         void setAltSlotsReady(bool value)
