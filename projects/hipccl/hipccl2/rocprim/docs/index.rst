@@ -37,7 +37,7 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
   .. grid-item-card:: Reference
 
     * :ref:`glossary`
-    * :ref:`data-type-support`
+    * :ref:`rocprim-data-type-support`
     * :ref:`reference`
 
       * :ref:`Iterators <iterators>` 

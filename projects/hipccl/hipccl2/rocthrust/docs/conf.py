@@ -22,7 +22,7 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-extensions = ["rocm_docs", "rocm_docs.doxygen"]
+extensions = ["rocm_docs", "rocm_docs.doxygen", "sphinxcontrib.datatemplates"]
 html_theme = "rocm_docs_theme"
 html_theme_options = {"flavor": "rocm"}
 
@@ -34,4 +34,12 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
-cpp_id_attributes = ["__device__", "__host__", "THRUST_HOST_DEVICE", "THRUST_HOST", "THRUST_DEVICE", "THRUST_SUPPRESS_DEPRECATED_PUSH", "THRUST_CONSTEXPR_SINCE_CXX23"]
+cpp_id_attributes = [
+    "__device__",
+    "__host__",
+    "THRUST_HOST_DEVICE",
+    "THRUST_HOST",
+    "THRUST_DEVICE",
+    "THRUST_SUPPRESS_DEPRECATED_PUSH",
+    "THRUST_CONSTEXPR_SINCE_CXX23",
+]
