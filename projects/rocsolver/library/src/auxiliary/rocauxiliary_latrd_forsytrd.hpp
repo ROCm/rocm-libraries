@@ -80,8 +80,21 @@ static inline __device__ rocblas_double_complex nontemporal_load(rocblas_double_
 static inline __device__ rocblas_float_complex nontemporal_load(rocblas_float_complex const* const p)
 {
     uint64_t const* const __restrict__ p2 = (const uint64_t*)p;
-    float2 const val = (float2)__builtin_nontemporal_load(p2);
-    return (rocblas_float_complex{val.x, val.y});
+    uint64_t const uval = __builtin_nontemporal_load(p2);
+    uint32_t const low_bits = (uint32_t)(uval & 0xFFFFFFFF);
+    uint32_t const high_bits = (uint32_t)(uval >> 32);
+
+    // std::bit_cast in C++20
+    // float const x = std::bit_cast<float>( low_bits );
+    // float const y = std::bit_cast<float>( high_bits );
+
+    // ----------------------------------------------------
+    // __int_as_float is hardware-specific non-portable C++
+    // ----------------------------------------------------
+    float const x = __int_as_float(low_bits);
+    float const y = __int_as_float(high_bits);
+
+    return (rocblas_float_complex{x, y});
 }
 
 static inline __device__ double nontemporal_load(double const* const p)
