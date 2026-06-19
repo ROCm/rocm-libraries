@@ -351,6 +351,9 @@ globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the
 
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
 
+# Enable SQTT markers around mainloop iteration (subtile kernels only).
+globalParameters["EmitMainloopTraceMarker"] = False
+
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
@@ -468,6 +471,7 @@ defaultBenchmarkCommonParameters = [
     {"OptNoLoadLoop": [1]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
+    {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprMXSA": [False]},
