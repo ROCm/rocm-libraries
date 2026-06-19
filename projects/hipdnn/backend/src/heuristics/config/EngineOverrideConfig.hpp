@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -53,29 +54,19 @@ struct TensorPattern
         {
             return false;
         }
-        for(size_t i = 0; i < dim.size(); ++i)
+
+        const auto matchesElement = [](int64_t expected, int64_t actual) {
+            return expected == WILDCARD_DIM || expected == actual;
+        };
+        if(!std::equal(dim.begin(), dim.end(), tdim.begin(), matchesElement))
         {
-            if(dim[i] != WILDCARD_DIM && dim[i] != tdim[i])
-            {
-                return false;
-            }
+            return false;
         }
-        if(!stride.empty())
-        {
-            const auto& tstride = *tensor.stride;
-            if(stride.size() != tstride.size())
-            {
-                return false;
-            }
-            for(size_t i = 0; i < stride.size(); ++i)
-            {
-                if(stride[i] != WILDCARD_DIM && stride[i] != tstride[i])
-                {
-                    return false;
-                }
-            }
-        }
-        return true;
+
+        const auto& tstride = *tensor.stride;
+        return stride.empty()
+               || (stride.size() == tstride.size()
+                   && std::equal(stride.begin(), stride.end(), tstride.begin(), matchesElement));
     }
 };
 struct Criterion
@@ -101,15 +92,13 @@ struct OperationRule
         {
             return false;
         }
-        for(size_t i = 0; i < criteria.size(); ++i)
-        {
-            if(criteria[i].key != actualCriteria[i].key
-               || criteria[i].value != actualCriteria[i].value)
-            {
-                return false;
-            }
-        }
-        return matchesTensors(inputs);
+        return std::equal(criteria.begin(),
+                          criteria.end(),
+                          actualCriteria.begin(),
+                          [](const Criterion& lhs, const Criterion& rhs) {
+                              return lhs.key == rhs.key && lhs.value == rhs.value;
+                          })
+               && matchesTensors(inputs);
     }
 
 private:
@@ -120,43 +109,27 @@ private:
             return matchesLegacyPositional(inputs);
         }
 
-        std::vector<uint8_t> used(inputs.size(), 0);
-        for(const auto& pattern : tensors)
-        {
-            if(!pattern.tensorId.has_value() || !matchesNamed(pattern, inputs, used))
-            {
-                return false;
-            }
-        }
-        return true;
+        return std::all_of(tensors.begin(), tensors.end(), [&](const TensorPattern& pattern) {
+            return pattern.tensorId.has_value() && matchesNamed(pattern, inputs);
+        });
     }
 
     bool matchesLegacyPositional(const std::vector<TensorView>& inputs) const
     {
-        for(size_t i = 0; i < tensors.size(); ++i)
-        {
-            if(!tensors[i].matches(inputs[i]))
-            {
-                return false;
-            }
-        }
-        return true;
+        return std::equal(tensors.begin(),
+                          tensors.end(),
+                          inputs.begin(),
+                          [](const TensorPattern& pattern, const TensorView& input) {
+                              return pattern.matches(input);
+                          });
     }
 
-    static bool matchesNamed(const TensorPattern& pattern,
-                             const std::vector<TensorView>& inputs,
-                             std::vector<uint8_t>& used)
+    static bool matchesNamed(const TensorPattern& pattern, const std::vector<TensorView>& inputs)
     {
-        for(size_t i = 0; i < inputs.size(); ++i)
-        {
-            if(used[i] == 0 && inputs[i].tensorId == *pattern.tensorId
-               && pattern.matches(inputs[i]))
-            {
-                used[i] = 1;
-                return true;
-            }
-        }
-        return false;
+        const auto it = std::find_if(inputs.begin(), inputs.end(), [&](const TensorView& input) {
+            return input.tensorId == *pattern.tensorId && pattern.matches(input);
+        });
+        return it != inputs.end();
     }
 };
 
@@ -336,8 +309,10 @@ private:
                     rule.criteria.push_back(Criterion{item.key(), item.value().get<int64_t>()});
                 }
             }
-            std::vector<std::string> tensorIds;
-            for(const auto& t : entry.at(config_json::TENSORS))
+            const auto& tensors = entry.at(config_json::TENSORS);
+            std::unordered_set<std::string_view> tensorIds;
+            tensorIds.reserve(tensors.size());
+            for(const auto& t : tensors)
             {
                 TensorPattern pat;
                 if(useNamedTensorIds)
@@ -347,14 +322,14 @@ private:
                         throw nlohmann::json::type_error::create(
                             302, "versioned tensor entry must contain tensor_id", &t);
                     }
-                    auto tensorId = t.at(config_json::TENSOR_ID).get<std::string>();
-                    if(std::find(tensorIds.begin(), tensorIds.end(), tensorId) != tensorIds.end())
+                    const auto& tensorId
+                        = t.at(config_json::TENSOR_ID).get_ref<const std::string&>();
+                    if(!tensorIds.emplace(tensorId.data(), tensorId.size()).second)
                     {
                         throw nlohmann::json::type_error::create(
                             302, "versioned tensor_id entries must be unique", &t);
                     }
-                    tensorIds.push_back(tensorId);
-                    pat.tensorId = std::move(tensorId);
+                    pat.tensorId = tensorId;
                 }
                 else if(t.contains(config_json::TENSOR_ID))
                 {

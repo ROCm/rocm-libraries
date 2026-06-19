@@ -35,6 +35,9 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace hipdnn_frontend
@@ -71,44 +74,48 @@ inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
 namespace detail
 {
 
-inline bool entryUsesNamedTensorIds(const nlohmann::json& entry)
+enum class TensorIdValidationResult
 {
-    if(!entry.contains(config_json::TENSORS) || !entry[config_json::TENSORS].is_array())
+    VALID,
+    MISSING,
+    DUPLICATE
+};
+
+inline TensorIdValidationResult validateTensorIds(size_t tensorCount,
+                                                  const std::vector<std::string>& tensorIds)
+{
+    if(tensorCount == 0 || tensorIds.size() < tensorCount)
     {
-        return false;
+        return TensorIdValidationResult::MISSING;
     }
-    const auto& tensors = entry[config_json::TENSORS];
-    return !tensors.empty()
-           && std::all_of(tensors.begin(), tensors.end(), [](const nlohmann::json& tensor) {
-                  return tensor.contains(config_json::TENSOR_ID);
-              });
+
+    std::unordered_set<std::string_view> seen;
+    seen.reserve(tensorCount);
+    for(size_t i = 0; i < tensorCount; ++i)
+    {
+        const auto& tensorId = tensorIds[i];
+        if(tensorId.empty())
+        {
+            return TensorIdValidationResult::MISSING;
+        }
+        if(!seen.emplace(tensorId.data(), tensorId.size()).second)
+        {
+            return TensorIdValidationResult::DUPLICATE;
+        }
+    }
+
+    return TensorIdValidationResult::VALID;
 }
 
-inline bool entryTensorIdsAreUnique(const nlohmann::json& entry)
+inline std::optional<std::string_view> tensorIdOf(const nlohmann::json& tensor)
 {
-    if(!entry.contains(config_json::TENSORS) || !entry[config_json::TENSORS].is_array())
+    if(!tensor.contains(config_json::TENSOR_ID) || !tensor[config_json::TENSOR_ID].is_string())
     {
-        return false;
+        return std::nullopt;
     }
 
-    const auto& tensors = entry[config_json::TENSORS];
-    for(size_t i = 0; i < tensors.size(); ++i)
-    {
-        if(!tensors[i].contains(config_json::TENSOR_ID)
-           || !tensors[i][config_json::TENSOR_ID].is_string())
-        {
-            return false;
-        }
-        for(size_t j = i + 1; j < tensors.size(); ++j)
-        {
-            if(tensors[j].contains(config_json::TENSOR_ID)
-               && tensors[i][config_json::TENSOR_ID] == tensors[j][config_json::TENSOR_ID])
-            {
-                return false;
-            }
-        }
-    }
-    return true;
+    const auto& tensorId = tensor[config_json::TENSOR_ID].get_ref<const std::string&>();
+    return std::string_view(tensorId.data(), tensorId.size());
 }
 
 inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
@@ -120,49 +127,35 @@ inline nlohmann::json tensorEntryWithoutId(nlohmann::json entry)
 inline bool tensorsMatchByIdIgnoringOrder(const nlohmann::json& existing,
                                           const nlohmann::json& replacement)
 {
-    std::vector<uint8_t> used(existing.size(), 0);
-    for(const auto& replacementTensor : replacement)
+    std::unordered_map<std::string_view, const nlohmann::json*> existingById;
+    existingById.reserve(existing.size());
+    for(const auto& existingTensor : existing)
     {
-        const auto replacementId = replacementTensor.at(config_json::TENSOR_ID).get<std::string>();
-        bool matched = false;
-        for(size_t i = 0; i < existing.size(); ++i)
-        {
-            if(used[i] != 0 || !existing[i].contains(config_json::TENSOR_ID)
-               || existing[i][config_json::TENSOR_ID].get<std::string>() != replacementId)
-            {
-                continue;
-            }
-            if(tensorEntryWithoutId(existing[i]) == tensorEntryWithoutId(replacementTensor))
-            {
-                used[i] = 1;
-                matched = true;
-                break;
-            }
-        }
-        if(!matched)
+        const auto existingId = tensorIdOf(existingTensor);
+        if(!existingId.has_value() || !existingById.emplace(*existingId, &existingTensor).second)
         {
             return false;
         }
     }
-    return true;
+
+    return std::all_of(
+        replacement.begin(), replacement.end(), [&](const nlohmann::json& replacementTensor) {
+            const auto replacementId = tensorIdOf(replacementTensor);
+            if(!replacementId.has_value())
+            {
+                return false;
+            }
+
+            const auto existingIt = existingById.find(*replacementId);
+            return existingIt != existingById.end()
+                   && tensorEntryWithoutId(*existingIt->second)
+                          == tensorEntryWithoutId(replacementTensor);
+        });
 }
 
 inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann::json& replacement)
 {
-    if(!existing.is_array() || !replacement.is_array() || existing.size() != replacement.size())
-    {
-        return false;
-    }
-
-    const bool existingAllNamed
-        = std::all_of(existing.begin(), existing.end(), [](const nlohmann::json& tensor) {
-              return tensor.contains(config_json::TENSOR_ID);
-          });
-    const bool replacementAllNamed
-        = std::all_of(replacement.begin(), replacement.end(), [](const nlohmann::json& tensor) {
-              return tensor.contains(config_json::TENSOR_ID);
-          });
-    return existingAllNamed && replacementAllNamed
+    return existing.is_array() && replacement.is_array() && existing.size() == replacement.size()
            && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
@@ -389,35 +382,33 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
 
         // Build the single new entry from the rank-0 winner (the first succeeded
         // result). Only one entry per (op, tensor shape) is ever produced.
-        std::optional<nlohmann::json> newEntry;
-        for(const auto& result : results)
-        {
-            if(!result.succeeded)
-            {
-                continue;
-            }
-
-            newEntry = buildOverrideEntry(
-                result, opName, tensorDims, tensorStrides, criteria, tensorIds);
-            break; // Only write the rank-0 winner
-        }
-
-        if(!newEntry.has_value())
+        const auto rank0Result
+            = std::find_if(results.begin(), results.end(), [](const AutotuneResult& result) {
+                  return result.succeeded;
+              });
+        if(rank0Result == results.end())
         {
             HIPDNN_FE_LOG_WARN("autotune: no successful results to write");
             return {ErrorCode::OK, ""};
         }
 
-        if(!entryUsesNamedTensorIds(*newEntry))
+        switch(validateTensorIds(tensorDims.size(), tensorIds))
         {
+        case TensorIdValidationResult::VALID:
+            break;
+        case TensorIdValidationResult::MISSING:
             return {ErrorCode::INVALID_VALUE,
                     "AutotuneFileWriter: tensor IDs are required for versioned config files"};
-        }
-        if(!entryTensorIdsAreUnique(*newEntry))
-        {
+        case TensorIdValidationResult::DUPLICATE:
             return {ErrorCode::INVALID_VALUE,
                     "AutotuneFileWriter: tensor IDs must be unique for versioned config files"};
+        default:
+            return {ErrorCode::INVALID_VALUE,
+                    "AutotuneFileWriter: unknown tensor ID validation result"};
         }
+
+        const auto newEntry = buildOverrideEntry(
+            *rank0Result, opName, tensorDims, tensorStrides, criteria, tensorIds);
 
         root[config_json::VERSION] = config_version::CURRENT;
 
@@ -430,23 +421,21 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
 
         if(!overrides.empty())
         {
-            overrides.erase(std::remove_if(overrides.begin(),
-                                           overrides.end(),
-                                           [&](const nlohmann::json& existing) {
-                                               return existing.contains(config_json::OP)
-                                                      && existing[config_json::OP]
-                                                             == (*newEntry)[config_json::OP]
-                                                      && criteriaOrEmpty(existing)
-                                                             == criteriaOrEmpty(*newEntry)
-                                                      && existing.contains(config_json::TENSORS)
-                                                      && tensorSignaturesMatch(
-                                                          existing[config_json::TENSORS],
-                                                          (*newEntry)[config_json::TENSORS]);
-                                           }),
-                            overrides.end());
+            overrides.erase(
+                std::remove_if(overrides.begin(),
+                               overrides.end(),
+                               [&](const nlohmann::json& existing) {
+                                   return existing.contains(config_json::OP)
+                                          && existing[config_json::OP] == newEntry[config_json::OP]
+                                          && criteriaOrEmpty(existing) == criteriaOrEmpty(newEntry)
+                                          && existing.contains(config_json::TENSORS)
+                                          && tensorSignaturesMatch(existing[config_json::TENSORS],
+                                                                   newEntry[config_json::TENSORS]);
+                               }),
+                overrides.end());
         }
 
-        overrides.push_back(*newEntry);
+        overrides.push_back(newEntry);
 
         // Atomic write: write to temp file, then rename.
         // If the process crashes or power is lost between creating the temp file
