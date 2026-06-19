@@ -7,7 +7,6 @@ TestParameters:
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   CMakeBuildType: Release
-  LibraryFormat: msgpack
   EnqueuesPerSync: 1
   SyncsPerBenchmark: 1
   NumElementsToValidate: -1
