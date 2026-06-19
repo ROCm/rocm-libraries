@@ -88,8 +88,8 @@ namespace TensileLite
                 || isMXTensor(problem.b(), problem.mxBlockB()));
         }
 
-        // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
-        // And problem-dept. from 8~15 (values depend on problem)
+        // Problem-independent from 0~7, and 16, and 23~26 (fixed values for every problem)
+        // And problem-dependent from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
         // UniformLowPrecision (27): uniform random in [-maxVal, maxVal] where maxVal is
         //   the maximum representable value of the target type. Only supported for
@@ -250,7 +250,7 @@ namespace TensileLite
    * Returns a ProblemInputs object with pointers to GPU memory,
    * suitable for using to run the kernel.
    */
-            // A temporarily wrapper
+            // Temporary wrapper
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem)
             {
                 if(m_ringPolicy.allowed && m_ring.hasAvailableSlot())
