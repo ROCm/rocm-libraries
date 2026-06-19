@@ -12,7 +12,7 @@ Documentation for rocFFT is available at
 
 ### Optimized
 
-* Made the real-Stockham fusion decision LDS-aware, fusing pre/post-processing into the FFT kernel whenever it fits in local data share. This speeds up even-length real transforms, with larger gains on devices with more LDS.
+* Improved performance of even-length real transforms with real lengths between 512 and 8192, extending to larger lengths (up to around 32768) on devices with more LDS.
 
 ### Changed
 
