@@ -26,7 +26,7 @@ namespace TensileLite::testing
         }
     } // namespace detail
 
-    struct BaseDataInitArgsOptions
+    struct DataInitConfig
     {
         // Must include the largest problem a test later passes to prepareCPUInputs()
         // or prepareGPUInputs(), because ClientProblemFactory sizes allocations from
@@ -90,9 +90,22 @@ namespace TensileLite::testing
         int32_t                       rotatingBufferMode    = 0;
         Client::BoundsCheckMode       boundsCheck           = Client::BoundsCheckMode::Disable;
 
-        int numBenchmarks        = 0;
-        int numEnqueuesPerSync   = 0;
-        int numSyncsPerBenchmark = 0;
+        int    numBenchmarks        = 0;
+        int    numEnqueuesPerSync   = 0;
+        int    maxEnqueuesPerSync   = -1;
+        size_t minFlopsPerSync      = 0;
+        int    numSyncsPerBenchmark = 0;
+        int    numWarmups           = 0;
+
+        bool printValids               = false;
+        int  printMax                  = -1;
+        bool printTensorA              = false;
+        bool printTensorB              = false;
+        bool printTensorC              = false;
+        bool printTensorD              = false;
+        bool printTensorRef            = false;
+        bool printTensorBias           = false;
+        bool printTensorAmaxD          = false;
 
         KernelLanguage    kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric performanceMetric  = PerformanceMetric::DeviceEfficiency;
@@ -119,8 +132,10 @@ namespace TensileLite::testing
         Client::InitMode initBeta         = Client::InitMode::Two;
     };
 
+    using BaseDataInitArgsOptions = DataInitConfig;
+
     inline Client::po::variables_map
-        buildBaseDataInitArgs(BaseDataInitArgsOptions const& options)
+        buildBaseDataInitArgs(DataInitConfig const& options)
     {
         if(options.problemSizes.empty())
         {
@@ -207,6 +222,15 @@ namespace TensileLite::testing
         detail::setDataInitArg(args,
                                "num-elements-to-validate",
                                std::any(options.numElementsToValidate));
+        detail::setDataInitArg(args, "print-valids", std::any(options.printValids));
+        detail::setDataInitArg(args, "print-max", std::any(options.printMax));
+        detail::setDataInitArg(args, "print-tensor-a", std::any(options.printTensorA));
+        detail::setDataInitArg(args, "print-tensor-b", std::any(options.printTensorB));
+        detail::setDataInitArg(args, "print-tensor-c", std::any(options.printTensorC));
+        detail::setDataInitArg(args, "print-tensor-d", std::any(options.printTensorD));
+        detail::setDataInitArg(args, "print-tensor-ref", std::any(options.printTensorRef));
+        detail::setDataInitArg(args, "print-tensor-bias", std::any(options.printTensorBias));
+        detail::setDataInitArg(args, "print-tensor-amaxd", std::any(options.printTensorAmaxD));
         detail::setDataInitArg(args, "pristine-on-gpu", std::any(options.pristineOnGpu));
         detail::setDataInitArg(args, "prune-mode", std::any(options.pruneMode));
         detail::setDataInitArg(args,
@@ -221,8 +245,15 @@ namespace TensileLite::testing
                                "num-enqueues-per-sync",
                                std::any(options.numEnqueuesPerSync));
         detail::setDataInitArg(args,
+                               "max-enqueues-per-sync",
+                               std::any(options.maxEnqueuesPerSync));
+        detail::setDataInitArg(args,
+                               "min-flops-per-sync",
+                               std::any(options.minFlopsPerSync));
+        detail::setDataInitArg(args,
                                "num-syncs-per-benchmark",
                                std::any(options.numSyncsPerBenchmark));
+        detail::setDataInitArg(args, "num-warmups", std::any(options.numWarmups));
 
         detail::setDataInitArg(args, "init-a", std::any(options.initA));
         detail::setDataInitArg(args, "init-b", std::any(options.initB));
@@ -246,9 +277,9 @@ namespace TensileLite::testing
     inline Client::po::variables_map
         buildBaseDataInitArgs(std::vector<std::vector<size_t>> problemSizes)
     {
-        BaseDataInitArgsOptions options;
-        options.problemSizes = std::move(problemSizes);
-        return buildBaseDataInitArgs(options);
+        DataInitConfig config;
+        config.problemSizes = std::move(problemSizes);
+        return buildBaseDataInitArgs(config);
     }
 
     inline Client::po::variables_map

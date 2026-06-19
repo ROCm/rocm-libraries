@@ -11,6 +11,9 @@
 
 namespace
 {
+    static_assert(std::is_same_v<TensileLite::testing::DataInitConfig,
+                                 TensileLite::testing::BaseDataInitArgsOptions>);
+
     template <typename T>
     void expectArgEq(TensileLite::Client::po::variables_map const& args,
                      char const*                                   key,
@@ -49,12 +52,21 @@ namespace
     {
         expectArgEq(args, "num-benchmarks", 0);
         expectArgEq(args, "num-enqueues-per-sync", 0);
+        expectArgEq(args, "max-enqueues-per-sync", -1);
+        expectArgEq(args, "min-flops-per-sync", size_t(0));
         expectArgEq(args, "num-syncs-per-benchmark", 0);
         expectArgEq(args, "num-warmups", 0);
 
         expectArgEq(args, "num-elements-to-validate", elementsToValidate);
         expectArgEq(args, "print-valids", false);
         expectArgEq(args, "print-max", -1);
+        expectArgEq(args, "print-tensor-a", false);
+        expectArgEq(args, "print-tensor-b", false);
+        expectArgEq(args, "print-tensor-c", false);
+        expectArgEq(args, "print-tensor-d", false);
+        expectArgEq(args, "print-tensor-ref", false);
+        expectArgEq(args, "print-tensor-bias", false);
+        expectArgEq(args, "print-tensor-amaxd", false);
 
         expectArgEq(args, "pristine-on-gpu", true);
         expectArgEq(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
@@ -89,6 +101,59 @@ namespace
         expectArgEq(args, "init-mx-b", TensileLite::Client::InitMode::One);
     }
 } // namespace
+
+TEST(BuildBaseDataInitArgs, PopulatesDataInitConfigDefaultsAndOverrides)
+{
+    TensileLite::testing::DataInitConfig config;
+    config.problemSizes       = {{64, 64, 64}};
+    config.numWarmups         = 6;
+    config.maxEnqueuesPerSync = 12;
+    config.minFlopsPerSync    = size_t(34);
+    config.printValids        = true;
+    config.printMax           = 11;
+    config.printTensorD       = true;
+    config.printTensorAmaxD   = true;
+
+    auto args = TensileLite::testing::buildBaseDataInitArgs(config);
+
+    expectArgEq(args, "problem-identifier", std::string("Contraction_l_Alik_Bjlk_Cijk_Dijk"));
+    ASSERT_EQ(args.count("problem-size"), 1u);
+    EXPECT_EQ(args.at("problem-size").as<std::vector<std::vector<size_t>>>(),
+              (std::vector<std::vector<size_t>>{{64, 64, 64}}));
+
+    expectArgEq(args, "type", rocisa::DataType::Float);
+    expectArgEq(args, "a-type", rocisa::DataType::Float);
+    expectArgEq(args, "b-type", rocisa::DataType::Float);
+    expectArgEq(args, "c-type", rocisa::DataType::Float);
+    expectArgEq(args, "d-type", rocisa::DataType::Float);
+    expectArgEq(args, "e-type", rocisa::DataType::None);
+    expectArgEq(args, "amaxD-type", rocisa::DataType::None);
+    expectArgEq(args, "alpha-type", rocisa::DataType::Float);
+    expectArgEq(args, "beta-type", rocisa::DataType::Float);
+
+    expectArgEq(args, "num-benchmarks", 0);
+    expectArgEq(args, "num-enqueues-per-sync", 0);
+    expectArgEq(args, "max-enqueues-per-sync", 12);
+    expectArgEq(args, "min-flops-per-sync", size_t(34));
+    expectArgEq(args, "num-syncs-per-benchmark", 0);
+    expectArgEq(args, "num-warmups", 6);
+
+    expectArgEq(args, "num-elements-to-validate", 0);
+    expectArgEq(args, "print-valids", true);
+    expectArgEq(args, "print-max", 11);
+    expectArgEq(args, "print-tensor-a", false);
+    expectArgEq(args, "print-tensor-b", false);
+    expectArgEq(args, "print-tensor-c", false);
+    expectArgEq(args, "print-tensor-d", true);
+    expectArgEq(args, "print-tensor-ref", false);
+    expectArgEq(args, "print-tensor-bias", false);
+    expectArgEq(args, "print-tensor-amaxd", true);
+
+    expectArgEq(args, "pristine-on-gpu", true);
+    expectArgEq(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
+    expectArgEq(args, "rotating-buffer-size", int32_t(0));
+    expectArgEq(args, "rotating-buffer-mode", int32_t(0));
+}
 
 TEST(BuildRingArgs, ProblemSizesAndCustomBase)
 {
