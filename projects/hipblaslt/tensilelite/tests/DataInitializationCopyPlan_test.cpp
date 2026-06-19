@@ -6,6 +6,7 @@
 #include <any>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationTestUtils.hpp"
+#include "RecordingCopyEngine.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -25,6 +27,7 @@ namespace
 {
     using TensileLite::testing::PlainProblemSpec;
     using TensileLite::testing::makePlainProblem;
+    using TensileLite::testing::RecordingCopyEngine;
 
     class CopyPlanDataInitialization : public DataInitialization
     {
@@ -218,6 +221,103 @@ TEST(DataInitializationCopyPlan, ExecutorPreservesD2DOnlyStreamForwarding)
     EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(h2h, sentinel), nullptr);
     EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(h2d, sentinel), nullptr);
     EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(d2d, sentinel), sentinel);
+}
+
+TEST(DataInitializationCopyPlan, ExecutorSubmitsCopiesThroughRecordingEngine)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeBaseArgs({{32, 24, 4, 16}});
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234)));
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+    engine->clear();
+
+    auto const expectCopies = [&](hipMemcpyKind kind,
+                                  hipStream_t   expectedStream,
+                                  RecordingCopyEngine::CopySubmissionMode expectedMode) {
+        auto const plan = dataInit.planInputCopies(problem, kind);
+        dataInit.executeTensorCopyPlan(plan, expectedStream);
+
+        bool sawCopy = false;
+        for(auto const& call : engine->calls)
+        {
+            if(call.type != RecordingCopyEngine::CallType::Copy)
+                continue;
+            sawCopy = true;
+            EXPECT_EQ(call.copyKind, kind);
+            EXPECT_EQ(call.stream, expectedStream);
+            EXPECT_EQ(call.submissionMode, expectedMode);
+        }
+        EXPECT_TRUE(sawCopy);
+        engine->clear();
+    };
+
+    expectCopies(hipMemcpyHostToHost,
+                 nullptr,
+                 RecordingCopyEngine::CopySubmissionMode::Sync);
+    expectCopies(hipMemcpyHostToDevice,
+                 nullptr,
+                 RecordingCopyEngine::CopySubmissionMode::Sync);
+    expectCopies(hipMemcpyDeviceToDevice,
+                 reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234)),
+                 RecordingCopyEngine::CopySubmissionMode::Async);
+}
+
+TEST(DataInitializationCopyPlan, BadBoundsPlanSubmitsSentinelFillAndValidCopy)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(17, 19, 23, 4);
+    auto args    = makeBaseArgs({{17, 19, 4, 23}});
+    TensileLite::testing::detail::setDataInitArg(args,
+                                                 "bounds-check",
+                                                 std::any(BoundsCheckMode::NaN));
+
+    auto engine = std::make_shared<RecordingCopyEngine>();
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+    engine->clear();
+
+    auto const plan = dataInit.planInputCopies(problem, hipMemcpyHostToDevice);
+    dataInit.executeTensorCopyPlan(plan, nullptr);
+
+    bool sawSentinelFill = false;
+    bool sawValidRegion  = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::Copy)
+            continue;
+
+        EXPECT_EQ(call.copyKind, hipMemcpyHostToDevice);
+        EXPECT_EQ(call.stream, nullptr);
+        if(call.dst == call.src)
+        {
+            sawValidRegion = true;
+            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
+        }
+        else
+        {
+            sawSentinelFill = true;
+            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Sync);
+        }
+    }
+
+    EXPECT_TRUE(sawSentinelFill);
+    EXPECT_TRUE(sawValidRegion);
 }
 
 TEST(DataInitializationCopyPlan, ExecutorReturnsTensorIndexedResults)

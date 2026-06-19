@@ -5,6 +5,7 @@
 
 #include <any>
 #include <cstdint>
+#include <memory>
 
 #include <hip/hip_runtime.h>
 
@@ -14,6 +15,7 @@
 #include "DataInitialization.hpp"
 #include "DataInitializationTestUtils.hpp"
 #include "HipStreamGuard.hpp"
+#include "RecordingCopyEngine.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -22,6 +24,7 @@ namespace
 {
     using TensileLite::testing::HipStreamGuard;
     using TensileLite::testing::makePlainProblem;
+    using TensileLite::testing::RecordingCopyEngine;
 
     class SlotStorageDataInitialization : public DataInitialization
     {
@@ -139,4 +142,84 @@ TEST(DataInitializationSlotStorage, PrimingAltSlotDoesNotMutateActiveAliases)
 
     HipStreamGuard computeStream(hipStreamNonBlocking);
     dataInit.waitForPreparedSlot(computeStream.get());
+}
+
+TEST(DataInitializationSlotStorage, SyncCopyStreamDelegatesToCopyEngine)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto args = makeRingArgs({{32, 32, 32}});
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1357)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    engine->clear();
+    dataInit.syncCopyStream();
+
+    ASSERT_EQ(engine->calls.size(), 1u);
+    EXPECT_EQ(engine->calls[0].type, RecordingCopyEngine::CallType::SynchronizeDefaultStream);
+    EXPECT_EQ(engine->calls[0].stream, engine->stream());
+}
+
+TEST(DataInitializationSlotStorage, RingPrimingAndWaitDelegateThroughCopyEngine)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x4321)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.ringEligible());
+
+    engine->clear();
+
+    dataInit.primeNextInputSlot(&problem);
+    auto const waitStream
+        = reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x8765));
+    dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    dataInit.waitForPreparedSlot(waitStream);
+
+    bool   sawRecord      = false;
+    bool   sawWait        = false;
+    size_t recordIndex    = engine->calls.size();
+    size_t waitIndex      = engine->calls.size();
+    for(size_t i = 0; i < engine->calls.size(); ++i)
+    {
+        auto const& call = engine->calls[i];
+        if(call.type == RecordingCopyEngine::CallType::RecordCopyDone)
+        {
+            sawRecord   = true;
+            recordIndex = i;
+            EXPECT_EQ(call.slot, 1u);
+            EXPECT_EQ(call.stream, engine->stream());
+        }
+        else if(call.type == RecordingCopyEngine::CallType::WaitForCopyDone)
+        {
+            sawWait   = true;
+            waitIndex = i;
+            EXPECT_EQ(call.slot, 1u);
+            EXPECT_EQ(call.computeStream, waitStream);
+        }
+    }
+
+    EXPECT_TRUE(sawRecord);
+    EXPECT_TRUE(sawWait);
+    EXPECT_LT(recordIndex, waitIndex);
 }

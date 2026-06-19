@@ -27,6 +27,7 @@
 #pragma once
 
 #include "ProgramOptions.hpp"
+#include "HipCopyEngine.hpp"
 #include "RingPolicy.hpp"
 #include "RingSlotController.hpp"
 #include "GpuInputSlotSet.hpp"
@@ -43,6 +44,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <memory>
 #include <random>
 #include <stdexcept>
 
@@ -192,7 +194,8 @@ namespace TensileLite
             static double GetRepresentativeBetaValue(po::variables_map const& args);
 
             DataInitialization(po::variables_map const&    args,
-                               ClientProblemFactory const& problemFactory);
+                               ClientProblemFactory const& problemFactory,
+                               std::shared_ptr<CopyEngine> copyEngine = nullptr);
             ~DataInitialization();
 
             /**
@@ -359,7 +362,7 @@ namespace TensileLite
 
             void syncCopyStream();
 
-            // Insert a GPU-side dependency between m_copyStream and computeStream
+            // Insert a GPU-side dependency between the copy engine stream and computeStream
             // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
             void waitForPreparedSlot(hipStream_t computeStream);
             void waitCopyDone(hipStream_t computeStream)
@@ -367,7 +370,7 @@ namespace TensileLite
                 waitForPreparedSlot(computeStream);
             }
 
-            // Prime the next free buffer slot in the ring on m_copyStream.
+            // Prime the next free buffer slot in the ring on the copy engine stream.
             // The caller must waitForPreparedSlot() before using the buffer
             // (done in main.cpp before benchmark_runs).
             void primeNextInputSlot(ContractionProblem const* problem);
@@ -1109,17 +1112,17 @@ namespace TensileLite
             void rollbackAltGPUInputs() noexcept;
 
             // callerOwnsCopySync: when true, the caller owns synchronizing or chaining
-            //   m_copyStream before any consumer uses the copied data. This helper
-            //   always enqueues on m_copyStream when available and does not select a
-            //   caller-provided stream.
+            //   the copy engine stream before any consumer uses the copied data. This
+            //   helper always enqueues on the engine stream when available and does not
+            //   select a caller-provided stream.
             void copyValidToGPUBuffer(ContractionProblemGemm const& problem,
                                       bool                          callerOwnsCopySync = false);
 
             // targetStream: when non-null, swizzle/MX uploads enqueue on targetStream.
             //   Async callers must provide swizzleStaging to keep temporary host sources
             //   alive until the caller-managed stream reaches the recorded event.
-            //   When targetStream is null, m_copyStream is used when available and the
-            //   helper synchronizes before returning.
+            //   When targetStream is null, the copy engine stream is used when available
+            //   and the helper synchronizes before returning.
             void copySwizzledToGPUBuffer(ContractionProblemGemm const& problem,
                                          hipStream_t                   targetStream = nullptr,
                                          std::vector<SwizzleUpload>*   swizzleStaging = nullptr);
@@ -1355,11 +1358,16 @@ namespace TensileLite
             {
                 return m_ringPolicy.allowed
                     && m_hasAltBuffers
-                    && m_copyStream
+                    && copyStream()
                     && m_gpuInit
                     && m_curBoundsCheck == BoundsCheckMode::Disable
                     && !m_problemDependentData
                     && (!m_warmOutputResetRequired || m_keepPristineCopyOnGPU);
+            }
+
+            hipStream_t copyStream() const noexcept
+            {
+                return m_copyEngine ? m_copyEngine->stream() : nullptr;
             }
 
             OutputResetPlan planNormalWarmOutputReset(ContractionProblemGemm const& problem) const;
@@ -1369,7 +1377,7 @@ namespace TensileLite
 
             uint8_t** pinnedBatchStagingSlice(size_t bufferSlot, size_t tensorIdx) const
             {
-                if(m_pinnedBatchStaging == nullptr)
+                if(!m_pinnedBatchStaging)
                     throw std::runtime_error("Pinned batch staging is not allocated.");
 
                 if(bufferSlot >= m_pinnedBatchStagingBufferSlots
@@ -1394,7 +1402,7 @@ namespace TensileLite
                 }
 
                 size_t const slotOffset = stripe * m_maxBatch;
-                return m_pinnedBatchStaging + slotOffset;
+                return m_pinnedBatchStaging.get() + slotOffset;
             }
 
             void activateRingSlot(size_t slot);
@@ -1435,14 +1443,12 @@ namespace TensileLite
             // Per-ring-slot host staging for async swizzle uploads.
             std::vector<SwizzleUpload>     m_swizzleUploadStaging[MAX_BUFFER_SETS];
 
-            hipStream_t m_copyStream = nullptr;
-            hipEvent_t  m_copyDoneEvents[MAX_BUFFER_SETS] = {};
-
             size_t    m_maxBatch;
-            uint8_t** m_pinnedBatchStaging = nullptr;
+            PinnedHostBuffer<uint8_t*> m_pinnedBatchStaging;
             size_t    m_pinnedBatchStagingBufferSlots = 0;
             size_t    m_pinnedBatchStagingTensorSlots = 0;
 
+            std::shared_ptr<CopyEngine> m_copyEngine;
             size_t m_workspaceSize;
 
             bool m_stridedBatched;

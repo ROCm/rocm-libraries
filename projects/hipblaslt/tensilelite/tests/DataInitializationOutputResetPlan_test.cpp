@@ -155,7 +155,7 @@ namespace
 
         hipStream_t copyStream() const
         {
-            return m_copyStream;
+            return DataInitialization::copyStream();
         }
 
         std::optional<size_t> nextPrimeSlot() const

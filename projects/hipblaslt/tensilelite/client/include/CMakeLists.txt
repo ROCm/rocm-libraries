@@ -14,6 +14,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/RingPolicy.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerLayout.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HipCopyEngine.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GpuInputSlotSet.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"

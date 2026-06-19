@@ -819,12 +819,13 @@ namespace TensileLite
             }
         }
 
-        void uploadBatchPointerLayout(void*                      base,
-                                      void**                     array,
-                                      BatchPointerLayout const&  layout,
-                                      uint8_t**                  pinnedStaging,
-                                      size_t                     pinnedStagingCapacity,
-                                      hipStream_t                stream = nullptr)
+        void uploadBatchPointerLayout(CopyEngine&               copyEngine,
+                                      void*                     base,
+                                      void**                    array,
+                                      BatchPointerLayout const& layout,
+                                      uint8_t**                 pinnedStaging,
+                                      size_t                    pinnedStagingCapacity,
+                                      hipStream_t               stream = nullptr)
         {
             size_t const count = layout.count();
             if(count > pinnedStagingCapacity)
@@ -836,15 +837,80 @@ namespace TensileLite
                 pinnedStaging[idx] = baseBytes + layout.offsets[idx];
             }
 
-            if(stream)
-                HIP_CHECK_EXC(hipMemcpyAsync(
-                    array, pinnedStaging, count * sizeof(void*), hipMemcpyHostToDevice, stream));
-            else
-                HIP_CHECK_EXC(
-                    hipMemcpy(array, pinnedStaging, count * sizeof(void*), hipMemcpyHostToDevice));
+            copyEngine.copy(array,
+                            pinnedStaging,
+                            count * sizeof(void*),
+                            hipMemcpyHostToDevice,
+                            stream,
+                            submissionModeForStream(stream));
         }
 
-        void* copyBadInputBuffers(const TensorDescriptor& descriptor,
+        void* copyTensorVoidThroughEngine(CopyEngine&             copyEngine,
+                                          void*                   dst,
+                                          void const*             src,
+                                          TensorDescriptor const&  descriptor,
+                                          hipMemcpyKind           direction,
+                                          hipStream_t             stream = nullptr)
+        {
+            if(descriptor.dimensions() == 0 || descriptor.totalLogicalElements() == 0)
+                return dst;
+
+            auto const&         sizes   = descriptor.sizes();
+            auto const&         strides = descriptor.strides();
+            std::vector<size_t> coord(descriptor.dimensions(), 0);
+
+            size_t contiguousDimensions = 0;
+            size_t expectedStride       = 1;
+
+            // Optimize the number of copy operations by coalescing all the
+            // dimensions that are contiguous in memory.
+            for(size_t i = 0; i < descriptor.dimensions(); i++)
+            {
+                if(strides[i] > expectedStride)
+                    break;
+
+                contiguousDimensions = i + 1;
+
+                if(i < descriptor.dimensions() - 1)
+                    expectedStride = strides[i] * sizes[i];
+            }
+
+            auto copyCount = CoordCount(sizes.begin() + contiguousDimensions, sizes.end());
+
+            size_t maxStride
+                = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
+            size_t copyBytes
+                = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1),
+                                      descriptor.elementBytes());
+
+            for(size_t idx = 0; idx < copyCount; idx++)
+            {
+                CoordNumbered(idx,
+                              coord.begin() + contiguousDimensions,
+                              coord.end(),
+                              sizes.begin() + contiguousDimensions,
+                              sizes.end());
+
+                auto     beginOffset = descriptor.index(coord);
+                size_t   bytesOffset  = multiplyElementSize(beginOffset, descriptor.elementBytes());
+                uint8_t* dstBytes     = (uint8_t*)dst + bytesOffset;
+                // Intentionally mirror CopyTensorVoid's current source-pointer behavior.
+                uint8_t* srcBytes = (uint8_t*)dst + bytesOffset;
+                (void)src;
+
+                copyEngine.copy(dstBytes,
+                                srcBytes,
+                                copyBytes,
+                                direction,
+                                stream,
+                                CopyEngine::CopySubmissionMode::Async);
+            }
+
+            return dst;
+        }
+
+        void* copyBadInputBuffers(CopyEngine&             copyEngine,
+                                  const TensorDescriptor& descriptor,
                                   void*                   dst,
                                   void*                   src,
                                   void*                   bad,
@@ -855,10 +921,12 @@ namespace TensileLite
             // First, fill entire buffer with NaN/Inf sentinels from "bad" buffer
             auto bytes = multiplyElementSize(
                 totalElements, DataTypeInfo::Get(descriptor.dataType()).elementSize);
-            if(stream)
-                HIP_CHECK_EXC(hipMemcpyAsync(dst, bad, bytes, kind, stream));
-            else
-                HIP_CHECK_EXC(hipMemcpy(dst, bad, bytes, kind));
+            copyEngine.copy(dst,
+                            bad,
+                            bytes,
+                            kind,
+                            stream,
+                            submissionModeForStream(stream));
             // Then, copy valid data to middle section, overwriting sentinel padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
@@ -872,11 +940,12 @@ namespace TensileLite
             dPadding = (dPadding / alignmentBytes) * alignmentBytes;
 
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
-            TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind, stream);
+            copyTensorVoidThroughEngine(copyEngine, dstOffset, src, descriptor, kind, stream);
             return dstOffset;
         }
 
-        void* copyNaNInputBuffers(const TensorDescriptor& descriptor,
+        void* copyNaNInputBuffers(CopyEngine&             copyEngine,
+                                  const TensorDescriptor& descriptor,
                                   void*                   dst,
                                   void*                   src,
                                   size_t                  totalElements,
@@ -893,14 +962,17 @@ namespace TensileLite
             uint8_t* dstOffset
                 = (uint8_t*)dst + multiplyElementSize(dPadding, descriptor.elementBytes());
             auto     bytes     = multiplyElementSize(numElementsToCopy, descriptor.elementBytes());
-            if(stream)
-                HIP_CHECK_EXC(hipMemcpyAsync(dstOffset, src, bytes, kind, stream));
-            else
-                HIP_CHECK_EXC(hipMemcpy(dstOffset, src, bytes, kind));
+            copyEngine.copy(dstOffset,
+                            src,
+                            bytes,
+                            kind,
+                            stream,
+                            submissionModeForStream(stream));
             return dstOffset;
         }
 
-        void* copyInputBuffers(const TensorDescriptor& descriptor,
+        void* copyInputBuffers(CopyEngine&             copyEngine,
+                               const TensorDescriptor& descriptor,
                                void*                   dst,
                                void*                   src,
                                size_t                  totalElements,
@@ -921,10 +993,12 @@ namespace TensileLite
             if(totalElements > 0)
             {
                 auto bytes = multiplyElementSize(totalElements, descriptor.elementBytes());
-                if(stream)
-                    HIP_CHECK_EXC(hipMemcpyAsync(dst, src, bytes, kind, stream));
-                else
-                    HIP_CHECK_EXC(hipMemcpy(dst, src, bytes, kind));
+                copyEngine.copy(dst,
+                                src,
+                                bytes,
+                                kind,
+                                stream,
+                                submissionModeForStream(stream));
             }
             return dst;
         }
@@ -1247,7 +1321,8 @@ namespace TensileLite
                 switch(op.planKind)
                 {
                 case TensorCopyPlanKind::Plain:
-                    result = copyInputBuffers(*op.descriptor,
+                    result = copyInputBuffers(*m_copyEngine,
+                                              *op.descriptor,
                                               op.dst,
                                               op.src,
                                               op.maxElements,
@@ -1255,7 +1330,8 @@ namespace TensileLite
                                               stream);
                     break;
                 case TensorCopyPlanKind::BadBounds:
-                    result = copyBadInputBuffers(*op.descriptor,
+                    result = copyBadInputBuffers(*m_copyEngine,
+                                                 *op.descriptor,
                                                  op.dst,
                                                  op.src,
                                                  op.bad,
@@ -1266,7 +1342,8 @@ namespace TensileLite
                 case TensorCopyPlanKind::GuardBack:
                     if(op.customPadding != -1)
                     {
-                        result = copyNaNInputBuffers(*op.descriptor,
+                        result = copyNaNInputBuffers(*m_copyEngine,
+                                                     *op.descriptor,
                                                      op.dst,
                                                      op.src,
                                                      op.maxElements,
@@ -1276,7 +1353,8 @@ namespace TensileLite
                     }
                     else
                     {
-                        result = copyNaNInputBuffers(*op.descriptor,
+                        result = copyNaNInputBuffers(*m_copyEngine,
+                                                     *op.descriptor,
                                                      op.dst,
                                                      op.src,
                                                      op.maxElements,
@@ -1528,7 +1606,8 @@ namespace TensileLite
         }
 
         DataInitialization::DataInitialization(po::variables_map const&    args,
-                                               ClientProblemFactory const& problemFactory)
+                                               ClientProblemFactory const& problemFactory,
+                                               std::shared_ptr<CopyEngine> copyEngine)
             : m_maxBatch(0)
             , m_stridedBatched(args["strided-batched"].as<bool>())
             , m_sparse(args["sparse"].as<int>())
@@ -1551,10 +1630,9 @@ namespace TensileLite
                     = (std::string(prop.gcnArchName).find("gfx950") != std::string::npos);
             }
 
-            HIP_CHECK_EXC(hipStreamCreate(&m_copyStream));
-            for(size_t i = 0; i < MAX_BUFFER_SETS; i++)
-                HIP_CHECK_EXC(
-                    hipEventCreateWithFlags(&m_copyDoneEvents[i], hipEventDisableTiming));
+            m_copyEngine
+                = copyEngine ? std::move(copyEngine)
+                             : std::make_shared<HipCopyEngine>(MAX_BUFFER_SETS);
 
             // Determine ring policy from benchmark/validation settings.
             {
@@ -2003,11 +2081,13 @@ namespace TensileLite
                     {
 
                         initArray(p.first, it.init, pUnit.cpuInput.valid.get(), pUnit.maxElements);
-                        HIP_CHECK_EXC(
-                            hipMemcpy(pUnit.gpuInput.valid.get(),
-                                      pUnit.cpuInput.valid.get(),
-                                      multiplyElementSize(pUnit.maxElements, dataTypeSize),
-                                      hipMemcpyHostToDevice));
+                        m_copyEngine->copy(pUnit.gpuInput.valid.get(),
+                                           pUnit.cpuInput.valid.get(),
+                                           multiplyElementSize(pUnit.maxElements,
+                                                               dataTypeSize),
+                                           hipMemcpyHostToDevice,
+                                           nullptr,
+                                           CopyEngine::CopySubmissionMode::Sync);
                     }
                     // Init and copy bad from cpu to gpu
                     if(pUnit.gpuInput.bad && pUnit.cpuInput.bad)
@@ -2016,11 +2096,13 @@ namespace TensileLite
                                   InitMode::BadOutput,
                                   pUnit.cpuInput.bad.get(),
                                   pUnit.maxElements);
-                        HIP_CHECK_EXC(
-                            hipMemcpy(pUnit.gpuInput.bad.get(),
-                                      pUnit.cpuInput.bad.get(),
-                                      multiplyElementSize(pUnit.maxElements, dataTypeSize),
-                                      hipMemcpyHostToDevice));
+                        m_copyEngine->copy(pUnit.gpuInput.bad.get(),
+                                           pUnit.cpuInput.bad.get(),
+                                           multiplyElementSize(pUnit.maxElements,
+                                                               dataTypeSize),
+                                           hipMemcpyHostToDevice,
+                                           nullptr,
+                                           CopyEngine::CopySubmissionMode::Sync);
                     }
                 }
             }
@@ -2123,7 +2205,7 @@ namespace TensileLite
             };
 
             // Allocate reusable pinned staging buffer for batch pointer setup
-            if(!m_pinnedBatchStaging && m_maxBatch > 0)
+            if(m_pinnedBatchStaging.empty() && m_maxBatch > 0)
             {
                 size_t totalPointers = checkedMultiply(
                     m_pinnedBatchStagingBufferSlots,
@@ -2133,13 +2215,7 @@ namespace TensileLite
                     totalPointers,
                     m_maxBatch,
                     "[DataInitialization] pinned batch staging allocation overflow");
-                size_t const bytes = checkedMultiply(
-                    totalPointers,
-                    sizeof(*m_pinnedBatchStaging),
-                    "[DataInitialization] pinned batch staging allocation overflow");
-
-                HIP_CHECK_EXC(
-                    hipHostMalloc(&m_pinnedBatchStaging, bytes, 0));
+                m_pinnedBatchStaging.allocate(totalPointers);
             }
 
             auto disableAltBuffersAndRollback = [this]() noexcept {
@@ -2447,7 +2523,8 @@ namespace TensileLite
                 }
                 padding = multiplyElementSize(
                     padding, DataTypeInfo::Get(tensor.dataType()).elementSize);
-                uploadBatchPointerLayout(static_cast<void*>(offsetBase + padding),
+                uploadBatchPointerLayout(*m_copyEngine,
+                                         static_cast<void*>(offsetBase + padding),
                                          batchPtr.get(),
                                          layout,
                                          pinnedBatchStagingSlice(stagingBufferSlot, i),
@@ -2475,7 +2552,8 @@ namespace TensileLite
                     auto const biasLayout = makeBatchPointerLayout(biasTensor, batchIdx);
                     auto const& biasDataPtr = selectDataBuffer(pUnitBias.gpuInput);
                     auto const& biasBatchPtr = selectBatchBuffer(pUnitBias.gpuInput);
-                    uploadBatchPointerLayout(static_cast<void*>(
+                    uploadBatchPointerLayout(*m_copyEngine,
+                                             static_cast<void*>(
                                                  static_cast<uint8_t*>(biasDataPtr.get())
                                                  + padding),
                                         biasBatchPtr.get(),
@@ -2516,7 +2594,8 @@ namespace TensileLite
                     auto const metadataLayout = makeBatchPointerLayout(metadataTensor, batchIdx);
                     auto const& metadataDataPtr = selectDataBuffer(pUnitM.gpuInput);
                     auto const& metadataBatchPtr = selectBatchBuffer(pUnitM.gpuInput);
-                    uploadBatchPointerLayout(static_cast<void*>(
+                    uploadBatchPointerLayout(*m_copyEngine,
+                                             static_cast<void*>(
                                                  static_cast<uint8_t*>(metadataDataPtr.get())
                                                  + padding),
                                         metadataBatchPtr.get(),
@@ -2538,9 +2617,9 @@ namespace TensileLite
                     auto const compressedLayout = makeBatchPointerLayout(compressedTensor, batchIdx);
                     auto const& compressedDataPtr = selectDataBuffer(pUnitCp.gpuInput);
                     auto const& compressedBatchPtr = selectBatchBuffer(pUnitCp.gpuInput);
-                    uploadBatchPointerLayout(
-                        static_cast<void*>(static_cast<uint8_t*>(compressedDataPtr.get())
-                                           + padding),
+                    uploadBatchPointerLayout(*m_copyEngine,
+                                             static_cast<void*>(
+                        static_cast<uint8_t*>(compressedDataPtr.get()) + padding),
                         compressedBatchPtr.get(),
                         compressedLayout,
                         pinnedBatchStagingSlice(stagingBufferSlot,
@@ -2943,10 +3022,12 @@ namespace TensileLite
                                         -1.0f,
                                         1.0f);
                     }
-                    HIP_CHECK_EXC(hipMemcpy(pristineE8A.gpuInput.valid.get(),
-                                            gpuScaleBuf.data(),
-                                            gpuScaleBytes,
-                                            hipMemcpyHostToDevice));
+                    m_copyEngine->copy(pristineE8A.gpuInput.valid.get(),
+                                       gpuScaleBuf.data(),
+                                       gpuScaleBytes,
+                                       hipMemcpyHostToDevice,
+                                       nullptr,
+                                       CopyEngine::CopySubmissionMode::Sync);
                     m_mxPreswizzledA = true;
                 }
             }
@@ -3061,10 +3142,12 @@ namespace TensileLite
                                         -1.0f,
                                         1.0f);
                     }
-                    HIP_CHECK_EXC(hipMemcpy(pristineE8B.gpuInput.valid.get(),
-                                            gpuScaleBuf.data(),
-                                            gpuScaleBytes,
-                                            hipMemcpyHostToDevice));
+                    m_copyEngine->copy(pristineE8B.gpuInput.valid.get(),
+                                       gpuScaleBuf.data(),
+                                       gpuScaleBytes,
+                                       hipMemcpyHostToDevice,
+                                       nullptr,
+                                       CopyEngine::CopySubmissionMode::Sync);
                     m_mxPreswizzledB = true;
                 }
             }
@@ -3294,13 +3377,13 @@ namespace TensileLite
                                              hipMemcpyKind                     kind,
                                              hipStream_t                       targetStream)
         {
-            hipStream_t copyStream = targetStream ? targetStream : m_copyStream;
+            hipStream_t copyStream = targetStream ? targetStream : this->copyStream();
             bool        useAsync   = (kind == hipMemcpyDeviceToDevice) && copyStream;
             auto plan   = planOutputResetCopyOps(problem, kind);
             auto result = executeTensorCopyPlan(plan, useAsync ? copyStream : nullptr);
             applyOutputResetPlanResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
             if(useAsync && !targetStream)
-                HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
+                m_copyEngine->synchronize(copyStream);
         }
 
         void DataInitialization::resetOutputForSlot(std::vector<void*>&               ptrs,
@@ -3312,19 +3395,21 @@ namespace TensileLite
                                                     size_t                            gpuTargetSlot,
                                                     hipStream_t                       targetStream)
         {
-            hipStream_t copyStream = targetStream ? targetStream : m_copyStream;
+            hipStream_t copyStream = targetStream ? targetStream : this->copyStream();
             bool        useAsync   = (kind == hipMemcpyDeviceToDevice) && copyStream;
             auto plan = planOutputResetCopyOps(problem, kind, gpuTargetSlot);
             auto result = executeTensorCopyPlan(plan, useAsync ? copyStream : nullptr);
             applyOutputResetPlanResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
             if(useAsync && !targetStream)
-                HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
+                m_copyEngine->synchronize(copyStream);
         }
 
         void DataInitialization::copyValidToGPUBuffer(
             ContractionProblemGemm const& problem,
             bool                          callerOwnsCopySync)
         {
+            auto const copyStream = this->copyStream();
+            auto const mode       = submissionModeForStream(copyStream);
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 bool needSwizzle
@@ -3343,26 +3428,15 @@ namespace TensileLite
                 auto& p = m_vdata[i].pristine[desc.dataType()];
                 if(p.gpuInput.valid.get() == nullptr || p.cpuInput.valid.get() == nullptr)
                     continue;
-                if(m_copyStream)
-                {
-                    HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.valid.get(),
-                                                 p.cpuInput.valid.get(),
-                                                 multiplyElementSize(p.maxElements,
-                                                                     desc.elementBytes()),
-                                                 hipMemcpyHostToDevice,
-                                                 m_copyStream));
-                }
-                else
-                {
-                    HIP_CHECK_EXC(hipMemcpy(p.gpuInput.valid.get(),
-                                            p.cpuInput.valid.get(),
-                                            multiplyElementSize(p.maxElements,
-                                                                desc.elementBytes()),
-                                            hipMemcpyHostToDevice));
-                }
+                m_copyEngine->copy(p.gpuInput.valid.get(),
+                                   p.cpuInput.valid.get(),
+                                   multiplyElementSize(p.maxElements, desc.elementBytes()),
+                                   hipMemcpyHostToDevice,
+                                   copyStream,
+                                   mode);
             }
-            if(m_copyStream && !callerOwnsCopySync)
-                HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
+            if(copyStream && !callerOwnsCopySync)
+                m_copyEngine->synchronize(copyStream);
         }
 
         void DataInitialization::copySwizzledToGPUBuffer(
@@ -3372,7 +3446,7 @@ namespace TensileLite
         {
             using ManipTensor = ::Tensor::Manipulation::Tensor;
 
-            hipStream_t copyStream = targetStream ? targetStream : m_copyStream;
+            hipStream_t copyStream = targetStream ? targetStream : this->copyStream();
             bool const  useAsync   = copyStream != nullptr;
             bool const  callerOwnsCopySync = targetStream != nullptr;
 
@@ -3445,7 +3519,8 @@ namespace TensileLite
                             if(useAsync)
                             {
                                 auto& staged = stageTensor(permuted);
-                                ptr          = copyInputBuffers(desc,
+                                ptr          = copyInputBuffers(*m_copyEngine,
+                                                   desc,
                                                    p.gpuInput.valid.get(),
                                                    staged.bytes.data(),
                                                    staged.totalElements,
@@ -3454,7 +3529,8 @@ namespace TensileLite
                             }
                             else
                             {
-                                ptr = copyInputBuffers(desc,
+                                ptr = copyInputBuffers(*m_copyEngine,
+                                                       desc,
                                                        p.gpuInput.valid.get(),
                                                        permuted.as<void>(),
                                                        permuted.getDesc().flattenSize(),
@@ -3487,7 +3563,8 @@ namespace TensileLite
                         if(useAsync)
                         {
                             auto& staged = stageTensor(cachedPermuted);
-                            ptr          = copyInputBuffers(desc,
+                            ptr          = copyInputBuffers(*m_copyEngine,
+                                                       desc,
                                                        p.gpuInput.valid.get(),
                                                        staged.bytes.data(),
                                                        staged.totalElements,
@@ -3496,7 +3573,8 @@ namespace TensileLite
                         }
                         else
                         {
-                            ptr = copyInputBuffers(desc,
+                            ptr = copyInputBuffers(*m_copyEngine,
+                                                   desc,
                                                    p.gpuInput.valid.get(),
                                                    cachedPermuted.as<void>(),
                                                    cachedPermuted.getDesc().flattenSize(),
@@ -3527,7 +3605,8 @@ namespace TensileLite
                         // NoSwizzle: kernel reads scales in canonical row/column
                         // layout (buffer_load_* path). Upload cpuInput.valid as-is,
                         // no K-swizzle, no padding permute.
-                        ptr = copyInputBuffers(desc,
+                        ptr = copyInputBuffers(*m_copyEngine,
+                                               desc,
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),
                                                p.maxElements,
@@ -3545,7 +3624,8 @@ namespace TensileLite
                         // gfx950: preswizzle didn't fire (scale dims not divisible by tileK,
                         // e.g. small K). Kernel expects canonical layout — copy cpuInput.valid
                         // directly without K-swizzle.
-                        ptr = copyInputBuffers(desc,
+                        ptr = copyInputBuffers(*m_copyEngine,
+                                               desc,
                                                p.gpuInput.valid.get(),
                                                p.cpuInput.valid.get(),
                                                p.maxElements,
@@ -3583,16 +3663,18 @@ namespace TensileLite
                             if(useAsync)
                             {
                                 auto& staged = stageTensor(permuted);
-                                ptr          = copyInputBuffers(desc,
-                                                   p.gpuInput.valid.get(),
-                                                   staged.bytes.data(),
-                                                   staged.totalElements,
+                                ptr          = copyInputBuffers(*m_copyEngine,
+                                                           desc,
+                                                           p.gpuInput.valid.get(),
+                                                           staged.bytes.data(),
+                                                           staged.totalElements,
                                                    hipMemcpyHostToDevice,
                                                    copyStream);
                             }
                             else
                             {
-                                ptr = copyInputBuffers(desc,
+                                ptr = copyInputBuffers(*m_copyEngine,
+                                                       desc,
                                                        p.gpuInput.valid.get(),
                                                        permuted.as<void>(),
                                                        permuted.getDesc().flattenSize(),
@@ -3622,16 +3704,18 @@ namespace TensileLite
                             if(useAsync)
                             {
                                 auto& staged = stageTensor(permuted);
-                                ptr          = copyInputBuffers(desc,
-                                                   p.gpuInput.valid.get(),
-                                                   staged.bytes.data(),
-                                                   staged.totalElements,
+                                ptr          = copyInputBuffers(*m_copyEngine,
+                                                           desc,
+                                                           p.gpuInput.valid.get(),
+                                                           staged.bytes.data(),
+                                                           staged.totalElements,
                                                    hipMemcpyHostToDevice,
                                                    copyStream);
                             }
                             else
                             {
-                                ptr = copyInputBuffers(desc,
+                                ptr = copyInputBuffers(*m_copyEngine,
+                                                       desc,
                                                        p.gpuInput.valid.get(),
                                                        permuted.as<void>(),
                                                        permuted.getDesc().flattenSize(),
@@ -3642,7 +3726,8 @@ namespace TensileLite
                 }
                 else
                 {
-                    ptr = copyInputBuffers(desc,
+                    ptr = copyInputBuffers(*m_copyEngine,
+                                           desc,
                                            p.gpuInput.valid.get(),
                                            p.cpuInput.valid.get(),
                                            p.maxElements,
@@ -3654,7 +3739,7 @@ namespace TensileLite
                     std::__throw_runtime_error("error");
             }
             if(useAsync && !callerOwnsCopySync)
-                HIP_CHECK_EXC(hipStreamSynchronize(copyStream));
+                m_copyEngine->synchronize(copyStream);
         }
 
         template <typename T>
@@ -3904,10 +3989,14 @@ namespace TensileLite
                     {
                         auto& p = it->second;
                         if(i <= ContractionProblemGemm::TENSOR::METADATA)
-                            HIP_CHECK_EXC(hipMemcpy(mem[j][i].data.get(),
-                                                    p.gpuInput.current.get(),
-                                                    mem[j][i].size,
-                                                    hipMemcpyDeviceToDevice));
+                        {
+                            m_copyEngine->copy(mem[j][i].data.get(),
+                                               p.gpuInput.current.get(),
+                                               mem[j][i].size,
+                                               hipMemcpyDeviceToDevice,
+                                               nullptr,
+                                               CopyEngine::CopySubmissionMode::Sync);
+                        }
                     }
                 }
         }
@@ -4037,81 +4126,100 @@ namespace TensileLite
             return rotatingSize;
         }
 
-        void* copyRotatingInput(
-            const void* src, void* dst, int64_t length, int64_t& dstOffset, hipStream_t stream)
+        void* copyRotatingInput(CopyEngine&    copyEngine,
+                                const void*    src,
+                                void*          dst,
+                                int64_t        length,
+                                int64_t&       dstOffset,
+                                hipStream_t    stream)
         {
             if(src == nullptr)
                 return nullptr;
             void* dstPos = (void*)((uint8_t*)dst + dstOffset);
-            HIP_CHECK_EXC(hipMemcpyAsync(dstPos, src, length, hipMemcpyDeviceToDevice, stream));
+            copyEngine.copy(dstPos,
+                            src,
+                            length,
+                            hipMemcpyDeviceToDevice,
+                            stream,
+                            CopyEngine::CopySubmissionMode::Async);
             dstOffset += length;
             return dstPos;
         }
 
-        ContractionInputs createRotatingInput(ContractionProblemGemm const& problem,
+        ContractionInputs createRotatingInput(CopyEngine&                  copyEngine,
+                                              ContractionProblemGemm const& problem,
                                               ContractionInputs const&      inputs,
                                               void*                         rotatingPtr,
                                               int64_t&                      offset,
                                               hipStream_t                   stream)
         {
             ContractionInputs newInputs = inputs;
-            newInputs.a                 = copyRotatingInput(
+            newInputs.a                 = copyRotatingInput(copyEngine,
                 newInputs.a,
                 rotatingPtr,
                 problem.tensors()[ContractionProblemGemm::TENSOR::A].totalAllocatedBytes(),
                 offset,
                 stream);
-            newInputs.b = copyRotatingInput(
-                newInputs.b,
-                rotatingPtr,
-                problem.tensors()[ContractionProblemGemm::TENSOR::B].totalAllocatedBytes(),
-                offset,
-                stream);
+            newInputs.b = copyRotatingInput(copyEngine,
+                                            newInputs.b,
+                                            rotatingPtr,
+                                            problem.tensors()[ContractionProblemGemm::TENSOR::B]
+                                                .totalAllocatedBytes(),
+                                            offset,
+                                            stream);
             if(problem.beta())
-                newInputs.c = copyRotatingInput(
-                    newInputs.c,
-                    rotatingPtr,
-                    problem.tensors()[ContractionProblemGemm::TENSOR::C].totalAllocatedBytes(),
-                    offset,
-                    stream);
-            newInputs.d = copyRotatingInput(
-                newInputs.d,
-                rotatingPtr,
-                problem.tensors()[ContractionProblemGemm::TENSOR::D].totalAllocatedBytes(),
-                offset,
-                stream);
-            newInputs.e = copyRotatingInput(
-                newInputs.e,
-                rotatingPtr,
-                problem.tensors()[ContractionProblemGemm::TENSOR::E].totalAllocatedBytes(),
-                offset,
-                stream);
+                newInputs.c = copyRotatingInput(copyEngine,
+                                                newInputs.c,
+                                                rotatingPtr,
+                                                problem.tensors()[ContractionProblemGemm::TENSOR::C]
+                                                    .totalAllocatedBytes(),
+                                                offset,
+                                                stream);
+            newInputs.d = copyRotatingInput(copyEngine,
+                                            newInputs.d,
+                                            rotatingPtr,
+                                            problem.tensors()[ContractionProblemGemm::TENSOR::D]
+                                                .totalAllocatedBytes(),
+                                            offset,
+                                            stream);
+            newInputs.e = copyRotatingInput(copyEngine,
+                                            newInputs.e,
+                                            rotatingPtr,
+                                            problem.tensors()[ContractionProblemGemm::TENSOR::E]
+                                                .totalAllocatedBytes(),
+                                            offset,
+                                            stream);
             newInputs.scaleA = copyRotatingInput(
+                copyEngine,
                 newInputs.scaleA,
                 rotatingPtr,
                 problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes(),
                 offset,
                 stream);
             newInputs.scaleB = copyRotatingInput(
+                copyEngine,
                 newInputs.scaleB,
                 rotatingPtr,
                 problem.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes(),
                 offset,
                 stream);
-            newInputs.bias = copyRotatingInput(
-                newInputs.bias,
+            newInputs.bias = copyRotatingInput(copyEngine,
+                                               newInputs.bias,
+                                               rotatingPtr,
+                                               problem.tensors()[ContractionProblemGemm::TENSOR::BIAS]
+                                                   .totalAllocatedBytes(),
+                                               offset,
+                                               stream);
+            newInputs.scaleAlphaVec = copyRotatingInput(
+                copyEngine,
+                newInputs.scaleAlphaVec,
                 rotatingPtr,
-                problem.tensors()[ContractionProblemGemm::TENSOR::BIAS].totalAllocatedBytes(),
+                problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
+                    .totalAllocatedElements(),
                 offset,
                 stream);
-            newInputs.scaleAlphaVec
-                = copyRotatingInput(newInputs.scaleAlphaVec,
-                                    rotatingPtr,
-                                    problem.tensors()[ContractionProblemGemm::TENSOR::SCALEALPHAVEC]
-                                        .totalAllocatedElements(),
-                                    offset,
-                                    stream);
             newInputs.metadata = (unsigned char*)copyRotatingInput(
+                copyEngine,
                 newInputs.metadata,
                 rotatingPtr,
                 problem.tensors()[ContractionProblemGemm::TENSOR::METADATA].totalAllocatedBytes(),
@@ -4164,7 +4272,12 @@ namespace TensileLite
                     for(size_t i = 0; i < rotatingNum; i++)
                     {
                         auto newInputs = createRotatingInput(
-                            *gemmProblem, *castInputs, (void*)ptr, offset, stream);
+                            *m_copyEngine,
+                            *gemmProblem,
+                            *castInputs,
+                            (void*)ptr,
+                            offset,
+                            stream);
                         inputArr.push_back(static_pointer_cast<ProblemInputs>(
                             std::make_shared<ContractionInputs>(newInputs)));
                     }
@@ -4230,7 +4343,8 @@ namespace TensileLite
                         newInputs.ws = castInputs->ws;
                         for(size_t i = 0; i < castInputs->grouped.size(); i++)
                         {
-                            auto newSingleInput = createRotatingInput(groupedProblem->gemms[i],
+                            auto newSingleInput = createRotatingInput(*m_copyEngine,
+                                                                      groupedProblem->gemms[i],
                                                                       castInputs->grouped[i],
                                                                       (void*)ptr,
                                                                       offset,
@@ -4408,8 +4522,8 @@ namespace TensileLite
 
         void DataInitialization::syncCopyStream()
         {
-            if(m_copyStream)
-                HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
+            if(m_copyEngine)
+                m_copyEngine->synchronizeDefaultStream();
         }
 
         void DataInitialization::activateRingSlot(size_t slot)
@@ -4431,18 +4545,17 @@ namespace TensileLite
             auto newActiveSlot = m_ring.advance();
             assert(newActiveSlot.has_value());
             activateRingSlot(*newActiveSlot);
-            // The new active slot may have an outstanding DMA on m_copyStream;
+            // The new active slot may have an outstanding DMA on the copy engine stream;
             // require waitForPreparedSlot before the compute stream reads it.
         }
 
-        // Insert a GPU-side dependency between m_copyStream and computeStream
+        // Insert a GPU-side dependency between the copy engine stream and computeStream
         // without blocking the CPU; hipStreamWaitEvent is a device-only barrier.
         void DataInitialization::waitForPreparedSlot(hipStream_t computeStream)
         {
             if(!m_ring.needsCopyBarrier())
                 return;
-            HIP_CHECK_EXC(hipStreamWaitEvent(
-                computeStream, m_copyDoneEvents[m_ring.activeSlot()], 0));
+            m_copyEngine->waitForCopyDone(m_ring.activeSlot(), computeStream);
             m_ring.markBarrierWaited();
         }
 
@@ -4468,7 +4581,7 @@ namespace TensileLite
                                    *gemmProblem,
                                    hipMemcpyDeviceToDevice,
                                    targetSlot,
-                                   m_copyStream);
+                                   copyStream());
             }
             else if(auto groupedProblem
                     = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
@@ -4481,7 +4594,7 @@ namespace TensileLite
                                    groupedProblem->gemms[0],
                                    hipMemcpyDeviceToDevice,
                                    targetSlot,
-                                   m_copyStream);
+                                   copyStream());
             }
         }
 
@@ -4516,7 +4629,7 @@ namespace TensileLite
             m_altSlotsReady                = false;
         }
 
-        // Prime the next free buffer slot in the ring on m_copyStream.
+        // Prime the next free buffer slot in the ring on the copy engine stream.
         // The caller must waitForPreparedSlot() before using the buffer
         // (done in main.cpp before benchmark_runs).
         void DataInitialization::primeNextInputSlot(ContractionProblem const* problem)
@@ -4550,48 +4663,37 @@ namespace TensileLite
             {
                 ScopedTimer prepTimer("async_reset_prepare");
                 if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
-                    fillSlot(targetSlot, *gemmProblem, m_copyStream);
+                    fillSlot(targetSlot, *gemmProblem, copyStream());
                 else if(auto groupedProblem
                         = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
                 {
                     assertGroupedRingFastPathInvariant(*groupedProblem);
-                    fillSlot(targetSlot, groupedProblem->gemms[0], m_copyStream);
+                    fillSlot(targetSlot, groupedProblem->gemms[0], copyStream());
                 }
             }
 
-            HIP_CHECK_EXC(hipEventRecord(m_copyDoneEvents[targetSlot], m_copyStream));
+            m_copyEngine->recordCopyDone(targetSlot);
             m_ring.markSlotPrimed();
         }
 
         DataInitialization::~DataInitialization()
         {
-            for(size_t i = 0; i < MAX_BUFFER_SETS; i++)
+            try
             {
-                if(m_copyDoneEvents[i])
+                if(m_copyEngine)
                 {
-                    hipError_t e = hipEventDestroy(m_copyDoneEvents[i]);
-                    if(e)
-                        std::cerr << "~DataInitialization: hipEventDestroy failed: "
-                                  << hipGetErrorString(e) << std::endl;
+                    m_copyEngine->synchronizeDefaultStream();
                 }
             }
-            if(m_copyStream)
+            catch(std::exception const& e)
             {
-                hipError_t e = hipStreamSynchronize(m_copyStream);
-                if(e)
-                    std::cerr << "~DataInitialization: hipStreamSynchronize failed: "
-                              << hipGetErrorString(e) << std::endl;
-                e = hipStreamDestroy(m_copyStream);
-                if(e)
-                    std::cerr << "~DataInitialization: hipStreamDestroy failed: "
-                              << hipGetErrorString(e) << std::endl;
+                std::cerr << "~DataInitialization: synchronizeDefaultStream failed: " << e.what()
+                          << std::endl;
             }
-            if(m_pinnedBatchStaging)
+            catch(...)
             {
-                hipError_t e = hipHostFree(m_pinnedBatchStaging);
-                if(e)
-                    std::cerr << "~DataInitialization: hipHostFree failed: "
-                              << hipGetErrorString(e) << std::endl;
+                std::cerr << "~DataInitialization: synchronizeDefaultStream failed: unknown error"
+                          << std::endl;
             }
         }
     } // namespace Client
