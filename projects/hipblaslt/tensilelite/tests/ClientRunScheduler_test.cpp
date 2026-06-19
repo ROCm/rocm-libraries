@@ -77,6 +77,18 @@ namespace
         return static_cast<size_t>(std::distance(events.begin(), it));
     }
 
+    std::vector<size_t> indicesOfEvent(std::vector<std::string> const& events,
+                                       std::string const&              value)
+    {
+        std::vector<size_t> indices;
+        for(size_t i = 0; i < events.size(); ++i)
+        {
+            if(events[i] == value)
+                indices.push_back(i);
+        }
+        return indices;
+    }
+
     class RecordingRunListener final : public RunListener
     {
     public:
@@ -827,6 +839,39 @@ TEST_F(ClientRunSchedulerTest, SubmitsTwoAsyncResetsAfterSuccessfulExecutedRun)
     ASSERT_NE(postSolutionIdx, harness.events.size());
     EXPECT_LT(static_cast<size_t>(std::distance(harness.events.begin(), secondReset)),
               postSolutionIdx);
+}
+
+TEST_F(ClientRunSchedulerTest, ResetSubmissionHappensBeforePostSolutionOrNextPrepare)
+{
+    harness.listeners.m_warmupRuns          = 0;
+    harness.listeners.m_syncs               = 0;
+    harness.listeners.m_enqueues            = 0;
+    harness.listeners.m_solutionRunsRemaining = 2;
+    harness.config.runKernels               = true;
+    harness.config.gpuTimer                 = false;
+    harness.solution->kernelsPerSolveCall   = {{}, {}};
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+
+    auto prepareIndices = indicesOfEvent(harness.events, "prepareGPUInputs");
+    auto resetIndices   = indicesOfEvent(harness.events, "beginAsyncReset");
+    auto postSolutionIdx = indexOfEvent(harness.events, "postSolution");
+
+    ASSERT_EQ(prepareIndices.size(), 3u);
+    ASSERT_EQ(resetIndices.size(), 4u);
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+
+    EXPECT_LT(prepareIndices[0], prepareIndices[1]);
+    EXPECT_LT(prepareIndices[1], resetIndices[0]);
+    EXPECT_LT(resetIndices[0], resetIndices[1]);
+    EXPECT_LT(resetIndices[1], prepareIndices[2]);
+    EXPECT_LT(prepareIndices[2], resetIndices[2]);
+    EXPECT_LT(resetIndices[2], resetIndices[3]);
+    EXPECT_LT(resetIndices[3], postSolutionIdx);
 }
 
 TEST_F(ClientRunSchedulerTest, SkipsKernelFlowWhenSolutionRejected)
