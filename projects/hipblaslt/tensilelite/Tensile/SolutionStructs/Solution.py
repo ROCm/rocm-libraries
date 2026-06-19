@@ -606,9 +606,48 @@ class Solution(collections.abc.Mapping):
     return outputVectorWidth, RegsPerOut
 
   ########################################
+  # uid/DU rebase (N1c) idempotency helpers.
+  #
+  # For the multi-DU MXFP8 subtile path the canonical (naming) DepthU is the
+  # smaller *data* DU, while the macro K-iteration unit — the value every codegen
+  # consumer reads — is the larger *scale* DU stored in _ScaleDepthU
+  # (uid_range = _ScaleDepthU // DepthU).  Tensile serialises the derived solution
+  # state into the library logic and re-runs assignDerivedParameters on it, so the
+  # rebase must be idempotent: re-deriving from the already-rebased (small) DepthU
+  # would otherwise re-demote it again (256 -> 128 -> 64 ...).  We therefore
+  # restore the macro DU before re-derivation and re-apply the data-base flip after
+  # all DepthU-derived parameters are computed.
+  @staticmethod
+  def _restoreMacroDepthU(state):
+    """Restore DepthU to the macro/scale DU before (re-)derivation.
+
+    A re-parsed multi-DU solution carries the data DU as its canonical DepthU and
+    the macro DU in _ScaleDepthU; recovering the macro makes the whole derivation
+    (LoopIters, SRD/GSU strides, validity checks, the dataDU/uid_range split)
+    recompute exactly as on the first pass.  No-op on the first pass and for
+    single-DU (where _ScaleDepthU == DepthU)."""
+    scaleDU = state.get("_ScaleDepthU")
+    if scaleDU and "DepthU" in state and scaleDU > state["DepthU"]:
+      state["DepthU"] = scaleDU
+
+  @staticmethod
+  def _rebaseDepthUToData(state):
+    """Rebase the canonical/naming DepthU onto the data DU (multi-DU subtile).
+
+    Must run only after every DepthU-derived parameter has been computed from the
+    macro DU.  No-op for single-DU (no _DataDepthU)."""
+    dataDU = state.get("_DataDepthU")
+    if dataDU and dataDU < state["DepthU"]:
+      state["DepthU"] = dataDU
+
+  ########################################
   # assign tile sizes
   @staticmethod
   def assignProblemIndependentDerivedParameters(state, printRejectionReason: bool, isaInfoMap: Dict[str, IsaInfo]):
+    # Idempotency: recover the macro DU before any DepthU-derived computation
+    # (this runs before the early-return guard below so it also applies on the
+    # already-derived re-parse path).
+    Solution._restoreMacroDepthU(state)
 
     if "AssignedProblemIndependentDerivedParameters" in state:
       if state["AssignedProblemIndependentDerivedParameters"]:
@@ -1510,6 +1549,10 @@ class Solution(collections.abc.Mapping):
 
     if "AssignedDerivedParameters" in state:
       if state["AssignedDerivedParameters"]:
+        # Already fully derived (re-parse fast path): _restoreMacroDepthU above
+        # recovered the macro DepthU; re-apply the data-base rebase so the
+        # canonical/naming DepthU is stable across the round-trip.
+        Solution._rebaseDepthUToData(state)
         return
     state["AssignedDerivedParameters"] = False
 
@@ -2725,6 +2768,7 @@ class Solution(collections.abc.Mapping):
       ########################################
       depthU = userDepthU
       depthUA = depthUB = depthUM = depthU
+      state.pop("_DataDepthU", None)  # recomputed below only for the multi-DU case
       if state["ProblemType"]["Sparse"]:
         if state["ProblemType"]["Sparse"] == 2:
           depthUB = depthUB // 2
@@ -2747,6 +2791,11 @@ class Solution(collections.abc.Mapping):
           if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
             depthUA = dataDU
             depthUB = dataDU
+            # Mark this as the data-base (multi-DU) case so the naming base
+            # DepthU can be rebased onto dataDU after all DepthU-derived
+            # parameters (LoopIters/LoopUnroll/validation) are computed from the
+            # macro DU.  Set only here (not for the sparse depthU//2 demotion).
+            state["_DataDepthU"] = dataDU
             if state["PrefetchGlobalRead"] > 1:
               reject(state, printRejectionReason,
                      f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
@@ -5490,6 +5539,17 @@ class Solution(collections.abc.Mapping):
     # change negative ExtraLatencyForLR to 0 for non DirectToVgpr
     if state["ExtraLatencyForLR"] < 0 and not (state["DirectToVgprA"] or state["DirectToVgprB"]):
       state["ExtraLatencyForLR"] = 0
+
+    # ── Rebase the canonical/naming base DepthU onto the data DU (N1c) ──
+    # For the multi-DU MXFP8 subtile path the data tensors are the base: the
+    # smaller data DU is the canonical DepthU (and the kernel-name DU token),
+    # while the scale span is indexed by uid_range = _ScaleDepthU // DepthU.
+    # Every DepthU-derived parameter above (LoopIters, LoopUnroll, SRD/GSU
+    # strides, validity checks) was computed from the macro DU, which is
+    # preserved in _ScaleDepthU and is what all codegen reads; this rebase
+    # therefore only relabels DepthU and does not move the schedule or the
+    # emitted instructions.  Single-DU configs have _DataDepthU unset (no flip).
+    Solution._rebaseDepthUToData(state)
 
   ########################################
   @ staticmethod
