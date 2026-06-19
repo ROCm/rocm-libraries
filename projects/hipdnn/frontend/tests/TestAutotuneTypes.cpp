@@ -21,13 +21,13 @@ using namespace hipdnn_frontend;
 
 TEST(TestAutotuneTypes, PlanSpecEqualSameOrder)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     a.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
     a.workspaceSize = 1024;
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     b.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
@@ -38,12 +38,12 @@ TEST(TestAutotuneTypes, PlanSpecEqualSameOrder)
 
 TEST(TestAutotuneTypes, PlanSpecEqualDifferentKnobOrder)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
     a.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     b.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
@@ -53,11 +53,11 @@ TEST(TestAutotuneTypes, PlanSpecEqualDifferentKnobOrder)
 
 TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentEngineId)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 99;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
@@ -66,11 +66,11 @@ TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentEngineId)
 
 TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentKnobValues)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{4});
 
@@ -79,12 +79,12 @@ TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentKnobValues)
 
 TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentKnobCount)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     a.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{2});
 
@@ -93,10 +93,10 @@ TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentKnobCount)
 
 TEST(TestAutotuneTypes, PlanSpecEqualEmptyKnobs)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
 
     EXPECT_EQ(a, b);
@@ -104,11 +104,11 @@ TEST(TestAutotuneTypes, PlanSpecEqualEmptyKnobs)
 
 TEST(TestAutotuneTypes, PlanSpecNotEqualDifferentKnobNames)
 {
-    PlanSpec a;
+    autotune::detail::PlanSpec a;
     a.engineId = 42;
     a.knobSettings.emplace_back("KNOB_A", int64_t{1});
 
-    PlanSpec b;
+    autotune::detail::PlanSpec b;
     b.engineId = 42;
     b.knobSettings.emplace_back("KNOB_B", int64_t{1});
 
@@ -124,7 +124,7 @@ TEST(TestAutotuneTypes, CartesianProductEmptyAxes)
     const std::vector<KnobSweepAxis> axes;
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     // Cartesian product of zero sets is one empty tuple
     ASSERT_EQ(result.size(), 1u);
@@ -136,7 +136,7 @@ TEST(TestAutotuneTypes, CartesianProductSingleAxis)
     const std::vector<KnobSweepAxis> axes = {{"SPLIT_K", {int64_t{1}, int64_t{2}, int64_t{4}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     ASSERT_EQ(result.size(), 3u);
 
@@ -154,7 +154,7 @@ TEST(TestAutotuneTypes, CartesianProductTwoAxes)
         = {{"SPLIT_K", {int64_t{1}, int64_t{2}}}, {"TILE_SIZE", {int64_t{64}, int64_t{128}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     ASSERT_EQ(result.size(), 4u);
 
@@ -172,7 +172,7 @@ TEST(TestAutotuneTypes, CartesianProductThreeAxesCorrectCount)
                                              {"C", {int64_t{100}, int64_t{200}, int64_t{300}}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     // 3 * 2 * 3 = 18
     EXPECT_EQ(result.size(), 18u);
@@ -185,7 +185,7 @@ TEST(TestAutotuneTypes, CartesianProductEmptyAxisProducesEmptyResult)
     };
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     EXPECT_TRUE(result.empty());
 }
@@ -210,7 +210,7 @@ TEST(TestAutotuneTypes, CartesianProductErrorAtLimit)
     const std::vector<KnobSweepAxis> axes = {{"A", values101}, {"B", values100}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(result.empty());
 }
@@ -228,7 +228,7 @@ TEST(TestAutotuneTypes, CartesianProductAtExactLimit)
     const std::vector<KnobSweepAxis> axes = {{"A", values100}, {"B", values100}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
     EXPECT_EQ(error.code, ErrorCode::OK);
     EXPECT_EQ(result.size(), 10000u);
 }
@@ -240,7 +240,7 @@ TEST(TestAutotuneTypes, CartesianProductPreservesMixedValueTypesAndAxisOrder)
                                              {"STRING_AXIS", {std::string("fast")}}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     ASSERT_EQ(result.size(), 1u);
@@ -271,7 +271,7 @@ TEST(TestAutotuneTypes, CartesianProductAboveWarningThresholdStillProducesAllCom
     const std::vector<KnobSweepAxis> axes = {{"A", values40}, {"B", values30}};
     std::vector<std::vector<KnobSetting>> result;
 
-    auto error = autotune::computeCartesianProduct(axes, result);
+    auto error = autotune::detail::computeCartesianProduct(axes, result);
 
     ASSERT_EQ(error.code, ErrorCode::OK) << error.err_msg;
     ASSERT_EQ(result.size(), 1200u);
@@ -288,32 +288,32 @@ TEST(TestAutotuneTypes, CartesianProductAboveWarningThresholdStillProducesAllCom
 TEST(TestAutotuneTypes, MeanSingleValue)
 {
     const std::vector<float> values = {5.0f};
-    EXPECT_FLOAT_EQ(autotune::computeMean(values), 5.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeMean(values), 5.0f);
 }
 
 TEST(TestAutotuneTypes, MeanMultipleValues)
 {
     const std::vector<float> values = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-    EXPECT_FLOAT_EQ(autotune::computeMean(values), 3.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeMean(values), 3.0f);
 }
 
 TEST(TestAutotuneTypes, MeanDoubleValues)
 {
     const std::vector<double> values = {2.0, 4.0, 6.0};
-    EXPECT_DOUBLE_EQ(autotune::computeMean(values), 4.0);
+    EXPECT_DOUBLE_EQ(autotune::detail::computeMean(values), 4.0);
 }
 
 TEST(TestAutotuneTypes, MeanThrowsOnEmpty)
 {
     const std::vector<float> values;
-    EXPECT_THROW(autotune::computeMean(values), std::invalid_argument);
+    EXPECT_THROW(autotune::detail::computeMean(values), std::invalid_argument);
 }
 
 TEST(TestAutotuneTypes, StddevUniformValues)
 {
     // All identical values should have zero standard deviation
     const std::vector<float> values = {3.0f, 3.0f, 3.0f, 3.0f};
-    EXPECT_FLOAT_EQ(autotune::computeStddev(values), 0.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeStddev(values), 0.0f);
 }
 
 TEST(TestAutotuneTypes, StddevKnownValues)
@@ -325,46 +325,46 @@ TEST(TestAutotuneTypes, StddevKnownValues)
     //          = (9+1+1+1+0+0+4+16)/8 = 32/8 = 4.0
     // Stddev = sqrt(4) = 2.0
     const std::vector<double> values = {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
-    EXPECT_DOUBLE_EQ(autotune::computeStddev(values), 2.0);
+    EXPECT_DOUBLE_EQ(autotune::detail::computeStddev(values), 2.0);
 }
 
 TEST(TestAutotuneTypes, StddevThrowsOnEmpty)
 {
     const std::vector<float> values;
-    EXPECT_THROW(autotune::computeStddev(values), std::invalid_argument);
+    EXPECT_THROW(autotune::detail::computeStddev(values), std::invalid_argument);
 }
 
 TEST(TestAutotuneTypes, CoVKnownValues)
 {
     // Mean = 5.0, Stddev = 2.0, CoV = 2.0/5.0 = 0.4
     const std::vector<double> values = {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
-    EXPECT_DOUBLE_EQ(autotune::computeCoefficientOfVariation(values), 0.4);
+    EXPECT_DOUBLE_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.4);
 }
 
 TEST(TestAutotuneTypes, CoVUniformValuesIsZero)
 {
     const std::vector<float> values = {7.0f, 7.0f, 7.0f};
-    EXPECT_FLOAT_EQ(autotune::computeCoefficientOfVariation(values), 0.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.0f);
 }
 
 TEST(TestAutotuneTypes, CoVAllZerosIsZero)
 {
     // When mean is 0, CoV returns 0 to avoid division by zero
     const std::vector<float> values = {0.0f, 0.0f, 0.0f};
-    EXPECT_FLOAT_EQ(autotune::computeCoefficientOfVariation(values), 0.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeCoefficientOfVariation(values), 0.0f);
 }
 
 TEST(TestAutotuneTypes, CoVThrowsOnEmpty)
 {
     const std::vector<double> values;
-    EXPECT_THROW(autotune::computeCoefficientOfVariation(values), std::invalid_argument);
+    EXPECT_THROW(autotune::detail::computeCoefficientOfVariation(values), std::invalid_argument);
 }
 
 TEST(TestAutotuneTypes, StddevSingleValue)
 {
     // Single value: stddev = 0
     const std::vector<float> values = {42.0f};
-    EXPECT_FLOAT_EQ(autotune::computeStddev(values), 0.0f);
+    EXPECT_FLOAT_EQ(autotune::detail::computeStddev(values), 0.0f);
 }
 
 // ============================================================================

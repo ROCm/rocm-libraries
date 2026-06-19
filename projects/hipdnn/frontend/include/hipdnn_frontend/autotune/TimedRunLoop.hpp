@@ -22,9 +22,7 @@
 
 #include "hipdnn_frontend/autotune/BenchmarkStatistics.hpp"
 
-namespace hipdnn_frontend
-{
-namespace autotune
+namespace hipdnn_frontend::autotune
 {
 
 /**
@@ -44,21 +42,19 @@ struct TimedRunOutcome
     std::string errorMessage;
 };
 
-/**
- * @brief RUN_UNTIL_STABLE timed loop: run until the trailing-window CoV
- *        converges or @c maxIterations is reached.
- *
- * @tparam TimeOnceFn Callable @c (float& elapsed) -> Error. No GPU, no member
- *         state. Returns a bad Error to signal a benchmark failure.
- * @tparam OnIterationFn Callable @c (int iter, float elapsed, float cov, bool
- *         covValid) -> void, invoked once per successful iteration for logging.
- * @param maxIterations Maximum number of timed iterations.
- * @param windowSize Number of trailing samples used for the CoV check.
- * @param stabilityThreshold CoV below this value indicates convergence.
- * @param timeOnce Timing callable.
- * @param onIteration Per-iteration logging callback (cov/covValid are only
- *        meaningful once @c timings.size() >= windowSize).
- */
+namespace detail
+{
+
+// RUN_UNTIL_STABLE timed loop: run until the trailing-window CoV converges or
+// maxIterations is reached.
+//
+// TimeOnceFn is a callable (float& elapsed) -> Error with no GPU and no member
+// state; it returns a bad Error to signal a benchmark failure. OnIterationFn is
+// a callable (int iter, float elapsed, float cov, bool covValid) -> void,
+// invoked once per successful iteration for logging. windowSize is the number
+// of trailing samples used for the CoV check; stabilityThreshold is the CoV
+// value below which the loop is considered converged. cov/covValid passed to
+// onIteration are only meaningful once timings.size() >= windowSize.
 template <typename TimeOnceFn, typename OnIterationFn>
 TimedRunOutcome runUntilStable(int maxIterations,
                                int windowSize,
@@ -112,15 +108,11 @@ TimedRunOutcome runUntilStable(int maxIterations,
     return outcome;
 }
 
-/**
- * @brief FIXED_AVERAGE timed loop: run exactly @c timedIterations and average.
- *
- * @tparam TimeOnceFn Callable @c (float& elapsed) -> Error.
- * @tparam OnIterationFn Callable @c (int iter, float elapsed) -> void.
- * @param timedIterations Number of timed iterations to run.
- * @param timeOnce Timing callable.
- * @param onIteration Per-iteration logging callback.
- */
+// FIXED_AVERAGE timed loop: run exactly timedIterations and average.
+//
+// TimeOnceFn is a callable (float& elapsed) -> Error; OnIterationFn is a
+// callable (int iter, float elapsed) -> void invoked once per iteration for
+// logging.
 template <typename TimeOnceFn, typename OnIterationFn>
 TimedRunOutcome
     runFixedAverage(int timedIterations, TimeOnceFn&& timeOnce, OnIterationFn&& onIteration)
@@ -148,5 +140,5 @@ TimedRunOutcome
     return outcome;
 }
 
-} // namespace autotune
-} // namespace hipdnn_frontend
+} // namespace detail
+} // namespace hipdnn_frontend::autotune

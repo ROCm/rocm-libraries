@@ -33,27 +33,27 @@ static constexpr size_t CARTESIAN_PRODUCT_LIMIT_ERROR = 10000;
 /// Threshold for logging a warning about large Cartesian products
 static constexpr size_t CARTESIAN_PRODUCT_LIMIT_WARNING = 1000;
 
-/**
- * @brief Compute the Cartesian product of knob sweep axes
- *
- * Given a vector of KnobSweepAxis (each containing a knob name and a list
- * of values), produces all combinations of knob settings.
- *
- * For example, given axes:
- *   - {"SPLIT_K", {1, 2, 4}}
- *   - {"TILE_SIZE", {0, 1}}
- *
- * The result contains 6 vectors of KnobSetting:
- *   [{SPLIT_K=1, TILE_SIZE=0}, {SPLIT_K=1, TILE_SIZE=1},
- *    {SPLIT_K=2, TILE_SIZE=0}, {SPLIT_K=2, TILE_SIZE=1},
- *    {SPLIT_K=4, TILE_SIZE=0}, {SPLIT_K=4, TILE_SIZE=1}]
- *
- * @param axes Vector of KnobSweepAxis describing the knobs to sweep
- * @param[out] result Vector of knob setting combinations (each combination is
- *             a vector of KnobSetting)
- * @return Error with ErrorCode::OK on success, or an error if the product
- *         exceeds the configurable limit (10,000 combinations)
- */
+namespace detail
+{
+
+// Compute the Cartesian product of knob sweep axes.
+//
+// Given a vector of KnobSweepAxis (each containing a knob name and a list
+// of values), produces all combinations of knob settings.
+//
+// For example, given axes:
+//   - {"SPLIT_K", {1, 2, 4}}
+//   - {"TILE_SIZE", {0, 1}}
+//
+// The result contains 6 vectors of KnobSetting:
+//   [{SPLIT_K=1, TILE_SIZE=0}, {SPLIT_K=1, TILE_SIZE=1},
+//    {SPLIT_K=2, TILE_SIZE=0}, {SPLIT_K=2, TILE_SIZE=1},
+//    {SPLIT_K=4, TILE_SIZE=0}, {SPLIT_K=4, TILE_SIZE=1}]
+//
+// On success returns Error with ErrorCode::OK; returns an error if the product
+// exceeds the configurable limit (10,000 combinations). The result is written
+// to the out-parameter as a vector of knob setting combinations (each
+// combination is a vector of KnobSetting).
 inline Error computeCartesianProduct(const std::vector<KnobSweepAxis>& axes,
                                      std::vector<std::vector<KnobSetting>>& result)
 {
@@ -118,5 +118,6 @@ inline Error computeCartesianProduct(const std::vector<KnobSweepAxis>& axes,
     return {ErrorCode::OK, ""};
 }
 
+} // namespace detail
 } // namespace autotune
 } // namespace hipdnn_frontend

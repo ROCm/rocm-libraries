@@ -3,13 +3,10 @@
 
 /**
  * @file PlanSpec.hpp
- * @brief Plan specification and engine metadata types for autotuning
+ * @brief Engine metadata and knob sweep types for autotuning
  *
- * Defines the internal plan spec type used to collect autotuning candidates,
- * plus user-facing types for engine discovery and knob sweep specification.
- *
- * PlanSpec is the composite key (engineId, knobSettings) that uniquely
- * identifies an autotuning candidate. It supports deduplication via operator==.
+ * Defines the user-facing types for engine discovery and knob sweep
+ * specification.
  *
  * EngineConfigInfo, EngineVariant, KnobSweepAxis, and EngineSweepSpec are
  * user-facing types for the engine discovery and plan spec collection API.
@@ -92,6 +89,11 @@ struct EngineSweepSpec
     std::map<KnobType_t, KnobValueVariant> fixedSettings; ///< Knobs held constant
 };
 
+} // namespace hipdnn_frontend
+
+namespace hipdnn_frontend::autotune::detail
+{
+
 /**
  * @brief Internal plan specification for autotuning deduplication
  *
@@ -166,4 +168,4 @@ private:
     }
 };
 
-} // namespace hipdnn_frontend
+} // namespace hipdnn_frontend::autotune::detail

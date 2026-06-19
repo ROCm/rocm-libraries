@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #endif
@@ -98,7 +99,7 @@ public:
     void injectDummyPlanSpec()
     {
         // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::PlanSpec spec;
+        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
         spec.engineId = 0;
         _planSpecs.push_back(std::move(spec));
     }
@@ -112,7 +113,7 @@ public:
     void injectPlanSpec(int64_t engineId, int64_t workspaceSize)
     {
         // Fully-qualified to work around clang-tidy-20 name resolution difference
-        ::hipdnn_frontend::PlanSpec spec;
+        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
         spec.engineId = engineId;
         spec.workspaceSize = workspaceSize;
         _planSpecs.push_back(std::move(spec));
@@ -235,13 +236,14 @@ public:
         return out;
     }
 
-    /// Test shim for the private static rankAndSelectWinner (drives the real
+    /// Test shim for the rankAndSelectWinner free function (drives the real
     /// production ranking/winner-selection code).
     static Error callRankAndSelectWinner(std::vector<AutotuneResult>& results,
                                          const AutotuneConfig& config,
                                          size_t& activePlanIndex)
     {
-        return Graph::rankAndSelectWinner(results, config, activePlanIndex);
+        return hipdnn_frontend::autotune::detail::rankAndSelectWinner(
+            results, config, activePlanIndex);
     }
 
     // True when an execution plan descriptor is attached (created) to the active
@@ -9072,7 +9074,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
 }
 
 // ============================================================================
-// Ranking tests driving the real Graph::rankAndSelectWinner
+// Ranking tests driving the real autotune::detail::rankAndSelectWinner
 // ============================================================================
 
 namespace
@@ -9270,14 +9272,14 @@ TEST_F(TestGraph, AddEngineStripsBenchmarkingKnobFromPlanSpec)
     auto result = graph.add_engine(
         42,
         {KnobSetting("tile_size", int64_t{256}),
-         KnobSetting(hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME, int64_t{1})});
+         KnobSetting(hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     auto knobIds = graph.getPlanSpecKnobIds();
     ASSERT_EQ(knobIds.size(), 1u);
     EXPECT_EQ(std::count(knobIds[0].begin(),
                          knobIds[0].end(),
-                         hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME),
+                         hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME),
               0)
         << "benchmarking knob must be stripped from the stored plan spec";
     EXPECT_NE(std::find(knobIds[0].begin(), knobIds[0].end(), "tile_size"), knobIds[0].end());
@@ -9408,7 +9410,7 @@ TEST_F(TestGraph, EngineVariantToKnobSettings)
     variant.knobSettings["TILE_SIZE"] = int64_t{128};
     variant.knobSettings["SPLIT_K"] = int64_t{2};
     // The benchmarking knob must be dropped by the production conversion.
-    variant.knobSettings[hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME] = int64_t{1};
+    variant.knobSettings[hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME] = int64_t{1};
 
     auto result = graph.add_engine_variants({variant});
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -9446,7 +9448,7 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
     mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {benchKnobDesc});
     setupKnobDescriptorMockRepeated(_mockBackend,
                                     benchKnobDesc,
-                                    hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME,
+                                    hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME,
                                     "Benchmarking knob",
                                     false,
                                     HIPDNN_TYPE_INT64,
@@ -9526,7 +9528,7 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
         captured.insert({capturedKnobIds[i], capturedKnobValues[i]});
     }
     const std::set<std::pair<std::string, int64_t>> expected
-        = {{hipdnn_frontend::autotune::BENCHMARKING_KNOB_NAME, int64_t{1}}};
+        = {{hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1}}};
     EXPECT_EQ(captured, expected)
         << "EXHAUSTIVE priming must inject exactly (global.benchmarking, 1)";
 }

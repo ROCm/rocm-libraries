@@ -24,7 +24,7 @@ using namespace hipdnn_frontend::autotune;
 
 TEST(TestAutotune, BenchmarkingKnobNameIsGlobalBenchmarking)
 {
-    EXPECT_EQ(BENCHMARKING_KNOB_NAME, "global.benchmarking");
+    EXPECT_EQ(autotune::detail::BENCHMARKING_KNOB_NAME, "global.benchmarking");
 }
 
 // ============================================================================
@@ -212,7 +212,7 @@ auto noopFixedAverageLog = [](int, float) {};
 TEST(TestAutotune, RunUntilStableConvergesAndExitsEarly)
 {
     ScriptedTimer timer{{10.0f}, -1, 0};
-    auto outcome = runUntilStable(
+    auto outcome = autotune::detail::runUntilStable(
         MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
@@ -223,7 +223,7 @@ TEST(TestAutotune, RunUntilStableNeverConvergesHitsCap)
 {
     // Alternating values keep the trailing-window CoV above the threshold.
     ScriptedTimer timer{{10.0f, 20.0f}, -1, 0};
-    auto outcome = runUntilStable(
+    auto outcome = autotune::detail::runUntilStable(
         MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
     EXPECT_FALSE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
@@ -234,7 +234,7 @@ TEST(TestAutotune, RunUntilStableConvergesLate)
 {
     // First window {5,9,5} is noisy; later window {10,10,10} converges at iter 6.
     ScriptedTimer timer{{5.0f, 9.0f, 5.0f, 10.0f, 10.0f, 10.0f}, -1, 0};
-    auto outcome = runUntilStable(
+    auto outcome = autotune::detail::runUntilStable(
         MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 6);
@@ -247,7 +247,7 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
     // high CoV and does NOT converge before the designated failure iteration —
     // a constant sequence would converge at iter 2 and never reach the failure.
     ScriptedTimer timer{{10.0f, 20.0f}, 3, 0};
-    auto outcome = runUntilStable(
+    auto outcome = autotune::detail::runUntilStable(
         MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
     EXPECT_TRUE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
@@ -257,7 +257,7 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
 TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, -1, 0};
-    auto outcome = runFixedAverage(/*timedIterations=*/10, timer, noopFixedAverageLog);
+    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/10, timer, noopFixedAverageLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 10);
@@ -266,7 +266,7 @@ TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 TEST(TestAutotune, RunFixedAverageFailureMidLoopBreaks)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, 2, 0};
-    auto outcome = runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
+    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
@@ -287,7 +287,7 @@ TEST(TestAutotune, RunFixedAverageInvokesCallbackForEachSuccessfulIteration)
         callbackElapsedMs.push_back(elapsedMs);
     };
 
-    auto outcome = runFixedAverage(/*timedIterations=*/3, timer, onIteration);
+    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/3, timer, onIteration);
 
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
@@ -309,7 +309,7 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
     };
 
     auto outcome
-        = runUntilStable(MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
+        = autotune::detail::runUntilStable(MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
 
     EXPECT_TRUE(outcome.converged);
     ASSERT_EQ(covValidByIteration.size(), 3u);

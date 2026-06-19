@@ -12,9 +12,7 @@
 
 #pragma once
 
-namespace hipdnn_frontend
-{
-namespace autotune
+namespace hipdnn_frontend::autotune::detail
 {
 
 /// Name of the benchmarking knob that triggers engine-internal cache priming.
@@ -22,5 +20,4 @@ namespace autotune
 /// by all add_engine_*() functions.
 static constexpr const char* BENCHMARKING_KNOB_NAME = "global.benchmarking";
 
-} // namespace autotune
-} // namespace hipdnn_frontend
+} // namespace hipdnn_frontend::autotune::detail

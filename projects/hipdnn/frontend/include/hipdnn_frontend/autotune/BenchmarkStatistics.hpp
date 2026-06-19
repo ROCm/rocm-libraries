@@ -19,18 +19,11 @@
 #include <type_traits>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace autotune
+namespace hipdnn_frontend::autotune::detail
 {
 
-/**
- * @brief Compute the arithmetic mean of a range of values
- * @tparam T Floating-point type (float or double)
- * @param values Vector of timing samples
- * @return The arithmetic mean
- * @throws std::invalid_argument if values is empty
- */
+// Compute the arithmetic mean of a range of floating-point timing samples.
+// Throws std::invalid_argument if values is empty.
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeMean(const std::vector<T>& values)
 {
@@ -42,17 +35,12 @@ T computeMean(const std::vector<T>& values)
     return sum / static_cast<T>(values.size());
 }
 
-/**
- * @brief Compute the population standard deviation of a range of values
- * @tparam T Floating-point type (float or double)
- * @param values Vector of timing samples
- * @return The population standard deviation
- * @throws std::invalid_argument if values is empty
- *
- * Uses population stddev (divides by N, not N-1) because the benchmarking
- * samples represent the complete set of measurements, not a sample drawn
- * from a larger population.
- */
+// Compute the population standard deviation of a range of floating-point
+// timing samples. Throws std::invalid_argument if values is empty.
+//
+// Uses population stddev (divides by N, not N-1) because the benchmarking
+// samples represent the complete set of measurements, not a sample drawn
+// from a larger population.
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeStddev(const std::vector<T>& values)
 {
@@ -71,17 +59,13 @@ T computeStddev(const std::vector<T>& values)
     return std::sqrt(variance);
 }
 
-/**
- * @brief Compute the coefficient of variation (CoV) of a range of values
- * @tparam T Floating-point type (float or double)
- * @param values Vector of timing samples
- * @return The coefficient of variation (stddev / mean), or 0 if mean is 0
- * @throws std::invalid_argument if values is empty
- *
- * The coefficient of variation expresses timing variability as a fraction
- * of the mean. A CoV below the stabilityThreshold indicates convergence
- * in the RUN_UNTIL_STABLE strategy.
- */
+// Compute the coefficient of variation (CoV) of a range of floating-point
+// timing samples: stddev / mean, or 0 if mean is 0. Throws
+// std::invalid_argument if values is empty.
+//
+// The coefficient of variation expresses timing variability as a fraction
+// of the mean. A CoV below the stabilityThreshold indicates convergence
+// in the RUN_UNTIL_STABLE strategy.
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeCoefficientOfVariation(const std::vector<T>& values)
 {
@@ -102,5 +86,4 @@ T computeCoefficientOfVariation(const std::vector<T>& values)
     return computeStddev(values) / mean;
 }
 
-} // namespace autotune
-} // namespace hipdnn_frontend
+} // namespace hipdnn_frontend::autotune::detail
