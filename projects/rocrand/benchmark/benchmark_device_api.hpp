@@ -109,7 +109,7 @@ constexpr int get_vectorization()
         return 1;
     }
 
-    // Philox4x supports all vectorized distrubutions.
+    // Philox4x supports all vectorized distributions.
     constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rand_state_philox4x32_10_t>;
     if constexpr(is_philox4x32_10)
     {
