@@ -140,10 +140,10 @@ int main() {
 
     {
         // Workaround: HIP compiler bug with `new (ptr) T(func())` on device memory.
-        hip::thread world_constructor([=] __device__ () {
+        hip::thread world_constructor{[=] __device__ () {
             hittable_list local = random_scene();
             new (world) hittable_list(std::move(local));
-        });
+        }};
         world_constructor.join();
 
         const int k_threads = 4096;

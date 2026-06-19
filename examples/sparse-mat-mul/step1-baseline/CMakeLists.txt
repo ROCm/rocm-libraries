@@ -22,4 +22,8 @@ target_compile_options(spmm PUBLIC "-O3" "-march=native")
 # git lfs pull examples/sparse-mat-mul/data/*
 
 # then build & run:
+# LINUX:
 # cd examples/sparse-mat-mul/step1-baseline && cmake -B build && cmake --build build && ./build/bin/spmm
+
+# WINDOWS (from x64 Native Tools Command Prompt for VS 2022):
+# cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DCMAKE_BUILD_TYPE=Release . && cmake --build build && build\bin\spmm.exe

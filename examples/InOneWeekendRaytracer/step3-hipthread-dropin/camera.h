@@ -14,6 +14,11 @@
 #include "random.h"
 #include "ray.h"
 
+// M_PI is missing definiton on Windows
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 
 __host__ __device__ vec3 random_in_unit_disk(RandState *randState) {
     vec3 p;

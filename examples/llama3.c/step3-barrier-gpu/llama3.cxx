@@ -2,7 +2,6 @@
 
 #include "hip/hip_runtime.h"
 #include <ctype.h>
-#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,8 +13,13 @@
 #include <hip/atomic>
 #include <hip/std/memory>
 #include <hip/thread>
-#include <sys/mman.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include "win.h"
+#else
+#  include <fcntl.h>
+#  include <sys/mman.h>
+#  include <unistd.h>
+#endif
 #include <thrust/copy.h>
 #include <thrust/device_free.h>
 #include <thrust/device_malloc.h>
@@ -171,7 +175,7 @@ Checkpoint read_checkpoint(const char *checkpoint_path) {
 
   // figure out the file size
   fseek(file, 0, SEEK_END); // move file pointer to end of file
-  ssize_t file_size = ftell(file); // get the file size, in bytes
+  long long file_size = ftell(file); // win.h redefines ftell to _ftelli64 on Windows; long is 32-bit on Windows so must use long long for >2GB files
   fclose(file);
 
   // memory map the Transformer weights into the data pointer
@@ -923,9 +927,8 @@ int sample(Sampler *sampler, float *logits) {
 
 long time_in_ms() {
   // return time in milliseconds, for benchmarking the model speed
-  struct timespec time;
-  clock_gettime(CLOCK_REALTIME, &time);
-  return time.tv_sec * 1000 + time.tv_nsec / 1000000;
+  return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 // ----------------------------------------------------------------------------

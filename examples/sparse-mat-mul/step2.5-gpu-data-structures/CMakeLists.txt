@@ -32,4 +32,8 @@ target_link_libraries(spmm PRIVATE roc::rocthrust)
 # git lfs pull examples/sparse-mat-mul/data/*
 
 # then build & run:
+# LINUX:
 # cd examples/sparse-mat-mul/step2.5-gpu-data-structures && cmake -B build && cmake --build build && ./build/bin/spmm
+
+# WINDOWS (from x64 Native Tools Command Prompt for VS 2022):
+# cd examples/sparse-mat-mul/step2.5-gpu-data-structures && cmake -B build -G Ninja -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_C_COMPILER="clang" -DHIP_PLATFORM=amd -DCMAKE_HIP_ARCHITECTURES=gfx1201 -DCMAKE_BUILD_TYPE=Release . && cmake --build build && build\bin\spmm.exe

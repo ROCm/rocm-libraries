@@ -1,7 +1,6 @@
 /* Inference for Llama-3 Transformer model in pure C */
 
 #include <ctype.h>
-#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,8 +10,13 @@
 #include <memory>
 #include <thread>
 #include <vector>
-#include <sys/mman.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include "win.h"
+#else
+#  include <fcntl.h>
+#  include <sys/mman.h>
+#  include <unistd.h>
+#endif
 // ----------------------------------------------------------------------------
 // Transformer model
 
@@ -801,9 +805,8 @@ int sample(Sampler *sampler, float *logits) {
 
 long time_in_ms() {
   // return time in milliseconds, for benchmarking the model speed
-  struct timespec time;
-  clock_gettime(CLOCK_REALTIME, &time);
-  return time.tv_sec * 1000 + time.tv_nsec / 1000000;
+  return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 // ----------------------------------------------------------------------------
