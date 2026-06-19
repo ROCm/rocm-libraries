@@ -236,7 +236,8 @@ void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                                                         handle.getStream()));
 
     // Scale pointers are device addresses, so they are set here rather than at
-    // build time (where the scale modes were set).
+    // build time (where the scale modes were set). Note: the buffers are swapped
+    // to match the operand swap.
     _params.desc().setAScalePointer(bScaleBuffer.ptr);
     _params.desc().setBScalePointer(transposedAScale);
 
