@@ -28,7 +28,7 @@ int main(int, char**) {
   {
     // x.get_id() == id() and get_id() returns the value of x.get_id() prior
     // to the start of construction.
-    hip::jthread j1 = support::make_test_jthread([] () {});
+    hip::jthread j1 = support::make_test_jthread([] __device__ () {});
     auto id1        = j1.get_id();
 
     hip::jthread j2(::std::move(j1));
@@ -39,7 +39,7 @@ int main(int, char**) {
   // {
   //   // ssource has the value of x.ssource prior to the start of construction
   //   // and x.ssource.stop_possible() is false.
-  //   hip::jthread j1 = support::make_test_jthread([] () {});
+  //   hip::jthread j1 = support::make_test_jthread([] __device__ () {});
   //   auto ss1        = j1.get_stop_source();
   //
   //   hip::jthread j2(::std::move(j1));

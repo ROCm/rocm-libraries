@@ -35,7 +35,7 @@ int main(int, char**) {
     constexpr auto numberOfThreads = 10u;
     hip::jthread jts[numberOfThreads];
     for (auto i = 0u; i < numberOfThreads; ++i) {
-      jts[i] = support::make_test_jthread([&calledTimes] () {
+      jts[i] = support::make_test_jthread([&calledTimes] __device__ () {
         hip::this_thread::sleep_for(hip::std::chrono::milliseconds(2));
         calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
       });
@@ -59,14 +59,14 @@ int main(int, char**) {
   {
     auto flag_ptr = hip::std::make_unique<bool>(false);
     auto& flag    = *flag_ptr;
-    hip::jthread jt = support::make_test_jthread([&flag] () { flag = true; });
+    hip::jthread jt = support::make_test_jthread([&flag] __device__ () { flag = true; });
     jt.join();
     assert(flag); // non atomic write is visible to the current thread
   }
 
   // Postconditions: The thread represented by *this has completed. get_id() == id().
   {
-    hip::jthread jt = support::make_test_jthread([] () {});
+    hip::jthread jt = support::make_test_jthread([] __device__ () {});
     assert(jt.get_id() != hip::jthread::id());
     jt.join();
     assert(jt.get_id() == hip::jthread::id());

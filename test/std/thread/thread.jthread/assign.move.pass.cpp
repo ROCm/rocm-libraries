@@ -32,7 +32,7 @@ int main(int, char**) {
 #ifdef __HIP_DEVICE_COMPILE__
   // If &x == this is true, there are no effects.
   {
-    hip::jthread j = support::make_test_jthread([] () {});
+    hip::jthread j = support::make_test_jthread([] __device__ () {});
     auto id        = j.get_id();
     // auto ssource = j.get_stop_source(); // stop token not implemented
     j              = ::std::move(j);
@@ -43,11 +43,11 @@ int main(int, char**) {
   // if joinable() is true, calls request_stop() and then join()
   // request_stop is called
   // {
-  //   hip::jthread j1 = support::make_test_jthread([] () {});
+  //   hip::jthread j1 = support::make_test_jthread([] __device__ () {});
   //   bool called     = false;
   //   hip::stop_callback cb(j1.get_stop_token(), [&called] { called = true; });
   //
-  //   hip::jthread j2 = support::make_test_jthread([] () {});
+  //   hip::jthread j2 = support::make_test_jthread([] __device__ () {});
   //   j1              = ::std::move(j2);
   //   assert(called);
   // } // stop token not implemented
@@ -60,7 +60,7 @@ int main(int, char**) {
     constexpr auto numberOfThreads = 10u;
     hip::jthread jts[numberOfThreads];
     for (auto i = 0u; i < numberOfThreads; ++i) {
-      jts[i] = support::make_test_jthread([&calledTimes] () {
+      jts[i] = support::make_test_jthread([&calledTimes] __device__ () {
         hip::this_thread::sleep_for(hip::std::chrono::milliseconds(2));
         calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
       });
@@ -81,8 +81,8 @@ int main(int, char**) {
 
   // then assigns the state of x to *this
   {
-    hip::jthread j1 = support::make_test_jthread([] () {});
-    hip::jthread j2 = support::make_test_jthread([] () {});
+    hip::jthread j1 = support::make_test_jthread([] __device__ () {});
+    hip::jthread j2 = support::make_test_jthread([] __device__ () {});
     auto id2        = j2.get_id();
     // auto ssource2 = j2.get_stop_source(); // stop token not implemented
 
@@ -94,8 +94,8 @@ int main(int, char**) {
 
   // sets x to a default constructed state
   {
-    hip::jthread j1 = support::make_test_jthread([] () {});
-    hip::jthread j2 = support::make_test_jthread([] () {});
+    hip::jthread j1 = support::make_test_jthread([] __device__ () {});
+    hip::jthread j2 = support::make_test_jthread([] __device__ () {});
     j1              = ::std::move(j2);
 
     assert(j2.get_id() == hip::jthread::id());
@@ -105,7 +105,7 @@ int main(int, char**) {
   // joinable is false
   {
     hip::jthread j1;
-    hip::jthread j2 = support::make_test_jthread([] () {});
+    hip::jthread j2 = support::make_test_jthread([] __device__ () {});
 
     auto j2Id = j2.get_id();
 

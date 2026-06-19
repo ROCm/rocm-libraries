@@ -34,7 +34,7 @@ int main(int, char**) {
     auto& start    = *start_ptr;
     auto& done     = *done_ptr;
 
-    hip::std::optional<hip::jthread> jt = support::make_test_jthread([&start, &done] () {
+    hip::std::optional<hip::jthread> jt = support::make_test_jthread([&start, &done] __device__ () {
       hip::std::atomic_wait(&start, false);
       done = true;
     });
@@ -52,7 +52,7 @@ int main(int, char**) {
 
   // Postconditions: get_id() == id().
   {
-    hip::jthread jt = support::make_test_jthread([] () {});
+    hip::jthread jt = support::make_test_jthread([] __device__ () {});
     assert(jt.get_id() != hip::jthread::id());
     jt.detach();
     assert(jt.get_id() == hip::jthread::id());

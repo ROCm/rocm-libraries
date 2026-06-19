@@ -27,7 +27,7 @@ static_assert(noexcept(::std::declval<hip::jthread&>().get_stop_source()));
 int main(int, char**) {
   // Represents a thread
   {
-    hip::jthread jt                                          = support::make_test_jthread([] () {});
+    hip::jthread jt                                          = support::make_test_jthread([] __device__ () {});
     ::std::same_as<::std::stop_source> decltype(auto) result = jt.get_stop_source();
     assert(result.stop_possible());
   }

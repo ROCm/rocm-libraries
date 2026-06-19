@@ -36,7 +36,7 @@ int main(int, char**) {
 
   // Non-default constructed
   {
-    const hip::jthread jt                      = support::make_test_jthread([] () {});
+    const hip::jthread jt                      = support::make_test_jthread([] __device__() {});
     ::std::same_as<bool> decltype(auto) result = jt.joinable();
     assert(result);
   }
@@ -46,7 +46,7 @@ int main(int, char**) {
   {
     auto done_ptr                = hip::std::make_unique<hip::std::atomic<bool>>(false);
     hip::std::atomic<bool>& done = *done_ptr;
-    const hip::jthread jt        = support::make_test_jthread([&done] {
+    const hip::jthread jt        = support::make_test_jthread([&done] __device__ {
       hip::std::atomic_wait(&done, false);
     });
     ::std::same_as<bool> decltype(auto) result = jt.joinable();

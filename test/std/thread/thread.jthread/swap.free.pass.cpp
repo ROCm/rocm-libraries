@@ -39,7 +39,7 @@ int main(int, char**) {
   // x is default constructed
   {
     hip::jthread t1;
-    hip::jthread t2        = support::make_test_jthread([] () {});
+    hip::jthread t2        = support::make_test_jthread([] __device__ () {});
     const auto originalId2 = t2.get_id();
     swap(t1, t2);
 
@@ -49,7 +49,7 @@ int main(int, char**) {
 
   // y is default constructed
   {
-    hip::jthread t1 = support::make_test_jthread([] () {});
+    hip::jthread t1 = support::make_test_jthread([] __device__ () {});
     hip::jthread t2{};
     const auto originalId1 = t1.get_id();
     swap(t1, t2);
@@ -60,8 +60,8 @@ int main(int, char**) {
 
   // both not default constructed
   {
-    hip::jthread t1        = support::make_test_jthread([] () {});
-    hip::jthread t2        = support::make_test_jthread([] () {});
+    hip::jthread t1        = support::make_test_jthread([] __device__ () {});
+    hip::jthread t2        = support::make_test_jthread([] __device__ () {});
     const auto originalId1 = t1.get_id();
     const auto originalId2 = t2.get_id();
     swap(t1, t2);

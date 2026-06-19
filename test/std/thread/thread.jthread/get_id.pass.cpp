@@ -36,7 +36,7 @@ int main(int, char**) {
   }
   // Represents a thread
   {
-    const hip::jthread jt                                = support::make_test_jthread([] {});
+    const hip::jthread jt                                = support::make_test_jthread([] __device__{});
     ::std::same_as<hip::jthread::id> decltype(auto) result = jt.get_id();
     assert(result != hip::jthread::id());
   }

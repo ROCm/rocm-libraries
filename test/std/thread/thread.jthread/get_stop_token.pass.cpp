@@ -28,7 +28,7 @@ static_assert(noexcept(::std::declval<const hip::jthread&>().get_stop_token()));
 int main(int, char**) {
   // Represents a thread
   {
-    hip::jthread jt                                     = support::make_test_jthread([] () {});
+    hip::jthread jt                                     = support::make_test_jthread([] __device__ () {});
     auto ss                                             = jt.get_stop_source();
     ::std::same_as<::std::stop_token> decltype(auto) st = ::std::as_const(jt).get_stop_token();
 
