@@ -24,6 +24,14 @@ template <class F, class ...Args>
 __device__ hip::thread make_test_thread(F&& f, Args&& ...args) {
     return hip::thread(::std::forward<F>(f), ::std::forward<Args>(args)...);
 }
+template <class F, class ...Args>
+__host__ hip::jthread make_test_jthread(F&& f, Args&& ...args) {
+    return hip::jthread(::std::forward<F>(f), ::std::forward<Args>(args)...);
+}
+template <class F, class ...Args>
+__device__ hip::jthread make_test_jthread(F&& f, Args&& ...args) {
+    return hip::jthread(::std::forward<F>(f), ::std::forward<Args>(args)...);
+}
 
 } // end namespace support
 
