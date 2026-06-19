@@ -411,6 +411,7 @@ class LRPlacement(Emittable):
     tiles: MFMATileRange
     subIterK_slot: int         # which subIterK this LR is placed in
     partition: int = 0         # which partition this LR belongs to
+    uid: int = 0               # first-class uid index (== subIterK_start // per_uid_k)
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -433,15 +434,20 @@ class GRPlacement(Emittable):
     subIterK_slot: int         # which subIterK this GR is placed in
     partition: int = 0         # which partition this GR belongs to
     unrollId: int = 0          # which inner-DU iteration (0 for single-DU configs)
+    uid: int = field(init=False, default=0)  # first-class uid index (== unrollId)
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
 
     def __post_init__(self):
         self.kind = 'gr'
+        # uid is the first-class addressing index for this GR; today it is
+        # exactly the inner-DU iteration unrollId (kept as data for S1+ which
+        # will consume placement.uid instead of recomputing unrollId*grGran.k).
+        self.uid = self.unrollId
 
     def __str__(self):
-        uid = f" uid={self.unrollId}" if self.unrollId else ""
+        uid = f" uid={self.uid}" if self.uid else ""
         return (f"GR {self.tensor} (MT {fmt_mt(self.mtIteration)}, "
                 f"subIterK {self.tiles.fmt_k()}) ids {self.tiles.fmt_tiles()}{uid}")
 
@@ -796,6 +802,7 @@ class LogicalScheduler:
                     mtIteration=0,
                     tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
                     subIterK_slot=slot_k,
+                    uid=lr_k_start // self._per_uid_k(tensor),
                 )
                 slots[slot_k].lrs.append(lr)
 
@@ -876,6 +883,7 @@ class LogicalScheduler:
                             mtIteration=lr_mt,
                             tiles=MFMATileRange(lr_k_start, lr_k_end, ts, te),
                             subIterK_slot=slot_k,
+                            uid=lr_k_start // self._per_uid_k(tensor),
                         )
                         slots[slot_k].lrs.append(lr)
                         slot_mt[slot_k] = lr_mt
@@ -2267,6 +2275,14 @@ class LogicalScheduler:
                     mt = lr.mtIteration
                     per_uid_k = self._per_uid_k(tensor)
                     lr_uid = lr.tiles.subIterK_start // per_uid_k
+                    # S0 stored-uid plumbing: the first-class uid threaded onto
+                    # the placement at creation must match the value recomputed
+                    # here from subIterK_start // per_uid_k (no consumer change
+                    # yet; this asserts the data is correct before S2+ consume it).
+                    assert lr.uid == lr_uid, (
+                        f"LR {tensor} stored uid={lr.uid} != recomputed "
+                        f"{lr_uid} (subIterK_start={lr.tiles.subIterK_start}, "
+                        f"per_uid_k={per_uid_k})")
                     if tensor not in first_lr:
                         first_lr[tensor] = lr
                     mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
@@ -4154,7 +4170,7 @@ class LogicalScheduler:
         slot = p.subIterK_slot if hasattr(p, 'subIterK_slot') else '?'
         part = p.partition if hasattr(p, 'partition') else 0
         kind = 'LR' if isinstance(p, LRPlacement) else 'GR'
-        uid = f" uid={p.unrollId}" if isinstance(p, GRPlacement) and p.unrollId else ""
+        uid = f" uid={p.uid}" if isinstance(p, GRPlacement) and p.uid else ""
         mt = f" (MT{dep.mt_offset})" if dep.mt_offset != 0 else ""
         return f"{kind} {p.tensor} @P{part}:subIterK={slot}{uid}{mt}"
 

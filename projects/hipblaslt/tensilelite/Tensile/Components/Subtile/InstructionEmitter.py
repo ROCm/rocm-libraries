@@ -209,6 +209,13 @@ class InstructionEmitter:
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
+            # S0 stored-uid plumbing: the first-class placement.uid must equal
+            # the inner-DU iteration unrollId that today's per-uid K window is
+            # derived from (no consumer change yet; S3 will source uid_k_base
+            # from placement.uid * grGran.k).
+            assert placement.uid == placement.unrollId, (
+                f"GR {tensor} stored uid={placement.uid} != unrollId="
+                f"{placement.unrollId}")
             uid_k_base = placement.unrollId * grGran.k
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
@@ -547,8 +554,11 @@ class InstructionEmitter:
             # the mask and passes without it, while MXFP4 (4-bit) passes either
             # way -- so single-DU MXFP4 keeps the mask and stays develop-
             # identical, but single-DU MXFP8 must skip it like multi-DU does.
-            _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
-                                   or self.config.numUnroll.get('B', 1) > 1)
+            # Multi-DU gate routed through the symmetric uid_range accessor.
+            # uid_range = scaleDU/dataDU = max(numUnroll[A], numUnroll[B]) (the
+            # config asserts this equivalence in __post_init__), so uid_range>1
+            # is identical to the old per-tensor numUnroll>1 disjunction.
+            _emit_mask_multi_du = self.config.uid_range > 1
             _data_is_8bit_float = kernel["ProblemType"]["DataTypeA"].is8bitFloat()
             _skip_data_kmask = self.hasScale and (_emit_mask_multi_du
                                                   or _data_is_8bit_float)
