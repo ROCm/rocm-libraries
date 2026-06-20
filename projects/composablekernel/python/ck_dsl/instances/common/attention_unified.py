@@ -973,7 +973,12 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
 
     Beyond the mw=32 prereq we gate on:
 
-      * dtype == bf16 (fp16/fp8 paths still use the default kernel)
+      * dtype in {bf16, fp16} (the transposed softmax/PV path is dtype-
+        generic -- it casts the f32 softmax probabilities to the working
+        dtype at the MFMA boundary and keeps m/l/acc in f32, so fp16 gets
+        the same fp32-accumulated online softmax bf16 does; the legacy
+        16x16 path it replaces lost accuracy on long-KV d128 fp16). The
+        fp8 K/V cache path still uses the default kernel.
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
       * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
@@ -993,7 +998,7 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if _enable_combo_2d(problem):
         return True
-    if problem.dtype != "bf16":
+    if problem.dtype not in ("bf16", "fp16"):
         return False
     if problem.use_fp8:
         return False

@@ -121,7 +121,11 @@ static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
     {
         return true;
     }
-    if(strcmp(p->dtype, "bf16") != 0)
+    /* fp16 and bf16 both ride the validated transposed-32x32 path. Gating this
+       to bf16 only left fp16 d128/d64 prefill on a legacy path that is
+       numerically wrong at d128 with KV >= 1024 (mirrors the Python selector
+       _enable_transposed_qk_32x32). */
+    if(strcmp(p->dtype, "bf16") != 0 && strcmp(p->dtype, "fp16") != 0)
     {
         return false;
     }
