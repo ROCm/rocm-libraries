@@ -106,16 +106,6 @@ def _render_instruction_schedule_output(make_cfg, kernel, fp4):
         sched.deallocVgprTiles(writer)
 
 
-# S6 re-baseline: the multi-DU StreamK wrap / cross-iter LRs no longer force a
-# full vmcnt(0) drain; they emit their precise per-(tensor,uid) inflight
-# vmcnt(count).  Only the multi-DU wrap waits move (vmcnt(0) -> vmcnt(N)); the
-# single-DU and BF16 goldens below are byte-identical.  The emitted vmcnt is the
-# post-pass operand (carried grCnt + buffer_loads packed ahead = loads ALLOWED
-# to remain outstanding, the genuine partial wait the drain previously hid).
-# Each moved wait is sound because after S3/E3-b the inflight set is MT-granular
-# and grid-independent (§1.3), so the producing buffer_load of the consumed
-# (tensor,uid) is never inside the allowed-outstanding count — it must retire
-# before the wrap-LR ds_read.  Proven on hardware (s4_s6/s6/gpu/).
 IS_OUTPUT_MXFP8_MULTI_DU_1x1 = """\
 multiDU=True
 P0 subIterK=0:
@@ -152,7 +142,7 @@ P0 subIterK=0:
   [i50] gr
 P0 subIterK=1:
   [i00] wait_lr
-  [i36] wait_gr(vmcnt=13)
+  [i36] wait_gr(vmcnt=0)
   [i37] sync
   [i37] lr
   [i38] lr
@@ -184,7 +174,7 @@ P0 subIterK=1:
   [i63] gr
 P0 subIterK=2:
   [i00] wait_lr
-  [i26] wait_gr(vmcnt=9)
+  [i26] wait_gr(vmcnt=0)
   [i27] sync
   [i27] lr
   [i28] lr
@@ -234,7 +224,7 @@ P0 subIterK=2:
   [i63] SXorB32
 P0 subIterK=3:
   [i00] wait_lr
-  [i05] wait_gr(vmcnt=10)
+  [i05] wait_gr(vmcnt=0)
   [i06] sync
   [i06] TextBlock
   [i07] VXorB32
@@ -404,7 +394,7 @@ P0 subIterK=3:
   [i32] gr
 P1 subIterK=0:
   [i00] wait_lr
-  [i09] wait_gr(vmcnt=3)
+  [i09] wait_gr(vmcnt=0)
   [i10] sync
   [i10] lr
   [i11] lr
@@ -433,7 +423,7 @@ P1 subIterK=1:
   [i15] SXorB32
 P1 subIterK=2:
   [i00] wait_lr
-  [i10] wait_gr(vmcnt=1)
+  [i10] wait_gr(vmcnt=0)
   [i11] sync
   [i11] lr
   [i12] lr
@@ -443,7 +433,7 @@ P1 subIterK=2:
   [i15] gr
 P1 subIterK=3:
   [i00] wait_lr
-  [i01] wait_gr(vmcnt=5)
+  [i01] wait_gr(vmcnt=0)
   [i01] sync
   [i01] TextBlock
   [i01] VXorB32

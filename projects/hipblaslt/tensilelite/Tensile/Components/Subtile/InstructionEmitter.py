@@ -269,28 +269,35 @@ class InstructionEmitter:
         if counts is None:
             return []
 
-        # S6 (force_drain removed): every wait_gr — including StreamK wrap /
-        # cross-iter LRs — emits the precise per-tensor vmcnt(counts).  After
-        # S3/E3-b the inflight set is grid-independent (§1.3), so the static
-        # count is exact under partial-tile truncation; there is no longer a
-        # forced vmcnt(0) drain. See WaitGROp in LogicalScheduler.py.
+        # force_drain -> emit a full vmcnt(0) drain instead of the per-tensor
+        # counts (which are then kept only for the diagnostic comment). See
+        # WaitGROp.force_drain in LogicalScheduler.py for why a static count is
+        # not used here.
+        force_drain = getattr(source, 'force_drain', False)
+
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
-            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            tdmCnt = 0 if force_drain else (counts.A + counts.B + counts.SA + counts.SB)
+            label = "full drain" if force_drain else "tensor_load_to_lds"
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
-                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+                                   comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
                  'SA': 1, 
                  'SB': 1}  
-        grCnt = (counts.A * grMap['A'] +
-                 counts.B * grMap['B'] +
-                 counts.SA * grMap['SA'] +
-                 counts.SB * grMap['SB'])
+        if force_drain:
+            grCnt = 0
+            label = "full drain"
+        else:
+            grCnt = (counts.A * grMap['A'] +
+                     counts.B * grMap['B'] +
+                     counts.SA * grMap['SA'] +
+                     counts.SB * grMap['SB'])
+            label = "per-subIterK"
         swait = SWaitCntEx(vlcnt=grCnt, vscnt=-1,
                            adjustVmcnt=source.adjustVmcnt,
-                           comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
+                           comment=f"Wait GR ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
         return [swait]
 
     def emit_wait_lr(self):

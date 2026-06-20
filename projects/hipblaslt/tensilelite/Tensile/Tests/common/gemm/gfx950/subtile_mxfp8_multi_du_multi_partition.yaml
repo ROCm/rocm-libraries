@@ -1,10 +1,10 @@
 ########################################
-# MXFP8 multi-DU + multi-partition wrap-LR wait coverage.
+# MXFP8 multi-DU + multi-partition force_drain coverage.
 #
-# Exercises the StreamK wrap / cross-iter wait_gr path in
-# LogicalScheduler.remove_cross_deps for asymmetric macro tiles that produce
-# numPartitions > 1 under multi-DU. Post-S6 these wraps emit their precise
-# per-(tensor,uid) vmcnt(count) instead of a forced vmcnt(0) drain.
+# Exercises the force_drain vmcnt(0) path in LogicalScheduler.remove_cross_deps
+# for asymmetric macro tiles that produce numPartitions > 1 under multi-DU.
+# Look for "[Subtile] force_drain:" messages in the build output to confirm
+# the path is hit.
 #
 # MTs chosen to cover different partition counts and MIWT asymmetries:
 #   320x256 MIWT=[10,8] — 5 partitions (M partitioned)
@@ -47,7 +47,7 @@ BenchmarkProblems:
   # FP8 TN — PGR=1, multi-DU, asymmetric MTs (multi-partition)
   # All MTs are asymmetric → scheduler picks numPartitions > 1.
   # Combined with multi-DU (DepthU=256, dataDU=128) this exercises
-  # the wrap-LR partial vmcnt(count) path (post-S6 drain removal).
+  # the force_drain vmcnt(0) path.
   ########################################
   -
     - # ProblemType

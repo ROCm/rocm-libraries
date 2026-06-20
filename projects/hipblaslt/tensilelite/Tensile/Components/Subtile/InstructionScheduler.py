@@ -168,8 +168,7 @@ _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') a
 # Typed op detection rather than matching substrings in the instruction
 # comment, which is brittle to comment edits. wait_gr is the only vmcnt-bearing
 # wait emitted on this path, so vlcnt != -1 identifies it; wait_lr uses
-# vlcnt=-1 (a wait_gr with an all-zero count still emits vlcnt=0, so it stays
-# classified as wait_gr).
+# vlcnt=-1 (force_drain wait_gr still emits vlcnt=0, so drains stay wait_gr).
 _isWaitGr = lambda x: _isWaitCnt(x) and x.vlcnt != -1
 
 class _SchedulingRules:

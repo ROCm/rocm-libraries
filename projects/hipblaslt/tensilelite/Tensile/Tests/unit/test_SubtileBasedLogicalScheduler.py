@@ -1995,7 +1995,7 @@ class TestComputeInflightLoads:
     def test_multi_du_multi_partition_inflight_counts(self):
         """Multi-DU + multi-partition: uid-aware distribution keeps GRs
         at their natural positions, so _compute_inflight_loads produces
-        accurate counts (S6 emits these directly, no drain override)."""
+        accurate non-zero counts (no force_drain needed)."""
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2,
                                    partSizeM=4, partSizeN=4, pgr=1)
         assert cfg.numPartitions > 1
@@ -2005,6 +2005,7 @@ class TestComputeInflightLoads:
         sched.remove_cross_deps()
 
         found_any = False
+        found_force_drain = False
         for pi, slots in enumerate(sched._partitions):
             for slot in slots:
                 for lr in slot.lrs:
@@ -2017,10 +2018,11 @@ class TestComputeInflightLoads:
                     any_cross = any(d.mt_offset != 0 for d in gr_deps)
                     if lr.mtIteration > 0 or any_cross:
                         found_any = True
+                        if getattr(wait, 'force_drain', False):
+                            found_force_drain = True
+                            continue
                         c = wait.wait_gr_counts
-                        # Multi-DU PGR=1 next-MT wrap LRs may carry an all-zero
-                        # count (the partial wait collapses to vmcnt(0)); only
-                        # assert non-zero on the cross-iter-within-MT case.
+                        # Multi-DU PGR=1 wrap LRs use empty counts (vmcnt drain).
                         if cfg.pgr == 1 and lr.mtIteration > 0:
                             continue
                         has_nonzero = c.A > 0 or c.B > 0 or c.SA > 0 or c.SB > 0
@@ -2032,19 +2034,18 @@ class TestComputeInflightLoads:
 
 
 class TestS5WaitGrCountAuthoritative:
-    """S6 (force_drain removed): the StreamK wrap / cross-iter drain is gone;
-    every wrap-LR now emits its precise per-(tensor,uid) vmcnt(count).  The
-    invariants pinned here:
+    """S5: the StreamK drain stays ON (force_drain still emits vmcnt(0)), but
+    we pin the invariants S6 will rely on once it drops the flag:
 
-      (a) every multi-DU pgr==1 wrap / cross-iter LR's wait_gr carries a
-          precise per-(tensor,uid) inflight count (no force_drain override),
-      (b) that count is schedule-static — a pure function of the logical
-          schedule with no grid / StreamK input — so the emitted vmcnt(count)
-          is exact even under partial-tile truncation (§1.3), and
-      (c) no wait_gr is ever force_drained (the field is removed).
+      (a) every multi-DU pgr==1 wrap / cross-iter LR's wait_gr is force_drain,
+      (b) it still carries the precise per-(tensor,uid) inflight count, and
+      (c) that count is schedule-static — a pure function of the logical
+          schedule with no grid / StreamK input — so the future vmcnt(count)
+          is exact even under partial-tile truncation (§1.3).
 
-    The single-DU rail was never drained, so S6's drain removal is
-    byte-identical for single-DU.  These assertions lock the count S6 emits.
+    The single-DU rail never force_drains, so S6's drain removal is
+    byte-identical for single-DU.  These assertions do not change any emitted
+    instruction; they lock the count S6 will trust.
     """
 
     # (label, make_cfg_256x256_fp4 kwargs) for multi-DU pgr==1 configs.
@@ -2073,9 +2074,8 @@ class TestS5WaitGrCountAuthoritative:
                             out.append((pi, slot.subIterK, lr.tensor, op))
         return out
 
-    def test_wrap_waitgr_carries_count_and_does_not_drain(self):
-        """(a)+(c): every wrap-LR carries its precise count and is no longer
-        force_drained (the drain override was removed in S6)."""
+    def test_wrap_waitgr_force_drains_and_carries_count(self):
+        """(a)+(b): every wrap-LR force_drains and still carries its count."""
         for name, kw in self.MULTI_DU_PGR1_CFGS:
             sched = LogicalScheduler(make_cfg_256x256_fp4(**kw))
             assert sched._is_multi_du(), f"{name}: expected a multi-DU config"
@@ -2083,12 +2083,12 @@ class TestS5WaitGrCountAuthoritative:
             wraps = self._wrap_waitgr_ops(sched)
             assert wraps, f"{name}: expected at least one wrap/cross-iter wait_gr"
             for pi, sk, tensor, op in wraps:
-                assert op.wait_gr_counts is not None, (
+                assert getattr(op, 'force_drain', False), (
                     f"{name}: pi={pi} sk={sk} lr={tensor}: wrap wait_gr must "
-                    "carry the schedule-static per-(tensor,uid) count")
-                assert not getattr(op, 'force_drain', False), (
-                    f"{name}: pi={pi} sk={sk} lr={tensor}: S6 removed the "
-                    "force_drain override; wrap wait_gr must emit vmcnt(count)")
+                    "force_drain while the drain is on (S5 keeps vmcnt(0))")
+                assert op.wait_gr_counts is not None, (
+                    f"{name}: pi={pi} sk={sk} lr={tensor}: force_drain wait_gr "
+                    "must still carry the schedule-static count for S6")
 
     def test_wrap_waitgr_count_is_schedule_static(self):
         """(c): building the same config twice yields identical wrap-LR counts;
@@ -2109,10 +2109,9 @@ class TestS5WaitGrCountAuthoritative:
                     f"{name}: count not schedule-static at pi={pi1} sk={sk1} "
                     f"lr={t1}: {a.wait_gr_counts} vs {b.wait_gr_counts}")
 
-    def test_no_waitgr_force_drains(self):
-        """The S6 rail: force_drain is removed, so no wait_gr (single-DU or
-        multi-DU) carries the attribute and every wait emits its count."""
-        # Single-DU was never drained -> byte-identical across S6.
+    def test_single_du_never_force_drains(self):
+        """The rail: a single-DU config never force_drains, so S6's drain
+        removal is byte-identical for single-DU."""
         sched = LogicalScheduler(make_cfg_256x256_fp4())  # default → single-DU
         assert not sched._is_multi_du()
         sched.remove_cross_deps()
@@ -2120,18 +2119,8 @@ class TestS5WaitGrCountAuthoritative:
             for lr in slot.lrs:
                 for op in lr.preOps:
                     assert not getattr(op, 'force_drain', False), (
-                        "force_drain was removed in S6")
-        # Multi-DU pgr==1 (the only place the drain ever lived) is likewise
-        # free of force_drain after S6.
-        for name, kw in self.MULTI_DU_PGR1_CFGS:
-            msched = LogicalScheduler(make_cfg_256x256_fp4(**kw))
-            assert msched._is_multi_du()
-            msched.remove_cross_deps()
-            for slot in (s for slots in msched._partitions for s in slots):
-                for lr in slot.lrs:
-                    for op in lr.preOps:
-                        assert not getattr(op, 'force_drain', False), (
-                            f"{name}: force_drain was removed in S6")
+                        "single-DU must never force_drain (S6 drain removal is "
+                        "multi-DU-only)")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -4020,14 +4009,13 @@ class TestIsWaitGrClassification:
                              comment="Wait GR (per-subIterK): A=1 B=1 SA=1 SB=1")
         assert _isWaitGr(wait_gr)
 
-    def test_zero_count_wait_gr_is_classified_as_wait_gr(self):
+    def test_force_drain_wait_gr_is_classified_as_wait_gr(self):
         from Tensile.Components.Subtile.InstructionEmitter import SWaitCntEx
         from Tensile.Components.Subtile.InstructionScheduler import _isWaitGr
-        # A wait_gr with an all-zero count still emits vlcnt=0 (!= -1), so it
-        # stays classified as wait_gr.
-        zero_gr = SWaitCntEx(vlcnt=0, vscnt=-1,
-                             comment="Wait GR (per-subIterK): A=0 B=0 SA=0 SB=0")
-        assert _isWaitGr(zero_gr)
+        # A force_drain wait_gr still emits vlcnt=0 (!= -1), so it stays wait_gr.
+        drain_gr = SWaitCntEx(vlcnt=0, vscnt=-1,
+                              comment="Wait GR (full drain): A=0 B=0 SA=0 SB=0")
+        assert _isWaitGr(drain_gr)
 
 
 class TestGrDeferAfterPostBarrierLr:
