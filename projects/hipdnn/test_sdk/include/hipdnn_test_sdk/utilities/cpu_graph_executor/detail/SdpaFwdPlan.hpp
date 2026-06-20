@@ -29,6 +29,8 @@ struct SdpaFwdParams
                   int64_t rightBound,
                   bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
+                  = nullptr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
@@ -41,6 +43,9 @@ struct SdpaFwdParams
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
+        , lseTensor(lseAttributes != nullptr
+                        ? std::make_optional(unpackTensorAttributes(*lseAttributes))
+                        : std::nullopt)
     {
     }
 
@@ -53,6 +58,7 @@ struct SdpaFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -66,7 +72,12 @@ public:
 
     std::vector<int64_t> getOutputTensorIds() const override
     {
-        return {_params.oTensor.uid};
+        std::vector<int64_t> ids = {_params.oTensor.uid};
+        if(_params.lseTensor.has_value())
+        {
+            ids.push_back(_params.lseTensor->uid);
+        }
+        return ids;
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -87,6 +98,13 @@ public:
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowLseTensor;
+        if(_params.lseTensor.has_value())
+        {
+            shallowLseTensor = createShallowTensor<float>(*_params.lseTensor,
+                                                          variantPack.at(_params.lseTensor->uid));
+        }
+
         utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
             *shallowQTensor,
             *shallowKTensor,
@@ -96,7 +114,8 @@ public:
             shallowAttnMaskTensor.get(),
             _params.leftBound,
             _params.rightBound,
-            _params.topLeftAlignment);
+            _params.topLeftAlignment,
+            shallowLseTensor.get());
     }
 
 private:
@@ -188,9 +207,8 @@ public:
             return false;
         }
 
-        // Unsupported: softmax stats outputs
-        if(nodeAttributes->stats_tensor_uid().has_value()
-           || nodeAttributes->max_tensor_uid().has_value()
+        // Unsupported: max/sum_exp stats outputs (LSE is supported)
+        if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
@@ -220,6 +238,10 @@ public:
         const auto* attnMaskPtr = nodeAttributes->attn_mask_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
+
+        const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
+                                 : nullptr;
 
         int64_t leftBound = (nodeAttributes->left_bound().has_value())
                                 ? nodeAttributes->left_bound().value()
@@ -270,7 +292,8 @@ public:
                           leftBound,
                           rightBound,
                           isTopLeft,
-                          attnMaskPtr));
+                          attnMaskPtr,
+                          lsePtr));
     }
 };
 

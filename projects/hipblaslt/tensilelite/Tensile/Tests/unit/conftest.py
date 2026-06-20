@@ -2,6 +2,8 @@
 
 import pytest
 
+from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
+
 
 @pytest.fixture
 def _force_strict_gate_on(monkeypatch):
