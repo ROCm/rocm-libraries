@@ -48,26 +48,31 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define STR_HELPER(x) #x
 #define STRINGIFY(x) STR_HELPER(x)
 
-// 2. The main macro that combines the pragma keyword with your argument K
-#define UNROLL_LOOP_BY(K) _Pragma(STRINGIFY(unroll K))
-
 // --------------------------------------------------------------------
 // use nontemporal load of read-only data to by-pass the cache
 //
 // Intended to avoid cache pollution for data that is used only once
 // --------------------------------------------------------------------
 
-#include "hip/hip_vector_types.h"
+#include <cstdint>
+// 1. Check if the compiler is running in C++20 mode or higher
+#if __cplusplus >= 202002L
+#include <bit> // Safe to include the C++20 bit header
+#define HAS_BIT_CAST 1
+#else
+#include <algorithm> // Fallback for C++17
+#define HAS_BIT_CAST 0
+#endif
 
 #if defined(__GFX9__)
-#undef USE_SPLIT_TYPE
+#define USE_SPLIT_TYPE 0
 #else
-#define USE_SPLIT_TYPE
+#define USE_SPLIT_TYPE 1
 #endif
 
 static inline __device__ rocblas_double_complex nontemporal_load(rocblas_double_complex const* const p)
 {
-#ifdef USE_SPLIT_TYPE
+#if USE_SPLIT_TYPE
     double const* const __restrict__ p2 = (double const*)p;
     return (rocblas_double_complex{*p2, *(p2 + 1)});
 #else
@@ -84,15 +89,17 @@ static inline __device__ rocblas_float_complex nontemporal_load(rocblas_float_co
     uint32_t const low_bits = (uint32_t)(uval & 0xFFFFFFFF);
     uint32_t const high_bits = (uint32_t)(uval >> 32);
 
-    // std::bit_cast in C++20
-    // float const x = std::bit_cast<float>( low_bits );
-    // float const y = std::bit_cast<float>( high_bits );
-
     // ----------------------------------------------------
     // __int_as_float is hardware-specific non-portable C++
+    // Use std::bit_cast in C++20
     // ----------------------------------------------------
+#if HAS_BIT_CAST
+    float const x = std::bit_cast<float>(low_bits);
+    float const y = std::bit_cast<float>(high_bits);
+#else
     float const x = __int_as_float(low_bits);
     float const y = __int_as_float(high_bits);
+#endif
 
     return (rocblas_float_complex{x, y});
 }
@@ -1408,4 +1415,8 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 }
 
 #undef USE_SPLIT_TYPE
+#undef STR_HELPER
+#undef STRINGIFY
+
+#undef HAS_BIT_CAST
 ROCSOLVER_END_NAMESPACE
