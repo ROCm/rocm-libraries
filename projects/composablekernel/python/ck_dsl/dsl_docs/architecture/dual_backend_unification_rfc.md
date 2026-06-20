@@ -318,7 +318,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS11 — Reconcile drift with the merge-target `ck-dsl-prototype` [pre-merge]
 
-**Objective.** This branch (`users/vanantha/ck-dsl-c-interface`) will PR into `users/vanantha/ck-dsl-prototype` (worktree `/workspace/rocm-lib-copy`). The prototype has **8 commits / ~16.5k Python lines not here** (merge-base `42a064df` = "dispatcher prototype #8237"). Most are **codegen-affecting**, so the C++ backend — built to match *this* branch's Python — will **drift** from the merged Python unless reconciled. Ensure the target's changes are **captured here** and **mirrored in the C++ backend** so the merge introduces **zero codegen drift**.
+**Objective.** This branch (the `ck-dsl-c-interface` branch) will PR into the `ck-dsl-prototype` branch (a separate worktree of this repo). The prototype has **8 commits / ~16.5k Python lines not here** (merge-base `42a064df` = "dispatcher prototype #8237"). Most are **codegen-affecting**, so the C++ backend — built to match *this* branch's Python — will **drift** from the merged Python unless reconciled. Ensure the target's changes are **captured here** and **mirrored in the C++ backend** so the merge introduces **zero codegen drift**.
 
 **The target delta** (`git diff 42a064df..60283014863 -- ck_dsl`):
 
@@ -332,7 +332,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | #8609 **gfx1250** (RDNA4) new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
 | attention/moe deltas | `attention_unified.py` +349, `moe_*`, `fused_moe_e2e.py` +124 | mirror in C++ |
 
-**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=/workspace/rocm-lib-copy/projects/composablekernel/python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
+**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/projects/composablekernel/python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
 
 **Tasks.** T11.1 core backend fixes (#8313/#8293) → C++ `lower_llvm`/`isa`. T11.2 conv (#8624/#8355) → C++ conv. T11.3 atoms fp32/bf16 (#8348) → C++ atoms/mma/catalog. T11.4 gemm/schedule (#8320). T11.5 attention/moe deltas. T11.6 **gfx1250** new arch (assess: new ckc backend + instances; prioritize after existing-family drift). T11.7 **capture-here** — ensure this branch's Python reflects target changes; **flag conflicts** with WS1/WS6 additions (`core/__init__.py`, `dispatch/gemm/*` both diverged from the #8237 base).
 
@@ -379,11 +379,11 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS20 — Personal-ID / hardcoded-path scrub + guard [pre-merge]
 
-**Premise.** Committed code/scripts/docs must carry **no personal identifiers or machine-specific paths**. Recon footprint (committed, excluding build dirs): `vanantha` ×4 (branch refs + `numeric.py`/`bindings/README`), `dsl_bake_off` venv ×2, `~/work` ×1, `.ssh` ×6; **zero** `sshuser`/NTIDs/`adc.amd.com`/login-host/`@amd.com` (agents used the `alola` alias + env). The `/workspace/` ×295 is ~all **stale build dirs** (`build_baseline/` etc.) → removed by WS19, not a scrub target.
+**Premise.** Committed code/scripts/docs must carry **no personal identifiers or machine-specific paths**.
 
-- **Sweep targets** (committed source/scripts/CI/tests/docs, *not* build dirs): usernames/NTIDs (`vanantha`, `sshuser`, `yraparti`, …), emails (`@amd.com`), internal hostnames (`*.adc.amd.com`, `ctr2-alola-login-*`, node names), personal absolute paths (`/workspace/…`, `/home/<u>`, `~/work`, `/tmp/claude*`, `dsl_bake_off` venv, `~/.ssh/<key>`).
-- **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$CKDSL_REMOTE_HOST`/`$USER`/`$TMPDIR`/`$HIPDNN_ROOT`/`$CKDSL_VENV`), or documented placeholders (`<login-host>`/`<user>`); the `~/.ckdsl_env` gitignored-local-config pattern for the alola scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
-- **Guard (with WS19's hooks):** a deny-list pre-commit + CI check rejecting the personal-id/hostname/personal-path patterns, with an allow-list for legitimate cases (e.g. the `alola` config alias).
+- **Sweep targets** (committed source/scripts/CI/tests/docs, *not* build dirs): usernames/NTIDs, emails (e.g. `@amd.com`), internal hostnames (login hosts, node names), personal absolute paths (absolute `workspace`/`home` checkout paths, `~/work`, `/tmp/claude*`, personal venvs, `~/.ssh/<key>`).
+- **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$USER`/`$TMPDIR`/`$HIPDNN_ROOT` etc.), or documented placeholders (`<login-host>`/`<user>`/`<repo>`); a gitignored-local-config pattern (e.g. `~/.ckdsl_env`) for remote-cluster scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
+- **Guard:** the deny-list check `ck_dsl_c/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
 
 **AC.** Zero personal usernames/emails/internal-hostnames + zero personal absolute paths in committed source/scripts/CI/tests; docs genericized/placeholdered; deny-list guard live; functionality preserved via env/relative. **Sequencing:** after WS10 (engine quiesces), coordinate the deny-list with WS19; sweep the final state once. Blocks the PR/merge.
 

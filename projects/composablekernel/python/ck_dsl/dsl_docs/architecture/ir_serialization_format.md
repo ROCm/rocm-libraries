@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Implemented (WS1.T1.2 / T1.3 / T1.5, Python side) |
-| **Decision** | RFC §13 D1 — a separate, explicit machine format; `print_ir` stays human-only |
+| **Status** | Implemented (Python side) |
+| **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
 | **Implementation** | `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py` |
 | **Scope** | A fully round-trippable text encoding of a `KernelDef` (`ck_dsl/core/ir.py`) |
 
@@ -11,12 +11,13 @@
 
 ## 0. Purpose
 
-`ck.dsl.ir/v1` is the **interchange artifact** for the dual-backend program
-(RFC §4.1, seam (a)). It captures *everything* needed to reconstruct a
+`ck.dsl.ir/v1` is the **interchange artifact** for the dual-backend path,
+the seam between the front end that builds IR and the backend that lowers it.
+It captures *everything* needed to reconstruct a
 `KernelDef` **exactly**, most importantly the **explicit SSA value ids**. The
 Python and C++ engines serialize the IR they built; the consumer parses what was
 written rather than re-deriving names. This kills the recurring **SSA-numbering
-drift** defect class (RFC §1.2): if both backends serialize the same ids, the
+drift** defect class: if both backends serialize the same ids, the
 text is identical; if they diverge, the diff is surfaced upstream of `.ll`.
 
 This is explicitly **not** `print_ir`. `print_ir`
@@ -282,7 +283,7 @@ elements are sorted by the same rule.
 ## 6. Why these choices
 
 - **Explicit SSA ids on every value (result, param, iv, iter-arg).** The whole
-  point (RFC §4.1, §11): the consumer prints what was assigned, not what it
+  point: the consumer prints what was assigned, not what it
   re-derives. The id is written once at its definition (result/param/iv/iter
   declaration) and referenced by bare id everywhere else.
 - **Operands by id only; types recovered from the value table.** Operand types
@@ -303,18 +304,18 @@ elements are sorted by the same rule.
 
 ---
 
-## 7. Canonicalization (for semantic diff, RFC WS1.T1.5)
+## 7. Canonicalization (for semantic diff)
 
 Two notions of equality:
 
 1. **Byte equality** — `serialize(k)` of the same `KernelDef` is deterministic
    (sorted attrs, fixed grammar, `repr` floats), so `serialize(parse(serialize
    (k))) == serialize(k)` is byte-identical. This is the round-trip idempotence
-   gate (RFC WS1.T1.4).
+   gate.
 
 2. **Semantic (canonical) equality** — two kernels are *semantically equal* if
    they differ only in **incidental SSA id choices** (the numbering-gap drift
-   from RFC §1.2). `canonicalize(text)` produces a normalized string where:
+   class). `canonicalize(text)` produces a normalized string where:
 
    - **Stable id normalization.** Every SSA id is renamed to `%<N>` by
      *first-definition order* in a pre-order walk (params first in ABI order,
@@ -329,7 +330,7 @@ Two notions of equality:
 
    `canonical_equal(a, b)` returns `canonicalize(serialize(a)) ==
    canonicalize(serialize(b))`. This is the comparator the differential harness
-   (RFC WS2 L2) uses to assert builder equivalence independent of id gaps, while
+   uses to assert builder equivalence independent of id gaps, while
    the byte-identity path (which keeps ids) remains available for the strict
    "ids must match too" check.
 

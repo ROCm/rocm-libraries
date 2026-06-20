@@ -686,11 +686,25 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
         return CKC_ERR_VALUE;
     }
 
-    const ckc_mma_op_t* op = ckc_mma_catalog_by_op_id(&target->mma, CKC_WMMA_ATTN_OP_ID);
+    /* Per-arch WMMA attention op_id (mirrors Python _wmma_attn_op_id): gfx11
+     * (RDNA3/3.5) uses the cross-half-duplicated wmma_f32_16x16x16_* atom; gfx12
+     * (RDNA4) uses the split-K wmma_gfx12_f32_16x16x16_* atom. The op_id also
+     * selects the f16 vs bf16 intrinsic mangling, so it is keyed on dtype. */
+    const char* elem = (strcmp(dtype, "bf16") == 0) ? "bf16" : "f16";
+    char op_id[48];
+    if(strcmp(arch, "gfx1201") == 0)
+    {
+        snprintf(op_id, sizeof(op_id), "wmma_gfx12_f32_16x16x16_%s", elem);
+    }
+    else
+    {
+        snprintf(op_id, sizeof(op_id), "wmma_f32_16x16x16_%s", elem);
+    }
+
+    const ckc_mma_op_t* op = ckc_mma_catalog_by_op_id(&target->mma, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
-        ckc_i_set_err(
-            b, CKC_ERR_VALUE, "WMMA attention atom %s absent on %s", CKC_WMMA_ATTN_OP_ID, arch);
+        ckc_i_set_err(b, CKC_ERR_VALUE, "WMMA attention atom %s absent on %s", op_id, arch);
         return CKC_ERR_VALUE;
     }
     int wave                   = op->wave_size;
@@ -717,6 +731,22 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
     ckc_value_t* a_row = NULL;
     ckc_value_t* dummy = NULL;
     ckc_layout_map_coord(a_map, b, lane, 0, &a_row, &dummy);
+    /* gfx12 (RDNA4) split-K: the 16 K-elements of one WMMA step are split across
+     * the two lane-halves, so each lane loads a_frag (=8) elements from K base
+     * (lane // 16) * a_frag. gfx11 (RDNA3/3.5) duplicates the full K row in every
+     * lane (a_frag=16, base 0). k_half_off==NULL keeps the gfx11 emission
+     * byte-identical (no half-offset add); mirrors Python's split_k handling. */
+    bool split_k            = (a_frag * 2 == 16);
+    ckc_value_t* k_half_off = NULL;
+    if(split_k)
+    {
+        /* Python: b.mul(b.div(lane, c16), b.const_i32(a_frag)) -- div created
+         * before the const (left-to-right). Hoist so the C arg-eval order (gcc is
+         * right-to-left) matches the Python value-creation order. */
+        ckc_value_t* half       = ckc_b_div(b, lane, c16);
+        ckc_value_t* c_frag_off = ckc_b_const_i32(b, a_frag);
+        k_half_off              = ckc_b_mul(b, half, c_frag_off);
+    }
     ckc_value_t* col = ckc_b_mod(b, lane, c16);
 
     ckc_value_t* neg_inf = ckc_b_const_f32(b, -1e30);
@@ -737,7 +767,11 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
     for(int d = 0; d < n_dk; ++d)
     {
         ckc_value_t* q_addr = ckc_b_add(b, q_addr_row_base, ckc_b_const_i32(b, d * 16));
-        q_frags[d]          = ckc_b_global_load_vN(b, p->Q, q_addr, dtype_ir, a_frag, a_frag * 2);
+        if(k_half_off != NULL)
+        {
+            q_addr = ckc_b_add(b, q_addr, k_half_off);
+        }
+        q_frags[d] = ckc_b_global_load_vN(b, p->Q, q_addr, dtype_ir, a_frag, a_frag * 2);
     }
 
     /* ---- LDS staging tiles ---- */
@@ -830,6 +864,10 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
         for(int d = 0; d < n_dk; ++d)
         {
             ckc_value_t* k_addr = ckc_b_add(b, k_addr_row_base, ckc_b_const_i32(b, d * 16));
+            if(k_half_off != NULL)
+            {
+                k_addr = ckc_b_add(b, k_addr, k_half_off);
+            }
             ckc_value_t* k_frag =
                 ckc_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, a_frag * 2);
             score = ckc_b_mma(b, op->op_id, q_frags[d], k_frag, score, NULL, 0);
@@ -945,16 +983,24 @@ ckc_status_t ckc_wmma_attention_fwd_inner_body(ckc_ir_builder_t* b,
             ckc_value_t* v_b   = ckc_b_zero_vec(b, dtype_ir, a_frag);
             for(int j = 0; j < a_frag; ++j)
             {
+                /* B-operand K row this lane's slot j feeds: j on gfx11 (full K
+                 * per lane, byte-identical to the historical literal), or
+                 * (lane // 16) * a_frag + j on gfx12 (split-K halves). Python:
+                 * b.add(k_half_off, b.const_i32(j)) -- k_half_off created before
+                 * the const, so it is the first add operand. */
+                ckc_value_t* b_k = (k_half_off != NULL)
+                                       ? ckc_b_add(b, k_half_off, ckc_b_const_i32(b, j))
+                                       : ckc_b_const_i32(b, j);
                 ckc_value_t* v_elem;
                 if(v_lds_stage)
                 {
-                    ckc_value_t* idx[2] = {ckc_b_const_i32(b, j), d_col};
+                    ckc_value_t* idx[2] = {b_k, d_col};
                     v_elem =
                         ckc_b_vec_extract(b, ckc_b_smem_load_vN(b, V_lds, idx, 2, dtype_ir, 1), 0);
                 }
                 else
                 {
-                    ckc_value_t* v_row = ckc_b_add(b, k_tile_base, ckc_b_const_i32(b, j));
+                    ckc_value_t* v_row = ckc_b_add(b, k_tile_base, b_k);
                     ckc_value_t* v_row_base;
                     if(p->v_row_base_fn != NULL)
                     {

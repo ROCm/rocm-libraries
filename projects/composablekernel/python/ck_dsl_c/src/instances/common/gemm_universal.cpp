@@ -19,7 +19,7 @@
  * build_universal_gemm() top-to-bottom so a reviewer can diff line by line.
  */
 
-#include <stdio.h> /* snprintf (WS3 C++ build: not pulled in transitively) */
+#include <stdio.h> /* snprintf (C++ build: not pulled in transitively) */
 #include <stdlib.h>
 #include <string.h>
 

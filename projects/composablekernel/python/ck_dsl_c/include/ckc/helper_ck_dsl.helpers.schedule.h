@@ -33,7 +33,7 @@
 #ifndef CKC_HELPER_CK_DSL_HELPERS_ATOMS_H
 typedef struct ckc_mfma_atom ckc_mfma_atom_t;
 
-/* MfmaAtom field/property accessors used by from_geometry. WS3 C++ build: these
+/* MfmaAtom field/property accessors used by from_geometry. C++ build: these
  * fallback prototypes must carry the same C linkage as the real ones in
  * helper_ck_dsl.helpers.atoms.h (which are inside its extern "C" block); without
  * this guard C++ flags a conflicting-linkage redeclaration. No effect in C. */

@@ -11,7 +11,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> /* strcmp (WS3 C++ build) */
+#include <string.h> /* strcmp (C++ build) */
 
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"

@@ -9,7 +9,7 @@ against the CK DSL tiled-2D kernel is apples-to-apples.
 
 Environment Variables:
     AITER_PATH:  optional explicit path to aiter checkout (defaults to
-                 /workspace/aiter or sibling of this repo)
+                 an ``aiter`` checkout sibling to this repo)
 
 Usage:
     source setup_env.sh

@@ -3,7 +3,7 @@
 /*
  * bindings/ckc_engine.cpp -- pybind11 module `ckc_engine` exposing the C++
  * ck_dsl_c engine (libckc_core.a) to Python. This is the foundation of the
- * CK_DSL_BACKEND=cpp dual-backend path (WS4).
+ * CK_DSL_BACKEND=cpp dual-backend path.
  *
  * It binds the universal-GEMM family as the first template:
  *
@@ -35,6 +35,7 @@
 #include "family_glue.hpp"
 
 extern "C" {
+#include "ckc/build_id.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
@@ -105,6 +106,19 @@ void register_img2col(py::module_& m);
  * fine on its own, but to keep the per-family include surface isolated they are
  * registered from a dedicated translation unit. */
 void register_attention(py::module_& m);
+
+/* The remaining FMHA-fwd variant families (appendkv / paged_prefill / varlen /
+ * splitkv_decode) and the fused-MoE end-to-end orchestrator share the same
+ * ckc_fmha_* struct tags as the attention TU; they are registered from their own
+ * dedicated translation unit (ckc_engine_fmha_extra.cpp). */
+void register_fmha_extra(py::module_& m);
+
+/* The fused-MoE end-to-end orchestrator (fused_moe_e2e). A separate TU: its
+ * internal header drags in the moe_gemm_fused / tensor_view headers whose
+ * ckc_tensor_descriptor tag clashes with the FMHA common header's transforms.h.
+ * It is a host-launch multi-kernel orchestrator, bound as a concatenated
+ * multi-stage lower (see ckc_engine_fused_moe_e2e.cpp). */
+void register_fused_moe_e2e(py::module_& m);
 
 /* Defined in ckc_engine_moe_gemm_fused.cpp (separate TU; see the tensor_view /
  * transforms ckc_tensor_descriptor tag clash note above). */
@@ -3218,12 +3232,117 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
                            ckc_build_wmma_gemm_gfx1201_new(&b, &s, a));
 }
 
+/* --------------------------------------------------------------------------
+ * Family-agnostic lower-from-serialized-IR.
+ *
+ * lower_serialized_ir(ir_text, arch) parses serialized ck.dsl.ir/v1 text back
+ * into a kernel (ckc_ir_parse) and lowers it to AMDGPU LLVM IR text
+ * (ckc_lower_kernel_to_llvm_ex), exactly as tests/ir_lower_cli.cpp does. This
+ * is the engine-side endpoint the CK_DSL_BACKEND=cpp default uses: a Python
+ * front end serializes whatever KernelDef it built (any family) and this
+ * reproduces the .ll the C++ engine would emit, with no per-family C builder
+ * involved. Every failure (parse or lower) is converted to a Python exception;
+ * the engine's extern "C" boundary never aborts/terminates.
+ * ------------------------------------------------------------------------ */
+std::string
+lower_serialized_ir(const std::string& ir_text, const std::string& arch, const std::string& flavor)
+{
+    if(ir_text.empty())
+    {
+        throw std::runtime_error("ckc_engine.lower_serialized_ir: empty IR input");
+    }
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+
+    /* flavor: "" => AUTO (resolve from env / ROCm version); "llvm20"/"llvm22"
+     * pin the intrinsic declaration shape. An unrecognised non-empty flavor is
+     * rejected so callers get the same hard error the Python lowerer raises. */
+    ckc_llvm_flavor_t fl = CKC_LLVM_FLAVOR_AUTO;
+    if(!flavor.empty())
+    {
+        fl = ckc_llvm_flavor_from_name(flavor.c_str());
+        if(fl == CKC_LLVM_FLAVOR_AUTO)
+        {
+            throw std::runtime_error(
+                std::string("ckc_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor +
+                "' (expected 'llvm20' or 'llvm22')");
+        }
+    }
+
+    ckc_ir_builder_t b;
+    if(ckc_ir_builder_init(&b, "lower_serialized_ir") != CKC_OK)
+    {
+        throw std::runtime_error("ckc_engine.lower_serialized_ir: builder init failed (OOM)");
+    }
+
+    ckc_kernel_def_t* kernel = nullptr;
+    ckc_status_t st          = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
+    if(st != CKC_OK || !kernel)
+    {
+        const char* m   = ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.lower_serialized_ir: parse failed (status ") +
+                          std::to_string((int)st) + "): " + ((m && *m) ? m : "unknown parse error");
+        ckc_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+
+    char* out_ll = nullptr;
+    char err[CKC_ERR_MSG_CAP];
+    err[0] = '\0';
+    st     = ckc_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
+    if(st != CKC_OK || !out_ll)
+    {
+        std::string msg = std::string("ckc_engine.lower_serialized_ir: lower failed for arch '") +
+                          a + "' (status " + std::to_string((int)st) +
+                          "): " + (err[0] ? err : "unknown lowering error");
+        ckc_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+
+    std::string result(out_ll);
+    std::free(out_ll);
+    ckc_ir_builder_free(&b);
+    return result;
+}
+
 } // namespace
 
 PYBIND11_MODULE(ckc_engine, m)
 {
     m.doc() = "pybind11 binding for the C++ ck_dsl_c engine (universal GEMM "
               "family). Foundation of the CK_DSL_BACKEND=cpp dual-backend path.";
+
+    /* ---- engine freshness / provenance stamp ----
+     * build_id() is a content hash of the engine sources this .so was built
+     * from; engine_version() is the human-readable version. Harnesses and the
+     * provider compare this against the build-id recorded with a set of
+     * prebuilt artifacts (emitters, manifests) to fail loud on a stale/mixed
+     * build instead of producing spurious mismatches. These are artifact
+     * stamps only; they never touch the emitted IR. */
+    m.def(
+        "build_id",
+        []() { return std::string(ckc_build_id()); },
+        "Content hash of the engine sources this module was built from. "
+        "Compare against the build-id recorded with prebuilt artifacts to "
+        "detect a stale/mixed build.");
+    m.def(
+        "engine_version",
+        []() { return std::string(ckc_engine_version()); },
+        "Human-readable engine version of this module.");
+
+    /* ---- family-agnostic lower-from-serialized-IR ----
+     * The keystone of the CK_DSL_BACKEND=cpp default for Python-authored
+     * kernels: a Python front end serializes any KernelDef to ck.dsl.ir/v1
+     * text, and this reproduces the exact AMDGPU .ll the C++ engine emits --
+     * no per-family C builder involved. Mirrors tests/ir_lower_cli.cpp. */
+    m.def("lower_serialized_ir",
+          &lower_serialized_ir,
+          py::arg("ir_text"),
+          py::arg("arch")   = "gfx950",
+          py::arg("flavor") = "",
+          "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
+          "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
+          "the Python lowerer for the same serialized IR. flavor='' resolves "
+          "the LLVM flavor automatically; 'llvm20'/'llvm22' pin it.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,
@@ -3402,4 +3521,10 @@ PYBIND11_MODULE(ckc_engine, m)
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);
+
+    /* ---- remaining FMHA-fwd variants (separate TU) ---- */
+    register_fmha_extra(m);
+
+    /* ---- fused-MoE end-to-end orchestrator (separate TU) ---- */
+    register_fused_moe_e2e(m);
 }

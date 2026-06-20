@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""IR verifier — an LLVM-``verify``-style well-formedness pass (RFC WS1.T1.1).
+"""IR verifier — an LLVM-``verify``-style well-formedness pass.
 
 :func:`verify` walks a :class:`KernelDef` and returns a list of
 :class:`Diagnostic`. An empty list means the IR is well-formed. The checks are

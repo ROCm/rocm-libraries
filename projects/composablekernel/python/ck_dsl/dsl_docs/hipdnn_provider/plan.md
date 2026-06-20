@@ -15,7 +15,7 @@ Python service). v0.5 promoted the first kernel from elementwise to
 CPU-reference verification both inside M1. v0.6 removed the NHWC↔NCHW
 host-side transpose after verifying the CPU reference is layout-
 agnostic via strides. v0.7 records resolution of Q4 (provider location),
-Q5 (no constraints; branch off `users/vanantha/ck-dsl-prototype`), Q6
+Q5 (no constraints; branch off `users/<user>/ck-dsl-prototype`), Q6
 (install `ck_dsl` for runtime discovery), Q7 (sequential Python critical
 path with the C++ adapter and PerfMeasurement as parallel sub-streams),
 Q8 (cold-cache perf acceptable), Q9 (log absolute TFLOPS in M1).
@@ -61,7 +61,7 @@ land.
 
 Work happens on a new feature branch (proposed name:
 `users/<user>/ck-dsl-provider`) cut from
-**`users/vanantha/ck-dsl-prototype`** — *not* from `develop`. Develop
+**`users/<user>/ck-dsl-prototype`** — *not* from `develop`. Develop
 does not yet carry the CK DSL prototype itself, so a branch off develop
 would be missing the dependency. Per-step Implementor WIP branches (for
 the parallel sub-streams in §6.5) come off the feature branch in the
@@ -787,7 +787,7 @@ listed below for traceability; full rationale is in the change log
   confirmed. *(v0.7)*
 - ~~`[Q5]`~~ — No release-branch or Python-version constraints.
   **Branch model:** work happens on a new feature branch off
-  `users/vanantha/ck-dsl-prototype`, not off develop (which lacks the
+  `users/<user>/ck-dsl-prototype`, not off develop (which lacks the
   CK DSL prototype). *(v0.7)*
 - ~~`[Q6]`~~ — `ck_dsl` discovered at runtime by **installing** it via
   the provider's build (`pip install` into the embedded interpreter's
@@ -890,7 +890,7 @@ All entries are committed code or in-tree documentation.
 - **v0.7** (2026-05-21) — six remaining open questions resolved.
   **Q4** provider location at `dnn-providers/ck-dsl-provider/`
   confirmed. **Q5** no constraints, but feature branch is cut from
-  `users/vanantha/ck-dsl-prototype`, not from develop, because develop
+  `users/<user>/ck-dsl-prototype`, not from develop, because develop
   lacks the CK DSL prototype. Added a "Branch model" subsection to §1.
   **Q6** `ck_dsl` is installed into the embedded interpreter's
   site-packages by the provider's build. **Q7** M1 runs as one

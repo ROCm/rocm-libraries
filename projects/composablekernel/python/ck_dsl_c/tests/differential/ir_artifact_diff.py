@@ -105,16 +105,99 @@ def is_end(rc, out, err):
     return rc != 0 and not out and "unknown config" in err.lower()
 
 
+_HDR = b"ckdsl.ir v1"
+
+
+def doc_spans(ir):
+    """Byte spans of each 'ckdsl.ir v1' document in a (possibly multi-kernel)
+    artifact: from the header line through the newline after the kernel's
+    closing brace. Brace-aware, skipping ';' comment lines and quoted strings.
+    Returns [] for a single-document artifact (the common case)."""
+    spans = []
+    n = len(ir)
+    i = 0
+    while i < n:
+        if ir[i : i + len(_HDR)] == _HDR and (i == 0 or ir[i - 1 : i] == b"\n"):
+            start = i
+            depth = 0
+            started = False
+            in_str = False
+            line_comment = False
+            at_line_start = True
+            j = i
+            while j < n:
+                c = ir[j : j + 1]
+                if at_line_start:
+                    line_comment = c == b";"
+                    at_line_start = False
+                if c == b"\n":
+                    at_line_start = True
+                    line_comment = False
+                    j += 1
+                    if started and depth <= 0:
+                        break
+                    continue
+                if line_comment:
+                    j += 1
+                    continue
+                if in_str:
+                    if c == b"\\":
+                        j += 2
+                        continue
+                    if c == b'"':
+                        in_str = False
+                    j += 1
+                    continue
+                if c == b'"':
+                    in_str = True
+                elif c == b"{":
+                    depth += 1
+                    started = True
+                elif c == b"}":
+                    depth -= 1
+                j += 1
+            spans.append((start, j))
+            i = j
+        else:
+            i += 1
+    return spans if len(spans) > 1 else []
+
+
+def _lower_stitched(cli, arch, ir_text, spans):
+    """Lower each document in a multi-kernel artifact and stitch the results
+    back into the original framing (inter-document comment lines preserved
+    byte-for-byte), mirroring how the multi-kernel emitter concatenates the
+    per-kernel .ll. Returns (assembled_bytes_or_None, err)."""
+    parts = []
+    last = 0
+    for s, e in spans:
+        parts.append(ir_text[last:s])  # framing before this document
+        rc, out, err = run_cli(cli, arch, ir_text[s:e])
+        if not out:
+            return None, err
+        parts.append(out)
+        last = e
+    parts.append(ir_text[last:])  # trailing framing after the last document
+    return b"".join(parts), ""
+
+
 def lower_artifact(cli, family, ir_text, ll_ref):
     """Parse+lower the IR artifact with the C CLI. Tries the family's primary
     arch first, then the remaining candidates, returning (rc, out, err, arch)
     for the arch that byte-matches the reference -- or the primary-arch result
-    if none match (so the caller can report a real DRIFT/ERROR)."""
+    if none match (so the caller can report a real DRIFT/ERROR). Multi-kernel
+    artifacts (several 'ckdsl.ir v1' documents) are lowered document-by-document
+    and stitched back into their framing."""
+    spans = doc_spans(ir_text)
     primary = None
     for arch in arch_candidates(family):
-        rc, out, err = run_cli(cli, arch, ir_text)
+        if spans:
+            out, err = _lower_stitched(cli, arch, ir_text, spans)
+            rc = 0 if out else 1
+        else:
+            rc, out, err = run_cli(cli, arch, ir_text)
         if primary is None:
-            primary = (rc, out, err, arch)
+            primary = (rc, out or b"", err, arch)
         if out and out == ll_ref:
             return rc, out, err, arch
     return primary

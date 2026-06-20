@@ -7,7 +7,7 @@
 # FmhaFwdSplitKvDecodeSpec configs by argv[1] (0..5) and a phase by argv[2]
 # ("seg" or "reduce"), builds via build_fmha_fwd_splitkv_decode_segment /
 # build_fmha_fwd_splitkv_decode_reduce and prints
-# lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
+# _native_lower(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter fmha_splitkv_decode_emit.c.
 import sys
 
@@ -17,7 +17,11 @@ from ck_dsl.instances.common.fmha_splitkv_decode import (
     build_fmha_fwd_splitkv_decode_segment,
     build_fmha_fwd_splitkv_decode_reduce,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -119,7 +123,7 @@ def main() -> int:
         kernel = build_fmha_fwd_splitkv_decode_reduce(spec, arch="gfx950")
 
     if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        text = _native_lower(kernel, arch="gfx950")
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))

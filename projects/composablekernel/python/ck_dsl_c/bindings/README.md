@@ -1,6 +1,6 @@
 # ckc_engine — pybind11 binding for the C++ ck_dsl_c engine
 
-This directory is the **WS4 foundation** of the dual-backend path. It builds a
+This directory is the binding layer of the dual-backend path. It builds a
 Python extension module, `ckc_engine`, that wraps the prebuilt C++ engine
 archive (`libckc_core.a`) and exposes its public C API to Python.
 
@@ -79,8 +79,8 @@ engine are copied into a `std::string` and `free`'d.
    # -> /tmp/ckc_pybind/build/ckc_engine.cpython-3XX-*.so
    ```
 
-   `pybind11` 3.0.4 is present in `/workspace/dsl_bake_off/venv` (and the system
-   `/usr/bin/python3`); use that python so `find_package(pybind11)` resolves.
+   Use a python environment that has `pybind11` (>= 3.0) installed so that
+   `find_package(pybind11)` resolves.
 
    The engine compiles as C++20; the binding sets `CMAKE_CXX_STANDARD 20`. The
    archive's symbols are reached through the `extern "C"` public headers, so it
@@ -113,7 +113,7 @@ reachable from Python and proven byte-identical, a `CK_DSL_BACKEND=cpp` selector
 can route GEMM lowering/serialization through `ckc_engine` instead of the pure
 Python lowerer.
 
-**NEXT WS4 STEP (deferred here):** the *deeper integration* — wiring
+**Deeper integration (not yet done here):** wiring
 `CK_DSL_BACKEND` into the `ck_dsl` `IRBuilder`/instances so the **same Python
 authoring API** transparently routes to this C++ engine — edits `ck_dsl/core`.
 It is intentionally **not** done in this task to avoid touching the shared

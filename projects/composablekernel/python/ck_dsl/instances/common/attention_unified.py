@@ -448,14 +448,14 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     refactor: the LDS savings (8 KiB Q + 8 KiB V) make the multi-block
     path fit comfortably for every workload class on MI355X. For decode,
     the higher per-iter amortization beats the smaller-tile choice by
-    ~24% (measured ``/workspace/probe_prefill_sweep.py``: decode_b1
+    ~24% (measured by an out-of-tree ``probe_prefill_sweep.py``: decode_b1
     drops 34 µs → 26 µs).
 
     The kernel's own gate (``supports_tiled_2d``) re-validates the
     choice against the per-wave-tokens / LDS-budget constraints.
 
     **FP8 sliding-window long-prefill exception** (round-2 cluster-B
-    sweep, ``/workspace/rounds/_summaries/prod_nw_sweep.log``): when the
+    sweep, ``prod_nw_sweep.log``): when the
     sliding window prunes the kv-loop to a handful of iters per CTA,
     bigger T over-allocates LDS without amortising any per-iter cost.
     For ``use_fp8 + sliding_window > 0 + max_seqlen_q > 256``, drop to
@@ -465,7 +465,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # Sliding-window long-prefill FP8 exception. The latest broad sweep
     # confirmed this should stay FP8-only: for bf16 SW long-prefill the
     # correctness-clean winner was T=64, not T=32
-    # (``/workspace/trace_bench/sweep_attention2d_configs.json``:
+    # (``trace_bench/sweep_attention2d_configs.json``:
     # bf16_sw_n16_q1000_k1050 best T=64/mw16/hipcc at ~257us; T=32
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
@@ -543,13 +543,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     per-tile KV slab, otherwise the async DMA underfills.
 
     Tuning thresholds (calibrated against the trace shapes documented in
-    ``/workspace/trace_bench_report.md`` on MI355X / gfx950; the
-    ``warps``-sweep harness is at ``/workspace/probe_prefill_sweep.py``
-    and the prefill-time harness is at
-    ``/workspace/probe_prefill_time.py``):
+    an out-of-tree ``trace_bench_report.md`` on MI355X / gfx950; the
+    ``warps``-sweep harness is an out-of-tree ``probe_prefill_sweep.py``
+    and the prefill-time harness is an out-of-tree
+    ``probe_prefill_time.py``):
 
-    **Post Q-in-registers + single-buffer-V refactor** (measured at
-    ``/workspace/probe_prefill_sweep.py`` on MI355X):
+    **Post Q-in-registers + single-buffer-V refactor** (measured with
+    ``probe_prefill_sweep.py`` on MI355X):
 
       ``q <= 64``    (decode + tiny prefill) -> 1   (small grid; tiny
                                                      per-CTA work)
@@ -649,7 +649,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         target = 4
     elif problem.num_seqs <= 1:
         # Long prefill with num_seqs <= 1: the production-shape sweep
-        # (``/workspace/rounds/_summaries/prefill_n_sweep.log``) shows
+        # (an out-of-tree ``prefill_n_sweep.log``) shows
         # nw=2 beats nw=4 by 3-5% at n=1 (fewer CTAs hurt under-saturated
         # GPU at single-seq). The crossover happens at n=2 where nw=4
         # takes over (4-16% faster than nw=2 from n=2 up to bench-cap n=16).
@@ -681,7 +681,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     else:
         # Long prefill (q > 256) with num_seqs >= 2: nw=4 wins.
         # Round-1 cluster-A sweep
-        # (``/workspace/rounds/round_01_bf16_q1000_v1/cluster_a_sweep.md``)
+        # (an out-of-tree ``cluster_a_sweep.md``)
         # showed ``nw=4 mw=16 T=2*BS`` beats ``nw=2`` on 14 of 17 long-prefill
         # bf16 targets by 1.04-1.87× (no regressions). Resource analysis
         # (``resources.json``): nw=4 keeps WGs/CU at 4 (vs default 5), VGPR
@@ -776,7 +776,9 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_compile_backend(problem),
         _enable_gfx942_fp16_flash(problem),
         _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
-        _gfx942_flash_kv_cache_policy(problem) if _enable_gfx942_fp16_flash(problem) else None,
+        _gfx942_flash_kv_cache_policy(problem)
+        if _enable_gfx942_fp16_flash(problem)
+        else None,
         _enable_gfx942_flash_q_direct(problem),
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),
@@ -788,7 +790,8 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     """Choose ``waves_per_eu`` for the tiled 2D kernel.
 
     Triton's ``select_2d_config`` uses ``waves_per_eu=2`` for every config
-    (verified at ``/workspace/aiter/aiter/ops/triton/attention/unified_attention.py``).
+    (verified against the aiter Triton reference
+    ``aiter/ops/triton/attention/unified_attention.py``).
     We match that: it gives the LLVM backend more VGPR headroom per wave
     (less risk of spill to scratch / LDS) while still meeting the
     occupancy targets (the double-buffered K/V kernel runs at 2-3 WGs/CU
@@ -1078,7 +1081,9 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # prefill now share the ring path.
     if not (_enable_gfx942_fp16_flash(problem) and problem.head_size in (64, 128)):
         return False
-    env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    env = (
+        __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    )
     if env in ("0", "off", "disable", "disabled", "no", "false"):
         return False
     if env in ("1", "on", "enable", "enabled", "yes", "true"):
@@ -1974,18 +1979,47 @@ def _cheap_2d_sig(problem) -> Tuple:
     on replay. Env/monkeypatch changes (sweeps) invalidate via ``_2D_GRAPHS``
     being cleared, so the signature need not encode the env knobs."""
     return (
-        "2dg", problem.head_size, problem.num_query_heads, problem.num_kv_heads,
-        problem.block_size, problem.dtype, problem.max_seqlen_q,
-        problem.max_seqlen_k, problem.num_seqs, problem.sliding_window,
-        bool(problem.use_sinks), float(problem.softcap), bool(problem.use_alibi),
-        bool(problem.use_qq_bias), bool(problem.use_fp8), int(problem.total_q),
+        "2dg",
+        problem.head_size,
+        problem.num_query_heads,
+        problem.num_kv_heads,
+        problem.block_size,
+        problem.dtype,
+        problem.max_seqlen_q,
+        problem.max_seqlen_k,
+        problem.num_seqs,
+        problem.sliding_window,
+        bool(problem.use_sinks),
+        float(problem.softcap),
+        bool(problem.use_alibi),
+        bool(problem.use_qq_bias),
+        bool(problem.use_fp8),
+        int(problem.total_q),
     )
 
 
-def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
-                    softmax_scale, block_table, softcap, sinks, bt_stride,
-                    alibi_slopes, qq_bias, qq_bias_stride_0, k_scale, v_scale,
-                    out_scale, stream):
+def _run_2d_graphed(
+    problem,
+    *,
+    q,
+    k,
+    v,
+    out,
+    cu_seqlens_q,
+    seqused_k,
+    softmax_scale,
+    block_table,
+    softcap,
+    sinks,
+    bt_stride,
+    alibi_slopes,
+    qq_bias,
+    qq_bias_stride_0,
+    k_scale,
+    v_scale,
+    out_scale,
+    stream,
+):
     """Look up (or build once) + replay a CUDA graph around the single 2D launch.
 
     The graph cache is keyed on a cheap shape signature + tensor identities +
@@ -1997,12 +2031,23 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
     the non-graph path. Tensors + kernarg pack are held alive in
     ``_2D_GRAPH_REFS``."""
     graph_key = _cheap_2d_sig(problem) + (
-        int(stream), id(q), id(k), id(v), id(out), id(cu_seqlens_q), id(seqused_k),
-        id(block_table), id(sinks) if sinks is not None else 0,
+        int(stream),
+        id(q),
+        id(k),
+        id(v),
+        id(out),
+        id(cu_seqlens_q),
+        id(seqused_k),
+        id(block_table),
+        id(sinks) if sinks is not None else 0,
         id(alibi_slopes) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
-        float(softmax_scale), float(k_scale), float(v_scale), float(softcap),
-        int(bt_stride), int(qq_bias_stride_0),
+        float(softmax_scale),
+        float(k_scale),
+        float(v_scale),
+        float(softcap),
+        int(bt_stride),
+        int(qq_bias_stride_0),
     )
     graph = _2D_GRAPHS.get(graph_key)
     if graph is not None:
@@ -2017,11 +2062,26 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
     key = _tiled_cache_key(problem)
     launcher = _get_2d_launcher(problem, key)
     vals = _attn_values(
-        problem=problem, q=q, k=k, v=v, out=out, cu_seqlens_q=cu_seqlens_q,
-        seqused_k=seqused_k, softmax_scale=softmax_scale, block_table=block_table,
-        softcap=softcap, sinks=sinks, bt_stride=bt_stride, include_bt_stride=True,
-        alibi_slopes=alibi_slopes, qq_bias=qq_bias, qq_bias_stride_0=qq_bias_stride_0,
-        include_qq_bias_stride=True, k_scale=k_scale, v_scale=v_scale, out_scale=out_scale,
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_seqlens_q,
+        seqused_k=seqused_k,
+        softmax_scale=softmax_scale,
+        block_table=block_table,
+        softcap=softcap,
+        sinks=sinks,
+        bt_stride=bt_stride,
+        include_bt_stride=True,
+        alibi_slopes=alibi_slopes,
+        qq_bias=qq_bias,
+        qq_bias_stride_0=qq_bias_stride_0,
+        include_qq_bias_stride=True,
+        k_scale=k_scale,
+        v_scale=v_scale,
+        out_scale=out_scale,
     )
     meta = _get_2d_launch_meta(problem, key)
     cfg = LaunchConfig(grid=meta.grid, block=meta.block, stream=int(stream))
@@ -2039,8 +2099,17 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
             _do()
     _2D_GRAPHS[graph_key] = graph
     _2D_GRAPH_REFS[graph_key] = (
-        vals, q, k, v, out, cu_seqlens_q, seqused_k, block_table, sinks,
-        alibi_slopes, qq_bias,
+        vals,
+        q,
+        k,
+        v,
+        out,
+        cu_seqlens_q,
+        seqused_k,
+        block_table,
+        sinks,
+        alibi_slopes,
+        qq_bias,
     )
     graph.replay()
     return None
@@ -2181,7 +2250,11 @@ def _get_3d_pipeline(
         pipeline=pipeline,
         pool=pool,
         seg_config=LaunchConfig(
-            grid=(int(total_num_q_blocks), int(problem.num_kv_heads), int(num_segments)),
+            grid=(
+                int(total_num_q_blocks),
+                int(problem.num_kv_heads),
+                int(num_segments),
+            ),
             block=(64, 1, 1),
         ),
         red_config=LaunchConfig(
@@ -2214,7 +2287,7 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
     pins FP8 to ``llvm`` until ``hipcc`` is validated for that
     code path.
 
-    See ``/workspace/probe_hip_lowering.py`` for the per-shape sweep.
+    See the out-of-tree ``probe_hip_lowering.py`` for the per-shape sweep.
     """
     if problem.compile_backend in ("llvm", "hipcc"):
         return problem.compile_backend
@@ -2397,7 +2470,9 @@ def run_unified_attention_torch(
     # replace, which otherwise dominates tiny-shape host latency.
     if problem.num_kv_blocks <= 0 and hasattr(k, "shape") and len(k.shape) >= 1:
         _eb = 1 if problem.use_fp8 else 2
-        _blk_stride = problem.block_size * problem.num_kv_heads * problem.head_size * _eb
+        _blk_stride = (
+            problem.block_size * problem.num_kv_heads * problem.head_size * _eb
+        )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
 
@@ -2462,11 +2537,26 @@ def run_unified_attention_torch(
         # caller is already capturing the forward (they take precedence).
         if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
             graphed = _run_2d_graphed(
-                problem, q=q, k=k, v=v, out=out, cu_seqlens_q=cu_seqlens_q,
-                seqused_k=seqused_k, softmax_scale=softmax_scale, block_table=block_table,
-                softcap=softcap, sinks=sinks, bt_stride=bt_stride, alibi_slopes=alibi_slopes,
-                qq_bias=qq_bias, qq_bias_stride_0=qq_bias_stride_0, k_scale=k_scale,
-                v_scale=v_scale, out_scale=out_scale, stream=stream)
+                problem,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                cu_seqlens_q=cu_seqlens_q,
+                seqused_k=seqused_k,
+                softmax_scale=softmax_scale,
+                block_table=block_table,
+                softcap=softcap,
+                sinks=sinks,
+                bt_stride=bt_stride,
+                alibi_slopes=alibi_slopes,
+                qq_bias=qq_bias,
+                qq_bias_stride_0=qq_bias_stride_0,
+                k_scale=k_scale,
+                v_scale=v_scale,
+                out_scale=out_scale,
+                stream=stream,
+            )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
         ok_t, reason_t = supports_native_unified_attention_tiled(problem)

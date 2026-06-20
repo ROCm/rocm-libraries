@@ -9,10 +9,25 @@ compare the result to the Python engine's lower_kernel_to_llvm(build_universal_g
 / ir_serialize.serialize for the same spec. They must match (sha equal)."""
 
 import hashlib
+import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/tmp/ckc_pybind/build")
-sys.path.insert(0, "/workspace/rocm-libraries/projects/composablekernel/python")
+# Directory holding the built ``ckc_engine`` pybind module. Override via
+# CKC_PYBIND_BUILD_DIR; defaults to a sibling ``build`` dir next to this file.
+sys.path.insert(
+    0,
+    os.environ.get(
+        "CKC_PYBIND_BUILD_DIR", str(Path(__file__).resolve().parent / "build")
+    ),
+)
+# composablekernel python root (so ``ck_dsl`` is importable). Override via
+# CKDSL_ROOT; defaults to the python/ root inferred relative to this file
+# (bindings/ -> ck_dsl_c/ -> python/).
+sys.path.insert(
+    0,
+    os.environ.get("CKDSL_ROOT", str(Path(__file__).resolve().parents[2])),
+)
 import ckc_engine
 
 from ck_dsl.instances.common.gemm_universal import (

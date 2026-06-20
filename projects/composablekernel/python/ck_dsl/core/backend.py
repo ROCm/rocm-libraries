@@ -7,14 +7,17 @@ The same public authoring API can lower a kernel through either of two
 interchangeable engines:
 
   - ``"python"``  the native Python lowerer (:func:`lower_kernel_to_llvm`
-                  / :func:`serialize`). This is the default and is
-                  byte-for-byte unchanged from the historical behaviour.
+                  / :func:`serialize`). Byte-for-byte the historical
+                  behaviour; selectable via ``CK_DSL_BACKEND=python`` and
+                  used as the differential oracle.
 
   - ``"cpp"``     the C++ engine, reached through the ``ckc_engine``
-                  Python extension. The extension wraps the prebuilt
-                  C engine archive and exposes the universal-GEMM
-                  template family (``gemm_lower_llvm`` /
-                  ``gemm_serialize_ir`` / ``gemm_verify``).
+                  Python extension. This is now the DEFAULT lowerer for
+                  Python-authored kernels: the family-agnostic
+                  ``lower_serialized_ir`` endpoint lowers any kernel from
+                  its serialized IR, byte-identically to the native
+                  lowerer across every family. Per-family spec endpoints
+                  (``gemm_lower_llvm`` / ...) remain available.
 
   - ``"both"``    run both engines and assert they agree, returning the
                   Python result on success and raising a precise diff on
@@ -55,7 +58,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Public backend identifiers.
 BACKEND_PYTHON = "python"
@@ -64,6 +67,13 @@ BACKEND_BOTH = "both"
 _VALID_BACKENDS = (BACKEND_PYTHON, BACKEND_CPP, BACKEND_BOTH)
 
 _ENV_VAR = "CK_DSL_BACKEND"
+
+# Package default backend for Python-authored kernel lowering. Flipped from
+# ``python`` to ``cpp`` after the full guarantee sweep proved the C++ engine
+# byte-identical across every family and example. Overridable per call
+# (``backend=`` argument) or per process (``CK_DSL_BACKEND`` env). The chokepoint
+# falls back to the native lowerer if the C++ engine is unavailable.
+_DEFAULT_BACKEND = BACKEND_CPP
 
 
 class BackendError(RuntimeError):
@@ -82,14 +92,25 @@ def resolve_backend(backend: Optional[str] = None) -> str:
     """Resolve the active backend name.
 
     Precedence: explicit ``backend`` argument, then the ``CK_DSL_BACKEND``
-    environment variable, then ``"python"``. The result is validated
-    against the known backend set.
+    environment variable, then the package default :data:`_DEFAULT_BACKEND`
+    (``"cpp"`` -- the C++ engine). The result is validated against the known
+    backend set.
+
+    The default lowerer for Python-authored kernels is the C++ engine: it is
+    byte-identical to the native Python lowerer across the full family surface
+    (proven by the differential gate, the random-spec fuzzer, and the
+    per-example lower sweep), so the flip is behaviour-preserving. Select the
+    native engine explicitly with ``CK_DSL_BACKEND=python`` (it remains the
+    differential oracle). If the C++ engine extension is unavailable, the
+    lowering chokepoint falls back to the native lowerer automatically and
+    records the reason (see :func:`lower_kernel_via_backend` /
+    :func:`cpp_fallbacks`), so the result is always well-defined.
     """
     chosen = backend
     if chosen is None:
         chosen = os.environ.get(_ENV_VAR)
     if chosen is None or chosen == "":
-        chosen = BACKEND_PYTHON
+        chosen = _DEFAULT_BACKEND
     chosen = chosen.strip().lower()
     if chosen not in _VALID_BACKENDS:
         raise BackendError(
@@ -97,6 +118,126 @@ def resolve_backend(backend: Optional[str] = None) -> str:
             f"(via backend= argument or {_ENV_VAR} environment variable)"
         )
     return chosen
+
+
+# =====================================================================
+# Family-agnostic single-kernel lowering dispatch.
+#
+# This is the chokepoint every Python-authored kernel reaches through
+# ``lower_kernel_to_llvm``. It routes the lowering of a built ``KernelDef`` to
+# the resolved backend, going through the serialized ``ck.dsl.ir/v1`` artifact
+# (NOT a per-family spec dict), so it is completely family-agnostic: any kernel
+# the Python front end can build is lowerable by the C++ engine.
+# =====================================================================
+
+
+# Every cpp-path fallback to the native lowerer is recorded here (kernel name +
+# reason), so the guarantee sweep can enumerate exactly which kernels did not
+# lower under the C++ engine and why. Empty on a clean run.
+_CPP_FALLBACKS: List[Tuple[str, str]] = []
+
+
+def cpp_fallbacks() -> List[Tuple[str, str]]:
+    """Return the recorded ``(kernel_name, reason)`` cpp-engine fallbacks.
+
+    A non-empty list means one or more kernels could not be lowered through
+    the C++ engine and were served by the native Python lowerer instead. The
+    result is always well-defined; this is the audit trail for the
+    user-facing guarantee.
+    """
+    return list(_CPP_FALLBACKS)
+
+
+def reset_cpp_fallbacks() -> None:
+    """Clear the recorded cpp-engine fallback log (test/sweep helper)."""
+    _CPP_FALLBACKS.clear()
+
+
+def _record_fallback(kernel_name: str, reason: str) -> None:
+    _CPP_FALLBACKS.append((kernel_name, reason))
+
+
+# When set, the cpp path does NOT silently fall back to Python: an engine
+# error is raised. The guarantee sweep sets this so a regression surfaces
+# loudly instead of being masked by a fallback.
+_ENV_STRICT = "CK_DSL_CPP_STRICT"
+
+
+def _cpp_strict() -> bool:
+    return os.environ.get(_ENV_STRICT, "").strip() not in ("", "0")
+
+
+def _lower_via_cpp_engine(
+    ir_text: str, arch: str, llvm_flavor: Optional[str] = None
+) -> str:
+    """Lower serialized ``ck.dsl.ir/v1`` text through the C++ engine.
+
+    Wraps ``ckc_engine.lower_serialized_ir`` (the family-agnostic
+    parse+lower endpoint). ``llvm_flavor`` (``None`` => engine AUTO) pins the
+    intrinsic-declaration shape, matching the Python lowerer's ``llvm_flavor``
+    parameter. Raises :class:`BackendError` if the engine extension is
+    unavailable.
+    """
+    engine = _import_engine()
+    return engine.lower_serialized_ir(ir_text, arch=arch, flavor=llvm_flavor or "")
+
+
+def lower_kernel_via_backend(
+    kernel: Any,
+    *,
+    llvm_flavor: Optional[str] = None,
+    arch: Optional[str] = None,
+    python_lower: Callable[..., str],
+) -> str:
+    """Lower a built ``KernelDef`` through the resolved backend.
+
+    ``python_lower(kernel, llvm_flavor=, arch=)`` is the native lowerer
+    (passed in to avoid an import cycle with ``lower_llvm``).
+
+    Dispatch:
+
+      - ``"python"`` -> native lowerer, byte-identical to historical behaviour.
+      - ``"cpp"``    -> serialize the kernel and lower through the C++ engine.
+        On engine unavailability or an engine-side rejection, fall back to the
+        native lowerer and record the reason (unless ``CK_DSL_CPP_STRICT`` is
+        set, which re-raises). The fallback keeps the user-facing guarantee
+        ("all examples and tests work") intact for any case the C++ engine
+        cannot serve.
+      - ``"both"``   -> lower with both and assert byte-equality, returning the
+        Python result (the differential oracle). A mismatch raises
+        :class:`BackendMismatch`.
+    """
+    chosen = resolve_backend()
+
+    if chosen == BACKEND_PYTHON:
+        return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+
+    _arch = arch or "gfx950"
+    name = getattr(kernel, "name", "?")
+
+    # The serialized artifact is the family-agnostic hand-off to the C++ engine.
+    from .ir_serialize import serialize
+
+    if chosen == BACKEND_CPP:
+        try:
+            ir_text = serialize(kernel)
+            return _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+        except BaseException as e:  # noqa: BLE001 -- includes BackendError
+            if _cpp_strict():
+                raise
+            _record_fallback(name, f"{type(e).__name__}: {e}")
+            return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+
+    # both: differential gate.
+    py_ll = python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
+    ir_text = serialize(kernel)
+    cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+    if py_ll != cpp_ll:
+        raise BackendMismatch(
+            f"python vs cpp engine disagree for kernel '{name}' on {_arch}:\n"
+            + _text_diff("lowered AMDGPU .ll", py_ll, cpp_ll)
+        )
+    return py_ll
 
 
 # ------------------------------------------------------------------ binding

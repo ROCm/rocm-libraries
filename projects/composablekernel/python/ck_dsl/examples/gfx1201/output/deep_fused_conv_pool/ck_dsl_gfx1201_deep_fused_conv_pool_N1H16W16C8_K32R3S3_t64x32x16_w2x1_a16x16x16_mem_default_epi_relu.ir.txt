@@ -1,0 +1,1374 @@
+kernel @ck_dsl_gfx1201_deep_fused_conv_pool_N1H16W16C8_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu(%A: ptr<f16,global>, %B: ptr<f16,global>, %D: ptr<f16,global>, %W1: ptr<f16,global>, %W1_bytes: i32, %A_bytes: i32, %B_bytes: i32, %D_bytes: i32) {
+  %rsrc1 = tile.buffer_rsrc %W1, %W1_bytes : vec<i32x4>
+  %c2 = arith.constant {ity = "i32", value = 0} : i32
+  %c3 = arith.constant {ity = "i32", value = 32} : i32
+  %c4 = arith.constant {ity = "i32", value = 1} : i32
+  %c5 = arith.constant {ity = "i32", value = 2} : i32
+  %c6 = arith.constant {ity = "i32", value = 64} : i32
+  %c7 = arith.constant {ity = "i32", value = 32} : i32
+  %c8 = arith.constant {ity = "i32", value = 16} : i32
+  %tid9 = gpu.thread_id {axis = "x"} : i32
+  %mod10 = arith.mod %tid9, %c3 : i32
+  %div11 = arith.div %tid9, %c3 : i32
+  %div12 = arith.div %div11, %c4 : i32
+  %mod13 = arith.mod %div11, %c4 : i32
+  %c14 = arith.constant {ity = "i32", value = 0} : i32
+  %bid15 = gpu.block_id {axis = "y"} : i32
+  %mul16 = arith.mul %bid15, %c6 : i32
+  %bid17 = gpu.block_id {axis = "x"} : i32
+  %mul18 = arith.mul %bid17, %c7 : i32
+  %c19 = arith.constant {ity = "i32", value = 0} : i32
+  %c20 = arith.constant {ity = "i32", value = 0} : i32
+  %c21 = arith.constant {ity = "i32", value = 16} : i32
+  %c22 = arith.constant {ity = "i32", value = 72} : i32
+  %A_smem23 = tile.smem_alloc : smem<f16, [64x24]>
+  %B_smem24 = tile.smem_alloc : smem<f16, [32x24]>
+  %cz825 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 8} : vec<f32x8>
+  %rsrc26 = tile.buffer_rsrc %A, %A_bytes : vec<i32x4>
+  %c27 = arith.constant {ity = "i32", value = 0} : i32
+  %rsrc28 = tile.buffer_rsrc %B, %B_bytes : vec<i32x4>
+  %c29 = arith.constant {ity = "i32", value = 0} : i32
+  %rsrc30 = tile.buffer_rsrc %D, %D_bytes : vec<i32x4>
+  %c31 = arith.constant {ity = "i32", value = 0} : i32
+  %for32, %for33, %for34, %for35 = scf.for %c20, %c22, %c21, %cz825, %cz825, %cz825, %cz825 {elide_trailing_barrier = True, iter_args = [{'name': '%acc_m0_n0', 'type': 'vec<f32x8>'}, {'name': '%acc_m0_n1', 'type': 'vec<f32x8>'}, {'name': '%acc_m1_n0', 'type': 'vec<f32x8>'}, {'name': '%acc_m1_n1', 'type': 'vec<f32x8>'}], iv = "%k0", iv_type = "i32", num_iter_args = 4, unroll = False} : vec<f32x8>, vec<f32x8>, vec<f32x8>, vec<f32x8>
+    region 'body' {
+      %c36 = arith.constant {ity = "i32", value = 8} : i32
+      %c37 = arith.constant {ity = "i32", value = 16} : i32
+      %c38 = arith.constant {ity = "i32", value = 8} : i32
+      %c39 = arith.constant {ity = "i32", value = 24} : i32
+      %c40 = arith.constant {ity = "i32", value = 72} : i32
+      %bid41 = gpu.block_id {axis = "y"} : i32
+      %c42 = arith.constant {ity = "i32", value = 8} : i32
+      %mul43 = arith.mul %bid41, %c42 : i32
+      %bid44 = gpu.block_id {axis = "z"} : i32
+      %c45 = arith.constant {ity = "i32", value = 8} : i32
+      %mul46 = arith.mul %bid44, %c45 : i32
+      %c47 = arith.constant {ity = "i32", value = 64} : i32
+      %c48 = arith.constant {ity = "i32", value = 8} : i32
+      %c49 = arith.constant {ity = "i32", value = 2} : i32
+      %c50 = arith.constant {ity = "i32", value = 2} : i32
+      %c51 = arith.constant {ity = "i32", value = 0} : i32
+      %c52 = arith.constant {ity = "i32", value = 2147483647} : i32
+      %c53 = arith.constant {ity = "i32", value = 0} : i32
+      %mul54 = arith.mul %c53, %c47 : i32
+      %add55 = arith.add %mul54, %tid9 : i32
+      %div56 = arith.div %add55, %c49 : i32
+      %mod57 = arith.mod %add55, %c49 : i32
+      %mul58 = arith.mul %mod57, %c48 : i32
+      %add59 = arith.add %k0, %mul58 : i32
+      %c60 = arith.constant {ity = "i32", value = 3} : i32
+      %lshr61 = arith.lshr %div56, %c60 : i32
+      %c62 = arith.constant {ity = "i32", value = 7} : i32
+      %and63 = arith.and %div56, %c62 : i32
+      %div64 = arith.div %add59, %c39 : i32
+      %mod65 = arith.mod %add59, %c39 : i32
+      %c66 = arith.constant {ity = "i32", value = 3} : i32
+      %lshr67 = arith.lshr %mod65, %c66 : i32
+      %c68 = arith.constant {ity = "i32", value = 7} : i32
+      %and69 = arith.and %mod65, %c68 : i32
+      %add70 = arith.add %mul43, %lshr61 : i32
+      %add71 = arith.add %add70, %div64 : i32
+      %c72 = arith.constant {ity = "i32", value = 1} : i32
+      %sub73 = arith.sub %add71, %c72 : i32
+      %add74 = arith.add %mul46, %and63 : i32
+      %add75 = arith.add %add74, %lshr67 : i32
+      %c76 = arith.constant {ity = "i32", value = 1} : i32
+      %sub77 = arith.sub %add75, %c76 : i32
+      %c78 = arith.constant {ity = "i32", value = 0} : i32
+      %ge79 = arith.cmp %sub73, %c78 {pred = "ge"} : i1
+      %c80 = arith.constant {ity = "i32", value = 16} : i32
+      %lt81 = arith.cmp %sub73, %c80 {pred = "lt"} : i1
+      %and82 = arith.and %ge79, %lt81 : i1
+      %c83 = arith.constant {ity = "i32", value = 0} : i32
+      %ge84 = arith.cmp %sub77, %c83 {pred = "ge"} : i1
+      %lt85 = arith.cmp %sub77, %c37 {pred = "lt"} : i1
+      %and86 = arith.and %ge84, %lt85 : i1
+      %lt87 = arith.cmp %add59, %c40 {pred = "lt"} : i1
+      %and88 = arith.and %and82, %and86 : i1
+      %and89 = arith.and %lt87, %and88 : i1
+      %mul90 = arith.mul %sub73, %c37 : i32
+      %add91 = arith.add %mul90, %sub77 : i32
+      %mul92 = arith.mul %add91, %c38 : i32
+      %add93 = arith.add %mul92, %and69 : i32
+      %mul94 = arith.mul %add93, %c50 : i32
+      %sel95 = arith.select %and89, %mul94, %c52 : i32
+      %bl896 = tile.buffer_load_vN_f16 %rsrc26, %sel95, %c51 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %A_smem23, %div56, %mul58, %bl896 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      %c97 = arith.constant {ity = "i32", value = 1} : i32
+      %mul98 = arith.mul %c97, %c47 : i32
+      %add99 = arith.add %mul98, %tid9 : i32
+      %div100 = arith.div %add99, %c49 : i32
+      %mod101 = arith.mod %add99, %c49 : i32
+      %mul102 = arith.mul %mod101, %c48 : i32
+      %add103 = arith.add %k0, %mul102 : i32
+      %c104 = arith.constant {ity = "i32", value = 3} : i32
+      %lshr105 = arith.lshr %div100, %c104 : i32
+      %c106 = arith.constant {ity = "i32", value = 7} : i32
+      %and107 = arith.and %div100, %c106 : i32
+      %div108 = arith.div %add103, %c39 : i32
+      %mod109 = arith.mod %add103, %c39 : i32
+      %c110 = arith.constant {ity = "i32", value = 3} : i32
+      %lshr111 = arith.lshr %mod109, %c110 : i32
+      %c112 = arith.constant {ity = "i32", value = 7} : i32
+      %and113 = arith.and %mod109, %c112 : i32
+      %add114 = arith.add %mul43, %lshr105 : i32
+      %add115 = arith.add %add114, %div108 : i32
+      %c116 = arith.constant {ity = "i32", value = 1} : i32
+      %sub117 = arith.sub %add115, %c116 : i32
+      %add118 = arith.add %mul46, %and107 : i32
+      %add119 = arith.add %add118, %lshr111 : i32
+      %c120 = arith.constant {ity = "i32", value = 1} : i32
+      %sub121 = arith.sub %add119, %c120 : i32
+      %c122 = arith.constant {ity = "i32", value = 0} : i32
+      %ge123 = arith.cmp %sub117, %c122 {pred = "ge"} : i1
+      %c124 = arith.constant {ity = "i32", value = 16} : i32
+      %lt125 = arith.cmp %sub117, %c124 {pred = "lt"} : i1
+      %and126 = arith.and %ge123, %lt125 : i1
+      %c127 = arith.constant {ity = "i32", value = 0} : i32
+      %ge128 = arith.cmp %sub121, %c127 {pred = "ge"} : i1
+      %lt129 = arith.cmp %sub121, %c37 {pred = "lt"} : i1
+      %and130 = arith.and %ge128, %lt129 : i1
+      %lt131 = arith.cmp %add103, %c40 {pred = "lt"} : i1
+      %and132 = arith.and %and126, %and130 : i1
+      %and133 = arith.and %lt131, %and132 : i1
+      %mul134 = arith.mul %sub117, %c37 : i32
+      %add135 = arith.add %mul134, %sub121 : i32
+      %mul136 = arith.mul %add135, %c38 : i32
+      %add137 = arith.add %mul136, %and113 : i32
+      %mul138 = arith.mul %add137, %c50 : i32
+      %sel139 = arith.select %and133, %mul138, %c52 : i32
+      %bl8140 = tile.buffer_load_vN_f16 %rsrc26, %sel139, %c51 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %A_smem23, %div100, %mul102, %bl8140 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      %c141 = arith.constant {ity = "i32", value = 64} : i32
+      %c142 = arith.constant {ity = "i32", value = 8} : i32
+      %c143 = arith.constant {ity = "i32", value = 2} : i32
+      %c144 = arith.constant {ity = "i32", value = 2} : i32
+      %c145 = arith.constant {ity = "i32", value = 0} : i32
+      %c146 = arith.constant {ity = "i32", value = 2147483647} : i32
+      %c147 = arith.constant {ity = "i32", value = 0} : i32
+      %mul148 = arith.mul %c147, %c141 : i32
+      %add149 = arith.add %mul148, %tid9 : i32
+      %div150 = arith.div %add149, %c143 : i32
+      %mod151 = arith.mod %add149, %c143 : i32
+      %mul152 = arith.mul %mod151, %c142 : i32
+      %add153 = arith.add %mul18, %div150 : i32
+      %add154 = arith.add %k0, %mul152 : i32
+      %c155 = arith.constant {ity = "i32", value = 1} : i32
+      %umh156 = arith.umul_hi_i32 %add154, %c155 : i32
+      %add157 = arith.add %umh156, %add154 : i32
+      %c158 = arith.constant {ity = "i32", value = 3} : i32
+      %lshr159 = arith.lshr %add157, %c158 : i32
+      %c160 = arith.constant {ity = "i32", value = 8} : i32
+      %mul161 = arith.mul %lshr159, %c160 : i32
+      %sub162 = arith.sub %add154, %mul161 : i32
+      %c163 = arith.constant {ity = "i32", value = 1431655766} : i32
+      %umh164 = arith.umul_hi_i32 %lshr159, %c163 : i32
+      %add165 = arith.add %umh164, %lshr159 : i32
+      %c166 = arith.constant {ity = "i32", value = 2} : i32
+      %lshr167 = arith.lshr %add165, %c166 : i32
+      %c168 = arith.constant {ity = "i32", value = 3} : i32
+      %mul169 = arith.mul %lshr167, %c168 : i32
+      %sub170 = arith.sub %lshr159, %mul169 : i32
+      %c171 = arith.constant {ity = "i32", value = 0} : i32
+      %c172 = arith.constant {ity = "i32", value = 3} : i32
+      %ge173 = arith.cmp %lshr167, %c171 {pred = "ge"} : i1
+      %lt174 = arith.cmp %lshr167, %c172 {pred = "lt"} : i1
+      %and175 = arith.and %ge173, %lt174 : i1
+      %c176 = arith.constant {ity = "i32", value = 0} : i32
+      %c177 = arith.constant {ity = "i32", value = 3} : i32
+      %ge178 = arith.cmp %sub170, %c176 {pred = "ge"} : i1
+      %lt179 = arith.cmp %sub170, %c177 {pred = "lt"} : i1
+      %and180 = arith.and %ge178, %lt179 : i1
+      %c181 = arith.constant {ity = "i32", value = 72} : i32
+      %mul182 = arith.mul %add153, %c181 : i32
+      %c183 = arith.constant {ity = "i32", value = 24} : i32
+      %mul184 = arith.mul %lshr167, %c183 : i32
+      %add185 = arith.add %mul182, %mul184 : i32
+      %and186 = arith.and %and175, %and180 : i1
+      %c187 = arith.constant {ity = "i32", value = 8} : i32
+      %mul188 = arith.mul %sub170, %c187 : i32
+      %add189 = arith.add %add185, %mul188 : i32
+      %add190 = arith.add %add189, %sub162 : i32
+      %mul191 = arith.mul %add190, %c144 : i32
+      %sel192 = arith.select %and186, %mul191, %c146 : i32
+      %bl8193 = tile.buffer_load_vN_f16 %rsrc28, %sel192, %c145 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %B_smem24, %div150, %mul152, %bl8193 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      tile.sync
+      %c194 = arith.constant {ity = "i32", value = 16} : i32
+      %mod195 = arith.mod %mod10, %c194 : i32
+      %div196 = arith.div %mod10, %c194 : i32
+      %c197 = arith.constant {ity = "i32", value = 8} : i32
+      %mul198 = arith.mul %div196, %c197 : i32
+      %c199 = arith.constant {ity = "i32", value = 0} : i32
+      %add200 = arith.add %mul198, %c199 : i32
+      %c201 = arith.constant {ity = "i32", value = 16} : i32
+      %mod202 = arith.mod %mod10, %c201 : i32
+      %div203 = arith.div %mod10, %c201 : i32
+      %c204 = arith.constant {ity = "i32", value = 8} : i32
+      %mul205 = arith.mul %div203, %c204 : i32
+      %c206 = arith.constant {ity = "i32", value = 0} : i32
+      %add207 = arith.add %mul205, %c206 : i32
+      %c208 = arith.constant {ity = "i32", value = 32} : i32
+      %mul209 = arith.mul %div12, %c208 : i32
+      %c210 = arith.constant {ity = "i32", value = 32} : i32
+      %mul211 = arith.mul %mod13, %c210 : i32
+      %c212 = arith.constant {ity = "i32", value = 0} : i32
+      %c213 = arith.constant {ity = "i32", value = 0} : i32
+      %add214 = arith.add %mul209, %c213 : i32
+      %add215 = arith.add %add214, %mod195 : i32
+      %add216 = arith.add %c212, %add200 : i32
+      %av8217 = tile.smem_load_vN %A_smem23, %add215, %add216 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c218 = arith.constant {ity = "i32", value = 16} : i32
+      %add219 = arith.add %mul209, %c218 : i32
+      %add220 = arith.add %add219, %mod195 : i32
+      %add221 = arith.add %c212, %add200 : i32
+      %av8222 = tile.smem_load_vN %A_smem23, %add220, %add221 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c223 = arith.constant {ity = "i32", value = 0} : i32
+      %add224 = arith.add %mul211, %c223 : i32
+      %add225 = arith.add %add224, %mod202 : i32
+      %add226 = arith.add %c212, %add207 : i32
+      %av8227 = tile.smem_load_vN %B_smem24, %add225, %add226 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c228 = arith.constant {ity = "i32", value = 16} : i32
+      %add229 = arith.add %mul211, %c228 : i32
+      %add230 = arith.add %add229, %mod202 : i32
+      %add231 = arith.add %c212, %add207 : i32
+      %av8232 = tile.smem_load_vN %B_smem24, %add230, %add231 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %acc233 = tile.mma %av8217, %av8227, %acc_m0_n0 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+      %acc234 = tile.mma %av8217, %av8232, %acc_m0_n1 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+      %acc235 = tile.mma %av8222, %av8227, %acc_m1_n0 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+      %acc236 = tile.mma %av8222, %av8232, %acc_m1_n1 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+      tile.sync
+      scf.yield %acc233, %acc234, %acc235, %acc236 {num = 4}
+    }
+  %c237 = arith.constant {ity = "f32", value = 0.0} : f32
+  %e238 = vector.extract %for32 {index = 0} : f32
+  %fmax239 = arith.fmax %e238, %c237 : f32
+  %e240 = vector.extract %for32 {index = 1} : f32
+  %fmax241 = arith.fmax %e240, %c237 : f32
+  %e242 = vector.extract %for32 {index = 2} : f32
+  %fmax243 = arith.fmax %e242, %c237 : f32
+  %e244 = vector.extract %for32 {index = 3} : f32
+  %fmax245 = arith.fmax %e244, %c237 : f32
+  %e246 = vector.extract %for32 {index = 4} : f32
+  %fmax247 = arith.fmax %e246, %c237 : f32
+  %e248 = vector.extract %for32 {index = 5} : f32
+  %fmax249 = arith.fmax %e248, %c237 : f32
+  %e250 = vector.extract %for32 {index = 6} : f32
+  %fmax251 = arith.fmax %e250, %c237 : f32
+  %e252 = vector.extract %for32 {index = 7} : f32
+  %fmax253 = arith.fmax %e252, %c237 : f32
+  %vp254 = vector.pack %fmax239, %fmax241, %fmax243, %fmax245, %fmax247, %fmax249, %fmax251, %fmax253 {elem = "f32", vec = 8} : vec<f32x8>
+  %e255 = vector.extract %for33 {index = 0} : f32
+  %fmax256 = arith.fmax %e255, %c237 : f32
+  %e257 = vector.extract %for33 {index = 1} : f32
+  %fmax258 = arith.fmax %e257, %c237 : f32
+  %e259 = vector.extract %for33 {index = 2} : f32
+  %fmax260 = arith.fmax %e259, %c237 : f32
+  %e261 = vector.extract %for33 {index = 3} : f32
+  %fmax262 = arith.fmax %e261, %c237 : f32
+  %e263 = vector.extract %for33 {index = 4} : f32
+  %fmax264 = arith.fmax %e263, %c237 : f32
+  %e265 = vector.extract %for33 {index = 5} : f32
+  %fmax266 = arith.fmax %e265, %c237 : f32
+  %e267 = vector.extract %for33 {index = 6} : f32
+  %fmax268 = arith.fmax %e267, %c237 : f32
+  %e269 = vector.extract %for33 {index = 7} : f32
+  %fmax270 = arith.fmax %e269, %c237 : f32
+  %vp271 = vector.pack %fmax256, %fmax258, %fmax260, %fmax262, %fmax264, %fmax266, %fmax268, %fmax270 {elem = "f32", vec = 8} : vec<f32x8>
+  %e272 = vector.extract %for34 {index = 0} : f32
+  %fmax273 = arith.fmax %e272, %c237 : f32
+  %e274 = vector.extract %for34 {index = 1} : f32
+  %fmax275 = arith.fmax %e274, %c237 : f32
+  %e276 = vector.extract %for34 {index = 2} : f32
+  %fmax277 = arith.fmax %e276, %c237 : f32
+  %e278 = vector.extract %for34 {index = 3} : f32
+  %fmax279 = arith.fmax %e278, %c237 : f32
+  %e280 = vector.extract %for34 {index = 4} : f32
+  %fmax281 = arith.fmax %e280, %c237 : f32
+  %e282 = vector.extract %for34 {index = 5} : f32
+  %fmax283 = arith.fmax %e282, %c237 : f32
+  %e284 = vector.extract %for34 {index = 6} : f32
+  %fmax285 = arith.fmax %e284, %c237 : f32
+  %e286 = vector.extract %for34 {index = 7} : f32
+  %fmax287 = arith.fmax %e286, %c237 : f32
+  %vp288 = vector.pack %fmax273, %fmax275, %fmax277, %fmax279, %fmax281, %fmax283, %fmax285, %fmax287 {elem = "f32", vec = 8} : vec<f32x8>
+  %e289 = vector.extract %for35 {index = 0} : f32
+  %fmax290 = arith.fmax %e289, %c237 : f32
+  %e291 = vector.extract %for35 {index = 1} : f32
+  %fmax292 = arith.fmax %e291, %c237 : f32
+  %e293 = vector.extract %for35 {index = 2} : f32
+  %fmax294 = arith.fmax %e293, %c237 : f32
+  %e295 = vector.extract %for35 {index = 3} : f32
+  %fmax296 = arith.fmax %e295, %c237 : f32
+  %e297 = vector.extract %for35 {index = 4} : f32
+  %fmax298 = arith.fmax %e297, %c237 : f32
+  %e299 = vector.extract %for35 {index = 5} : f32
+  %fmax300 = arith.fmax %e299, %c237 : f32
+  %e301 = vector.extract %for35 {index = 6} : f32
+  %fmax302 = arith.fmax %e301, %c237 : f32
+  %e303 = vector.extract %for35 {index = 7} : f32
+  %fmax304 = arith.fmax %e303, %c237 : f32
+  %vp305 = vector.pack %fmax290, %fmax292, %fmax294, %fmax296, %fmax298, %fmax300, %fmax302, %fmax304 {elem = "f32", vec = 8} : vec<f32x8>
+  %DeepFusionC_smem306 = tile.smem_alloc : smem<f16, [64x32]>
+  %c307 = arith.constant {ity = "i32", value = 0} : i32
+  %c308 = arith.constant {ity = "i32", value = 0} : i32
+  %c309 = arith.constant {ity = "i32", value = 32} : i32
+  %mul310 = arith.mul %div12, %c309 : i32
+  %c311 = arith.constant {ity = "i32", value = 32} : i32
+  %mul312 = arith.mul %mod13, %c311 : i32
+  %vh8313 = vector.trunc_f32_to %vp254 {target = "f16"} : vec<f16x8>
+  %e314 = vector.extract %vh8313 {index = 0} : f16
+  %e315 = vector.extract %vh8313 {index = 1} : f16
+  %e316 = vector.extract %vh8313 {index = 2} : f16
+  %e317 = vector.extract %vh8313 {index = 3} : f16
+  %e318 = vector.extract %vh8313 {index = 4} : f16
+  %e319 = vector.extract %vh8313 {index = 5} : f16
+  %e320 = vector.extract %vh8313 {index = 6} : f16
+  %e321 = vector.extract %vh8313 {index = 7} : f16
+  %c322 = arith.constant {ity = "i32", value = 0} : i32
+  %add323 = arith.add %mul310, %c322 : i32
+  %c324 = arith.constant {ity = "i32", value = 0} : i32
+  %add325 = arith.add %mul312, %c324 : i32
+  %c326 = arith.constant {ity = "i32", value = 16} : i32
+  %mod327 = arith.mod %mod10, %c326 : i32
+  %div328 = arith.div %mod10, %c326 : i32
+  %c329 = arith.constant {ity = "i32", value = 8} : i32
+  %mul330 = arith.mul %div328, %c329 : i32
+  %c331 = arith.constant {ity = "i32", value = 0} : i32
+  %add332 = arith.add %mul330, %c331 : i32
+  %add333 = arith.add %add323, %add332 : i32
+  %add334 = arith.add %add325, %mod327 : i32
+  tile.smem_store %DeepFusionC_smem306, %add333, %add334, %e314 {elem_type = "f16", rank = 2}
+  %c335 = arith.constant {ity = "i32", value = 16} : i32
+  %mod336 = arith.mod %mod10, %c335 : i32
+  %div337 = arith.div %mod10, %c335 : i32
+  %c338 = arith.constant {ity = "i32", value = 8} : i32
+  %mul339 = arith.mul %div337, %c338 : i32
+  %c340 = arith.constant {ity = "i32", value = 1} : i32
+  %add341 = arith.add %mul339, %c340 : i32
+  %add342 = arith.add %add323, %add341 : i32
+  %add343 = arith.add %add325, %mod336 : i32
+  tile.smem_store %DeepFusionC_smem306, %add342, %add343, %e315 {elem_type = "f16", rank = 2}
+  %c344 = arith.constant {ity = "i32", value = 16} : i32
+  %mod345 = arith.mod %mod10, %c344 : i32
+  %div346 = arith.div %mod10, %c344 : i32
+  %c347 = arith.constant {ity = "i32", value = 8} : i32
+  %mul348 = arith.mul %div346, %c347 : i32
+  %c349 = arith.constant {ity = "i32", value = 2} : i32
+  %add350 = arith.add %mul348, %c349 : i32
+  %add351 = arith.add %add323, %add350 : i32
+  %add352 = arith.add %add325, %mod345 : i32
+  tile.smem_store %DeepFusionC_smem306, %add351, %add352, %e316 {elem_type = "f16", rank = 2}
+  %c353 = arith.constant {ity = "i32", value = 16} : i32
+  %mod354 = arith.mod %mod10, %c353 : i32
+  %div355 = arith.div %mod10, %c353 : i32
+  %c356 = arith.constant {ity = "i32", value = 8} : i32
+  %mul357 = arith.mul %div355, %c356 : i32
+  %c358 = arith.constant {ity = "i32", value = 3} : i32
+  %add359 = arith.add %mul357, %c358 : i32
+  %add360 = arith.add %add323, %add359 : i32
+  %add361 = arith.add %add325, %mod354 : i32
+  tile.smem_store %DeepFusionC_smem306, %add360, %add361, %e317 {elem_type = "f16", rank = 2}
+  %c362 = arith.constant {ity = "i32", value = 16} : i32
+  %mod363 = arith.mod %mod10, %c362 : i32
+  %div364 = arith.div %mod10, %c362 : i32
+  %c365 = arith.constant {ity = "i32", value = 8} : i32
+  %mul366 = arith.mul %div364, %c365 : i32
+  %c367 = arith.constant {ity = "i32", value = 4} : i32
+  %add368 = arith.add %mul366, %c367 : i32
+  %add369 = arith.add %add323, %add368 : i32
+  %add370 = arith.add %add325, %mod363 : i32
+  tile.smem_store %DeepFusionC_smem306, %add369, %add370, %e318 {elem_type = "f16", rank = 2}
+  %c371 = arith.constant {ity = "i32", value = 16} : i32
+  %mod372 = arith.mod %mod10, %c371 : i32
+  %div373 = arith.div %mod10, %c371 : i32
+  %c374 = arith.constant {ity = "i32", value = 8} : i32
+  %mul375 = arith.mul %div373, %c374 : i32
+  %c376 = arith.constant {ity = "i32", value = 5} : i32
+  %add377 = arith.add %mul375, %c376 : i32
+  %add378 = arith.add %add323, %add377 : i32
+  %add379 = arith.add %add325, %mod372 : i32
+  tile.smem_store %DeepFusionC_smem306, %add378, %add379, %e319 {elem_type = "f16", rank = 2}
+  %c380 = arith.constant {ity = "i32", value = 16} : i32
+  %mod381 = arith.mod %mod10, %c380 : i32
+  %div382 = arith.div %mod10, %c380 : i32
+  %c383 = arith.constant {ity = "i32", value = 8} : i32
+  %mul384 = arith.mul %div382, %c383 : i32
+  %c385 = arith.constant {ity = "i32", value = 6} : i32
+  %add386 = arith.add %mul384, %c385 : i32
+  %add387 = arith.add %add323, %add386 : i32
+  %add388 = arith.add %add325, %mod381 : i32
+  tile.smem_store %DeepFusionC_smem306, %add387, %add388, %e320 {elem_type = "f16", rank = 2}
+  %c389 = arith.constant {ity = "i32", value = 16} : i32
+  %mod390 = arith.mod %mod10, %c389 : i32
+  %div391 = arith.div %mod10, %c389 : i32
+  %c392 = arith.constant {ity = "i32", value = 8} : i32
+  %mul393 = arith.mul %div391, %c392 : i32
+  %c394 = arith.constant {ity = "i32", value = 7} : i32
+  %add395 = arith.add %mul393, %c394 : i32
+  %add396 = arith.add %add323, %add395 : i32
+  %add397 = arith.add %add325, %mod390 : i32
+  tile.smem_store %DeepFusionC_smem306, %add396, %add397, %e321 {elem_type = "f16", rank = 2}
+  %vh8398 = vector.trunc_f32_to %vp271 {target = "f16"} : vec<f16x8>
+  %e399 = vector.extract %vh8398 {index = 0} : f16
+  %e400 = vector.extract %vh8398 {index = 1} : f16
+  %e401 = vector.extract %vh8398 {index = 2} : f16
+  %e402 = vector.extract %vh8398 {index = 3} : f16
+  %e403 = vector.extract %vh8398 {index = 4} : f16
+  %e404 = vector.extract %vh8398 {index = 5} : f16
+  %e405 = vector.extract %vh8398 {index = 6} : f16
+  %e406 = vector.extract %vh8398 {index = 7} : f16
+  %c407 = arith.constant {ity = "i32", value = 0} : i32
+  %add408 = arith.add %mul310, %c407 : i32
+  %c409 = arith.constant {ity = "i32", value = 16} : i32
+  %add410 = arith.add %mul312, %c409 : i32
+  %c411 = arith.constant {ity = "i32", value = 16} : i32
+  %mod412 = arith.mod %mod10, %c411 : i32
+  %div413 = arith.div %mod10, %c411 : i32
+  %c414 = arith.constant {ity = "i32", value = 8} : i32
+  %mul415 = arith.mul %div413, %c414 : i32
+  %c416 = arith.constant {ity = "i32", value = 0} : i32
+  %add417 = arith.add %mul415, %c416 : i32
+  %add418 = arith.add %add408, %add417 : i32
+  %add419 = arith.add %add410, %mod412 : i32
+  tile.smem_store %DeepFusionC_smem306, %add418, %add419, %e399 {elem_type = "f16", rank = 2}
+  %c420 = arith.constant {ity = "i32", value = 16} : i32
+  %mod421 = arith.mod %mod10, %c420 : i32
+  %div422 = arith.div %mod10, %c420 : i32
+  %c423 = arith.constant {ity = "i32", value = 8} : i32
+  %mul424 = arith.mul %div422, %c423 : i32
+  %c425 = arith.constant {ity = "i32", value = 1} : i32
+  %add426 = arith.add %mul424, %c425 : i32
+  %add427 = arith.add %add408, %add426 : i32
+  %add428 = arith.add %add410, %mod421 : i32
+  tile.smem_store %DeepFusionC_smem306, %add427, %add428, %e400 {elem_type = "f16", rank = 2}
+  %c429 = arith.constant {ity = "i32", value = 16} : i32
+  %mod430 = arith.mod %mod10, %c429 : i32
+  %div431 = arith.div %mod10, %c429 : i32
+  %c432 = arith.constant {ity = "i32", value = 8} : i32
+  %mul433 = arith.mul %div431, %c432 : i32
+  %c434 = arith.constant {ity = "i32", value = 2} : i32
+  %add435 = arith.add %mul433, %c434 : i32
+  %add436 = arith.add %add408, %add435 : i32
+  %add437 = arith.add %add410, %mod430 : i32
+  tile.smem_store %DeepFusionC_smem306, %add436, %add437, %e401 {elem_type = "f16", rank = 2}
+  %c438 = arith.constant {ity = "i32", value = 16} : i32
+  %mod439 = arith.mod %mod10, %c438 : i32
+  %div440 = arith.div %mod10, %c438 : i32
+  %c441 = arith.constant {ity = "i32", value = 8} : i32
+  %mul442 = arith.mul %div440, %c441 : i32
+  %c443 = arith.constant {ity = "i32", value = 3} : i32
+  %add444 = arith.add %mul442, %c443 : i32
+  %add445 = arith.add %add408, %add444 : i32
+  %add446 = arith.add %add410, %mod439 : i32
+  tile.smem_store %DeepFusionC_smem306, %add445, %add446, %e402 {elem_type = "f16", rank = 2}
+  %c447 = arith.constant {ity = "i32", value = 16} : i32
+  %mod448 = arith.mod %mod10, %c447 : i32
+  %div449 = arith.div %mod10, %c447 : i32
+  %c450 = arith.constant {ity = "i32", value = 8} : i32
+  %mul451 = arith.mul %div449, %c450 : i32
+  %c452 = arith.constant {ity = "i32", value = 4} : i32
+  %add453 = arith.add %mul451, %c452 : i32
+  %add454 = arith.add %add408, %add453 : i32
+  %add455 = arith.add %add410, %mod448 : i32
+  tile.smem_store %DeepFusionC_smem306, %add454, %add455, %e403 {elem_type = "f16", rank = 2}
+  %c456 = arith.constant {ity = "i32", value = 16} : i32
+  %mod457 = arith.mod %mod10, %c456 : i32
+  %div458 = arith.div %mod10, %c456 : i32
+  %c459 = arith.constant {ity = "i32", value = 8} : i32
+  %mul460 = arith.mul %div458, %c459 : i32
+  %c461 = arith.constant {ity = "i32", value = 5} : i32
+  %add462 = arith.add %mul460, %c461 : i32
+  %add463 = arith.add %add408, %add462 : i32
+  %add464 = arith.add %add410, %mod457 : i32
+  tile.smem_store %DeepFusionC_smem306, %add463, %add464, %e404 {elem_type = "f16", rank = 2}
+  %c465 = arith.constant {ity = "i32", value = 16} : i32
+  %mod466 = arith.mod %mod10, %c465 : i32
+  %div467 = arith.div %mod10, %c465 : i32
+  %c468 = arith.constant {ity = "i32", value = 8} : i32
+  %mul469 = arith.mul %div467, %c468 : i32
+  %c470 = arith.constant {ity = "i32", value = 6} : i32
+  %add471 = arith.add %mul469, %c470 : i32
+  %add472 = arith.add %add408, %add471 : i32
+  %add473 = arith.add %add410, %mod466 : i32
+  tile.smem_store %DeepFusionC_smem306, %add472, %add473, %e405 {elem_type = "f16", rank = 2}
+  %c474 = arith.constant {ity = "i32", value = 16} : i32
+  %mod475 = arith.mod %mod10, %c474 : i32
+  %div476 = arith.div %mod10, %c474 : i32
+  %c477 = arith.constant {ity = "i32", value = 8} : i32
+  %mul478 = arith.mul %div476, %c477 : i32
+  %c479 = arith.constant {ity = "i32", value = 7} : i32
+  %add480 = arith.add %mul478, %c479 : i32
+  %add481 = arith.add %add408, %add480 : i32
+  %add482 = arith.add %add410, %mod475 : i32
+  tile.smem_store %DeepFusionC_smem306, %add481, %add482, %e406 {elem_type = "f16", rank = 2}
+  %vh8483 = vector.trunc_f32_to %vp288 {target = "f16"} : vec<f16x8>
+  %e484 = vector.extract %vh8483 {index = 0} : f16
+  %e485 = vector.extract %vh8483 {index = 1} : f16
+  %e486 = vector.extract %vh8483 {index = 2} : f16
+  %e487 = vector.extract %vh8483 {index = 3} : f16
+  %e488 = vector.extract %vh8483 {index = 4} : f16
+  %e489 = vector.extract %vh8483 {index = 5} : f16
+  %e490 = vector.extract %vh8483 {index = 6} : f16
+  %e491 = vector.extract %vh8483 {index = 7} : f16
+  %c492 = arith.constant {ity = "i32", value = 16} : i32
+  %add493 = arith.add %mul310, %c492 : i32
+  %c494 = arith.constant {ity = "i32", value = 0} : i32
+  %add495 = arith.add %mul312, %c494 : i32
+  %c496 = arith.constant {ity = "i32", value = 16} : i32
+  %mod497 = arith.mod %mod10, %c496 : i32
+  %div498 = arith.div %mod10, %c496 : i32
+  %c499 = arith.constant {ity = "i32", value = 8} : i32
+  %mul500 = arith.mul %div498, %c499 : i32
+  %c501 = arith.constant {ity = "i32", value = 0} : i32
+  %add502 = arith.add %mul500, %c501 : i32
+  %add503 = arith.add %add493, %add502 : i32
+  %add504 = arith.add %add495, %mod497 : i32
+  tile.smem_store %DeepFusionC_smem306, %add503, %add504, %e484 {elem_type = "f16", rank = 2}
+  %c505 = arith.constant {ity = "i32", value = 16} : i32
+  %mod506 = arith.mod %mod10, %c505 : i32
+  %div507 = arith.div %mod10, %c505 : i32
+  %c508 = arith.constant {ity = "i32", value = 8} : i32
+  %mul509 = arith.mul %div507, %c508 : i32
+  %c510 = arith.constant {ity = "i32", value = 1} : i32
+  %add511 = arith.add %mul509, %c510 : i32
+  %add512 = arith.add %add493, %add511 : i32
+  %add513 = arith.add %add495, %mod506 : i32
+  tile.smem_store %DeepFusionC_smem306, %add512, %add513, %e485 {elem_type = "f16", rank = 2}
+  %c514 = arith.constant {ity = "i32", value = 16} : i32
+  %mod515 = arith.mod %mod10, %c514 : i32
+  %div516 = arith.div %mod10, %c514 : i32
+  %c517 = arith.constant {ity = "i32", value = 8} : i32
+  %mul518 = arith.mul %div516, %c517 : i32
+  %c519 = arith.constant {ity = "i32", value = 2} : i32
+  %add520 = arith.add %mul518, %c519 : i32
+  %add521 = arith.add %add493, %add520 : i32
+  %add522 = arith.add %add495, %mod515 : i32
+  tile.smem_store %DeepFusionC_smem306, %add521, %add522, %e486 {elem_type = "f16", rank = 2}
+  %c523 = arith.constant {ity = "i32", value = 16} : i32
+  %mod524 = arith.mod %mod10, %c523 : i32
+  %div525 = arith.div %mod10, %c523 : i32
+  %c526 = arith.constant {ity = "i32", value = 8} : i32
+  %mul527 = arith.mul %div525, %c526 : i32
+  %c528 = arith.constant {ity = "i32", value = 3} : i32
+  %add529 = arith.add %mul527, %c528 : i32
+  %add530 = arith.add %add493, %add529 : i32
+  %add531 = arith.add %add495, %mod524 : i32
+  tile.smem_store %DeepFusionC_smem306, %add530, %add531, %e487 {elem_type = "f16", rank = 2}
+  %c532 = arith.constant {ity = "i32", value = 16} : i32
+  %mod533 = arith.mod %mod10, %c532 : i32
+  %div534 = arith.div %mod10, %c532 : i32
+  %c535 = arith.constant {ity = "i32", value = 8} : i32
+  %mul536 = arith.mul %div534, %c535 : i32
+  %c537 = arith.constant {ity = "i32", value = 4} : i32
+  %add538 = arith.add %mul536, %c537 : i32
+  %add539 = arith.add %add493, %add538 : i32
+  %add540 = arith.add %add495, %mod533 : i32
+  tile.smem_store %DeepFusionC_smem306, %add539, %add540, %e488 {elem_type = "f16", rank = 2}
+  %c541 = arith.constant {ity = "i32", value = 16} : i32
+  %mod542 = arith.mod %mod10, %c541 : i32
+  %div543 = arith.div %mod10, %c541 : i32
+  %c544 = arith.constant {ity = "i32", value = 8} : i32
+  %mul545 = arith.mul %div543, %c544 : i32
+  %c546 = arith.constant {ity = "i32", value = 5} : i32
+  %add547 = arith.add %mul545, %c546 : i32
+  %add548 = arith.add %add493, %add547 : i32
+  %add549 = arith.add %add495, %mod542 : i32
+  tile.smem_store %DeepFusionC_smem306, %add548, %add549, %e489 {elem_type = "f16", rank = 2}
+  %c550 = arith.constant {ity = "i32", value = 16} : i32
+  %mod551 = arith.mod %mod10, %c550 : i32
+  %div552 = arith.div %mod10, %c550 : i32
+  %c553 = arith.constant {ity = "i32", value = 8} : i32
+  %mul554 = arith.mul %div552, %c553 : i32
+  %c555 = arith.constant {ity = "i32", value = 6} : i32
+  %add556 = arith.add %mul554, %c555 : i32
+  %add557 = arith.add %add493, %add556 : i32
+  %add558 = arith.add %add495, %mod551 : i32
+  tile.smem_store %DeepFusionC_smem306, %add557, %add558, %e490 {elem_type = "f16", rank = 2}
+  %c559 = arith.constant {ity = "i32", value = 16} : i32
+  %mod560 = arith.mod %mod10, %c559 : i32
+  %div561 = arith.div %mod10, %c559 : i32
+  %c562 = arith.constant {ity = "i32", value = 8} : i32
+  %mul563 = arith.mul %div561, %c562 : i32
+  %c564 = arith.constant {ity = "i32", value = 7} : i32
+  %add565 = arith.add %mul563, %c564 : i32
+  %add566 = arith.add %add493, %add565 : i32
+  %add567 = arith.add %add495, %mod560 : i32
+  tile.smem_store %DeepFusionC_smem306, %add566, %add567, %e491 {elem_type = "f16", rank = 2}
+  %vh8568 = vector.trunc_f32_to %vp305 {target = "f16"} : vec<f16x8>
+  %e569 = vector.extract %vh8568 {index = 0} : f16
+  %e570 = vector.extract %vh8568 {index = 1} : f16
+  %e571 = vector.extract %vh8568 {index = 2} : f16
+  %e572 = vector.extract %vh8568 {index = 3} : f16
+  %e573 = vector.extract %vh8568 {index = 4} : f16
+  %e574 = vector.extract %vh8568 {index = 5} : f16
+  %e575 = vector.extract %vh8568 {index = 6} : f16
+  %e576 = vector.extract %vh8568 {index = 7} : f16
+  %c577 = arith.constant {ity = "i32", value = 16} : i32
+  %add578 = arith.add %mul310, %c577 : i32
+  %c579 = arith.constant {ity = "i32", value = 16} : i32
+  %add580 = arith.add %mul312, %c579 : i32
+  %c581 = arith.constant {ity = "i32", value = 16} : i32
+  %mod582 = arith.mod %mod10, %c581 : i32
+  %div583 = arith.div %mod10, %c581 : i32
+  %c584 = arith.constant {ity = "i32", value = 8} : i32
+  %mul585 = arith.mul %div583, %c584 : i32
+  %c586 = arith.constant {ity = "i32", value = 0} : i32
+  %add587 = arith.add %mul585, %c586 : i32
+  %add588 = arith.add %add578, %add587 : i32
+  %add589 = arith.add %add580, %mod582 : i32
+  tile.smem_store %DeepFusionC_smem306, %add588, %add589, %e569 {elem_type = "f16", rank = 2}
+  %c590 = arith.constant {ity = "i32", value = 16} : i32
+  %mod591 = arith.mod %mod10, %c590 : i32
+  %div592 = arith.div %mod10, %c590 : i32
+  %c593 = arith.constant {ity = "i32", value = 8} : i32
+  %mul594 = arith.mul %div592, %c593 : i32
+  %c595 = arith.constant {ity = "i32", value = 1} : i32
+  %add596 = arith.add %mul594, %c595 : i32
+  %add597 = arith.add %add578, %add596 : i32
+  %add598 = arith.add %add580, %mod591 : i32
+  tile.smem_store %DeepFusionC_smem306, %add597, %add598, %e570 {elem_type = "f16", rank = 2}
+  %c599 = arith.constant {ity = "i32", value = 16} : i32
+  %mod600 = arith.mod %mod10, %c599 : i32
+  %div601 = arith.div %mod10, %c599 : i32
+  %c602 = arith.constant {ity = "i32", value = 8} : i32
+  %mul603 = arith.mul %div601, %c602 : i32
+  %c604 = arith.constant {ity = "i32", value = 2} : i32
+  %add605 = arith.add %mul603, %c604 : i32
+  %add606 = arith.add %add578, %add605 : i32
+  %add607 = arith.add %add580, %mod600 : i32
+  tile.smem_store %DeepFusionC_smem306, %add606, %add607, %e571 {elem_type = "f16", rank = 2}
+  %c608 = arith.constant {ity = "i32", value = 16} : i32
+  %mod609 = arith.mod %mod10, %c608 : i32
+  %div610 = arith.div %mod10, %c608 : i32
+  %c611 = arith.constant {ity = "i32", value = 8} : i32
+  %mul612 = arith.mul %div610, %c611 : i32
+  %c613 = arith.constant {ity = "i32", value = 3} : i32
+  %add614 = arith.add %mul612, %c613 : i32
+  %add615 = arith.add %add578, %add614 : i32
+  %add616 = arith.add %add580, %mod609 : i32
+  tile.smem_store %DeepFusionC_smem306, %add615, %add616, %e572 {elem_type = "f16", rank = 2}
+  %c617 = arith.constant {ity = "i32", value = 16} : i32
+  %mod618 = arith.mod %mod10, %c617 : i32
+  %div619 = arith.div %mod10, %c617 : i32
+  %c620 = arith.constant {ity = "i32", value = 8} : i32
+  %mul621 = arith.mul %div619, %c620 : i32
+  %c622 = arith.constant {ity = "i32", value = 4} : i32
+  %add623 = arith.add %mul621, %c622 : i32
+  %add624 = arith.add %add578, %add623 : i32
+  %add625 = arith.add %add580, %mod618 : i32
+  tile.smem_store %DeepFusionC_smem306, %add624, %add625, %e573 {elem_type = "f16", rank = 2}
+  %c626 = arith.constant {ity = "i32", value = 16} : i32
+  %mod627 = arith.mod %mod10, %c626 : i32
+  %div628 = arith.div %mod10, %c626 : i32
+  %c629 = arith.constant {ity = "i32", value = 8} : i32
+  %mul630 = arith.mul %div628, %c629 : i32
+  %c631 = arith.constant {ity = "i32", value = 5} : i32
+  %add632 = arith.add %mul630, %c631 : i32
+  %add633 = arith.add %add578, %add632 : i32
+  %add634 = arith.add %add580, %mod627 : i32
+  tile.smem_store %DeepFusionC_smem306, %add633, %add634, %e574 {elem_type = "f16", rank = 2}
+  %c635 = arith.constant {ity = "i32", value = 16} : i32
+  %mod636 = arith.mod %mod10, %c635 : i32
+  %div637 = arith.div %mod10, %c635 : i32
+  %c638 = arith.constant {ity = "i32", value = 8} : i32
+  %mul639 = arith.mul %div637, %c638 : i32
+  %c640 = arith.constant {ity = "i32", value = 6} : i32
+  %add641 = arith.add %mul639, %c640 : i32
+  %add642 = arith.add %add578, %add641 : i32
+  %add643 = arith.add %add580, %mod636 : i32
+  tile.smem_store %DeepFusionC_smem306, %add642, %add643, %e575 {elem_type = "f16", rank = 2}
+  %c644 = arith.constant {ity = "i32", value = 16} : i32
+  %mod645 = arith.mod %mod10, %c644 : i32
+  %div646 = arith.div %mod10, %c644 : i32
+  %c647 = arith.constant {ity = "i32", value = 8} : i32
+  %mul648 = arith.mul %div646, %c647 : i32
+  %c649 = arith.constant {ity = "i32", value = 7} : i32
+  %add650 = arith.add %mul648, %c649 : i32
+  %add651 = arith.add %add578, %add650 : i32
+  %add652 = arith.add %add580, %mod645 : i32
+  tile.smem_store %DeepFusionC_smem306, %add651, %add652, %e576 {elem_type = "f16", rank = 2}
+  %W1_smem653 = tile.smem_alloc : smem<f16, [32x32]>
+  %c654 = arith.constant {ity = "i32", value = 32} : i32
+  %c655 = arith.constant {ity = "i32", value = 24} : i32
+  %c656 = arith.constant {ity = "i32", value = 64} : i32
+  %c657 = arith.constant {ity = "i32", value = 8} : i32
+  %c658 = arith.constant {ity = "i32", value = 4} : i32
+  %c659 = arith.constant {ity = "i32", value = 2} : i32
+  %c660 = arith.constant {ity = "i32", value = 0} : i32
+  %c661 = arith.constant {ity = "i32", value = 2147483647} : i32
+  %c662 = arith.constant {ity = "i32", value = 0} : i32
+  %mul663 = arith.mul %c662, %c656 : i32
+  %add664 = arith.add %mul663, %tid9 : i32
+  %div665 = arith.div %add664, %c658 : i32
+  %mod666 = arith.mod %add664, %c658 : i32
+  %mul667 = arith.mul %mod666, %c657 : i32
+  %lt668 = arith.cmp %div665, %c655 {pred = "lt"} : i1
+  %lt669 = arith.cmp %mul667, %c654 {pred = "lt"} : i1
+  %and670 = arith.and %lt668, %lt669 : i1
+  %mul671 = arith.mul %div665, %c654 : i32
+  %add672 = arith.add %mul671, %mul667 : i32
+  %mul673 = arith.mul %add672, %c659 : i32
+  %sel674 = arith.select %and670, %mul673, %c661 : i32
+  %bl8675 = tile.buffer_load_vN_f16 %rsrc1, %sel674, %c660 {dwords = 4} : vec<f16x8>
+  tile.smem_store_vN %W1_smem653, %div665, %mul667, %bl8675 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+  %c676 = arith.constant {ity = "i32", value = 1} : i32
+  %mul677 = arith.mul %c676, %c656 : i32
+  %add678 = arith.add %mul677, %tid9 : i32
+  %div679 = arith.div %add678, %c658 : i32
+  %mod680 = arith.mod %add678, %c658 : i32
+  %mul681 = arith.mul %mod680, %c657 : i32
+  %lt682 = arith.cmp %div679, %c655 {pred = "lt"} : i1
+  %lt683 = arith.cmp %mul681, %c654 {pred = "lt"} : i1
+  %and684 = arith.and %lt682, %lt683 : i1
+  %mul685 = arith.mul %div679, %c654 : i32
+  %add686 = arith.add %mul685, %mul681 : i32
+  %mul687 = arith.mul %add686, %c659 : i32
+  %sel688 = arith.select %and684, %mul687, %c661 : i32
+  %bl8689 = tile.buffer_load_vN_f16 %rsrc1, %sel688, %c660 {dwords = 4} : vec<f16x8>
+  tile.smem_store_vN %W1_smem653, %div679, %mul681, %bl8689 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+  tile.sync
+  %c690 = arith.constant {ity = "i32", value = 16} : i32
+  %mod691 = arith.mod %mod10, %c690 : i32
+  %div692 = arith.div %mod10, %c690 : i32
+  %c693 = arith.constant {ity = "i32", value = 8} : i32
+  %mul694 = arith.mul %div692, %c693 : i32
+  %c695 = arith.constant {ity = "i32", value = 0} : i32
+  %add696 = arith.add %mul694, %c695 : i32
+  %c697 = arith.constant {ity = "i32", value = 16} : i32
+  %mod698 = arith.mod %mod10, %c697 : i32
+  %div699 = arith.div %mod10, %c697 : i32
+  %c700 = arith.constant {ity = "i32", value = 8} : i32
+  %mul701 = arith.mul %div699, %c700 : i32
+  %c702 = arith.constant {ity = "i32", value = 0} : i32
+  %add703 = arith.add %mul701, %c702 : i32
+  %c704 = arith.constant {ity = "i32", value = 32} : i32
+  %mul705 = arith.mul %div12, %c704 : i32
+  %c706 = arith.constant {ity = "i32", value = 32} : i32
+  %mul707 = arith.mul %mod13, %c706 : i32
+  %cz8708 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 8} : vec<f32x8>
+  %cz8709 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 8} : vec<f32x8>
+  %cz8710 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 8} : vec<f32x8>
+  %cz8711 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 8} : vec<f32x8>
+  %c712 = arith.constant {ity = "i32", value = 0} : i32
+  %add713 = arith.add %add696, %c712 : i32
+  %add714 = arith.add %add703, %c712 : i32
+  %c715 = arith.constant {ity = "i32", value = 0} : i32
+  %add716 = arith.add %c715, %mod691 : i32
+  %add717 = arith.add %mul705, %add716 : i32
+  %av8718 = tile.smem_load_vN %DeepFusionC_smem306, %add717, %add713 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c719 = arith.constant {ity = "i32", value = 16} : i32
+  %add720 = arith.add %c719, %mod691 : i32
+  %add721 = arith.add %mul705, %add720 : i32
+  %av8722 = tile.smem_load_vN %DeepFusionC_smem306, %add721, %add713 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c723 = arith.constant {ity = "i32", value = 0} : i32
+  %add724 = arith.add %c723, %mod698 : i32
+  %add725 = arith.add %mul707, %add724 : i32
+  %av8726 = tile.smem_load_vN %W1_smem653, %add725, %add714 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c727 = arith.constant {ity = "i32", value = 16} : i32
+  %add728 = arith.add %c727, %mod698 : i32
+  %add729 = arith.add %mul707, %add728 : i32
+  %av8730 = tile.smem_load_vN %W1_smem653, %add729, %add714 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %acc731 = tile.mma %av8718, %av8726, %cz8708 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc732 = tile.mma %av8718, %av8730, %cz8709 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc733 = tile.mma %av8722, %av8726, %cz8710 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc734 = tile.mma %av8722, %av8730, %cz8711 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %c735 = arith.constant {ity = "i32", value = 16} : i32
+  %add736 = arith.add %add696, %c735 : i32
+  %add737 = arith.add %add703, %c735 : i32
+  %c738 = arith.constant {ity = "i32", value = 0} : i32
+  %add739 = arith.add %c738, %mod691 : i32
+  %add740 = arith.add %mul705, %add739 : i32
+  %av8741 = tile.smem_load_vN %DeepFusionC_smem306, %add740, %add736 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c742 = arith.constant {ity = "i32", value = 16} : i32
+  %add743 = arith.add %c742, %mod691 : i32
+  %add744 = arith.add %mul705, %add743 : i32
+  %av8745 = tile.smem_load_vN %DeepFusionC_smem306, %add744, %add736 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c746 = arith.constant {ity = "i32", value = 0} : i32
+  %add747 = arith.add %c746, %mod698 : i32
+  %add748 = arith.add %mul707, %add747 : i32
+  %av8749 = tile.smem_load_vN %W1_smem653, %add748, %add737 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c750 = arith.constant {ity = "i32", value = 16} : i32
+  %add751 = arith.add %c750, %mod698 : i32
+  %add752 = arith.add %mul707, %add751 : i32
+  %av8753 = tile.smem_load_vN %W1_smem653, %add752, %add737 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %acc754 = tile.mma %av8741, %av8749, %acc731 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc755 = tile.mma %av8741, %av8753, %acc732 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc756 = tile.mma %av8745, %av8749, %acc733 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %acc757 = tile.mma %av8745, %av8753, %acc734 {op_id = "wmma_gfx12_f32_16x16x16_f16"} : vec<f32x8>
+  %DeepFusionC_smem758 = tile.smem_alloc : smem<f16, [64x32]>
+  %c759 = arith.constant {ity = "i32", value = 0} : i32
+  %c760 = arith.constant {ity = "i32", value = 0} : i32
+  %c761 = arith.constant {ity = "i32", value = 32} : i32
+  %mul762 = arith.mul %div12, %c761 : i32
+  %c763 = arith.constant {ity = "i32", value = 32} : i32
+  %mul764 = arith.mul %mod13, %c763 : i32
+  %vh8765 = vector.trunc_f32_to %acc754 {target = "f16"} : vec<f16x8>
+  %e766 = vector.extract %vh8765 {index = 0} : f16
+  %e767 = vector.extract %vh8765 {index = 1} : f16
+  %e768 = vector.extract %vh8765 {index = 2} : f16
+  %e769 = vector.extract %vh8765 {index = 3} : f16
+  %e770 = vector.extract %vh8765 {index = 4} : f16
+  %e771 = vector.extract %vh8765 {index = 5} : f16
+  %e772 = vector.extract %vh8765 {index = 6} : f16
+  %e773 = vector.extract %vh8765 {index = 7} : f16
+  %c774 = arith.constant {ity = "i32", value = 0} : i32
+  %add775 = arith.add %mul762, %c774 : i32
+  %c776 = arith.constant {ity = "i32", value = 0} : i32
+  %add777 = arith.add %mul764, %c776 : i32
+  %c778 = arith.constant {ity = "i32", value = 16} : i32
+  %mod779 = arith.mod %mod10, %c778 : i32
+  %div780 = arith.div %mod10, %c778 : i32
+  %c781 = arith.constant {ity = "i32", value = 8} : i32
+  %mul782 = arith.mul %div780, %c781 : i32
+  %c783 = arith.constant {ity = "i32", value = 0} : i32
+  %add784 = arith.add %mul782, %c783 : i32
+  %add785 = arith.add %add775, %add784 : i32
+  %add786 = arith.add %add777, %mod779 : i32
+  tile.smem_store %DeepFusionC_smem758, %add785, %add786, %e766 {elem_type = "f16", rank = 2}
+  %c787 = arith.constant {ity = "i32", value = 16} : i32
+  %mod788 = arith.mod %mod10, %c787 : i32
+  %div789 = arith.div %mod10, %c787 : i32
+  %c790 = arith.constant {ity = "i32", value = 8} : i32
+  %mul791 = arith.mul %div789, %c790 : i32
+  %c792 = arith.constant {ity = "i32", value = 1} : i32
+  %add793 = arith.add %mul791, %c792 : i32
+  %add794 = arith.add %add775, %add793 : i32
+  %add795 = arith.add %add777, %mod788 : i32
+  tile.smem_store %DeepFusionC_smem758, %add794, %add795, %e767 {elem_type = "f16", rank = 2}
+  %c796 = arith.constant {ity = "i32", value = 16} : i32
+  %mod797 = arith.mod %mod10, %c796 : i32
+  %div798 = arith.div %mod10, %c796 : i32
+  %c799 = arith.constant {ity = "i32", value = 8} : i32
+  %mul800 = arith.mul %div798, %c799 : i32
+  %c801 = arith.constant {ity = "i32", value = 2} : i32
+  %add802 = arith.add %mul800, %c801 : i32
+  %add803 = arith.add %add775, %add802 : i32
+  %add804 = arith.add %add777, %mod797 : i32
+  tile.smem_store %DeepFusionC_smem758, %add803, %add804, %e768 {elem_type = "f16", rank = 2}
+  %c805 = arith.constant {ity = "i32", value = 16} : i32
+  %mod806 = arith.mod %mod10, %c805 : i32
+  %div807 = arith.div %mod10, %c805 : i32
+  %c808 = arith.constant {ity = "i32", value = 8} : i32
+  %mul809 = arith.mul %div807, %c808 : i32
+  %c810 = arith.constant {ity = "i32", value = 3} : i32
+  %add811 = arith.add %mul809, %c810 : i32
+  %add812 = arith.add %add775, %add811 : i32
+  %add813 = arith.add %add777, %mod806 : i32
+  tile.smem_store %DeepFusionC_smem758, %add812, %add813, %e769 {elem_type = "f16", rank = 2}
+  %c814 = arith.constant {ity = "i32", value = 16} : i32
+  %mod815 = arith.mod %mod10, %c814 : i32
+  %div816 = arith.div %mod10, %c814 : i32
+  %c817 = arith.constant {ity = "i32", value = 8} : i32
+  %mul818 = arith.mul %div816, %c817 : i32
+  %c819 = arith.constant {ity = "i32", value = 4} : i32
+  %add820 = arith.add %mul818, %c819 : i32
+  %add821 = arith.add %add775, %add820 : i32
+  %add822 = arith.add %add777, %mod815 : i32
+  tile.smem_store %DeepFusionC_smem758, %add821, %add822, %e770 {elem_type = "f16", rank = 2}
+  %c823 = arith.constant {ity = "i32", value = 16} : i32
+  %mod824 = arith.mod %mod10, %c823 : i32
+  %div825 = arith.div %mod10, %c823 : i32
+  %c826 = arith.constant {ity = "i32", value = 8} : i32
+  %mul827 = arith.mul %div825, %c826 : i32
+  %c828 = arith.constant {ity = "i32", value = 5} : i32
+  %add829 = arith.add %mul827, %c828 : i32
+  %add830 = arith.add %add775, %add829 : i32
+  %add831 = arith.add %add777, %mod824 : i32
+  tile.smem_store %DeepFusionC_smem758, %add830, %add831, %e771 {elem_type = "f16", rank = 2}
+  %c832 = arith.constant {ity = "i32", value = 16} : i32
+  %mod833 = arith.mod %mod10, %c832 : i32
+  %div834 = arith.div %mod10, %c832 : i32
+  %c835 = arith.constant {ity = "i32", value = 8} : i32
+  %mul836 = arith.mul %div834, %c835 : i32
+  %c837 = arith.constant {ity = "i32", value = 6} : i32
+  %add838 = arith.add %mul836, %c837 : i32
+  %add839 = arith.add %add775, %add838 : i32
+  %add840 = arith.add %add777, %mod833 : i32
+  tile.smem_store %DeepFusionC_smem758, %add839, %add840, %e772 {elem_type = "f16", rank = 2}
+  %c841 = arith.constant {ity = "i32", value = 16} : i32
+  %mod842 = arith.mod %mod10, %c841 : i32
+  %div843 = arith.div %mod10, %c841 : i32
+  %c844 = arith.constant {ity = "i32", value = 8} : i32
+  %mul845 = arith.mul %div843, %c844 : i32
+  %c846 = arith.constant {ity = "i32", value = 7} : i32
+  %add847 = arith.add %mul845, %c846 : i32
+  %add848 = arith.add %add775, %add847 : i32
+  %add849 = arith.add %add777, %mod842 : i32
+  tile.smem_store %DeepFusionC_smem758, %add848, %add849, %e773 {elem_type = "f16", rank = 2}
+  %vh8850 = vector.trunc_f32_to %acc755 {target = "f16"} : vec<f16x8>
+  %e851 = vector.extract %vh8850 {index = 0} : f16
+  %e852 = vector.extract %vh8850 {index = 1} : f16
+  %e853 = vector.extract %vh8850 {index = 2} : f16
+  %e854 = vector.extract %vh8850 {index = 3} : f16
+  %e855 = vector.extract %vh8850 {index = 4} : f16
+  %e856 = vector.extract %vh8850 {index = 5} : f16
+  %e857 = vector.extract %vh8850 {index = 6} : f16
+  %e858 = vector.extract %vh8850 {index = 7} : f16
+  %c859 = arith.constant {ity = "i32", value = 0} : i32
+  %add860 = arith.add %mul762, %c859 : i32
+  %c861 = arith.constant {ity = "i32", value = 16} : i32
+  %add862 = arith.add %mul764, %c861 : i32
+  %c863 = arith.constant {ity = "i32", value = 16} : i32
+  %mod864 = arith.mod %mod10, %c863 : i32
+  %div865 = arith.div %mod10, %c863 : i32
+  %c866 = arith.constant {ity = "i32", value = 8} : i32
+  %mul867 = arith.mul %div865, %c866 : i32
+  %c868 = arith.constant {ity = "i32", value = 0} : i32
+  %add869 = arith.add %mul867, %c868 : i32
+  %add870 = arith.add %add860, %add869 : i32
+  %add871 = arith.add %add862, %mod864 : i32
+  tile.smem_store %DeepFusionC_smem758, %add870, %add871, %e851 {elem_type = "f16", rank = 2}
+  %c872 = arith.constant {ity = "i32", value = 16} : i32
+  %mod873 = arith.mod %mod10, %c872 : i32
+  %div874 = arith.div %mod10, %c872 : i32
+  %c875 = arith.constant {ity = "i32", value = 8} : i32
+  %mul876 = arith.mul %div874, %c875 : i32
+  %c877 = arith.constant {ity = "i32", value = 1} : i32
+  %add878 = arith.add %mul876, %c877 : i32
+  %add879 = arith.add %add860, %add878 : i32
+  %add880 = arith.add %add862, %mod873 : i32
+  tile.smem_store %DeepFusionC_smem758, %add879, %add880, %e852 {elem_type = "f16", rank = 2}
+  %c881 = arith.constant {ity = "i32", value = 16} : i32
+  %mod882 = arith.mod %mod10, %c881 : i32
+  %div883 = arith.div %mod10, %c881 : i32
+  %c884 = arith.constant {ity = "i32", value = 8} : i32
+  %mul885 = arith.mul %div883, %c884 : i32
+  %c886 = arith.constant {ity = "i32", value = 2} : i32
+  %add887 = arith.add %mul885, %c886 : i32
+  %add888 = arith.add %add860, %add887 : i32
+  %add889 = arith.add %add862, %mod882 : i32
+  tile.smem_store %DeepFusionC_smem758, %add888, %add889, %e853 {elem_type = "f16", rank = 2}
+  %c890 = arith.constant {ity = "i32", value = 16} : i32
+  %mod891 = arith.mod %mod10, %c890 : i32
+  %div892 = arith.div %mod10, %c890 : i32
+  %c893 = arith.constant {ity = "i32", value = 8} : i32
+  %mul894 = arith.mul %div892, %c893 : i32
+  %c895 = arith.constant {ity = "i32", value = 3} : i32
+  %add896 = arith.add %mul894, %c895 : i32
+  %add897 = arith.add %add860, %add896 : i32
+  %add898 = arith.add %add862, %mod891 : i32
+  tile.smem_store %DeepFusionC_smem758, %add897, %add898, %e854 {elem_type = "f16", rank = 2}
+  %c899 = arith.constant {ity = "i32", value = 16} : i32
+  %mod900 = arith.mod %mod10, %c899 : i32
+  %div901 = arith.div %mod10, %c899 : i32
+  %c902 = arith.constant {ity = "i32", value = 8} : i32
+  %mul903 = arith.mul %div901, %c902 : i32
+  %c904 = arith.constant {ity = "i32", value = 4} : i32
+  %add905 = arith.add %mul903, %c904 : i32
+  %add906 = arith.add %add860, %add905 : i32
+  %add907 = arith.add %add862, %mod900 : i32
+  tile.smem_store %DeepFusionC_smem758, %add906, %add907, %e855 {elem_type = "f16", rank = 2}
+  %c908 = arith.constant {ity = "i32", value = 16} : i32
+  %mod909 = arith.mod %mod10, %c908 : i32
+  %div910 = arith.div %mod10, %c908 : i32
+  %c911 = arith.constant {ity = "i32", value = 8} : i32
+  %mul912 = arith.mul %div910, %c911 : i32
+  %c913 = arith.constant {ity = "i32", value = 5} : i32
+  %add914 = arith.add %mul912, %c913 : i32
+  %add915 = arith.add %add860, %add914 : i32
+  %add916 = arith.add %add862, %mod909 : i32
+  tile.smem_store %DeepFusionC_smem758, %add915, %add916, %e856 {elem_type = "f16", rank = 2}
+  %c917 = arith.constant {ity = "i32", value = 16} : i32
+  %mod918 = arith.mod %mod10, %c917 : i32
+  %div919 = arith.div %mod10, %c917 : i32
+  %c920 = arith.constant {ity = "i32", value = 8} : i32
+  %mul921 = arith.mul %div919, %c920 : i32
+  %c922 = arith.constant {ity = "i32", value = 6} : i32
+  %add923 = arith.add %mul921, %c922 : i32
+  %add924 = arith.add %add860, %add923 : i32
+  %add925 = arith.add %add862, %mod918 : i32
+  tile.smem_store %DeepFusionC_smem758, %add924, %add925, %e857 {elem_type = "f16", rank = 2}
+  %c926 = arith.constant {ity = "i32", value = 16} : i32
+  %mod927 = arith.mod %mod10, %c926 : i32
+  %div928 = arith.div %mod10, %c926 : i32
+  %c929 = arith.constant {ity = "i32", value = 8} : i32
+  %mul930 = arith.mul %div928, %c929 : i32
+  %c931 = arith.constant {ity = "i32", value = 7} : i32
+  %add932 = arith.add %mul930, %c931 : i32
+  %add933 = arith.add %add860, %add932 : i32
+  %add934 = arith.add %add862, %mod927 : i32
+  tile.smem_store %DeepFusionC_smem758, %add933, %add934, %e858 {elem_type = "f16", rank = 2}
+  %vh8935 = vector.trunc_f32_to %acc756 {target = "f16"} : vec<f16x8>
+  %e936 = vector.extract %vh8935 {index = 0} : f16
+  %e937 = vector.extract %vh8935 {index = 1} : f16
+  %e938 = vector.extract %vh8935 {index = 2} : f16
+  %e939 = vector.extract %vh8935 {index = 3} : f16
+  %e940 = vector.extract %vh8935 {index = 4} : f16
+  %e941 = vector.extract %vh8935 {index = 5} : f16
+  %e942 = vector.extract %vh8935 {index = 6} : f16
+  %e943 = vector.extract %vh8935 {index = 7} : f16
+  %c944 = arith.constant {ity = "i32", value = 16} : i32
+  %add945 = arith.add %mul762, %c944 : i32
+  %c946 = arith.constant {ity = "i32", value = 0} : i32
+  %add947 = arith.add %mul764, %c946 : i32
+  %c948 = arith.constant {ity = "i32", value = 16} : i32
+  %mod949 = arith.mod %mod10, %c948 : i32
+  %div950 = arith.div %mod10, %c948 : i32
+  %c951 = arith.constant {ity = "i32", value = 8} : i32
+  %mul952 = arith.mul %div950, %c951 : i32
+  %c953 = arith.constant {ity = "i32", value = 0} : i32
+  %add954 = arith.add %mul952, %c953 : i32
+  %add955 = arith.add %add945, %add954 : i32
+  %add956 = arith.add %add947, %mod949 : i32
+  tile.smem_store %DeepFusionC_smem758, %add955, %add956, %e936 {elem_type = "f16", rank = 2}
+  %c957 = arith.constant {ity = "i32", value = 16} : i32
+  %mod958 = arith.mod %mod10, %c957 : i32
+  %div959 = arith.div %mod10, %c957 : i32
+  %c960 = arith.constant {ity = "i32", value = 8} : i32
+  %mul961 = arith.mul %div959, %c960 : i32
+  %c962 = arith.constant {ity = "i32", value = 1} : i32
+  %add963 = arith.add %mul961, %c962 : i32
+  %add964 = arith.add %add945, %add963 : i32
+  %add965 = arith.add %add947, %mod958 : i32
+  tile.smem_store %DeepFusionC_smem758, %add964, %add965, %e937 {elem_type = "f16", rank = 2}
+  %c966 = arith.constant {ity = "i32", value = 16} : i32
+  %mod967 = arith.mod %mod10, %c966 : i32
+  %div968 = arith.div %mod10, %c966 : i32
+  %c969 = arith.constant {ity = "i32", value = 8} : i32
+  %mul970 = arith.mul %div968, %c969 : i32
+  %c971 = arith.constant {ity = "i32", value = 2} : i32
+  %add972 = arith.add %mul970, %c971 : i32
+  %add973 = arith.add %add945, %add972 : i32
+  %add974 = arith.add %add947, %mod967 : i32
+  tile.smem_store %DeepFusionC_smem758, %add973, %add974, %e938 {elem_type = "f16", rank = 2}
+  %c975 = arith.constant {ity = "i32", value = 16} : i32
+  %mod976 = arith.mod %mod10, %c975 : i32
+  %div977 = arith.div %mod10, %c975 : i32
+  %c978 = arith.constant {ity = "i32", value = 8} : i32
+  %mul979 = arith.mul %div977, %c978 : i32
+  %c980 = arith.constant {ity = "i32", value = 3} : i32
+  %add981 = arith.add %mul979, %c980 : i32
+  %add982 = arith.add %add945, %add981 : i32
+  %add983 = arith.add %add947, %mod976 : i32
+  tile.smem_store %DeepFusionC_smem758, %add982, %add983, %e939 {elem_type = "f16", rank = 2}
+  %c984 = arith.constant {ity = "i32", value = 16} : i32
+  %mod985 = arith.mod %mod10, %c984 : i32
+  %div986 = arith.div %mod10, %c984 : i32
+  %c987 = arith.constant {ity = "i32", value = 8} : i32
+  %mul988 = arith.mul %div986, %c987 : i32
+  %c989 = arith.constant {ity = "i32", value = 4} : i32
+  %add990 = arith.add %mul988, %c989 : i32
+  %add991 = arith.add %add945, %add990 : i32
+  %add992 = arith.add %add947, %mod985 : i32
+  tile.smem_store %DeepFusionC_smem758, %add991, %add992, %e940 {elem_type = "f16", rank = 2}
+  %c993 = arith.constant {ity = "i32", value = 16} : i32
+  %mod994 = arith.mod %mod10, %c993 : i32
+  %div995 = arith.div %mod10, %c993 : i32
+  %c996 = arith.constant {ity = "i32", value = 8} : i32
+  %mul997 = arith.mul %div995, %c996 : i32
+  %c998 = arith.constant {ity = "i32", value = 5} : i32
+  %add999 = arith.add %mul997, %c998 : i32
+  %add1000 = arith.add %add945, %add999 : i32
+  %add1001 = arith.add %add947, %mod994 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1000, %add1001, %e941 {elem_type = "f16", rank = 2}
+  %c1002 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1003 = arith.mod %mod10, %c1002 : i32
+  %div1004 = arith.div %mod10, %c1002 : i32
+  %c1005 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1006 = arith.mul %div1004, %c1005 : i32
+  %c1007 = arith.constant {ity = "i32", value = 6} : i32
+  %add1008 = arith.add %mul1006, %c1007 : i32
+  %add1009 = arith.add %add945, %add1008 : i32
+  %add1010 = arith.add %add947, %mod1003 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1009, %add1010, %e942 {elem_type = "f16", rank = 2}
+  %c1011 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1012 = arith.mod %mod10, %c1011 : i32
+  %div1013 = arith.div %mod10, %c1011 : i32
+  %c1014 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1015 = arith.mul %div1013, %c1014 : i32
+  %c1016 = arith.constant {ity = "i32", value = 7} : i32
+  %add1017 = arith.add %mul1015, %c1016 : i32
+  %add1018 = arith.add %add945, %add1017 : i32
+  %add1019 = arith.add %add947, %mod1012 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1018, %add1019, %e943 {elem_type = "f16", rank = 2}
+  %vh81020 = vector.trunc_f32_to %acc757 {target = "f16"} : vec<f16x8>
+  %e1021 = vector.extract %vh81020 {index = 0} : f16
+  %e1022 = vector.extract %vh81020 {index = 1} : f16
+  %e1023 = vector.extract %vh81020 {index = 2} : f16
+  %e1024 = vector.extract %vh81020 {index = 3} : f16
+  %e1025 = vector.extract %vh81020 {index = 4} : f16
+  %e1026 = vector.extract %vh81020 {index = 5} : f16
+  %e1027 = vector.extract %vh81020 {index = 6} : f16
+  %e1028 = vector.extract %vh81020 {index = 7} : f16
+  %c1029 = arith.constant {ity = "i32", value = 16} : i32
+  %add1030 = arith.add %mul762, %c1029 : i32
+  %c1031 = arith.constant {ity = "i32", value = 16} : i32
+  %add1032 = arith.add %mul764, %c1031 : i32
+  %c1033 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1034 = arith.mod %mod10, %c1033 : i32
+  %div1035 = arith.div %mod10, %c1033 : i32
+  %c1036 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1037 = arith.mul %div1035, %c1036 : i32
+  %c1038 = arith.constant {ity = "i32", value = 0} : i32
+  %add1039 = arith.add %mul1037, %c1038 : i32
+  %add1040 = arith.add %add1030, %add1039 : i32
+  %add1041 = arith.add %add1032, %mod1034 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1040, %add1041, %e1021 {elem_type = "f16", rank = 2}
+  %c1042 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1043 = arith.mod %mod10, %c1042 : i32
+  %div1044 = arith.div %mod10, %c1042 : i32
+  %c1045 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1046 = arith.mul %div1044, %c1045 : i32
+  %c1047 = arith.constant {ity = "i32", value = 1} : i32
+  %add1048 = arith.add %mul1046, %c1047 : i32
+  %add1049 = arith.add %add1030, %add1048 : i32
+  %add1050 = arith.add %add1032, %mod1043 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1049, %add1050, %e1022 {elem_type = "f16", rank = 2}
+  %c1051 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1052 = arith.mod %mod10, %c1051 : i32
+  %div1053 = arith.div %mod10, %c1051 : i32
+  %c1054 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1055 = arith.mul %div1053, %c1054 : i32
+  %c1056 = arith.constant {ity = "i32", value = 2} : i32
+  %add1057 = arith.add %mul1055, %c1056 : i32
+  %add1058 = arith.add %add1030, %add1057 : i32
+  %add1059 = arith.add %add1032, %mod1052 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1058, %add1059, %e1023 {elem_type = "f16", rank = 2}
+  %c1060 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1061 = arith.mod %mod10, %c1060 : i32
+  %div1062 = arith.div %mod10, %c1060 : i32
+  %c1063 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1064 = arith.mul %div1062, %c1063 : i32
+  %c1065 = arith.constant {ity = "i32", value = 3} : i32
+  %add1066 = arith.add %mul1064, %c1065 : i32
+  %add1067 = arith.add %add1030, %add1066 : i32
+  %add1068 = arith.add %add1032, %mod1061 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1067, %add1068, %e1024 {elem_type = "f16", rank = 2}
+  %c1069 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1070 = arith.mod %mod10, %c1069 : i32
+  %div1071 = arith.div %mod10, %c1069 : i32
+  %c1072 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1073 = arith.mul %div1071, %c1072 : i32
+  %c1074 = arith.constant {ity = "i32", value = 4} : i32
+  %add1075 = arith.add %mul1073, %c1074 : i32
+  %add1076 = arith.add %add1030, %add1075 : i32
+  %add1077 = arith.add %add1032, %mod1070 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1076, %add1077, %e1025 {elem_type = "f16", rank = 2}
+  %c1078 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1079 = arith.mod %mod10, %c1078 : i32
+  %div1080 = arith.div %mod10, %c1078 : i32
+  %c1081 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1082 = arith.mul %div1080, %c1081 : i32
+  %c1083 = arith.constant {ity = "i32", value = 5} : i32
+  %add1084 = arith.add %mul1082, %c1083 : i32
+  %add1085 = arith.add %add1030, %add1084 : i32
+  %add1086 = arith.add %add1032, %mod1079 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1085, %add1086, %e1026 {elem_type = "f16", rank = 2}
+  %c1087 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1088 = arith.mod %mod10, %c1087 : i32
+  %div1089 = arith.div %mod10, %c1087 : i32
+  %c1090 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1091 = arith.mul %div1089, %c1090 : i32
+  %c1092 = arith.constant {ity = "i32", value = 6} : i32
+  %add1093 = arith.add %mul1091, %c1092 : i32
+  %add1094 = arith.add %add1030, %add1093 : i32
+  %add1095 = arith.add %add1032, %mod1088 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1094, %add1095, %e1027 {elem_type = "f16", rank = 2}
+  %c1096 = arith.constant {ity = "i32", value = 16} : i32
+  %mod1097 = arith.mod %mod10, %c1096 : i32
+  %div1098 = arith.div %mod10, %c1096 : i32
+  %c1099 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1100 = arith.mul %div1098, %c1099 : i32
+  %c1101 = arith.constant {ity = "i32", value = 7} : i32
+  %add1102 = arith.add %mul1100, %c1101 : i32
+  %add1103 = arith.add %add1030, %add1102 : i32
+  %add1104 = arith.add %add1032, %mod1097 : i32
+  tile.smem_store %DeepFusionC_smem758, %add1103, %add1104, %e1028 {elem_type = "f16", rank = 2}
+  tile.sync
+  %c1105 = arith.constant {ity = "i32", value = 48} : i32
+  %c1106 = arith.constant {ity = "i32", value = 3} : i32
+  %c1107 = arith.constant {ity = "i32", value = 8} : i32
+  %c1108 = arith.constant {ity = "i32", value = 4} : i32
+  %c1109 = arith.constant {ity = "i32", value = 8} : i32
+  %c1110 = arith.constant {ity = "i32", value = 24} : i32
+  %c1111 = arith.constant {ity = "i32", value = 2} : i32
+  %c1112 = arith.constant {ity = "i32", value = 2147483647} : i32
+  %c1113 = arith.constant {ity = "f32", value = -3.4028234663852886e+38} : f32
+  %bid1114 = gpu.block_id {axis = "y"} : i32
+  %c1115 = arith.constant {ity = "i32", value = 4} : i32
+  %mul1116 = arith.mul %bid1114, %c1115 : i32
+  %bid1117 = gpu.block_id {axis = "z"} : i32
+  %c1118 = arith.constant {ity = "i32", value = 4} : i32
+  %mul1119 = arith.mul %bid1117, %c1118 : i32
+  %c1120 = arith.constant {ity = "i32", value = 0} : i32
+  %c1121 = arith.constant {ity = "i32", value = 64} : i32
+  %mul1122 = arith.mul %c1120, %c1121 : i32
+  %add1123 = arith.add %mul1122, %tid9 : i32
+  %lt1124 = arith.cmp %add1123, %c1105 {pred = "lt"} : i1
+  %c1125 = arith.constant {ity = "i32", value = 0} : i32
+  %sel1126 = arith.select %lt1124, %add1123, %c1125 : i32
+  %mod1127 = arith.mod %sel1126, %c1106 : i32
+  %mul1128 = arith.mul %mod1127, %c1107 : i32
+  %div1129 = arith.div %sel1126, %c1106 : i32
+  %mod1130 = arith.mod %div1129, %c1108 : i32
+  %div1131 = arith.div %div1129, %c1108 : i32
+  %add1132 = arith.add %mul1116, %div1131 : i32
+  %add1133 = arith.add %mul1119, %mod1130 : i32
+  %c1134 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1135 = arith.mul %div1131, %c1134 : i32
+  %c1136 = arith.constant {ity = "i32", value = 0} : i32
+  %add1137 = arith.add %mul1135, %c1136 : i32
+  %c1138 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1139 = arith.mul %mod1130, %c1138 : i32
+  %c1140 = arith.constant {ity = "i32", value = 0} : i32
+  %add1141 = arith.add %mul1139, %c1140 : i32
+  %mul1142 = arith.mul %add1137, %c1109 : i32
+  %add1143 = arith.add %mul1142, %add1141 : i32
+  %av81144 = tile.smem_load_vN %DeepFusionC_smem758, %add1143, %mul1128 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %e1145 = vector.extract %av81144 {index = 0} : f16
+  %f321146 = arith.cast_to_f32 %e1145 : f32
+  %fmax1147 = arith.fmax %c1113, %f321146 : f32
+  %e1148 = vector.extract %av81144 {index = 1} : f16
+  %f321149 = arith.cast_to_f32 %e1148 : f32
+  %fmax1150 = arith.fmax %c1113, %f321149 : f32
+  %e1151 = vector.extract %av81144 {index = 2} : f16
+  %f321152 = arith.cast_to_f32 %e1151 : f32
+  %fmax1153 = arith.fmax %c1113, %f321152 : f32
+  %e1154 = vector.extract %av81144 {index = 3} : f16
+  %f321155 = arith.cast_to_f32 %e1154 : f32
+  %fmax1156 = arith.fmax %c1113, %f321155 : f32
+  %e1157 = vector.extract %av81144 {index = 4} : f16
+  %f321158 = arith.cast_to_f32 %e1157 : f32
+  %fmax1159 = arith.fmax %c1113, %f321158 : f32
+  %e1160 = vector.extract %av81144 {index = 5} : f16
+  %f321161 = arith.cast_to_f32 %e1160 : f32
+  %fmax1162 = arith.fmax %c1113, %f321161 : f32
+  %e1163 = vector.extract %av81144 {index = 6} : f16
+  %f321164 = arith.cast_to_f32 %e1163 : f32
+  %fmax1165 = arith.fmax %c1113, %f321164 : f32
+  %e1166 = vector.extract %av81144 {index = 7} : f16
+  %f321167 = arith.cast_to_f32 %e1166 : f32
+  %fmax1168 = arith.fmax %c1113, %f321167 : f32
+  %c1169 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1170 = arith.mul %mod1130, %c1169 : i32
+  %c1171 = arith.constant {ity = "i32", value = 1} : i32
+  %add1172 = arith.add %mul1170, %c1171 : i32
+  %mul1173 = arith.mul %add1137, %c1109 : i32
+  %add1174 = arith.add %mul1173, %add1172 : i32
+  %av81175 = tile.smem_load_vN %DeepFusionC_smem758, %add1174, %mul1128 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %e1176 = vector.extract %av81175 {index = 0} : f16
+  %f321177 = arith.cast_to_f32 %e1176 : f32
+  %fmax1178 = arith.fmax %fmax1147, %f321177 : f32
+  %e1179 = vector.extract %av81175 {index = 1} : f16
+  %f321180 = arith.cast_to_f32 %e1179 : f32
+  %fmax1181 = arith.fmax %fmax1150, %f321180 : f32
+  %e1182 = vector.extract %av81175 {index = 2} : f16
+  %f321183 = arith.cast_to_f32 %e1182 : f32
+  %fmax1184 = arith.fmax %fmax1153, %f321183 : f32
+  %e1185 = vector.extract %av81175 {index = 3} : f16
+  %f321186 = arith.cast_to_f32 %e1185 : f32
+  %fmax1187 = arith.fmax %fmax1156, %f321186 : f32
+  %e1188 = vector.extract %av81175 {index = 4} : f16
+  %f321189 = arith.cast_to_f32 %e1188 : f32
+  %fmax1190 = arith.fmax %fmax1159, %f321189 : f32
+  %e1191 = vector.extract %av81175 {index = 5} : f16
+  %f321192 = arith.cast_to_f32 %e1191 : f32
+  %fmax1193 = arith.fmax %fmax1162, %f321192 : f32
+  %e1194 = vector.extract %av81175 {index = 6} : f16
+  %f321195 = arith.cast_to_f32 %e1194 : f32
+  %fmax1196 = arith.fmax %fmax1165, %f321195 : f32
+  %e1197 = vector.extract %av81175 {index = 7} : f16
+  %f321198 = arith.cast_to_f32 %e1197 : f32
+  %fmax1199 = arith.fmax %fmax1168, %f321198 : f32
+  %c1200 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1201 = arith.mul %div1131, %c1200 : i32
+  %c1202 = arith.constant {ity = "i32", value = 1} : i32
+  %add1203 = arith.add %mul1201, %c1202 : i32
+  %c1204 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1205 = arith.mul %mod1130, %c1204 : i32
+  %c1206 = arith.constant {ity = "i32", value = 0} : i32
+  %add1207 = arith.add %mul1205, %c1206 : i32
+  %mul1208 = arith.mul %add1203, %c1109 : i32
+  %add1209 = arith.add %mul1208, %add1207 : i32
+  %av81210 = tile.smem_load_vN %DeepFusionC_smem758, %add1209, %mul1128 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %e1211 = vector.extract %av81210 {index = 0} : f16
+  %f321212 = arith.cast_to_f32 %e1211 : f32
+  %fmax1213 = arith.fmax %fmax1178, %f321212 : f32
+  %e1214 = vector.extract %av81210 {index = 1} : f16
+  %f321215 = arith.cast_to_f32 %e1214 : f32
+  %fmax1216 = arith.fmax %fmax1181, %f321215 : f32
+  %e1217 = vector.extract %av81210 {index = 2} : f16
+  %f321218 = arith.cast_to_f32 %e1217 : f32
+  %fmax1219 = arith.fmax %fmax1184, %f321218 : f32
+  %e1220 = vector.extract %av81210 {index = 3} : f16
+  %f321221 = arith.cast_to_f32 %e1220 : f32
+  %fmax1222 = arith.fmax %fmax1187, %f321221 : f32
+  %e1223 = vector.extract %av81210 {index = 4} : f16
+  %f321224 = arith.cast_to_f32 %e1223 : f32
+  %fmax1225 = arith.fmax %fmax1190, %f321224 : f32
+  %e1226 = vector.extract %av81210 {index = 5} : f16
+  %f321227 = arith.cast_to_f32 %e1226 : f32
+  %fmax1228 = arith.fmax %fmax1193, %f321227 : f32
+  %e1229 = vector.extract %av81210 {index = 6} : f16
+  %f321230 = arith.cast_to_f32 %e1229 : f32
+  %fmax1231 = arith.fmax %fmax1196, %f321230 : f32
+  %e1232 = vector.extract %av81210 {index = 7} : f16
+  %f321233 = arith.cast_to_f32 %e1232 : f32
+  %fmax1234 = arith.fmax %fmax1199, %f321233 : f32
+  %c1235 = arith.constant {ity = "i32", value = 2} : i32
+  %mul1236 = arith.mul %mod1130, %c1235 : i32
+  %c1237 = arith.constant {ity = "i32", value = 1} : i32
+  %add1238 = arith.add %mul1236, %c1237 : i32
+  %mul1239 = arith.mul %add1203, %c1109 : i32
+  %add1240 = arith.add %mul1239, %add1238 : i32
+  %av81241 = tile.smem_load_vN %DeepFusionC_smem758, %add1240, %mul1128 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %e1242 = vector.extract %av81241 {index = 0} : f16
+  %f321243 = arith.cast_to_f32 %e1242 : f32
+  %fmax1244 = arith.fmax %fmax1213, %f321243 : f32
+  %e1245 = vector.extract %av81241 {index = 1} : f16
+  %f321246 = arith.cast_to_f32 %e1245 : f32
+  %fmax1247 = arith.fmax %fmax1216, %f321246 : f32
+  %e1248 = vector.extract %av81241 {index = 2} : f16
+  %f321249 = arith.cast_to_f32 %e1248 : f32
+  %fmax1250 = arith.fmax %fmax1219, %f321249 : f32
+  %e1251 = vector.extract %av81241 {index = 3} : f16
+  %f321252 = arith.cast_to_f32 %e1251 : f32
+  %fmax1253 = arith.fmax %fmax1222, %f321252 : f32
+  %e1254 = vector.extract %av81241 {index = 4} : f16
+  %f321255 = arith.cast_to_f32 %e1254 : f32
+  %fmax1256 = arith.fmax %fmax1225, %f321255 : f32
+  %e1257 = vector.extract %av81241 {index = 5} : f16
+  %f321258 = arith.cast_to_f32 %e1257 : f32
+  %fmax1259 = arith.fmax %fmax1228, %f321258 : f32
+  %e1260 = vector.extract %av81241 {index = 6} : f16
+  %f321261 = arith.cast_to_f32 %e1260 : f32
+  %fmax1262 = arith.fmax %fmax1231, %f321261 : f32
+  %e1263 = vector.extract %av81241 {index = 7} : f16
+  %f321264 = arith.cast_to_f32 %e1263 : f32
+  %fmax1265 = arith.fmax %fmax1234, %f321264 : f32
+  %c1266 = arith.constant {ity = "i32", value = 8} : i32
+  %mul1267 = arith.mul %add1132, %c1266 : i32
+  %add1268 = arith.add %mul1267, %add1133 : i32
+  %mul1269 = arith.mul %add1268, %c1110 : i32
+  %add1270 = arith.add %mul1269, %mul1128 : i32
+  %c1271 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1272 = arith.fmax %fmax1244, %c1271 : f32
+  %t1273 = arith.trunc_f32_to_f16 %fmax1272 : f16
+  %c1274 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1275 = arith.fmax %fmax1247, %c1274 : f32
+  %t1276 = arith.trunc_f32_to_f16 %fmax1275 : f16
+  %c1277 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1278 = arith.fmax %fmax1250, %c1277 : f32
+  %t1279 = arith.trunc_f32_to_f16 %fmax1278 : f16
+  %c1280 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1281 = arith.fmax %fmax1253, %c1280 : f32
+  %t1282 = arith.trunc_f32_to_f16 %fmax1281 : f16
+  %c1283 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1284 = arith.fmax %fmax1256, %c1283 : f32
+  %t1285 = arith.trunc_f32_to_f16 %fmax1284 : f16
+  %c1286 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1287 = arith.fmax %fmax1259, %c1286 : f32
+  %t1288 = arith.trunc_f32_to_f16 %fmax1287 : f16
+  %c1289 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1290 = arith.fmax %fmax1262, %c1289 : f32
+  %t1291 = arith.trunc_f32_to_f16 %fmax1290 : f16
+  %c1292 = arith.constant {ity = "f32", value = 0.0} : f32
+  %fmax1293 = arith.fmax %fmax1265, %c1292 : f32
+  %t1294 = arith.trunc_f32_to_f16 %fmax1293 : f16
+  %mul1295 = arith.mul %add1270, %c1111 : i32
+  %sel1296 = arith.select %lt1124, %mul1295, %c1112 : i32
+  %vp1297 = vector.pack %t1273, %t1276, %t1279, %t1282, %t1285, %t1288, %t1291, %t1294 {elem = "f16", vec = 8} : vec<f16x8>
+  %c1298 = arith.constant {ity = "i32", value = 0} : i32
+  tile.buffer_store_vN_f16 %rsrc30, %sel1296, %c1298, %vp1297 {dwords = 4}
+}

@@ -5,7 +5,7 @@
  *
  * Faithful C99 port of ck_dsl/core/ir_serialize.py. This is the MACHINE
  * interchange format specified in
- * dsl_docs/architecture/ir_serialization_format.md (RFC WS1.T1.2/T1.3/T1.5).
+ * dsl_docs/architecture/ir_serialization_format.md.
  * Unlike ckc/ir_print.h (human-only, lossy, unparseable), it captures
  * everything needed to reconstruct a ckc_kernel_def_t exactly -- most
  * importantly the explicit SSA value ids -- so the C and Python engines emit

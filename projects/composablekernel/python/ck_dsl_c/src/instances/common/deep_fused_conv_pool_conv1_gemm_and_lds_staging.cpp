@@ -57,7 +57,7 @@
  * _apply_accumulator_epilogue(b, epilogue, accs[n], out_accs[n]).
  * ------------------------------------------------------------------ */
 /* TODO(port): expose this through a non-conflicting public/internal header. */
-/* WS3 C++ build: cross-TU C-ABI helper; forward decl must be extern "C" so the
+/* C++ build: cross-TU C-ABI helper; forward decl must be extern "C" so the
  * reference is not mangled. No effect in C. */
 #ifdef __cplusplus
 extern "C" {

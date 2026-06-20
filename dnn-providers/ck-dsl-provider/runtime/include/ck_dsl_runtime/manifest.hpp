@@ -41,6 +41,12 @@ struct Manifest {
     std::string kernel_name;  // == the HSACO entry symbol == hipModuleGetFunction name
     std::string hsaco;        // basename of the .hsaco (if shipped alongside)
     std::string cache_key;    // stable identity (optional; falls back to kernel_name)
+    // Engine provenance stamped at emit time. Lets a consumer fail loud when a
+    // shipped bundle's engine does not match the engine the consumer is linked
+    // against, instead of silently mixing stale artifacts. Empty if the manifest
+    // predates the stamp.
+    std::string engine_build_id;
+    std::string engine_version;
     int threads_per_block = 256;
 
     // Grid geometry. Either grid_explicit is set, or (block_m/n + grid_order)
@@ -68,6 +74,8 @@ struct Manifest {
         m.kernel_name = v.get_str("kernel_name");
         m.hsaco = v.get_str("hsaco");
         m.cache_key = v.get_str("cache_key");
+        m.engine_build_id = v.get_str("engine_build_id");
+        m.engine_version = v.get_str("engine_version");
         m.threads_per_block = static_cast<int>(v.get_int("threads_per_block", 256));
         m.block_m = static_cast<int>(v.get_int("block_m", 0));
         m.block_n = static_cast<int>(v.get_int("block_n", 0));

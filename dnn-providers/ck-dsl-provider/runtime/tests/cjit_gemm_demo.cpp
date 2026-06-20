@@ -13,10 +13,10 @@
 //
 // Build:
 //   hipcc -std=c++17 \
-//     -I /workspace/rocm-libraries/projects/composablekernel/python/ck_dsl_c/include \
-//     -I /workspace/rocm-lib-copy/dnn-providers/ck-dsl-provider/runtime/include \
+//     -I <repo>/projects/composablekernel/python/ck_dsl_c/include \
+//     -I <repo>/dnn-providers/ck-dsl-provider/runtime/include \
 //     -I /opt/rocm/include \
-//     cjit_gemm_demo.cpp -L<libdir> -lckc_core -lamd_comgr -o /tmp/cjit_gemm
+//     cjit_gemm_demo.cpp -L<libdir> -lckc_core -lamd_comgr -o <outdir>/cjit_gemm
 
 #include <hip/hip_runtime.h>
 

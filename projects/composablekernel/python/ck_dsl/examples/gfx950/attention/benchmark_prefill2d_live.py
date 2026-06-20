@@ -17,10 +17,10 @@ It is the canonical workbench for closing the prefill-2D gap.
 
 Run:
 
-    export AITER_PATH=/workspace/aiter
+    export AITER_PATH=<path/to/aiter>
     PYTHONPATH="python:${AITER_PATH}" \
-      .venv/bin/python python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
-        --shapes /workspace/aiter_unified_attention_2.jsonl \
+      python python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
+        --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
         --limit 20
 """

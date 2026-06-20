@@ -6,7 +6,7 @@
 # add_rmsnorm2d_rdquant parity harness. Selects one of the sampled configs by
 # argv[1] (the config index), builds the AddRmsnorm2DRdquantSpec, builds the
 # kernel via build_add_rmsnorm2d_rdquant(arch='gfx950') and prints
-# lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
+# _native_lower(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter add_rmsnorm2d_rdquant_emit.c.
 import sys
 
@@ -15,7 +15,11 @@ from ck_dsl.instances.common.add_rmsnorm2d_rdquant import (
     build_add_rmsnorm2d_rdquant,
     is_valid_spec,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -108,7 +112,7 @@ def main() -> int:
         return 1
     kernel = build_add_rmsnorm2d_rdquant(spec, arch="gfx950")
     if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        text = _native_lower(kernel, arch="gfx950")
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))

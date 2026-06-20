@@ -3,7 +3,7 @@
  *
  * ckc/verify.h -- IR verifier (LLVM-verify-style well-formedness pass).
  *
- * Faithful C99 port of ck_dsl/core/verify.py (RFC WS1.T1.1). ckc_verify walks
+ * Faithful C99 port of ck_dsl/core/verify.py. ckc_verify walks
  * a ckc_kernel_def_t and produces a list of ckc_diag_t. An empty list (n==0)
  * means well-formed. The checks mirror the Python verifier exactly:
  *

@@ -29,9 +29,9 @@
 #             gx = ceil(N/block_n), gy = ceil(M/block_m), gz = 1
 #     block : (block_size, 1, 1)
 #
-# NOTE: launching a kernel needs GPU access. On this box plain python sees no
-# GPU; run under passwordless sudo with -E so PYTHONPATH survives, e.g.
-#     sudo -n -E /workspace/dsl_bake_off/venv/bin/python -m \
+# NOTE: launching a kernel needs GPU access. If plain python cannot see the
+# GPU, run under passwordless sudo with -E so PYTHONPATH survives, e.g.
+#     sudo -n -E "$(command -v python)" -m \
 #         ck_dsl_c.tests.differential.numeric
 # (build/compile via comgr does NOT need the GPU; only the launch does.)
 #
@@ -759,6 +759,14 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 
     # --- build spec + kernel for the requested family ---
     try:
+        # Thread the running arch's wave size into the row-reduction specs so the
+        # cross-wave fold matches the hardware wavefront (wave32 on RDNA, wave64
+        # on CDNA). Defaulting to 64 on a wave32 part does a cross-half butterfly
+        # over lanes that do not exist and miscounts the waves per CTA, dropping
+        # partials -> wrong reduction.
+        from ck_dsl.core.arch import ArchTarget as _ArchTarget
+
+        _wave = _ArchTarget.from_gfx(arch).wave_size
         if cfg.family == "layernorm2d":
             from ck_dsl.instances.common.layernorm2d import (
                 LayerNorm2DSpec,
@@ -773,6 +781,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
                 block_size=cfg.block_size,
                 vec=cfg.vec,
                 dtype=cfg.dtype,
+                wave_size=_wave,
             )
             ok, reason = is_valid_spec(spec, arch=arch)
             builder, grid_fn, sig_fn = (
@@ -794,6 +803,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
                 block_size=cfg.block_size,
                 vec=cfg.vec,
                 dtype=cfg.dtype,
+                wave_size=_wave,
             )
             ok, reason = is_valid_spec(spec, arch=arch)
             builder, grid_fn, sig_fn = (
@@ -816,6 +826,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
                 block_size=cfg.block_size,
                 vec=cfg.vec,
                 dtype=cfg.dtype,
+                wave_size=_wave,
             )
             ok, reason = is_valid_spec(spec)
             builder, grid_fn, sig_fn = (

@@ -154,15 +154,19 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
         return false;
     }
 
-    /* op = target.mma.by_op_id(_WMMA_OP_ID); reject if absent or not "wmma". */
-    op = ckc_archtarget_by_op_id(target, CKC_WMMA_FMHA_FWD_OP_ID);
+    /* op = target.mma.by_op_id(_wmma_op_id_for_arch(arch)); reject if absent or
+     * not "wmma". gfx1201 (RDNA4) selects the split-K wmma_gfx12_* atom; gfx11
+     * (RDNA3/3.5) the cross-half-duplicated atom. */
+    const char* op_id =
+        (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16" : CKC_WMMA_FMHA_FWD_OP_ID;
+    op = ckc_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
         snprintf(buf,
                  sizeof(buf),
-                 "WMMA %s atom absent on %s (WMMA is an RDNA/gfx11 instruction; "
-                 "this kernel is gfx1151-only)",
-                 CKC_WMMA_FMHA_FWD_OP_ID,
+                 "WMMA %s atom absent on %s (WMMA is an RDNA gfx11/gfx12 "
+                 "instruction; this kernel needs a wave32 RDNA target)",
+                 op_id,
                  arch);
         wmma_set_reason(reason, reason_cap, buf);
         return false;

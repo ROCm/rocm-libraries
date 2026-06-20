@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Round-trip + verifier tests for the ``ck.dsl.ir/v1`` serialization (WS1).
+"""Round-trip + verifier tests for the ``ck.dsl.ir/v1`` serialization.
 
 Covers:
   * round-trip idempotence (build -> serialize -> parse -> serialize is

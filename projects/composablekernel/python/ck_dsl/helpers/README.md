@@ -54,36 +54,36 @@ ck_dsl/helpers/
 │ # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
 ├── reduction.py # block_lds_reduce (sum/max/min/prod) -- canonical
 │ # LDS tree reduction shared by norm/reduce/pool
-│ # kernels. Min and prod were added in .
-├── quant.py # WAVE 2. f32 <-> {i8, fp8e4m3, bf8e5m2} cast helpers
+│ # kernels. Min and prod are also supported.
+├── quant.py # f32 <-> {i8, fp8e4m3, bf8e5m2} cast helpers
 │ # used by SmoothQuant / RDQuant / MoE-Quant. Built
 │ # on the IRBuilder ops cvt_f32_to_{fp8, bf8, i8_sat}
 │ # and clamp_f32; see primitives/quantization.md.
-├── scan.py # WAVE 3. Block-wide cooperative primitives that
+├── scan.py # Block-wide cooperative primitives that
 │ # the MoE-sort family is built on:
 │ # lds_zero_i32 -- cooperative LDS clear + sync
 │ # block_histogram_i32 -- LDS atomics per key
 │ # block_exclusive_scan_i32 -- Hillis-Steele scan
-├── persistent.py # WAVE 3 / WAVE 4 shared. Persistent-grid pattern:
+├── persistent.py # Persistent-grid pattern:
 │ # each CTA atomic-fetches its first tile id, then
 │ # loops via atomic_add(counter, 1) until the
 │ # global tile count exhausts. Used by
 │ # MoE infrastructure and StreamK GEMM.
-├── streamk.py # WAVE 4. StreamK tile partitioner: decode a
+├── streamk.py # StreamK tile partitioner: decode a
 │ # linear macro-tile id into (m_tile, n_tile,
 │ # k_iter, is_first, is_last) for the Atomic /
 │ # Reduction strategies. Pairs with
 │ # ``persistent.py`` -- the partitioner picks the
 │ # work, the persistent loop drives it.
-├── i4_dequant.py # WAVE 5. Packed-i4 byte unpack (sign-extend
+├── i4_dequant.py # Packed-i4 byte unpack (sign-extend
 │ # 4-bit nibbles to i32 / f32 / fp8 / bf8) for
 │ # the i4-quant weight path in block-scale GEMM
 │ # and fused MoE down-projection.
-├── mx_scale.py # WAVE 5. OCP MX E8M0 shared-exponent decode +
+├── mx_scale.py # OCP MX E8M0 shared-exponent decode +
 │ # apply: ``2^(e - 127)`` with NaN / zero
 │ # sentinel handling matching the AMDGPU MX
 │ # MFMA hardware path.
-├── preshuffle.py # WAVE 5. Preshuffled-B tile-major layout
+├── preshuffle.py # Preshuffled-B tile-major layout
 │ # descriptor + per-lane offset emitter for the
 │ # high-bandwidth FP8 / BF8 GEMM path.
 ├── spec.py # IOSpecRule + validate_io, SignatureBuilder,

@@ -4076,6 +4076,25 @@ def _fp16_hex(x: float) -> str:
     return f"0xH{bits:04X}"
 
 
+def _lower_kernel_to_llvm_python(
+    kernel: KernelDef,
+    *,
+    llvm_flavor: Optional[str] = None,
+    arch: Optional[str] = None,
+) -> str:
+    """Native Python lowering of a built ``KernelDef`` to AMDGPU LLVM IR text.
+
+    This is the historical body of :func:`lower_kernel_to_llvm`; it is kept
+    as a separate, always-available entry point so that the backend dispatch
+    wrapper (and the ``"both"`` differential oracle) can reach the Python
+    engine unconditionally regardless of the resolved default backend.
+    """
+    lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
+    lowerer._collect_smem(kernel.body)
+    lowerer.lower_region(kernel.body)
+    return lowerer.finalize()
+
+
 def lower_kernel_to_llvm(
     kernel: KernelDef,
     *,
@@ -4092,8 +4111,30 @@ def lower_kernel_to_llvm(
     ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that
     owns the datalayout, triple, and waitcnt encoding. Defaults to ``gfx950``
     so existing callers and the gfx950 byte-identical baseline are preserved.
+
+    Backend dispatch: this is the single chokepoint every Python-authored
+    kernel funnels through. The active backend is resolved (explicit env
+    ``CK_DSL_BACKEND`` -> default) by :func:`ck_dsl.core.backend.resolve_backend`:
+
+      - ``"python"`` lowers natively (the historical, byte-identical path);
+      - ``"cpp"`` serializes the kernel and lowers it through the C++ engine
+        (``ckc_engine.lower_serialized_ir``), which is byte-identical to the
+        native lowerer for every supported family;
+      - ``"both"`` runs both and asserts byte-equality, returning the Python
+        result (the differential oracle).
+
+    The cpp / both paths are family-agnostic: they go through the serialized
+    ``ck.dsl.ir/v1`` artifact, so no per-family C builder or spec object is
+    needed -- any kernel the Python front end can build is lowerable. If the
+    C++ engine is unavailable or rejects the IR, the dispatch records the
+    reason and falls back to the native lowerer so the result is always
+    well-defined (see :func:`ck_dsl.core.backend.lower_kernel_via_backend`).
     """
-    lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
-    lowerer._collect_smem(kernel.body)
-    lowerer.lower_region(kernel.body)
-    return lowerer.finalize()
+    from .backend import lower_kernel_via_backend
+
+    return lower_kernel_via_backend(
+        kernel,
+        llvm_flavor=llvm_flavor,
+        arch=arch,
+        python_lower=_lower_kernel_to_llvm_python,
+    )

@@ -156,7 +156,7 @@ or change an instance family, validate the binding still produces identical
 emission:
 
 ```bash
-python3 ck_dsl_c/bindings/prove_parity_ws16b.py   # per-family VALIDATED / mismatched
+python3 ck_dsl_c/bindings/prove_parity_binding.py   # per-family VALIDATED / mismatched
 ```
 
 ## Where a change lands on both sides
@@ -187,5 +187,5 @@ code — the cause is usually the build, not the source.
 - [ ] Python static tests pass.
 - [ ] `ck_dsl_c/tools/check_byte_identity.sh` is green (engine builds + `.ll` gate).
 - [ ] If output changed on purpose: golden re-blessed, diff reviewed.
-- [ ] New/changed instance family: `prove_parity_ws16b.py` validates the binding.
+- [ ] New/changed instance family: `prove_parity_binding.py` validates the binding.
 - [ ] No new internal-tracker nomenclature in code comments or docs (functionality only).

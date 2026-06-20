@@ -21,8 +21,7 @@ This script:
 
 Run with::
 
-    cd /workspace/rocm-libraries-streaming/projects/composablekernel/python
-    source /workspace/rocm-libraries-streaming/.venv/bin/activate
+    cd <repo>/projects/composablekernel/python
     python ck_dsl/examples/moe/test_preshuffle_b.py
 """
 

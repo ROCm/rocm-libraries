@@ -136,7 +136,7 @@ void ckc_ll_yield_push(ckc_lower_t* L)
     /* yield_stack stores a distinct anonymous-struct pointer type; the in-place
      * layout is identical, so launder through void* to satisfy the compiler. */
     void* frame_v = frame;
-    /* WS3 C++ build: the element type is a distinct anonymous-struct pointer, so
+    /* C++ build: the element type is a distinct anonymous-struct pointer, so
      * the void* must be cast back explicitly (C allowed the implicit conversion).
      * __typeof__ recovers the exact element type; layout is identical. */
     ckc_vec_push(&L->arena, &L->yield_stack, (__typeof__(*L->yield_stack.data))frame_v, rc);

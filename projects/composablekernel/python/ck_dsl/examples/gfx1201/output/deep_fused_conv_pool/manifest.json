@@ -1,0 +1,115 @@
+{
+  "args_signature": [
+    {
+      "name": "A",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "B",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "Y",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "W1",
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "W1_bytes",
+      "type": "i32"
+    },
+    {
+      "name": "A_bytes",
+      "type": "i32"
+    },
+    {
+      "name": "B_bytes",
+      "type": "i32"
+    },
+    {
+      "name": "Y_bytes",
+      "type": "i32"
+    }
+  ],
+  "atoms": [
+    "tile.wmma_gfx12_f32_16x16x16_f16"
+  ],
+  "block_k": 16,
+  "block_m": 64,
+  "block_n": 32,
+  "ck_dependency": false,
+  "conv": [
+    1,
+    16,
+    16,
+    8,
+    32,
+    3,
+    3,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "conv1": {
+    "K1": 24,
+    "kernel": "1x1",
+    "tile_k": 16
+  },
+  "conv_layout": "deep_fused_conv_pool",
+  "cpg": 8,
+  "default_shape": [
+    1,
+    16,
+    16,
+    8,
+    32,
+    24
+  ],
+  "engine_build_id": "811ad18370f11c2e",
+  "engine_version": "1.0.0+20260620",
+  "experimental": true,
+  "grid_explicit": [
+    1,
+    2,
+    2
+  ],
+  "groups": 1,
+  "hsaco": "ck_dsl_gfx1201_deep_fused_conv_pool_N1H16W16C8_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu.hsaco",
+  "hsaco_bytes": 8696,
+  "ir_authored": true,
+  "kernel_name": "ck_dsl_gfx1201_deep_fused_conv_pool_N1H16W16C8_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu",
+  "kind": "deep_fused_conv_pool_fp16",
+  "kpg": 32,
+  "notes": "Experimental gfx1201 (RDNA4 WMMA) deep-fusion prototype: implicit-GEMM conv0 + ReLU staged through LDS, 1x1 conv1 + ReLU, inline 2x2 stride-2 maxpool to global. No conv0/conv1 intermediate written to HBM.",
+  "pool": [
+    2,
+    2,
+    2,
+    2
+  ],
+  "pool_output_shape": [
+    1,
+    8,
+    8,
+    24
+  ],
+  "schema": "ck.dsl.example.manifest/v1",
+  "sig_has_bytes": 1,
+  "threads_per_block": 64,
+  "timed_iters": 100,
+  "timing_ms": {
+    "comgr_bc": 14.934346007066779,
+    "comgr_executable": 2.9580900009023026,
+    "comgr_relocatable": 29.980131992488168,
+    "ir_build": 1.3644610007759184,
+    "ir_lower_llvm": 8.738780990825035,
+    "ir_opt": 0.0013399985618889332,
+    "total": 58.07754799025133
+  },
+  "warmup_iters": 5
+}

@@ -4,7 +4,7 @@
 """``ck.dsl.ir/v1`` — round-trippable IR serialization.
 
 This is the machine interchange format specified in
-``dsl_docs/architecture/ir_serialization_format.md`` and RFC §13 D1. Unlike
+``dsl_docs/architecture/ir_serialization_format.md``. Unlike
 :func:`ck_dsl.core.ir_print.print_ir` (human-only, lossy, unparseable) this
 captures *everything* needed to reconstruct a :class:`KernelDef` exactly,
 including the **explicit SSA value ids**, so the consumer prints what was
@@ -15,7 +15,7 @@ Public surface:
 * :func:`serialize` — ``KernelDef -> str`` (deterministic, canonical).
 * :func:`parse`     — ``str -> KernelDef`` (the inverse).
 * :func:`canonicalize` / :func:`canonical_equal` — semantic diff with stable
-  SSA-id normalization (RFC WS1.T1.5), tolerant of incidental id gaps.
+  SSA-id normalization, tolerant of incidental id gaps.
 
 Standard library only.
 """
@@ -620,7 +620,7 @@ def _split_top(s: str, sep: str) -> List[str]:
 
 
 # --------------------------------------------------------------------------
-# Canonicalization for semantic diff (§7, RFC WS1.T1.5)
+# Canonicalization for semantic diff (see ir_serialization_format.md §7)
 # --------------------------------------------------------------------------
 
 
@@ -663,7 +663,7 @@ def canonicalize(kernel: KernelDef) -> str:
     """Return a normalized serialization where SSA ids are renamed to ``%0,
     %1, ...`` in first-definition order and ``loc`` is stripped. Two kernels
     that differ only in incidental id choices / authoring locations produce the
-    same canonical string (RFC WS1.T1.5)."""
+    same canonical string."""
     rename = {old: f"%{i}" for i, old in enumerate(_walk_values_in_def_order(kernel))}
 
     def rt(v: Value) -> Value:

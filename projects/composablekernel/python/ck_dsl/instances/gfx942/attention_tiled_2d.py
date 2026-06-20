@@ -258,7 +258,7 @@ class UnifiedAttention2DTiledSpec:
     # cancelled by the occupancy loss. The knob is kept exposed for
     # future workloads (e.g. HD=128 or shapes with different LDS
     # budgets) where the trade-off might flip. See
-    # ``/workspace/probe_blockm32_perf.py`` for the sweep.
+    # the out-of-tree ``probe_blockm32_perf.py`` for the sweep.
     block_m_per_warp: int = 16
     # gfx950-only knob: selects the 32x32 wide-K MFMA geometry (M=32, N=32,
     # K-step=16, <16 x f32> accumulator). gfx942 has no f16/bf16 32x32x16
@@ -551,9 +551,7 @@ class UnifiedAttention2DTiledSpec:
                         "x8-transposed requires head_size to be a multiple of 32"
                     )
                 if self.block_m_per_warp != 32:
-                    raise ValueError(
-                        "x8-transposed requires block_m_per_warp=32"
-                    )
+                    raise ValueError("x8-transposed requires block_m_per_warp=32")
                 if self.tile_size_eff % 32 != 0:
                     raise ValueError(
                         "x8-transposed requires tile_size to be a multiple of 32"
@@ -561,7 +559,10 @@ class UnifiedAttention2DTiledSpec:
                 _x8t_unsupported = [
                     name
                     for name, on in (
-                        ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
+                        (
+                            "use_transposed_half_local_pv",
+                            self.use_transposed_half_local_pv,
+                        ),
                     )
                     if on
                 ]
@@ -635,7 +636,9 @@ class UnifiedAttention2DTiledSpec:
                 and self.use_transposed_qk_32x32
                 and self.use_conflict_free_v_store
             ):
-                raise ValueError("use_k_sliced_ring requires the transposed-x8 cfvst path")
+                raise ValueError(
+                    "use_k_sliced_ring requires the transposed-x8 cfvst path"
+                )
             if (
                 self.dtype != "fp16"
                 or self.head_size not in (64, 128)
@@ -1223,15 +1226,9 @@ def build_unified_attention_2d_tiled(
     )
     # DIAGNOSTIC: store-path vehicle (c) -- element-wise scatter (no perm).
     # Proves the (dim,token) mapping + coverage independent of the perm.
-    _CFV_STORE_SCATTER = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_SCATTER", "0") == "1"
-    )
-    _CFV_STORE_PREZERO = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_PREZERO", "0") == "1"
-    )
-    _CFV_STORE_SEPOFF = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_SEPOFF", "0") == "1"
-    )
+    _CFV_STORE_SCATTER = os.environ.get("HIPDNN_GFX942_CFV_STORE_SCATTER", "0") == "1"
+    _CFV_STORE_PREZERO = os.environ.get("HIPDNN_GFX942_CFV_STORE_PREZERO", "0") == "1"
+    _CFV_STORE_SEPOFF = os.environ.get("HIPDNN_GFX942_CFV_STORE_SEPOFF", "0") == "1"
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
@@ -1452,9 +1449,7 @@ def build_unified_attention_2d_tiled(
     # row r now occupies bytes ``r * (HD*2 + 16)`` so the bank index
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
-    # The conv kernel optimization study at
-    # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-    # analysis/00_CONSOLIDATED_FINDINGS.md`` measured +43% throughput on
+    # An internal conv kernel optimization study measured +43% throughput on
     # MI355X gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
@@ -1526,7 +1521,9 @@ def build_unified_attention_2d_tiled(
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
     Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
-    Q_ALIAS_K = (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+    Q_ALIAS_K = (
+        (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+    )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     if K_SLICED_ACTIVE:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
@@ -1622,9 +1619,7 @@ def build_unified_attention_2d_tiled(
     _x8_k_slots = 1 if (BLOCK_M <= T) else 2
     _x8_q_lds = 0 if (BLOCK_M <= 2 * T) else BLOCK_M * HD * 2
     _v_t_fits_x8 = (
-        _x8_k_slots * T * HD * 2
-        + (T + _v_t_pad) * HD * 2
-        + _x8_q_lds
+        _x8_k_slots * T * HD * 2 + (T + _v_t_pad) * HD * 2 + _x8_q_lds
     ) <= _LDS_CAP
     # Both conflict-free-V vehicles share the SAME transposed [HD,T+pad] V_lds
     # layout + consumer; they differ only in the STORE fill. TRANSPOSED_V gates
@@ -1653,9 +1648,7 @@ def build_unified_attention_2d_tiled(
     # Store-vehicle selector: vehicle (c) (register-load + in-register perm_b32
     # transpose) when the store-path flag drove TRANSPOSED_V; the 2x2 f16
     # transpose needs T and HD both even (HD%8==0 already; T%2 below).
-    TRANSPOSED_V_STORE = (
-        TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
-    )
+    TRANSPOSED_V_STORE = TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
     SWIZZLE_VLDS = (
         os.environ.get("HIPDNN_GFX942_SWIZZLE_VLDS", "1") == "1"
         and not FP8_MFMA_PV
@@ -1697,10 +1690,7 @@ def build_unified_attention_2d_tiled(
     # where logical N=head-dim and K=token. The simple [HD, T+pad] layout is
     # correct but not the production bank layout; use the CK-packed slot map by
     # default, and keep a kill-switch for quick A/B.
-    V_T_CK_LAYOUT = (
-        TRANSPOSED_V
-        and spec.use_conflict_free_v_ck_vlds
-    )
+    V_T_CK_LAYOUT = TRANSPOSED_V and spec.use_conflict_free_v_ck_vlds
     V_T_KPACK = 8
     V_T_PIXELS_PER_ROW = 64  # 32 LDS banks * 4 bytes / sizeof(f16)
     V_T_NPER_ROW = V_T_PIXELS_PER_ROW // V_T_KPACK
@@ -1779,9 +1769,7 @@ def build_unified_attention_2d_tiled(
     def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
         v_buf0 = b.const_i32(0)
         if V_T_CK_LAYOUT:
-            return b.smem_load_vN(
-                V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n
-            )
+            return b.smem_load_vN(V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n)
         return b.smem_load_vN(V_lds, v_buf0, dim, tok, dtype=dtype, n=n)
 
     def _v_load1(v_buf: Value, v_row: Value, v_n_col: Value) -> Value:
@@ -2276,14 +2264,10 @@ def build_unified_attention_2d_tiled(
     )
     if not SWIZZLE_VLDS or NUM_WARPS == 1:
         v_wave_lds_offset_i64 = (
-            b.const_i64(0)
-            if NUM_WARPS == 1
-            else wave_lds_offset_i64
+            b.const_i64(0) if NUM_WARPS == 1 else wave_lds_offset_i64
         )
     else:
-        v_wave_lds_offset_i32 = b.to_sgpr_u32(
-            b.mul(wave_id, b.const_i32(V_WAVE_BYTES))
-        )
+        v_wave_lds_offset_i32 = b.to_sgpr_u32(b.mul(wave_id, b.const_i32(V_WAVE_BYTES)))
         v_wave_lds_offset_i64 = b.zext(v_wave_lds_offset_i32, I64)
 
     # ---- Paged KV byte descriptor (full transform DAG) ----
@@ -2508,15 +2492,15 @@ def build_unified_attention_2d_tiled(
 
     K_SLICE_CALLS_PER_TILE = (T * K_SLICE_HD) // KV_HALVES_PER_CALL
 
-    def _issue_k_slice_load_runtime(kv_tile_idx: Value, slice_idx: int, slot_idx: int) -> None:
+    def _issue_k_slice_load_runtime(
+        kv_tile_idx: Value, slice_idx: int, slot_idx: int
+    ) -> None:
         """Issue one 32-dim K slice into the sliced K ring."""
         slot_off_i64 = b.const_i64(slot_idx * K_BUF_BYTES)
         K_slot_base = b.smem_ptr_add(K_lds_addr, slot_off_i64)
         K_wave_base = b.smem_ptr_add(K_slot_base, wave_lds_offset_i64)
         for call in range(K_SLICE_CALLS_PER_TILE):
-            linear_local = b.add(
-                b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
-            )
+            linear_local = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             token = b.div(linear_local, b.const_i32(K_SLICE_HD))
             dim_local = b.mod(linear_local, b.const_i32(K_SLICE_HD))
             dim = b.add(b.const_i32(slice_idx * K_SLICE_HD), dim_local)
@@ -2711,9 +2695,7 @@ def build_unified_attention_2d_tiled(
                     linear_half=linear_j,
                     kv_head=kv_head_idx,
                 )
-                in_range = b.cmp_lt(
-                    b.add(tile_tok_base, token_j), max_seq_prefix_len
-                )
+                in_range = b.cmp_lt(b.add(tile_tok_base, token_j), max_seq_prefix_len)
                 if valid_j is not None:
                     in_range = b.land(in_range, valid_j)
                 safe_voff_j = b.select(in_range, voff_j, b.const_i32(0))
@@ -2790,16 +2772,16 @@ def build_unified_attention_2d_tiled(
                 in_range = b.land(in_range, valid)
             safe_voff = b.select(in_range, voff, zero_i32)
             safe_elem = (
-                b.div(safe_voff, b.const_i32(KV_BYTES))
-                if KV_BYTES != 1
-                else safe_voff
+                b.div(safe_voff, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else safe_voff
             )
             if _CFV_STORE_SEPOFF:
                 # ISOLATION: compute the (t_row, d0+1) offset via a SEPARATE
                 # descriptor call instead of voff+1. Tests the dim-contiguity
                 # assumption (does the paged descriptor have dim element-stride
                 # 1?). Vehicle (a) always uses separate per-element offsets.
-                linear1 = b.add(b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1)))
+                linear1 = b.add(
+                    b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1))
+                )
                 voff1, valid1 = paged_kv_desc.offset(
                     b, tile_idx=kv_tile_idx, linear_half=linear1, kv_head=kv_head_idx
                 )
@@ -2855,13 +2837,12 @@ def build_unified_attention_2d_tiled(
             d0, d1, t0, t1 = _cfvst_block_coords(blk)
             x0 = _load_token_row_pair(t0, d0)  # (V[t0,d0], V[t0,d1])
             x1 = _load_token_row_pair(t1, d0)  # (V[t1,d0], V[t1,d1])
-            payload.append((d0, d1, t0, x0, x1))
+            payload.append((d0, d1, t0, t1, x0, x1))
         return payload
 
     def _cfvst_store_v_regs(payload) -> None:
         """Permute loaded cfvst VGPRs and publish the transposed V LDS tile."""
         zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
-        zero_i32 = b.const_i32(0)
         if _CFV_STORE_PREZERO:
             # DIAGNOSTIC: pre-zero every V_lds slot (dim x token) so any
             # uncovered slot reads 0 instead of garbage. If this fixes the
@@ -2875,7 +2856,7 @@ def build_unified_attention_2d_tiled(
                 _v_t_store(_pd, _ptk, zero_h, 1)
             b.sync()
 
-        for d0, d1, t0, x0, x1 in payload:
+        for d0, d1, t0, t1, x0, x1 in payload:
             if _CFV_STORE_SCATTER:
                 # DIAGNOSTIC: element-wise scatter (no perm) -- store each of
                 # the 4 loaded V values directly at its transposed slot.
@@ -3417,9 +3398,7 @@ def build_unified_attention_2d_tiled(
         if FP8_NATIVE_QK:
             # Native fp8 QK: hand the raw fp8 K straight to the fp8 MFMA --
             # no dequant. (k_scale is folded into qk_scale post-MFMA.)
-            return b.smem_load_vN(
-                K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag
-            )
+            return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag)
         k_fp8 = b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag)
         return dequant_fp8x8_to_dtype(b, k_fp8, k_scale_p, dtype)
 
@@ -3517,7 +3496,8 @@ def build_unified_attention_2d_tiled(
         Q32_HALF_STRIDE = 4 if USE_MFMA_32X32X8 else 8
         for k in range(QK_K_ITERS):
             q32_col = b.add(
-                b.const_i32(k * QK_K_STEP), b.mul(lane_half, b.const_i32(Q32_HALF_STRIDE))
+                b.const_i32(k * QK_K_STEP),
+                b.mul(lane_half, b.const_i32(Q32_HALF_STRIDE)),
             )
             if Q_DIRECT_GLOBAL:
                 q32_pos = b.add(qb_start_pos, b.div(q32_row, b.const_i32(NQK)))
@@ -3545,7 +3525,9 @@ def build_unified_attention_2d_tiled(
                 )
             else:
                 q32_idx_args = (
-                    (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
+                    (q32_buf, q32_row_in_buf, q32_col)
+                    if Q_ALIAS_K
+                    else (q32_row, q32_col)
                 )
                 q32 = b.smem_load_vN(Q_lds, *q32_idx_args, dtype=dtype, n=Q32_FRAG)
             if FP8_NATIVE_QK:
@@ -3814,9 +3796,8 @@ def build_unified_attention_2d_tiled(
         # fit attention's mask + softmax + PV pattern, where the post-RA
         # scheduler's default heuristics already produce good interleave.
         # Consistent with the conv-kernel optimization study finding that
-        # "compiler scheduling hints don't work on gfx950" (see
-        # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-        # analysis/00_CONSOLIDATED_FINDINGS.md``). Leaving them out.
+        # "compiler scheduling hints don't work on gfx950" (per an
+        # internal conv kernel optimization study). Leaving them out.
         if USE_MFMA_32X32:
             if TRANSPOSED_QK_32X32:
                 # Transposed-score orientation: compute S^T = K @ Q^T.
@@ -3865,6 +3846,7 @@ def build_unified_attention_2d_tiled(
                     ST32_n = [b.zero_vec_f32(16) for _ in range(QK_N_TILES)]
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
+
                     def _kslot(group_idx: int) -> int:
                         if K_SLICED_LDSSEQ and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
@@ -3879,16 +3861,18 @@ def build_unified_attention_2d_tiled(
                         slot = _kslot(kg)
                         if kg + 2 < k_groups:
                             next_slot = _kslot(kg + 2)
-                            if K_SLICED_LDSSEQ and kg > 0 and next_slot == _kslot(kg - 1):
+                            if (
+                                K_SLICED_LDSSEQ
+                                and kg > 0
+                                and next_slot == _kslot(kg - 1)
+                            ):
                                 # CK's LdsSeq can reuse the slice consumed by the
                                 # previous kg. Drain LDS reads before overwriting
                                 # that slot; the VMEM prefetch still overlaps the
                                 # current slice's compute after the partial wait.
                                 b.s_waitcnt(lgkmcnt=0)
                                 b.s_barrier_bare()
-                            _issue_k_slice_load_runtime(
-                                kv_tile_iv, kg + 2, next_slot
-                            )
+                            _issue_k_slice_load_runtime(kv_tile_iv, kg + 2, next_slot)
                         # Leave one newer slice's VMEM stream in flight whenever
                         # such a slice exists; fully drain for the final slice.
                         if kg + 1 < k_groups:
@@ -4807,9 +4791,7 @@ def build_unified_attention_2d_tiled(
                         B_v32 = b.zero_vec(dtype, 4)
                         for j in range(4):
                             v_row = b.add(k_row_base, b.const_i32(j))
-                            elem = b.vec_extract(
-                                _v_load1(v_buf, v_row, v_col32), 0
-                            )
+                            elem = b.vec_extract(_v_load1(v_buf, v_row, v_col32), 0)
                             B_v32 = b.vec_insert(B_v32, elem, j)
                         acc32 = _mfma_32x32x8(b, dtype, A_p32, B_v32, acc32)
                     new_acc[n] = acc32
@@ -4976,6 +4958,9 @@ def build_unified_attention_2d_tiled(
                                 comps.append(b.fadd(old, add))
                             acc_per_atom[atom] = b.vec_pack(comps, F32)
                     else:
+                        n_col_base = b.add(
+                            b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane
+                        )
                         B_r0 = b.ds_read_tr16_b64(
                             V_lds, v_buf, row_r0, n_col_base, dtype=dtype
                         )

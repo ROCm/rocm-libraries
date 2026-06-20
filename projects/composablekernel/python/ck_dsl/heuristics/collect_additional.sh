@@ -5,7 +5,9 @@
 # Generate additional benchmark data for shapes NOT in the original log.
 # Runs in background; outputs streaming JSON that can be parsed by data_pipeline.py.
 
-BIN_DIR="/workspace/ck_tile/bin"
+# Directory containing the CK Tile gemm_universal benchmark binaries.
+# Override with CK_TILE_BIN_DIR to point at your local CK Tile build.
+BIN_DIR="${CK_TILE_BIN_DIR:-./ck_tile/bin}"
 OUT_LOG="data/additional_shapes.log"
 WARMUP=3
 REPEAT=10

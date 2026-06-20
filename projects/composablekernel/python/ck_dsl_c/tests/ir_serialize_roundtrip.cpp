@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * tests/ir_serialize_roundtrip.c -- round-trip + verifier test for the C
- * ck.dsl.ir/v1 serializer/parser (WS1).
+ * ck.dsl.ir/v1 serializer/parser.
  *
  * For each buildable universal-GEMM config it asserts:
  *
@@ -10,7 +10,7 @@
  *      byte-identical to lower(k). This is the strongest faithfulness gate:
  *      the parsed-back IR must lower to exactly the same code.
  *   2. Serialization idempotence: serialize(parse(serialize(k))) ==
- *      serialize(k), byte-for-byte (RFC WS1.T1.4).
+ *      serialize(k), byte-for-byte.
  *   3. Verifier: ckc_verify(parse(serialize(k))) reports zero ERROR
  *      diagnostics (a real, well-formed kernel verifies clean).
  *

@@ -16,9 +16,20 @@ rejects) is reported separately and does NOT count toward a family being
 "validated"; per the strengthened rule a family is validated only if it has at
 least one buildable config and ALL its buildable configs match NON-EMPTY.
 
+Freshness / stale-build guard:
+  The .so and the standalone emitters MUST come from the same engine source
+  snapshot. When the emit dir was built it records the engine build-id it was
+  linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
+  asserts ckc_engine.build_id() (from the loaded .so) equals that file. On a
+  mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
+  reporting a flood of spurious 'mismatched' configs (the exact trap that once
+  produced a false '30 mismatched'). Set CKC_PARITY_ALLOW_STALE=1 to downgrade
+  the check to a warning if you really must.
+
 Env:
-  CKC_WS16B_BUILD   build dir holding ckc_engine*.so  (default /tmp/ckc_ws16b/build)
-  CKC_WS16B_EMIT    dir holding the prebuilt standalone emitters (default /tmp/ckc_ws16b/emit)
+  CKC_PARITY_BUILD       build dir holding ckc_engine*.so  (default /tmp/ckc_parity/build)
+  CKC_PARITY_EMIT        dir holding the prebuilt standalone emitters (default /tmp/ckc_parity/emit)
+  CKC_PARITY_ALLOW_STALE if set to 1, a build-id mismatch warns instead of failing
 """
 
 import hashlib
@@ -26,10 +37,41 @@ import os
 import subprocess
 import sys
 
-BUILD = os.environ.get("CKC_WS16B_BUILD", "/tmp/ckc_ws16b/build")
-EMIT = os.environ.get("CKC_WS16B_EMIT", "/tmp/ckc_ws16b/emit")
+BUILD = os.environ.get("CKC_PARITY_BUILD", "/tmp/ckc_parity/build")
+EMIT = os.environ.get("CKC_PARITY_EMIT", "/tmp/ckc_parity/emit")
 sys.path.insert(0, BUILD)
 import ckc_engine  # noqa: E402
+
+
+def _assert_build_id_match():
+    """Cross-check the loaded .so's build-id against the emit dir's BUILD_ID.
+
+    Fails loud (SystemExit) on mismatch so a stale/mixed build cannot masquerade
+    as a flood of config mismatches. Returns the .so build-id for the report."""
+    so_id = ckc_engine.build_id()
+    so_ver = ckc_engine.engine_version()
+    bid_path = os.path.join(EMIT, "BUILD_ID")
+    if not os.path.exists(bid_path):
+        print(
+            f"WARNING: no {bid_path} -- cannot verify the emitters and the .so "
+            f"were built from the same engine source. .so build-id={so_id}. "
+            "Build the emitters with a driver that writes <EMIT>/BUILD_ID "
+            "(see ci/tiers/tier2_differential.sh) to enable the stale-build guard.",
+            file=sys.stderr,
+        )
+        return so_id, so_ver
+    emit_id = open(bid_path).read().strip()
+    if emit_id != so_id:
+        msg = (
+            "stale/mixed build: .so build-id "
+            f"{so_id} != emitter build-id {emit_id}; rebuild both into one dir. "
+            f"(.so from CKC_PARITY_BUILD={BUILD}, emitters from CKC_PARITY_EMIT={EMIT})"
+        )
+        if os.environ.get("CKC_PARITY_ALLOW_STALE") == "1":
+            print(f"WARNING (CKC_PARITY_ALLOW_STALE=1): {msg}", file=sys.stderr)
+        else:
+            sys.exit(f"FATAL: {msg}")
+    return so_id, so_ver
 
 
 def sha(s):
@@ -929,6 +971,147 @@ def cfgs_sage_attention():
     ]
 
 
+def cfgs_fmha_appendkv():
+    # mirrors fmha_appendkv_emit.c make_spec (0..5). rotary head_size == H.
+    rows = [
+        # H, q, kv, dtype, has_rotary, rotary_layout, block_size, shape_make
+        (128, 4, 2, "f16", False, None, 256, False),
+        (128, 4, 2, "f16", True, "half", 256, False),
+        (128, 8, 4, "bf16", True, "interleaved", 128, True),
+        (64, 4, 2, "f16", True, "half", 256, False),
+        (32, 8, 8, "bf16", False, None, 256, False),
+        (192, 4, 2, "f16", True, "half", 256, False),
+    ]
+    out = []
+    for h, q, kv, dt, rope, lay, bs, smake in rows:
+        d = dict(
+            head_size=h,
+            num_query_heads=q,
+            num_kv_heads=kv,
+            dtype=dt,
+            batch=1,
+            block_size=bs,
+            has_rotary=rope,
+        )
+        if smake:
+            d["block_size_q"] = 16
+            d["block_size_k"] = 64
+        if rope:
+            d["rotary_layout"] = lay
+            d["rotary_head_size"] = h
+        # batch: cfg1/cfg2/cfg4 use batch=2
+        out.append(d)
+    out[1]["batch"] = 2
+    out[2]["batch"] = 2
+    out[4]["batch"] = 2
+    return out
+
+
+def cfgs_fmha_paged_prefill():
+    # mirrors fmha_paged_prefill_emit.c make_spec (0..5); cfg5 engine-rejected.
+    rows = [
+        # H, q, kv, dtype, mask, sw, page_bs, max_blocks, batch, mfma
+        (64, 8, 8, "f16", "none", 0, 16, 32, 2, False),
+        (128, 8, 8, "f16", "causal", 0, 32, 64, 4, False),
+        (256, 8, 2, "bf16", "sliding_window", 2048, 64, 128, 8, True),
+        (64, 32, 8, "f16", "causal", 0, 128, 256, 16, False),
+        (128, 16, 2, "bf16", "none", 0, 256, 512, 1, True),
+        (192, 12, 12, "f16", "sliding_window", 1024, 32, 64, 4, False),
+    ]
+    out = []
+    for h, q, kv, dt, m, sw, pbs, mbs, b, mfma in rows:
+        d = dict(
+            head_size=h,
+            num_query_heads=q,
+            num_kv_heads=kv,
+            dtype=dt,
+            mask_mode=m,
+            page_block_size=pbs,
+            max_blocks_per_seq=mbs,
+            batch=b,
+            use_mfma_body=mfma,
+        )
+        if m == "sliding_window":
+            d["sliding_window"] = sw
+        out.append(d)
+    return out
+
+
+def cfgs_fmha_varlen():
+    # mirrors fmha_varlen_emit.c make_spec (0..5).
+    rows = [
+        (64, 8, 8, "f16", "none", 0, 128, 256, 4),
+        (128, 8, 8, "bf16", "causal", 0, 256, 512, 2),
+        (128, 16, 4, "f16", "none", 0, 64, 128, 8),
+        (256, 4, 4, "bf16", "sliding_window", 64, 512, 512, 1),
+        (64, 12, 12, "fp16", "none", 0, 256, 256, 16),
+        (192, 12, 12, "f16", "causal", 0, 192, 384, 8),
+    ]
+    out = []
+    for h, q, kv, dt, m, sw, msq, msk, b in rows:
+        d = dict(
+            head_size=h,
+            num_query_heads=q,
+            num_kv_heads=kv,
+            dtype=dt,
+            mask_mode=m,
+            max_seqlen_q=msq,
+            max_seqlen_k=msk,
+            batch=b,
+        )
+        if m == "sliding_window":
+            d["sliding_window"] = sw
+        out.append(d)
+    return out
+
+
+def cfgs_fmha_splitkv_decode():
+    # mirrors fmha_splitkv_decode_emit.c make_spec (0..5); harness compares the
+    # segment phase (the emitter's `<idx> ll` => mode=ll/phase=seg). The binding
+    # defaults to "seg" so no explicit phase key is needed.
+    rows = [
+        (64, 8, 8, "f16", "none", 0, 1, 4, True),
+        (128, 8, 8, "f16", "causal", 0, 2, 8, True),
+        (192, 16, 2, "bf16", "none", 0, 4, 16, False),
+        (256, 32, 4, "f16", "sliding_window", 2048, 1, 32, True),
+        (64, 12, 3, "bf16", "none", 0, 8, 64, True),
+        (128, 16, 8, "f16", "causal", 0, 2, 128, True),
+    ]
+    out = []
+    for h, q, kv, dt, m, sw, b, segs, mfma in rows:
+        d = dict(
+            head_size=h,
+            num_query_heads=q,
+            num_kv_heads=kv,
+            dtype=dt,
+            mask_mode=m,
+            batch=b,
+            num_segments=segs,
+            use_mfma_body=mfma,
+        )
+        if m == "sliding_window":
+            d["sliding_window"] = sw
+        out.append(d)
+    return out
+
+
+def cfgs_fused_moe_e2e():
+    # mirrors fused_moe_e2e_emit.c make_spec (0..5). Only the enumerated shape +
+    # dtype differ; every other field is the dataclass default.
+    rows = [
+        (1, 8, 2, 4096, 7168, "f16"),
+        (8, 8, 2, 4096, 7168, "f16"),
+        (32, 8, 2, 4096, 7168, "f16"),
+        (128, 8, 2, 4096, 7168, "f16"),
+        (1, 8, 2, 4096, 7168, "bf16"),
+        (128, 32, 5, 8192, 8192, "f16"),
+    ]
+    return [
+        dict(tokens=t, experts=e, topk=k, hidden=h, intermediate=i, dtype=d)
+        for (t, e, k, h, i, d) in rows
+    ]
+
+
 def cfgs_gfx942_attention_tiled_2d():
     rows = [
         (64, 32, 32, 32, "bf16", True, 2048, False),
@@ -1296,6 +1479,21 @@ FAMILIES = [
         cfgs_fmha_head_grouping(),
         "gfx950",
     ),
+    ("fmha_appendkv", "fmha_appendkv_lower_llvm", cfgs_fmha_appendkv(), "gfx950"),
+    (
+        "fmha_paged_prefill",
+        "fmha_paged_prefill_lower_llvm",
+        cfgs_fmha_paged_prefill(),
+        "gfx950",
+    ),
+    ("fmha_varlen", "fmha_varlen_lower_llvm", cfgs_fmha_varlen(), "gfx950"),
+    (
+        "fmha_splitkv_decode",
+        "fmha_splitkv_decode_lower_llvm",
+        cfgs_fmha_splitkv_decode(),
+        "gfx950",
+    ),
+    ("fused_moe_e2e", "fused_moe_e2e_lower_llvm", cfgs_fused_moe_e2e(), "gfx950"),
     (
         "sparse_attention",
         "sparse_attention_lower_llvm",
@@ -1343,6 +1541,8 @@ FAMILIES = [
 
 
 def main():
+    so_id, so_ver = _assert_build_id_match()
+    print(f"engine build-id: {so_id}  version: {so_ver}  (matches emit dir)")
     fam_validated = 0
     fam_empty_only = 0
     fam_failed = 0

@@ -509,7 +509,7 @@ void ckc_tile_window_store_scalar(ckc_ir_builder_t* b,
  * helpers resolve them at link time.
  */
 
-/* WS3 C++ build: these are declared (and called) as extern "C" via
+/* C++ build: these are declared (and called) as extern "C" via
  * helper_ck_dsl.helpers.sweep.h, but that header is not included here. Re-declare
  * them extern "C" so the definitions below take C linkage and link against the
  * sweep callers without name mangling. No effect in C. */

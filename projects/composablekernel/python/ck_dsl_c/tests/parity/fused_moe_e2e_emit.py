@@ -22,7 +22,10 @@
 # excluded from the diff here.)
 import sys
 
-from ck_dsl import lower_kernel_to_llvm
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.instances.common.fused_moe_e2e import (
     FusedMoeForwardSpec,
     FusedMoeForward,
@@ -89,7 +92,7 @@ def main() -> int:
         kernel = build_kernel(fwd)
         out.append(f"; === fused_moe_e2e stage: {banner} ===\n")
         if mode == "ll":
-            text = lower_kernel_to_llvm(kernel, arch="gfx950")
+            text = _native_lower(kernel, arch="gfx950")
             out.append(text)
             if not text.endswith("\n"):
                 out.append("\n")

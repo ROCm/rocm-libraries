@@ -64,7 +64,7 @@
 /* spec.conv_spec(): build the wrapped ImplicitGemmConvSpec. The peer owns the
  * returned storage's lifetime (it is value-stable for the build). Returns NULL +
  * sets b's sticky error on failure. */
-/* WS3 C++ build: cross-TU C-ABI peers; forward decls must be extern "C" so the
+/* C++ build: cross-TU C-ABI peers; forward decls must be extern "C" so the
  * references are not mangled. No effect in C. */
 #ifdef __cplusplus
 extern "C" {

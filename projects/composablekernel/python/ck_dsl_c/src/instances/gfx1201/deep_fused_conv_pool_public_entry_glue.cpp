@@ -65,7 +65,7 @@
 
 /* spec.conv_spec(): build the wrapped ImplicitGemmConvSpec from the common spec
  * view. Returns NULL + sets b's sticky error on failure. */
-/* WS3 C++ build: cross-TU C-ABI peers; forward decls must be extern "C". */
+/* C++ build: cross-TU C-ABI peers; forward decls must be extern "C". */
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -775,7 +775,7 @@ ckc_status_t ckc_deep_fused_conv_pool_grid(const ckc_deep_fused_conv_pool_spec_t
  *       pipeline=.., epilogue=epilogue, async_dma=.., unroll_k=..,
  *       acc_epilogue=acc_epilogue)
  * Every other ImplicitGemmConvSpec field keeps its dataclass default. */
-/* WS3 C++ build: cross-TU C-ABI helper (peer entry-glue TUs forward-declare it
+/* C++ build: cross-TU C-ABI helper (peer entry-glue TUs forward-declare it
  * as extern "C"); define with C linkage so the symbol is not mangled. No effect
  * in C. */
 #ifdef __cplusplus

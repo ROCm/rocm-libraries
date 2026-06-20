@@ -256,7 +256,7 @@ class UnifiedAttention2DTiledSpec:
     # cancelled by the occupancy loss. The knob is kept exposed for
     # future workloads (e.g. HD=128 or shapes with different LDS
     # budgets) where the trade-off might flip. See
-    # ``/workspace/probe_blockm32_perf.py`` for the sweep.
+    # the out-of-tree ``probe_blockm32_perf.py`` for the sweep.
     block_m_per_warp: int = 16
     # Migrate the in-place tiled 2D kernel from the old 16x16x32 MFMA
     # geometry to the CK Tile / Triton long-prefill geometry:
@@ -968,9 +968,7 @@ def build_unified_attention_2d_tiled(
     # row r now occupies bytes ``r * (HD*2 + 16)`` so the bank index
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
-    # The conv kernel optimization study at
-    # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-    # analysis/00_CONSOLIDATED_FINDINGS.md`` measured +43% throughput on
+    # An internal conv kernel optimization study measured +43% throughput on
     # MI355X gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
@@ -2602,9 +2600,8 @@ def build_unified_attention_2d_tiled(
         # fit attention's mask + softmax + PV pattern, where the post-RA
         # scheduler's default heuristics already produce good interleave.
         # Consistent with the conv-kernel optimization study finding that
-        # "compiler scheduling hints don't work on gfx950" (see
-        # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-        # analysis/00_CONSOLIDATED_FINDINGS.md``). Leaving them out.
+        # "compiler scheduling hints don't work on gfx950" (per an
+        # internal conv kernel optimization study). Leaving them out.
         if USE_MFMA_32X32:
             if TRANSPOSED_QK_32X32:
                 # Transposed-score orientation: compute S^T = K @ Q^T.

@@ -5,7 +5,7 @@
 # tests/parity/moe_fused_mega_fp8_emit.py -- Python reference emitter for the FP8
 # fused-MoE MEGA-kernel parity harness. Selects one of N sampled spec configs by
 # argv[1], builds FusedMegaKernelSpecFp8, builds via build_moe_fused_mega_gemm_fp8
-# and prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be
+# and prints _native_lower(arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter moe_fused_mega_fp8_emit.c.
 import sys
 
@@ -13,7 +13,11 @@ from ck_dsl.instances.common.moe_fused_mega_fp8 import (
     FusedMegaKernelSpecFp8,
     build_moe_fused_mega_gemm_fp8,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -91,7 +95,7 @@ def main() -> int:
     spec, persistent = _spec(idx)
     kernel = build_moe_fused_mega_gemm_fp8(spec, arch="gfx950", persistent=persistent)
     if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        text = _native_lower(kernel, arch="gfx950")
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))

@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "CkDslContainer.hpp"
+#include "ck_dsl_runtime/engine_freshness.hpp"
 
 namespace {
 
@@ -38,6 +39,18 @@ CkDslHandle::CkDslHandle() {
     size_t n = 0;
     if (const char* p = std::getenv("CK_DSL_KERNEL_LIB_PATH")) n += store_->add_bundle(p);
 
+    // Defense-in-depth: every stamped manifest in the bundle must have been
+    // produced by the same engine build this provider is linked against.
+    // Otherwise the shipped HSACOs/.ll came from a different engine -- a stale
+    // or mixed build that can silently dispatch wrong kernels. Fail loud (unless
+    // CK_DSL_ALLOW_ENGINE_MISMATCH=1). Unstamped (legacy) manifests are skipped.
+    {
+        const std::string bad = ck_dsl::check_bundle_engine_freshness(*store_);
+        if (!bad.empty())
+            HIPDNN_PLUGIN_LOG_WARN("CkDslHandle: engine build-id mismatch for bundle kernel '"
+                                   << bad << "' overridden by CK_DSL_ALLOW_ENGINE_MISMATCH=1");
+    }
+
     dispatcher_ = std::make_unique<ck_dsl::Dispatcher>(*store_);
 
     // Trained-model kernel selection: when CK_DSL_ML_MODEL_DIR is set, rank
@@ -61,10 +74,10 @@ CkDslHandle::CkDslHandle() {
         }
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("CkDslHandle: arch=" << gfx_arch_ << " kernels=" << n << " selection="
-                                                << (ml ? "ml_heuristic" : "firstfit")
-                                                << (ml && ml_heuristic_->has_conv() ? " conv_model=yes"
-                                                                                    : ""));
+    HIPDNN_PLUGIN_LOG_INFO("CkDslHandle: arch="
+                           << gfx_arch_ << " kernels=" << n
+                           << " selection=" << (ml ? "ml_heuristic" : "firstfit")
+                           << (ml && ml_heuristic_->has_conv() ? " conv_model=yes" : ""));
 }
 
 CkDslHandle::~CkDslHandle() = default;

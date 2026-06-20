@@ -260,7 +260,7 @@ follow-up for the 2D kernel itself.
 ## Prefill-2D trace cohort (the d64 / sinks production family)
 
 The scenarios above are the d128 reference set. Real serving traces
-(`/workspace/aiter_unified_attention_*.jsonl`) hit a *different* family:
+(`aiter_unified_attention_*.jsonl`) hit a *different* family:
 **head_size 64, block_size 32, GQA-8 (64 query / 8 KV heads), attention
 sinks, sliding-window (127,0) or full, bf16 (or bf16-Q + fp8-KV)**, with
 chunked prefill across 1..512 sequences. These all route to the 2D path.
@@ -447,10 +447,10 @@ is the open follow-up. On the **low-num-seqs** shapes CK DSL already wins
 Regenerate the cohort numbers + CSV (`prefill2d_bf16_triton_ckdsl_perf.csv`):
 
 ```bash
-export AITER_PATH=/workspace/aiter
+export AITER_PATH=<path/to/aiter>
 PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/gfx950/attention/benchmark_prefill2d_live.py \
-  --shapes /workspace/aiter_unified_attention_2.jsonl --variants prod combo fallback
+  --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
 
 ## JSON report layout

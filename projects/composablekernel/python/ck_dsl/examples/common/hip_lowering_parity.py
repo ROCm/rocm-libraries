@@ -40,6 +40,7 @@ from typing import Callable, Iterable, List, Optional
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "python"))
 
+from ck_dsl.core.arch import ArchTarget  # noqa: E402
 from ck_dsl.core.lower_hip import lower_kernel_to_hip  # noqa: E402
 from ck_dsl.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 from ck_dsl.helpers import QkScaleSpec  # noqa: E402
@@ -218,13 +219,23 @@ def _fmha_common(dtype: str = "f16") -> FmhaCommonSpec:
     )
 
 
-def make_cases(*, include_attention: bool = True) -> List[Case]:
+def make_cases(*, include_attention: bool = True, arch: str = "gfx950") -> List[Case]:
     base = _base_gemm()
     base_tile = _base_tile()
     base_trait = _base_trait()
     convp = _conv_problem()
     common = _fmha_common()
     qks = QkScaleSpec(layout="per_head", stride_batch=4, stride_head=1)
+
+    # Thread the running arch's wavefront width into the wave-size-sensitive
+    # specs (the BlockReduce2d XOR-butterfly + cross-warp fold in reduce2d).
+    # Defaulting to wave_size=64 would emit a 6-stage butterfly with a mask-32
+    # ds_bpermute across lanes that don't exist on a wave32 (RDNA3/3.5/4)
+    # target AND miscount num_warps (block_size//64 = 4 vs the real 8), so on
+    # gfx1151/gfx1201 the cross-warp stage drops half the waves' partials --
+    # this is the reduce2d sum/max drift the multi-arch run hit. Mirrors the
+    # arch-threaded spec construction in ck_dsl/examples/common/ck_tile_parity.py.
+    red_wave = ArchTarget.from_gfx(arch).wave_size
 
     cases: List[Case] = [
         Case(
@@ -260,14 +271,26 @@ def make_cases(*, include_attention: bool = True) -> List[Case]:
             "reduce.sum",
             "small",
             lambda: build_reduce2d(
-                Reduce2DSpec(n_per_block=2048, op="sum", block_size=256, vec=8)
+                Reduce2DSpec(
+                    n_per_block=2048,
+                    op="sum",
+                    block_size=256,
+                    vec=8,
+                    wave_size=red_wave,
+                )
             ),
         ),
         Case(
             "reduce.max",
             "small",
             lambda: build_reduce2d(
-                Reduce2DSpec(n_per_block=2048, op="max", block_size=256, vec=8)
+                Reduce2DSpec(
+                    n_per_block=2048,
+                    op="max",
+                    block_size=256,
+                    vec=8,
+                    wave_size=red_wave,
+                )
             ),
         ),
         Case(
@@ -591,7 +614,13 @@ def make_cases(*, include_attention: bool = True) -> List[Case]:
                 f"reduce.{op}",
                 "small",
                 lambda op=op: build_reduce2d(
-                    Reduce2DSpec(n_per_block=2048, op=op, block_size=256, vec=8)
+                    Reduce2DSpec(
+                        n_per_block=2048,
+                        op=op,
+                        block_size=256,
+                        vec=8,
+                        wave_size=red_wave,
+                    )
                 ),
             )
         )
@@ -601,7 +630,12 @@ def make_cases(*, include_attention: bool = True) -> List[Case]:
             "small",
             lambda: build_reduce2d(
                 Reduce2DSpec(
-                    n_per_block=2048, op="sum", dtype="bf16", block_size=256, vec=8
+                    n_per_block=2048,
+                    op="sum",
+                    dtype="bf16",
+                    block_size=256,
+                    vec=8,
+                    wave_size=red_wave,
                 )
             ),
         )
@@ -1206,8 +1240,14 @@ with tempfile.TemporaryDirectory() as td:
         c_hip,
     )
 
-    # LDS reduction path smoke.
-    red_spec = Reduce2DSpec(n_per_block=2048, op="sum", block_size=256, vec=8)
+    # LDS reduction path smoke. wave_size threaded from the target arch so the
+    # BlockReduce2d butterfly/cross-warp fold matches the hardware wavefront
+    # (wave32 on RDNA, wave64 on CDNA) instead of the default 64.
+    from ck_dsl.core.arch import ArchTarget
+    red_spec = Reduce2DSpec(
+        n_per_block=2048, op="sum", block_size=256, vec=8,
+        wave_size=ArchTarget.from_gfx("{arch}").wave_size,
+    )
     red_kernel = build_reduce2d(red_spec)
     red_llvm, red_hip = make_launchers("reduce.sum", red_kernel, reduce2d_signature(red_spec))
     m = 128
@@ -1274,7 +1314,9 @@ def main() -> int:
     parser.add_argument("--bench-smoke", action="store_true")
     args = parser.parse_args()
 
-    cases = _selected(make_cases(include_attention=not args.no_attention), args.case)
+    cases = _selected(
+        make_cases(include_attention=not args.no_attention, arch=args.arch), args.case
+    )
     if not cases:
         print(f"no cases matched {args.case!r}")
         return 2

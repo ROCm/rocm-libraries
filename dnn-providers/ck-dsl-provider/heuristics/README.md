@@ -95,13 +95,13 @@ Variables used throughout:
 
 | Variable | Example | Description |
 |---|---|---|
-| `REPO` | `/home/AMD/cerb/rocm-libraries` | Absolute path to this repo |
+| `REPO` | `<path/to>/rocm-libraries` | Absolute path to this repo |
 | `HEURISTICS` | `$REPO/dnn-providers/ck-dsl-provider/heuristics` | This directory |
 | `CK_HEURISTICS` | `$REPO/projects/composablekernel/dispatcher/heuristics` | Shared shape generators |
 | `WORK` | `/tmp/ckdsl_retrain` | Writable scratch directory |
 
 ```bash
-REPO=/home/AMD/cerb/rocm-libraries      # adjust to your checkout
+REPO="${REPO:-$(git rev-parse --show-toplevel)}"   # or set to your checkout
 HEURISTICS=$REPO/dnn-providers/ck-dsl-provider/heuristics
 CK_HEURISTICS=$REPO/projects/composablekernel/dispatcher/heuristics
 WORK=/tmp/ckdsl_retrain

@@ -54,7 +54,7 @@ When to use this v1 kernel:
   cheap enough.
 
 The partitioner + reduction helpers (`helpers/streamk.py`) are the
-durable deliverable; this kernel is the smallest end-to-end
+reusable core; this kernel is the smallest end-to-end
 consumer that proves they compose correctly.
 """
 

@@ -61,9 +61,9 @@ points:
      ``void CK_TILE_CONSTANT_ADDRESS_SPACE* gemm_descs_const``); the
      ``ck_dsl.core.ir.PtrType("global")`` path covers this but the
      LLVM-side ``addrspace(4)`` lift needs a small extension to the
-     param attrs. Both items are in the proposal list in the
-     deliverable notes file; the public API and per-group input
-     layout here match what the single-launch kernel will use.
+     param attrs. Both items are future extensions; the public API
+     and per-group input layout here match what the single-launch
+     kernel will use.
 
 Today's launcher therefore is the per-group multi-launch path. The
 public API and per-group input layout match what the single-launch

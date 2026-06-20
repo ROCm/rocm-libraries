@@ -14,7 +14,7 @@
 # whose UnifiedAttentionReduceTiledSpec is derived from the same config
 # (head_size / num_query_heads / num_kv_heads / dtype / num_segments).
 #
-# Each kernel is lowered with lower_kernel_to_llvm(kernel, arch="gfx950") and
+# Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
 import sys
@@ -25,7 +25,11 @@ from ck_dsl.instances.gfx950.attention_tiled_3d import (
     build_unified_attention_3d_tiled,
     build_unified_attention_reduce_tiled,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -103,7 +107,7 @@ def _emit(idx: int) -> str:
 
     seg_spec = UnifiedAttention3DTiledSpec(**cfg)
     seg_kernel = build_unified_attention_3d_tiled(seg_spec, arch="gfx950")
-    seg_ll = lower_kernel_to_llvm(seg_kernel, arch="gfx950")
+    seg_ll = _native_lower(seg_kernel, arch="gfx950")
 
     red_spec = UnifiedAttentionReduceTiledSpec(
         head_size=cfg["head_size"],
@@ -113,7 +117,7 @@ def _emit(idx: int) -> str:
         num_segments=cfg["num_segments"],
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
-    red_ll = lower_kernel_to_llvm(red_kernel, arch="gfx950")
+    red_ll = _native_lower(red_kernel, arch="gfx950")
 
     return seg_ll + red_ll
 

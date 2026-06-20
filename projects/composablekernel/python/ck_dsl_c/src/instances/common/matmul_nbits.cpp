@@ -50,7 +50,7 @@ typedef struct ckc_matmul_nbits_decode_gemv_spec
     ckc_matmul_nbits_scale_wire_dtype_t scale_wire;
 } ckc_matmul_nbits_decode_gemv_spec_t;
 
-/* WS3 C++ build: cross-TU C-ABI helper (defined with C linkage in
+/* C++ build: cross-TU C-ABI helper (defined with C linkage in
  * _matmul_nbits_decode_gemv.c); forward decl must be extern "C". No effect in C. */
 #ifdef __cplusplus
 extern "C" {

@@ -74,6 +74,25 @@ cmake --build "$BUILD_ROOT" -j"$(nproc)" >/dev/null
 [ -f "$ARCHIVE" ] || { echo "FATAL: archive not produced: $ARCHIVE" >&2; exit 1; }
 echo "   archive: $ARCHIVE"
 
+# Freshness/provenance: print the build-id stamped into the archive we just
+# built. This is informational + a sanity print so a stale archive is obvious
+# in the log. Link a tiny probe that calls ckc_build_id(); fall back to strings
+# if the probe cannot be built. The build_id TU is off the emission path, so
+# this does not affect the .ll contract.
+probe_src="$BUILD_ROOT/_build_id_probe.cpp"
+probe_bin="$BUILD_ROOT/_build_id_probe"
+cat > "$probe_src" <<'PROBE'
+extern "C" const char* ckc_build_id(void);
+extern "C" const char* ckc_engine_version(void);
+#include <cstdio>
+int main(){ printf("%s %s\n", ckc_build_id(), ckc_engine_version()); return 0; }
+PROBE
+if c++ -std=c++20 "$probe_src" "$ARCHIVE" -lm -o "$probe_bin" 2>/dev/null; then
+  echo "   build-id: $("$probe_bin")"
+else
+  echo "   build-id: $(strings "$ARCHIVE" | grep -E '^[0-9a-f]{16}$' | head -1 || echo unknown) (via strings)"
+fi
+
 run_gate() {  # mode-label, extra run_diff args...
   local label="$1"; shift
   local out rc

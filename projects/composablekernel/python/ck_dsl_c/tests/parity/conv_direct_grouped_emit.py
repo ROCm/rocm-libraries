@@ -6,7 +6,7 @@
 # direct grouped convolution parity harness. Selects one of N sampled spec
 # configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec, builds the
 # kernel via build_direct_conv_16c / build_direct_conv_4c(arch=<cfg arch>) and
-# prints lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be
+# prints _native_lower(arch=<cfg arch>) to stdout so it can be
 # byte-compared with the C emitter conv_direct_grouped_emit.c.
 import sys
 
@@ -17,7 +17,11 @@ from ck_dsl.instances.common.conv_direct_grouped import (
     build_direct_conv_16c,
     build_direct_conv_4c,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -81,7 +85,7 @@ def main() -> int:
     else:
         kernel = build_direct_conv_4c(spec, arch=arch)
     if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch=arch)
+        text = _native_lower(kernel, arch=arch)
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))

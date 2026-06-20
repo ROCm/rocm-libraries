@@ -101,13 +101,27 @@ endif()
 # LightGBM for the trained-model heuristic (mirrors CK Tile's ML heuristic).
 # Optional: when not found the plugin still builds (FirstFit only) -- but the
 # LGBM_* symbols in ml_heuristic.hpp must resolve, so we link it when present.
+#
+# Discovery is portable: set -DLIGHTGBM_ROOT=<dir> to point at a LightGBM
+# install, or let the build probe the active python's site-packages (the pip
+# `lightgbm` wheel ships lib_lightgbm.so under <site-packages>/lightgbm/lib).
+if(NOT DEFINED LIGHTGBM_ROOT)
+    find_program(_CKDSL_PYTHON NAMES python3 python)
+    if(_CKDSL_PYTHON)
+        execute_process(
+            COMMAND "${_CKDSL_PYTHON}" -c
+                "import os,lightgbm;print(os.path.join(os.path.dirname(lightgbm.__file__),'lib'))"
+            OUTPUT_VARIABLE _LIGHTGBM_PKG_LIB
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+endif()
 find_library(LIGHTGBM_LIB NAMES _lightgbm lightgbm lib_lightgbm
-    HINTS /workspace/.local/lib/python3.12/site-packages/lightgbm/lib
-          ${LIGHTGBM_ROOT}/lib /opt/rocm/lib)
+    HINTS ${LIGHTGBM_ROOT}/lib ${_LIGHTGBM_PKG_LIB} /opt/rocm/lib)
 if(NOT LIGHTGBM_LIB)
-    # Fall back to the explicit path if the NAMES probe misses the lib_ prefix.
+    # Fall back to the explicit filename if the NAMES probe misses the lib_ prefix.
     find_file(LIGHTGBM_LIB lib_lightgbm.so
-        HINTS /workspace/.local/lib/python3.12/site-packages/lightgbm/lib)
+        HINTS ${LIGHTGBM_ROOT}/lib ${_LIGHTGBM_PKG_LIB})
 endif()
 message(STATUS "ck-dsl-provider LightGBM: ${LIGHTGBM_LIB}")
 

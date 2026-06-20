@@ -50,7 +50,7 @@ from typing import Dict, List, Optional
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import lower_kernel_to_llvm
+from ..core.lower_llvm import _lower_kernel_to_llvm_python
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
@@ -170,29 +170,49 @@ def _lower_llvm_via_backend(
 ) -> str:
     """Produce the AMDGPU ``.ll`` text through the selected backend.
 
-    The default (``backend`` unset and ``CK_DSL_BACKEND`` unset, resolving
-    to ``"python"``) calls the native lowerer directly with no behaviour
-    change. ``"cpp"``/``"both"`` route through the C++ engine binding and
-    require the instance-level ``spec``; ``"both"`` additionally asserts
-    the two engines agree before returning the Python result.
+    The default (``backend`` unset and ``CK_DSL_BACKEND`` unset) resolves to
+    the package default backend. Lowering is family-agnostic: it goes through
+    the serialized ``ck.dsl.ir/v1`` artifact of the built ``kernel``, so the
+    instance-level ``spec`` is NOT required for any family.
+
+      - ``"python"`` calls the native lowerer (byte-identical historical path);
+      - ``"cpp"`` serializes ``kernel`` and lowers it through the C++ engine,
+        falling back to the native lowerer (recorded) on engine unavailability
+        or rejection;
+      - ``"both"`` lowers with both and asserts byte-equality.
+
+    ``backend`` overrides the env/default precedence when given. ``spec`` is
+    accepted for backward compatibility but is no longer consulted (the
+    serialized-IR hand-off makes it unnecessary).
     """
-    from ..core.backend import BACKEND_PYTHON, lower_universal_gemm, resolve_backend
+    from ..core.backend import lower_kernel_via_backend, resolve_backend
 
     chosen = resolve_backend(backend)
-    if chosen == BACKEND_PYTHON:
-        # Native path -- byte-identical to the historical default.
-        return lower_kernel_to_llvm(kernel, arch=arch)
+    if backend is not None and chosen != resolve_backend():
+        # An explicit backend= argument was passed that differs from the
+        # resolved default; honour it by lowering against that backend
+        # directly rather than the chokepoint's env-resolved default.
+        import os
 
-    if spec is None:
-        raise ValueError(
-            f"compile_kernel(backend={chosen!r}) needs the instance-level spec "
-            "to route through the C++ engine (it lowers from the spec, not the "
-            "post-IR KernelDef); pass spec=<UniversalGemmSpec>."
-        )
+        prev = os.environ.get("CK_DSL_BACKEND")
+        os.environ["CK_DSL_BACKEND"] = chosen
+        try:
+            return lower_kernel_via_backend(
+                kernel,
+                arch=arch,
+                python_lower=_lower_kernel_to_llvm_python,
+            )
+        finally:
+            if prev is None:
+                os.environ.pop("CK_DSL_BACKEND", None)
+            else:
+                os.environ["CK_DSL_BACKEND"] = prev
 
-    _arch = arch or "gfx950"
-    result = lower_universal_gemm(spec, arch=_arch, backend=chosen)
-    return result.llvm_text
+    return lower_kernel_via_backend(
+        kernel,
+        arch=arch,
+        python_lower=_lower_kernel_to_llvm_python,
+    )
 
 
 def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:

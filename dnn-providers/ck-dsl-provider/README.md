@@ -56,7 +56,7 @@ ninja -C /var/tmp/ckdsl_rt
 # 2) the hipDNN plugin
 cmake -S . -B /var/tmp/ckdsl_prov -G Ninja \
   -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DHIPDNN_ROOT=/workspace/rocm-lib-copy/projects/hipdnn
+  -DHIPDNN_ROOT="${HIPDNN_ROOT:-<repo>/projects/hipdnn}"
 ninja -C /var/tmp/ckdsl_prov          # -> libck_dsl_provider_plugin.so
 ```
 

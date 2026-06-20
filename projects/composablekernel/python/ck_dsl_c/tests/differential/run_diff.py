@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# run_diff.py -- WS2 differential harness spine (RFC dual_backend_unification).
+# run_diff.py -- differential harness spine for the dual-backend path.
 #
 # Drives EVERY tests/parity/<family>_emit.{c,py} pair through a differential
 # layer and sha256-compares the C engine against the Python reference across all
@@ -99,6 +99,44 @@ def sh(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def archive_build_id(archive: Path) -> str:
+    """Build-id stamped into the engine archive (link a 2-line probe that calls
+    ckc_build_id). Returns '<unavailable: ...>' if the probe cannot be built so
+    this stays purely informational and never fails the run."""
+    probe_c = TMP / "_build_id_probe.cpp"
+    probe_bin = TMP / "_build_id_probe"
+    probe_c.write_text(
+        'extern "C" const char* ckc_build_id(void);\n'
+        'extern "C" const char* ckc_engine_version(void);\n'
+        "#include <cstdio>\n"
+        'int main(){printf("%s %s\\n", ckc_build_id(), ckc_engine_version());'
+        "return 0;}\n"
+    )
+    try:
+        cc = subprocess.run(
+            [
+                "c++",
+                "-std=c++20",
+                str(probe_c),
+                str(archive),
+                "-lm",
+                "-o",
+                str(probe_bin),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+        )
+        if cc.returncode != 0:
+            return "<unavailable: link failed>"
+        run = subprocess.run(
+            [str(probe_bin)], capture_output=True, text=True, timeout=30
+        )
+        return run.stdout.strip() or "<unavailable: empty>"
+    except Exception as e:  # noqa: BLE001
+        return f"<unavailable: {e}>"
+
+
 def find_families():
     fams = []
     for c in sorted(PARITY.glob("*_emit.c")):
@@ -143,7 +181,7 @@ def run_c(binpath, idx, mode):
 
 # Reference-side Python root: defaults to this branch's tree, but --pyroot can
 # point it at another tree (e.g. the merge-target ck-dsl-prototype) to measure
-# C++(this branch) vs Python(target) drift for WS11. SHIM_DIR (optional) is
+# C++(this branch) vs Python(target) drift. SHIM_DIR (optional) is
 # prepended so modules the target lacks (ir_serialize/verify) import as stubs.
 PY_REF_ROOT = PYROOT
 SHIM_DIR = None
@@ -310,7 +348,7 @@ def main():
         "--pyroot",
         default="",
         help="override the reference-side Python root (e.g. the merge-target "
-        "tree) to measure C++(this branch) vs Python(other tree) drift (WS11)",
+        "tree) to measure C++(this branch) vs Python(other tree) drift",
     )
     ap.add_argument(
         "--shim",
@@ -338,7 +376,7 @@ def main():
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
         PY_REF_ROOT = Path(args.pyroot)
-        print(f"[WS11] reference Python root overridden -> {PY_REF_ROOT}")
+        print(f"[diff] reference Python root overridden -> {PY_REF_ROOT}")
     if args.shim:
         SHIM_DIR = Path(args.shim)
 
@@ -354,6 +392,7 @@ def main():
         fams = [f for f in fams if any(s in f for s in subs)]
 
     print(f"mode={args.mode}  families={len(fams)}  archive={archive}")
+    print(f"engine build-id: {archive_build_id(archive)}")
     results = []
     for name in fams:
         r = run_family(name, archive, args.mode, canonical=args.canonical)

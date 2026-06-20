@@ -1277,11 +1277,21 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
 
     if(L->kernel)
     {
-        int64_t wpe = 0;
-        if(ckc_attr_get_int(&L->kernel->attrs, "waves_per_eu", &wpe))
+        /* waves_per_eu mirrors the Python lowerer: a bare int N emits "N,N",
+         * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
+         * -- emits "lo,hi". */
+        const ckc_attr_value_t* wpe_v = ckc_attr_get(&L->kernel->attrs, "waves_per_eu");
+        if(wpe_v && wpe_v->kind == CKC_ATTR_INT)
         {
-            ckc_strbuf_appendf(
-                out, " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"", (long long)wpe, (long long)wpe);
+            long long n = (long long)wpe_v->u.i;
+            ckc_strbuf_appendf(out, " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"", n, n);
+        }
+        else if(wpe_v && wpe_v->kind == CKC_ATTR_INT_LIST && wpe_v->u.ilist.count == 2)
+        {
+            ckc_strbuf_appendf(out,
+                               " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"",
+                               (long long)wpe_v->u.ilist.ints[0],
+                               (long long)wpe_v->u.ilist.ints[1]);
         }
         const ckc_attr_value_t* agpr = ckc_attr_get(&L->kernel->attrs, "agpr_alloc");
         if(agpr)

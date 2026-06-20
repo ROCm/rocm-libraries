@@ -31,7 +31,7 @@ If no kernel script is provided, ask the user.
 **Check MEMORY.md for the user's current remote access configuration.** If not found, ask the user for:
 - SSH host and user
 - Docker container name (if applicable)
-- CK DSL install path on remote (default: `/workspace/rocm-libraries-streaming/projects/composablekernel/python`)
+- CK DSL install path on remote (e.g. `<repo>/projects/composablekernel/python`)
 
 SSH command pattern (adjust per environment):
 ```bash
@@ -357,7 +357,7 @@ For profiling, ensure the kernel is actually launched (not just compiled).
 """CK DSL Conv2D for profiling with rocprofv3."""
 import sys
 from pathlib import Path
-sys.path.insert(0, '/workspace/rocm-libraries-streaming/projects/composablekernel/python')
+sys.path.insert(0, '<repo>/projects/composablekernel/python')
 
 from ck_dsl.helpers import compile_kernel, make_conv_manifest, write_artifact
 from ck_dsl.instances.conv_implicit_gemm import (

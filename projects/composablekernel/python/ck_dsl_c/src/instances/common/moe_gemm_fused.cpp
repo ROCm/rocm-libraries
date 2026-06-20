@@ -20,7 +20,7 @@
  * this module needs for TensorView / TileWindow. The two cannot coexist in one
  * TU (see instance_permute_nd.c for the same constraint), so we forward-declare
  * just the two pure magic-division entry points we use. */
-/* WS3 C++ build: these are cross-TU C-ABI helpers (defined with C linkage in
+/* C++ build: these are cross-TU C-ABI helpers (defined with C linkage in
  * helpers/transforms.c); the forward decls must be extern "C" so C++ does not
  * mangle the references. No effect in C. */
 #ifdef __cplusplus

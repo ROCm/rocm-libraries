@@ -92,7 +92,7 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
 
     /* The 15 entries, in the exact Python order. Helper macros keep the
      * table declaration readable; rank/elem_bytes are derived from dtype. */
-#define WS1(nm, d0, dk, eb)         \
+#define WSPEC1(nm, d0, dk, eb)      \
     do                              \
     {                               \
         table[n].name       = (nm); \
@@ -103,7 +103,7 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
         table[n].elem_bytes = (eb); \
         n++;                        \
     } while(0)
-#define WS2(nm, d0, d1, dk, eb)     \
+#define WSPEC2(nm, d0, d1, dk, eb)  \
     do                              \
     {                               \
         table[n].name       = (nm); \
@@ -116,24 +116,24 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
     } while(0)
 
     n = 0;
-    WS2("TopkIds", T, K, CKC_WS_I32, 4);
-    WS2("TopkWeights", T, K, CKC_WS_F32, 4);
-    WS1("Hist", E, CKC_WS_I32, 4);
-    WS1("Counter", E, CKC_WS_I32, 4);
-    WS1("Offsets", E, CKC_WS_I32, 4);
-    WS1("Counts", E, CKC_WS_I32, 4);
-    WS1("SortedTokenIds", TP, CKC_WS_I32, 4);
-    WS1("SortedTopkIds", TP, CKC_WS_I32, 4);
-    WS1("SortedWeights", TP, CKC_WS_F32, 4);
-    WS2("GroupedInput", TP, H, CKC_WS_ACT, act_bytes);
-    WS2("GateOut", TP, I, CKC_WS_ACT, act_bytes);
-    WS2("UpOut", TP, I, CKC_WS_ACT, act_bytes);
-    WS2("Hidden", TP, I, CKC_WS_ACT, act_bytes);
-    WS2("DownOut", TP, H, CKC_WS_ACT, act_bytes);
-    WS2("Y_f32", T, H, CKC_WS_F32, 4);
+    WSPEC2("TopkIds", T, K, CKC_WS_I32, 4);
+    WSPEC2("TopkWeights", T, K, CKC_WS_F32, 4);
+    WSPEC1("Hist", E, CKC_WS_I32, 4);
+    WSPEC1("Counter", E, CKC_WS_I32, 4);
+    WSPEC1("Offsets", E, CKC_WS_I32, 4);
+    WSPEC1("Counts", E, CKC_WS_I32, 4);
+    WSPEC1("SortedTokenIds", TP, CKC_WS_I32, 4);
+    WSPEC1("SortedTopkIds", TP, CKC_WS_I32, 4);
+    WSPEC1("SortedWeights", TP, CKC_WS_F32, 4);
+    WSPEC2("GroupedInput", TP, H, CKC_WS_ACT, act_bytes);
+    WSPEC2("GateOut", TP, I, CKC_WS_ACT, act_bytes);
+    WSPEC2("UpOut", TP, I, CKC_WS_ACT, act_bytes);
+    WSPEC2("Hidden", TP, I, CKC_WS_ACT, act_bytes);
+    WSPEC2("DownOut", TP, H, CKC_WS_ACT, act_bytes);
+    WSPEC2("Y_f32", T, H, CKC_WS_F32, 4);
 
-#undef WS1
-#undef WS2
+#undef WSPEC1
+#undef WSPEC2
 
     /* n is now CKC_FMOE_NUM_WORKSPACE_SPECS (15). Copy up to cap. */
     for(i = 0; i < n && i < cap; ++i)

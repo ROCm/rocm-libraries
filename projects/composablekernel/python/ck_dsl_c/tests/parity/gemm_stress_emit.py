@@ -4,7 +4,7 @@
 #
 # tests/parity/gemm_stress_emit.py -- WIDE adversarial Python reference emitter
 # for the universal-GEMM parity harness. Mirrors gemm_stress_emit.c config table
-# 1:1. Selects a config by argv[1] and prints lower_kernel_to_llvm(gfx950).
+# 1:1. Selects a config by argv[1] and prints _native_lower(gfx950).
 import sys
 
 from ck_dsl.instances.common.gemm_universal import (
@@ -14,7 +14,11 @@ from ck_dsl.instances.common.gemm_universal import (
     DataSpec,
     build_universal_gemm,
 )
-from ck_dsl import lower_kernel_to_llvm
+
+try:
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+except ImportError:  # pragma: no cover - older reference tree
+    from ck_dsl import lower_kernel_to_llvm as _native_lower
 from ck_dsl.core.ir_serialize import serialize
 from ck_dsl.core.verify import verify
 
@@ -322,7 +326,7 @@ def main() -> int:
     spec = specs[idx]
     kernel = build_universal_gemm(spec, arch="gfx950")
     if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
+        text = _native_lower(kernel, arch="gfx950")
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
