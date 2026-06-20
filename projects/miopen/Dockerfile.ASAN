@@ -152,7 +152,7 @@ RUN . /opt/venv/bin/activate && \
         --amdgpu-family ${AMDGPU_FAMILIES} \
         --amdgpu-targets ${AMDGPU_TARGETS} \
         --blas \
-        --no-miopen \
+        --miopen \
         --rand \
         --tests \
         --output-dir ${ROCM_PATH}
