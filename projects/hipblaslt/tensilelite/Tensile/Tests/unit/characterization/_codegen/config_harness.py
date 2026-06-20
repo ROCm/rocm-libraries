@@ -44,6 +44,7 @@ import functools
 # canonicalize/warm-state emit, global-state isolation, and per-kernel rocisa
 # init. Everything below only adds the *config -> solutions* front end.
 import codegen_harness as _ch
+from char_paths import resolve_tensile_path
 
 
 # Default target architecture. gfx942 (IsaVersion(9, 4, 2)) supports the MFMA
@@ -106,7 +107,7 @@ def _load_config(config_path):
     """Read a Tensile config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
     from Tensile import LibraryIO
 
-    return LibraryIO.read(str(config_path))
+    return LibraryIO.read(str(resolve_tensile_path(config_path)))
 
 
 def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_solutions=None):
