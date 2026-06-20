@@ -1,0 +1,152 @@
+Agent 3 final review: existing tests value
+
+Scope reviewed:
+- Branch: users/alvasile/ring_buffer
+- Diff scope: git diff origin/develop...HEAD -- .
+- Focus: existing branch tests that overclaim, add little value, couple too tightly
+  to implementation, or use weak/misleading assertions.
+
+Caveat:
+- This was a static review of the current checkout and branch diff. I did not run
+  the test binaries. Many of the DataInitialization regression tests are
+  GPU-backed and would likely skip in this sandbox when no ROCm-capable device is
+  present.
+
+Findings:
+
+1. MEDIUM - Bad-bounds copy test treats a self-copy as proof of a valid-data copy.
+
+   Test:
+   - tests/DataInitializationCopyPlan_test.cpp:279-324
+
+   Production context:
+   - client/src/DataInitialization.cpp:821-823
+   - client/src/DataInitialization.cpp:836-868
+
+   `DataInitializationCopyPlan.BadBoundsPlanSubmitsSentinelFillAndValidCopy`
+   claims to prove that the sentinel-filled bad-bounds buffer is followed by a
+   valid-region copy. The assertion identifies the valid-region copy with
+   `call.dst == call.src` at tests/DataInitializationCopyPlan_test.cpp:311-315.
+   That is not evidence that valid input data was copied. It is evidence of a
+   self-copy/no-op-shaped submission.
+
+   This is especially misleading because `copyTensorVoidThroughEngine()` currently
+   ignores its `src` argument and derives `srcBytes` from `dst` at
+   client/src/DataInitialization.cpp:821-823. So the test can pass while the
+   "valid copy" never reads from the valid source buffer after the sentinel fill.
+   The test validates submission shape, not the behavior advertised by its name.
+
+   Better shape:
+   - Assert that the second copy source is derived from the valid buffer, not the
+     destination.
+   - Or execute the operation on a small tensor with distinguishable sentinel and
+     valid data, then read back enough bytes to prove the valid region was
+     overwritten from the correct source.
+
+2. MEDIUM - Ring no-validation output-reset test constructs an unreachable state.
+
+   Test:
+   - tests/DataInitializationOutputResetPlan_test.cpp:352-380
+
+   Production context:
+   - client/include/RingPolicy.hpp:38-40
+   - client/include/RingPolicy.hpp:63-79
+   - client/src/DataInitialization.cpp:1521-1527
+
+   `DataInitializationOutputResetPlan.RingWarmNoValidationPlansNoReset` is named
+   like it covers a no-validation ring path, but it starts from
+   `buildRingArgs({{32, 32, 32}}, 1)` and then manually mutates protected
+   internals: `m_warmOutputResetRequired`, `m_gpuInit`, `m_hasAltBuffers`,
+   `m_altSlotsReady`, `m_problemDependentData`, and `m_curBoundsCheck`
+   (tests/DataInitializationOutputResetPlan_test.cpp:358-369).
+
+   In production, no-validation/no-print inputs fail `hasValidationDriver()`, and
+   `chooseRingPolicy()` returns the disabled one-slot policy. The constructor
+   derives `m_ringPolicy`, `m_warmOutputResetRequired`, and the controller from
+   that policy at client/src/DataInitialization.cpp:1521-1527. The test bypasses
+   that lifecycle and freezes a private planner branch that is not reachable from
+   the public configuration it claims to model.
+
+   Better shape:
+   - If the branch is reachable, build it through real args and public calls.
+   - If it is intentionally unreachable, remove the test or rename it as a
+     private planner-unit test and avoid using it as evidence for client behavior.
+
+3. LOW - `InputPlanIsPureAndMatchesViewMetadata` contains vacuous purity checks.
+
+   Test:
+   - tests/DataInitializationCopyPlan_test.cpp:363-451
+
+   The test name says it checks that the input plan is pure, but after generating
+   and executing the plan at lines 376-377 it creates local vectors, copies them,
+   and immediately compares each vector to its own copy at lines 382-396. Nothing
+   occurs between those snapshots, so those assertions cannot catch mutation from
+   `planInputCopies()` or `executeTensorCopyPlan()`.
+
+   The useful part is the later `copyInputs()` call and comparison against
+   expected plan results. The purity section should either be removed or moved to
+   a real before/after check around the function whose purity matters.
+
+4. LOW - `AutoIcacheRotationLoadsExtraCopiesOnce` does not exercise "once".
+
+   Tests:
+   - tests/ClientRunScheduler_test.cpp:980-1025
+
+   Production context:
+   - client/src/ClientRunScheduler.cpp:44-89
+   - client/src/ClientRunScheduler.cpp:147
+
+   `ClientRunScheduler.AutoIcacheRotationComputesExtraCopyCount` and
+   `ClientRunScheduler.AutoIcacheRotationLoadsExtraCopiesOnce` both run the
+   default single-problem / single-flush scheduler path and assert one load of
+   three extra copies. The second test never creates a second opportunity to call
+   `maybeLoadAutoIcacheRotation()`, so it cannot detect repeated extra-copy loads.
+
+   Better shape:
+   - Use two problems, two `icacheFlushArgs`, or another repeated scheduler path
+     and assert the load count stays at one.
+
+5. LOW - Several scheduler tests are overcoupled to exact event traces.
+
+   Tests:
+   - tests/ClientRunScheduler_test.cpp:705-730
+   - tests/ClientRunScheduler_test.cpp:775-797
+   - tests/ClientRunScheduler_test.cpp:896-908
+
+   These tests assert the entire `harness.events` vector. The material behaviors
+   are narrower:
+   - listener counts must be re-read after `preSolution()` / `postWarmup()`;
+   - benchmark paths must not submit the no-benchmark reset hook;
+   - rejected solutions must skip solve, launch, wait, and reset.
+
+   Whole-trace assertions make the tests fragile under harmless callback or
+   reporting refactors. The nearby focused assertions already carry most of the
+   value; the full vectors add coupling more than signal.
+
+6. LOW - Some reset tests prove stream ordering but only weakly prove reset data.
+
+   Tests:
+   - tests/DataInitializationAsyncReset_test.cpp:223-258
+   - tests/DataInitializationOutputResetPlan_test.cpp:416-452
+
+   These tests are useful for stream-gating behavior, but the data assertions are
+   weak for reset correctness. They set a whole destination region, then verify
+   only `readFirstByte(...)` after the reset. A wrong copy size, partial reset, or
+   tensor coverage mistake could still pass if the first byte is correct. The
+   warm-ring test also checks only D's pointer/data path.
+
+   Better shape:
+   - Assert at least first, middle, and last bytes or use a tiny typed tensor with
+     multiple distinguishable elements.
+   - Add a precondition that the expected byte differs from the poison byte, so a
+     no-op cannot pass by coincidence.
+
+Tests with comparatively strong signal:
+- `BatchPointerReset` contains useful problem-switch and stale-alt-slot checks
+  that inspect batch-pointer strides across real GPU prepare paths.
+- `DataInitializationSlotStorage.ValidationOnlyConfigurationUsesThreeSlots`
+  has useful pointer-identity and copy-engine ordering assertions for the ring
+  slot lifecycle.
+- `RingPolicy` and `RingSlotController` are reasonable HIP-free units, although
+  they mainly protect the extracted policy/controller contracts rather than the
+  end-to-end production path.

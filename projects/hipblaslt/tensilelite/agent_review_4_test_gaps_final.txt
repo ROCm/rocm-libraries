@@ -1,0 +1,106 @@
+Agent 4 final review: test gaps
+Scope: `git diff origin/develop...HEAD -- .`
+Branch: `users/alvasile/ring_buffer`
+
+Summary:
+The branch adds a substantial amount of host-side coverage, especially around `RingPolicy`,
+`RingSlotController`, copy planning, slot storage, and several negative ring-eligibility cases.
+The remaining gaps are mostly production-path and lifecycle gaps where the tests validate seams in
+isolation but do not yet prove the composed client behavior.
+
+Findings:
+
+1. High: no production-composition test for the scheduler, listener stack, and DataInitialization.
+
+`client/main.cpp` now wires the extracted scheduler through production adapters and real listener
+objects at `client/main.cpp:1253-1286`. The scheduler tests use fake collaborators instead:
+`RecordingDataCoordinator` in `tests/ClientRunScheduler_test.cpp:287-326` and a fully synthetic
+`SchedulerHarness` in `tests/ClientRunScheduler_test.cpp:501-548`.
+
+That is useful unit coverage, but it does not prove that parsed client options, `RingPolicy`,
+`DataInitialization`, `ReferenceValidator`, `BenchmarkTimer`, and `MetaRunListener` compose into the
+same no-benchmark validation behavior. The no-benchmark reset test at
+`tests/ClientRunScheduler_test.cpp:562-609` verifies that the scheduler calls `primeNextInputSlot()`
+twice on a fake object; it does not prove the real `DataInitialization` instance accepts those calls,
+uses the ring, and exposes the prepared slot through the real listener-driven flow.
+
+Recommended coverage:
+Add a thin integration-style scheduler/client test that uses real `MetaRunListener`,
+`DataInitialization`, and `ReferenceValidator` with a fake or minimal `RunKernelLauncher`/solution
+source. The important assertion is not another order-only event log; it should prove that a
+validation-only, no-benchmark run primes and consumes ring slots through the real data coordinator.
+
+2. High: grouped-GEMM ring fast path is not exercised.
+
+The new fast path in `DataInitialization::prepareGPUInputs(ContractionProblem const*)` bypasses typed
+dispatch once the ring has an available prepared slot (`client/include/DataInitialization.hpp:223-238`).
+The comments explicitly include grouped GEMM in that contract. Grouped preparation and ring priming
+then reduce the problem to `gemms[0]` after only an element-type invariant assertion:
+`client/include/DataInitialization.hpp:351-364`, `client/include/DataInitialization.hpp:1291-1316`,
+`client/src/DataInitialization.cpp:4395-4407`, and `client/src/DataInitialization.cpp:4476-4481`.
+
+I did not find a test that drives a `ContractionProblemGroupedGemm` through warm slot priming,
+advance, `waitForPreparedSlot()`, and validation. The helper can set `groupedGemm`
+(`tests/include/DataInitializationTestUtils.hpp:48-50`,
+`tests/include/DataInitializationTestUtils.hpp:163-165`), but current test references only exercise
+grouped offsets/planning support, not the grouped ring lifecycle.
+
+Recommended coverage:
+Add a GPU-backed grouped-GEMM ring test with at least two groups and non-identical offsets/sizes, then
+cycle through a prepared warm slot and validate pointer identity plus result/readback for every group.
+
+3. Medium: `use-user-args` scheduler path is untested.
+
+`ClientRunScheduler` has a separate branch for user-argument kernels:
+`solveTensileGPU()` is called instead of `solve()` at `client/src/ClientRunScheduler.cpp:186-196`,
+and device user args are released at `client/src/ClientRunScheduler.cpp:322-325`. The test fake
+implements both hooks at `tests/ClientRunScheduler_test.cpp:357-387`, but I found no scheduler test
+setting `ClientRunSchedulerConfig::useUserArgs = true`.
+
+This leaves the extracted scheduler's user-args call path, release ordering, and exception behavior
+uncovered. That matters because the extraction moved this branch out of `main.cpp`, and the normal
+`solve()` tests do not exercise the `dUA`/`dUAHost` lifetime.
+
+Recommended coverage:
+Add success and failure tests with `useUserArgs = true`: one that asserts `solveTensileGPU()` and
+`relaseDeviceUserArgs()` ordering, and one that documents expected release behavior when solve or
+launch fails after user args have been allocated.
+
+4. Medium: solution-dependent MX refresh is only predicate-tested, not lifecycle-tested.
+
+`DataInitialization::beginSolution()` now performs solution-dependent MX FP4/FP8 regeneration,
+copies refreshed valid inputs back to GPU, and syncs CPU current buffers at
+`client/include/DataInitialization.hpp:262-318`. The test coverage I found stops at predicate level:
+`tests/BatchPointerReset_test.cpp:451-473` verifies `shouldRefreshMXForSolution()` after GPU inputs
+are prepared, but no test calls `beginSolution()` or `preSolution()` and verifies the full refresh.
+
+This is a lifecycle gap because `ReferenceValidator::preSolution()` reruns the CPU reference for MX
+problems after the data refresh and relies on the CPU current buffers being updated
+(`client/src/ReferenceValidator.cpp:127-149`).
+
+Recommended coverage:
+Add an MX-enabled test that calls `DataInitialization::preSolution()` after `prepareGPUInputs()` and
+asserts that MX data regeneration, `copyValidToGPUBuffer()`, D2D `copyInputs()`, and CPU-current
+sync all occurred. If the generator dependency makes this conditional, gate it the same way existing
+MX tests are gated.
+
+5. Medium: scheduler loop coverage is single-problem and mostly single-pass.
+
+Production scheduling iterates benchmark runs, icache-flush modes, and
+`problemIdx = firstProblemIdx..lastProblemIdx`, while resetting prepared slots before each problem
+(`client/src/ClientRunScheduler.cpp:91-123`). The test harness defaults to exactly one problem at
+`tests/ClientRunScheduler_test.cpp:501-548`; I did not find tests overriding the problem count,
+using a non-zero `firstProblemIdx`, or exercising multiple benchmark passes.
+
+Lower-level tests cover manual problem switches in `DataInitialization`, but not scheduler-driven
+multi-problem cleanup, progress reporting, and ring cancellation. That leaves off-by-one range
+behavior and cross-problem state cleanup mostly unproven at the scheduler layer.
+
+Recommended coverage:
+Add scheduler tests for a non-zero problem start, multiple problems, and two benchmark passes. Assert
+that `resetPreparedSlotsForProblem()` precedes each problem's first `prepareGPUInputs()`, progress
+strings are correct, and no primed slot from one problem is consumed by the next.
+
+Caveat:
+I did not run the build or GPU-backed tests for this review. Findings are based on static inspection
+of the current checkout and the branch diff against `origin/develop`.

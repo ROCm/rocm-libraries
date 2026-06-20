@@ -1,0 +1,82 @@
+Agent 2 overdesign/simplification review - live notes
+
+Scope:
+- Branch: users/alvasile/ring_buffer
+- Diff reviewed: git diff origin/develop...HEAD -- .
+- Focus: overcomplication, over-design, and opportunities to preserve behavior with fewer concepts/code paths.
+
+Status:
+- Complete.
+- Initial diff shape is large: client data initialization, ring slot policy/controller helpers, scheduler extraction, copy/layout planning helpers, and many tests.
+- I am treating the existing untracked agent_review_2_overdesign_simplification.txt as outside my ownership and leaving it untouched.
+
+Potential focus areas under inspection:
+- Whether the new ring-buffer abstractions split a single data-flow concern across too many single-purpose types.
+- Whether async reset/copy planning code adds a full strategy layer where narrower local helpers would preserve behavior.
+- Whether the scheduler extraction introduces policy/config duplication around counts and timing decisions.
+- Whether test scaffolding mirrors production implementation too closely, making future simplification harder.
+
+Findings:
+1. Medium - `DataInitialization` now keeps two mutable representations of the
+   same ring-slot state, which is more mechanism than the feature needs.
+   `MemoryInput` owns `current`, `batch`, and per-slot `buffers[]`/`batchBufs[]`
+   in `client/include/DataInitialization.hpp:916-979`; the new
+   `GpuInputSlotSet` separately owns per-slot `ptrs`, `batchPtrs`, and
+   `cachedInputs` in `client/include/GpuInputSlotSet.hpp:16-33` and
+   `client/include/GpuInputSlotSet.hpp:35-74`; `DataInitialization` then has to
+   reconcile them in `activateRingSlot()` by walking every pristine tensor and
+   also replacing `m_gpuPtrs`, `m_gpuBatchPtrs`, and `m_cachedGPUInputs`
+   (`client/src/DataInitialization.cpp:4338-4350`). This creates a standing
+   invariant that two independent containers must agree on the active slot and
+   on which vectors describe that slot. A simpler design would keep one
+   slot-owned representation, plus an active slot index, and derive the legacy
+   `m_gpuPtrs` view only at the boundary where `ProblemInputs` are built.
+
+2. Medium - The copy/reset path builds a local plan/executor/apply framework,
+   but production immediately executes every plan and discards it. The model
+   lives in `client/include/DataInitialization.hpp:1005-1030`, the two planners
+   duplicate pointer-selection logic in
+   `client/src/DataInitialization.cpp:936-1149`, execution is another full pass
+   in `client/src/DataInitialization.cpp:1216-1287`, and result application is a
+   third pass in `client/src/DataInitialization.cpp:1289-1387`. The production
+   wrappers are just plan -> execute -> apply in
+   `client/src/DataInitialization.cpp:1389-1415` and
+   `client/src/DataInitialization.cpp:3210-3243`. This is a lot of internal API
+   surface for code that could stay as one direct tensor loop with a small
+   "destination slot" parameter and an "outputs only" flag. The current shape is
+   also test-led: `tests/DataInitializationCopyPlan_test.cpp:33-50` exposes the
+   protected planner/executor methods directly, which tends to freeze the
+   implementation structure instead of only locking behavior.
+
+3. Low - `OutputResetPlan` carries explanatory metadata that production never
+   uses. `reason`, `requiresPristineGpuCopy`, `usesExistingSlotContents`,
+   `targetIsRingSlot`, and `targetSlot` are defined at
+   `client/include/DataInitialization.hpp:1040-1056` and assigned in
+   `client/src/DataInitialization.cpp:1152-1214`, but the production call sites
+   branch only on `action` (`client/src/DataInitialization.cpp:4214-4239` and
+   `client/src/DataInitialization.cpp:4452-4471`). The remaining fields are
+   asserted by `tests/DataInitializationOutputResetPlan_test.cpp:129-139` and
+   later expectations, not used to drive behavior. If the fields are useful as
+   comments, they should be comments; if they are intended as policy, production
+   should consume them. As written, they expand the domain model without buying
+   a runtime decision.
+
+4. Medium - The `ClientRunScheduler` extraction became a small OO framework
+   even though there is one production caller. The scheduler header defines
+   four virtual dependency interfaces plus callback/config/dependency structs
+   (`client/include/ClientRunScheduler.hpp:25-43`,
+   `client/include/ClientRunScheduler.hpp:45-100`, and
+   `client/include/ClientRunScheduler.hpp:102-122`). `main.cpp` then adds four
+   adapter classes whose bodies only forward to `MetaResultReporter`,
+   `DataInitialization`, `SolutionIterator`, and `SolutionAdapter`
+   (`client/main.cpp:894-1037`), instantiates them at
+   `client/main.cpp:1253-1256`, and passes raw pointers through
+   `ClientRunSchedulerDependencies` at `client/main.cpp:1274-1284`.
+   The tests reproduce the same interface graph with recording fakes
+   (`tests/ClientRunScheduler_test.cpp:250-332` and
+   `tests/ClientRunScheduler_test.cpp:407-553`). This is a lot of indirection
+   for one loop extraction. A smaller design would keep the scheduler as a
+   concrete helper or free function taking the existing concrete collaborators
+   plus a small callbacks struct for HIP-only side effects; the pure policies
+   in `ClientRunPolicies` can stay independently testable without requiring
+   every collaborator to become a new virtual interface.

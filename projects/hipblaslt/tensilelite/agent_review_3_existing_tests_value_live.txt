@@ -1,0 +1,112 @@
+Agent 3 live review: existing tests value
+
+Scope: current branch changes against origin/develop using:
+  git diff origin/develop...HEAD -- .
+
+Status:
+- Started review on branch users/alvasile/ring_buffer.
+- Confirmed concurrent untracked report from another agent exists:
+  agent_review_2_overdesign_simplification.txt
+- I will only write this live file and agent_review_3_existing_tests_value_final.txt.
+
+Initial diff inventory:
+- New/changed test files include:
+  tests/BatchPointerLayout_test.cpp
+  tests/BatchPointerReset_test.cpp
+  tests/ClientRunPolicies_test.cpp
+  tests/ClientRunScheduler_test.cpp
+  tests/DataInit_test.cpp
+  tests/DataInitializationAltAllocation_test.cpp
+  tests/DataInitializationAsyncReset_test.cpp
+  tests/DataInitializationCopyPlan_test.cpp
+  tests/DataInitializationOutputResetPlan_test.cpp
+  tests/DataInitializationSlotStorage_test.cpp
+  tests/DataInitializationTestUtils_test.cpp
+  tests/GpuInputSlotSet_test.cpp
+  tests/HipStreamGuard_test.cpp
+  tests/InputLayoutPolicy_test.cpp
+  tests/MXScalePadding_test.cpp
+  tests/RingPolicy_test.cpp
+  tests/RingSlotController_test.cpp
+  Tensile/Tests/unit/test_analyze_timing.py
+
+Findings will be added below as concrete issues are verified.
+
+Findings verified so far:
+
+1. MEDIUM - `DataInitializationCopyPlan.BadBoundsPlanSubmitsSentinelFillAndValidCopy`
+   does not prove that the valid data is copied from the valid source.
+   - Test: tests/DataInitializationCopyPlan_test.cpp:279-324
+   - Implementation context: client/src/DataInitialization.cpp:821-823 and
+     client/src/DataInitialization.cpp:836-868
+   - The test calls the second copy a "valid region" when `call.dst == call.src`
+     (tests/DataInitializationCopyPlan_test.cpp:311-315). That is exactly the
+     no-op/self-copy shape. The implementation currently ignores the `src`
+     argument in `copyTensorVoidThroughEngine()` and derives `srcBytes` from
+     `dst` instead (client/src/DataInitialization.cpp:821-823). As a result,
+     this test would pass even if the valid-region overwrite never reads the
+     valid input buffer after the sentinel fill. It validates a submission shape,
+     not the behavior claimed by the test name.
+
+2. MEDIUM - `DataInitializationOutputResetPlan.RingWarmNoValidationPlansNoReset`
+   constructs an unreachable state by mutating protected internals, so it does
+   not test a production no-validation ring configuration.
+   - Test: tests/DataInitializationOutputResetPlan_test.cpp:352-380
+   - Policy context: client/include/RingPolicy.hpp:38-40 and
+     client/include/RingPolicy.hpp:63-79
+   - DataInitialization constructor context:
+     client/src/DataInitialization.cpp:1521-1527
+   - The test starts from `buildRingArgs({{32, 32, 32}}, 1)` and then forces
+     `m_warmOutputResetRequired=false`, `m_gpuInit=true`, `m_hasAltBuffers=true`,
+     `m_altSlotsReady=true`, and `m_curBoundsCheck=Disable` through a test
+     subclass (tests/DataInitializationOutputResetPlan_test.cpp:358-369). In
+     production, no-validation/no-print inputs fail `hasValidationDriver()`, so
+     `chooseRingPolicy()` returns the disabled one-slot policy. This mostly
+     freezes a private planner branch instead of validating a reachable client
+     behavior.
+
+3. LOW - `DataInitializationCopyPlan.InputPlanIsPureAndMatchesViewMetadata`
+   has vacuous "pure" assertions.
+   - Test: tests/DataInitializationCopyPlan_test.cpp:363-451
+   - The test builds the plan and executes it at lines 376-377, then allocates
+     local vectors and immediately compares them to copies of themselves at
+     lines 382-396. Nothing happened between those snapshots, so those equality
+     checks cannot catch impurity in `planInputCopies()` or
+     `executeTensorCopyPlan()`. The useful part starts later when `copyInputs()`
+     mutates the vectors and is compared to expected plan results.
+
+4. LOW - `ClientRunScheduler.AutoIcacheRotationLoadsExtraCopiesOnce` is
+   effectively a duplicate of the extra-copy-count test and does not exercise
+   "once".
+   - Test: tests/ClientRunScheduler_test.cpp:980-1025
+   - Scheduler context: client/src/ClientRunScheduler.cpp:44-89 and
+     client/src/ClientRunScheduler.cpp:147
+   - `AutoIcacheRotationComputesExtraCopyCount` and
+     `AutoIcacheRotationLoadsExtraCopiesOnce` both run the default single
+     problem / single icache-flush pass and assert one load of 3 extra copies.
+     The "once" test never drives a second problem, second flush setting, or
+     second scheduler pass, so it cannot catch repeated calls to
+     `maybeLoadAutoIcacheRotation()`.
+
+5. LOW - Several scheduler tests overcouple to full event traces rather than
+   the behavior they need to protect.
+   - Tests: tests/ClientRunScheduler_test.cpp:705-730,
+     tests/ClientRunScheduler_test.cpp:775-797, and
+     tests/ClientRunScheduler_test.cpp:896-908
+   - Exact whole-vector assertions make these tests sensitive to incidental
+     callback/reporting order changes, while the material invariants are much
+     narrower: listener counts must be re-read after `preSolution()` /
+     `postWarmup()`, benchmark runs must not submit the no-benchmark reset hook,
+     and rejected solutions must skip solve/launch/reset. The tests already have
+     some focused assertions nearby; the full traces add brittleness more than
+     signal.
+
+6. LOW - Some output-reset data assertions are weak.
+   - Tests: tests/DataInitializationAsyncReset_test.cpp:223-258 and
+     tests/DataInitializationOutputResetPlan_test.cpp:416-452
+   - These tests are useful for stream-ordering/gating, but they set or reset a
+     whole region and then inspect only the first byte. That leaves room for a
+     wrong copy size, partial reset, or incomplete tensor coverage to pass.
+
+Final report written:
+- agent_review_3_existing_tests_value_final.txt

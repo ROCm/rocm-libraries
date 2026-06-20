@@ -1,0 +1,20 @@
+Agent 1 architecture/testability review live notes
+
+Scope:
+- Branch: users/alvasile/ring_buffer
+- Diff command: git diff origin/develop...HEAD -- .
+- Ownership: this file and agent_review_1_architecture_testability_final.txt only.
+
+Status:
+- Review complete.
+- Found unrelated untracked agent_review_2_overdesign_simplification.txt and left it untouched.
+- Wrote final report to agent_review_1_architecture_testability_final.txt.
+
+Final findings:
+- High: client/src/DataInitialization.cpp:821-824 introduces copyTensorVoidThroughEngine() with srcBytes derived from dst instead of src, and tests/DataInitializationCopyPlan_test.cpp:309-315 codifies that bad behavior by expecting call.dst == call.src for the valid-region copy.
+- Medium: tests/CMakeLists.txt:20-35 comments out CuCount_test.cpp from the existing tensilelite-tests target without an explained replacement.
+- Medium: client/include/DataInitialization.hpp:223-237 consumes prepared ring slots with only m_ringPolicy.allowed && m_ring.hasAvailableSlot() in release builds; ringEligible() is debug-only at that point, and problem-signature freshness is not checked before advanceBuffer().
+- Low: plan/executor extraction is incomplete for testability. Copy/reset planning still requires constructing HIP-allocating DataInitialization and exposing protected internals through test subclasses.
+
+Validation caveat:
+- Static review only; no C++ test binaries were run in this pass.
