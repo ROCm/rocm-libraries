@@ -168,6 +168,19 @@ ConvDepthwiseFwd2D::GetSolution(const ExecutionContext& ctx,
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
+    // Guard: only request a solution for a kernel_id that this build's CK instance factory
+    // actually contains. A SystemDB entry can carry a depthwise kernel_id tuned against a
+    // different CK kernel set (e.g. another commit); without this check the unrecognized id
+    // reaches ck_impl_depthwise_fwd_get_solution, which throws
+    // "No matching kernel found for kernel_id" (CK_IMPL_STATUS_INVALID_VALUE) and aborts the
+    // process instead of failing gracefully. IsArgsSupported performs the same factory lookup
+    // gracefully, matching IsValidPerformanceConfig() / PerformanceConfig::IsValid().
+    const auto data_type = problem.GetInDataType();
+    if(config.kernel_id.empty() ||
+       !loader.IsArgsSupported(
+           CKSolverType::DepthwiseFwd, problem, config.kernel_id, data_type, false))
+        return ConvSolution{miopenStatusInternalError};
+
     return loader.GetSolution(CKSolverType::DepthwiseFwd, ctx, problem, config.kernel_id, false);
 #else
     std::ignore = ctx;
