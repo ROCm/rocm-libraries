@@ -428,7 +428,8 @@ namespace TensileLite
 
         std::string ToString() const;
 
-        friend std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
+        friend TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&           stream,
+                                                               const TensorDescriptor& t);
 
     private:
         std::string         m_name;
