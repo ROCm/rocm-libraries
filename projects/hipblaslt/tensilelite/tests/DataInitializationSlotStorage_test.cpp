@@ -359,6 +359,111 @@ TEST(DataInitializationSlotStorage,
     EXPECT_FALSE(sawWaitForCopyDone);
 }
 
+TEST(DataInitializationSlotStorage,
+     ZeroEnqueueNoValidationConfigurationDoesNotClaimWarmRingBehavior)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = TensileLite::testing::buildRingArgs({{32, 32, 32}}, 0);
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x8642)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    auto* initialCi = dynamic_cast<ContractionInputs*>(inputs.get());
+    ASSERT_NE(initialCi, nullptr);
+
+    EXPECT_FALSE(dataInit.ringPolicyAllowed());
+    EXPECT_FALSE(dataInit.ringPolicyAllocatesAltBuffers());
+    EXPECT_EQ(dataInit.activeBufferCount(), 1u);
+    EXPECT_FALSE(dataInit.hasAltBuffers());
+    EXPECT_FALSE(dataInit.warmOutputResetRequired());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_FALSE(dataInit.altSlotsReady());
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+    EXPECT_FALSE(dataInit.nextPrimeSlot().has_value());
+    EXPECT_TRUE(dataInit.allAltGpuInputsCleared());
+
+    auto const& slot0State = dataInit.slotState(0);
+    ASSERT_TRUE(slot0State.populated());
+    ASSERT_NE(slot0State.cachedInputs, nullptr);
+
+    auto const slot0Inputs = slot0State.cachedInputs;
+    auto const slot0A      = slot0State.ptrs.at(ContractionProblemGemm::TENSOR::A);
+    auto const slot0D      = slot0State.ptrs.at(ContractionProblemGemm::TENSOR::D);
+    auto const slot0BatchA = slot0State.batchPtrs.at(ContractionProblemGemm::TENSOR::A);
+    auto const slot0BatchD = slot0State.batchPtrs.at(ContractionProblemGemm::TENSOR::D);
+
+    ASSERT_NE(slot0A, nullptr);
+    ASSERT_NE(slot0D, nullptr);
+    ASSERT_NE(slot0BatchA, nullptr);
+    ASSERT_NE(slot0BatchD, nullptr);
+    EXPECT_EQ(inputs, slot0Inputs);
+    EXPECT_EQ(initialCi->a, slot0A);
+    EXPECT_EQ(initialCi->d, slot0D);
+    EXPECT_EQ(initialCi->batchA, slot0BatchA);
+    EXPECT_EQ(initialCi->batchD, slot0BatchD);
+
+    engine->clear();
+
+    dataInit.primeNextInputSlot(&problem);
+
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+    EXPECT_FALSE(dataInit.altSlotsReady());
+    EXPECT_FALSE(dataInit.warmOutputResetRequired());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_FALSE(dataInit.nextPrimeSlot().has_value());
+    EXPECT_TRUE(dataInit.allAltGpuInputsCleared());
+
+    auto secondInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(secondInputs, nullptr);
+    auto* secondCi = dynamic_cast<ContractionInputs*>(secondInputs.get());
+    ASSERT_NE(secondCi, nullptr);
+    EXPECT_EQ(secondInputs, slot0Inputs);
+    EXPECT_EQ(secondCi->a, slot0A);
+    EXPECT_EQ(secondCi->d, slot0D);
+    EXPECT_EQ(secondCi->batchA, slot0BatchA);
+    EXPECT_EQ(secondCi->batchD, slot0BatchD);
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+    EXPECT_FALSE(dataInit.altSlotsReady());
+    EXPECT_FALSE(dataInit.warmOutputResetRequired());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_TRUE(dataInit.allAltGpuInputsCleared());
+
+    dataInit.waitForPreparedSlot(nullptr);
+
+    bool sawWarmRingHook = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type == RecordingCopyEngine::CallType::RecordCopyDone
+           || call.type == RecordingCopyEngine::CallType::WaitForCopyDone)
+        {
+            sawWarmRingHook = true;
+            break;
+        }
+    }
+
+    EXPECT_FALSE(sawWarmRingHook);
+}
+
 TEST(DataInitializationSlotStorage, FastPathReturnsDistinctValidAltSlot)
 {
     auto hipDevice = hasHipDevice();
