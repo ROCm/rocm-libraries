@@ -60,6 +60,8 @@ import sys
 import py
 import pytest
 
+from Tensile.Diagnostics import Diagnostic
+
 from artifact_helpers import artifact_name_for_config
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,12 +74,17 @@ def _call_helper_in_subprocess(
     output_dir: str,
     artifact_dir: str,
     tensile_args: list[str],
+    phase: str,
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
     Each phase runs in a clean interpreter so Tensile's global state from the
     build phase cannot bleed into the run phase (uninstalled checkout case).
     PYTHONPATH is forwarded from sys.path so the child can import Tensile.
+
+    On a nonzero child exit a structured diagnostic is emitted naming the phase,
+    config, and child exit code, then a CalledProcessError with a short command
+    is raised so pytest fails without dumping the full argv.
     """
     script = (
         f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "
@@ -85,11 +92,22 @@ def _call_helper_in_subprocess(
         f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
-        check=True,
         env=env,
     )
+    if result.returncode != 0:
+        Diagnostic(Diagnostic.FATAL, "test-config-phase-failed") \
+            .field("phase", phase) \
+            .field("config", config) \
+            .field("helper", f"{module}.{func}") \
+            .field("exit_code", result.returncode) \
+            .next("rerun this config alone; search the output above for "
+                  "'[tensilelite:diag]' from the client and the helper") \
+            .emit()
+        raise subprocess.CalledProcessError(
+            result.returncode, f"{module}.{func}({config})"
+        )
 
 
 def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
@@ -105,10 +123,10 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
-    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args, "build")
     shutil.rmtree(output_dir)
     try:
-        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args, "run")
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(artifact_path)

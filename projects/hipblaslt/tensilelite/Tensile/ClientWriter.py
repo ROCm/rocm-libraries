@@ -40,6 +40,7 @@ import rocisa
 
 from . import ROOT_PATH
 from . import LibraryIO
+from .Diagnostics import Diagnostic
 from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from Tensile.Common.Architectures import isaToGfx
@@ -226,6 +227,12 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
     subprocess.run(args, check=True)
   except (subprocess.CalledProcessError, OSError) as e:
     printWarning("ClientWriter Benchmark Process exited with error: {}".format(e))
+    Diagnostic(Diagnostic.ERROR, "client-process-failed") \
+        .field("error", type(e).__name__) \
+        .field("msg", e) \
+        .next("search the client output above for '[tensilelite:diag]' lines "
+              "(config, gpu, phase, solution, error)") \
+        .emit()
 
 
 def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
@@ -272,6 +279,11 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
+    Diagnostic(Diagnostic.ERROR, "client-exit-nonzero") \
+        .field("exit_code", process.returncode) \
+        .next("search the client output above for '[tensilelite:diag]' lines "
+              "(config, gpu, phase, solution, error)") \
+        .emit()
 
   return process.returncode
 

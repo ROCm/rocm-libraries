@@ -50,6 +50,7 @@ import py
 import pytest
 
 from Tensile import Tensile
+from Tensile.Diagnostics import Diagnostic
 
 from artifact_helpers import artifact_name_for_config, compress_output
 
@@ -59,9 +60,20 @@ def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[s
 
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
+    On failure a structured diagnostic is emitted before the exception propagates.
     """
-    Tensile.Tensile([config, output_dir, "--build-only", *tensile_args])
-    compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
+    try:
+        Tensile.Tensile([config, output_dir, "--build-only", *tensile_args])
+        compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
+    except Exception as e:
+        Diagnostic(Diagnostic.FATAL, "build-failed") \
+            .field("config", config) \
+            .field("output_dir", output_dir) \
+            .field("error", type(e).__name__) \
+            .field("msg", e) \
+            .next("rerun: Tensile <config> <output_dir> --build-only") \
+            .emit()
+        raise
 
 
 def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
