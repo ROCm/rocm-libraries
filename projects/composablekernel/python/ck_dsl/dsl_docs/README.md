@@ -11,6 +11,28 @@ This folder is a deep, code-adjacent guide to `ck_dsl`, the Python authoring lay
 > to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
 > stack (older ROCm needs `CK_DSL_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
 
+## Two engines at a glance
+
+ck_dsl has two interchangeable engines (Python authoring + a peer C++ runtime
+engine) that emit byte-identical LLVM IR. Select the lowering back end with
+`CK_DSL_BACKEND` (default `cpp`, auto-falls back to Python if the C++ extension
+isn't built; `both` = run both and assert identical).
+
+```mermaid
+flowchart LR
+  spec["spec"] --> b["Python builder"] --> ir[("KernelDef IR")]
+  ir -->|"backend=python"| pl["Python lowerer"]
+  ir -->|"backend=cpp: serialize → ckc_ir_parse"| cl["C++ lowerer"]
+  pl --> ll[(".ll")]
+  cl --> ll
+  ll --> hsaco["comgr → HSACO"]
+  pl -. "byte-identical (gated)" .- cl
+```
+
+Full picture (the front-end/back-end matrix, every interconnect, how to switch,
+and the hipDNN provider's Fast / JIT / IR-artifact / C-JIT modes):
+[`architecture/engines_and_switching.md`](./architecture/engines_and_switching.md).
+
 The implementation tree is:
 
 ```text
