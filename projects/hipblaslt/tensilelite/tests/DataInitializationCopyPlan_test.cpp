@@ -15,6 +15,7 @@
 
 #include <Tensile/Utils.hpp>
 
+#include "BatchPointerLayout.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationTestUtils.hpp"
@@ -42,6 +43,9 @@ namespace
         using DataInitialization::executeTensorCopyPlan;
         using DataInitialization::planInputCopies;
         using DataInitialization::planOutputResetCopyOps;
+        using DataInitialization::copySwizzledToGPUBuffer;
+        using DataInitialization::copyValidToGPUBuffer;
+        using DataInitialization::initializeGPUBatchedInputs;
         using DataInitialization::resetOutput;
 
         std::vector<void*>& gpuPtrs()
@@ -518,6 +522,86 @@ TEST(DataInitializationCopyPlan, InputGuardPageBackSwizzledTensorsUseCustomPaddi
     }
 }
 
+TEST(DataInitializationCopyPlan,
+     InputGuardPageBackSwizzledBatchPointersUsePolicyGeometry)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(17, 19, 23, 4, true, true);
+    auto args    = makeGuardPageBackArgs({{17, 19, 4, 23}}, true, true);
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x2468)));
+
+    ClientProblemFactory       factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+
+    dataInit.prepareGPUInputs(problem);
+    engine->clear();
+
+    dataInit.initializeGPUBatchedInputs(problem);
+
+    InputLayoutPolicy const policy;
+    auto const aPlan = policy.planTensorSwizzle(problem, ContractionProblemGemm::TENSOR::A);
+    auto const bPlan = policy.planTensorSwizzle(problem, ContractionProblemGemm::TENSOR::B);
+    auto const& aUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem);
+    auto const& bUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem);
+
+    auto const expectedADst = static_cast<uint8_t*>(aUnit.gpuInput.current.get())
+                              + multiplyElementSize(
+                                  aUnit.maxElements - aPlan.allocatedElements,
+                                  problem.tensors().at(ContractionProblemGemm::TENSOR::A)
+                                      .elementBytes());
+    auto const expectedBDst = static_cast<uint8_t*>(bUnit.gpuInput.current.get())
+                              + multiplyElementSize(
+                                  bUnit.maxElements - bPlan.allocatedElements,
+                                  problem.tensors().at(ContractionProblemGemm::TENSOR::B)
+                                      .elementBytes());
+    auto const aLayout = makeBatchPointerLayout(
+        problem.a(),
+        batchPointerTensorBatchIndices(problem.batchIndices(), ContractionProblemGemm::TENSOR::A));
+    auto const bLayout = makeBatchPointerLayout(
+        problem.b(),
+        batchPointerTensorBatchIndices(problem.batchIndices(), ContractionProblemGemm::TENSOR::B));
+
+    auto stagingMatches = [](RecordingCopyEngine::Call const& call,
+                             void*                            expectedBatchArray,
+                             uint8_t*                         expectedBase,
+                             BatchPointerLayout const&         layout) {
+        if(call.dst != expectedBatchArray)
+            return false;
+        if(call.bytes != layout.count() * sizeof(void*))
+            return false;
+
+        auto const* staged = static_cast<void* const*>(call.src);
+        for(size_t idx = 0; idx < layout.count(); ++idx)
+        {
+            if(staged[idx] != expectedBase + layout.offsets[idx])
+                return false;
+        }
+        return true;
+    };
+
+    bool sawA = false;
+    bool sawB = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::Copy)
+            continue;
+        if(call.copyKind != hipMemcpyHostToDevice)
+            continue;
+        sawA |= stagingMatches(call, aUnit.gpuInput.batch.get(), expectedADst, aLayout);
+        sawB |= stagingMatches(call, bUnit.gpuInput.batch.get(), expectedBDst, bLayout);
+    }
+
+    EXPECT_TRUE(sawA);
+    EXPECT_TRUE(sawB);
+}
+
 TEST(DataInitializationCopyPlan, OutputResetPlanOnlyTargetsOutputs)
 {
     auto hipDevice = hasHipDevice();
@@ -705,4 +789,64 @@ TEST(DataInitializationCopyPlan, OutputResetPlanUsesDefaultAndExplicitGpuSlots)
         EXPECT_NE(opExplicit.dst, opDefault.dst);
         EXPECT_NE(opExplicit.batchPtr, opDefault.batchPtr);
     }
+}
+
+TEST(DataInitializationInputLayoutPolicy, CopyValidSkipsPolicySpecializedTensors)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makeBatchProblem(32, 24, 16, 4, /*swizzleTensorA=*/true);
+    auto args    = makeBaseArgs({{32, 24, 4, 16}});
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x5678)));
+
+    ClientProblemFactory       factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+
+    dataInit.prepareCPUInputs(problem);
+    engine->clear();
+
+    dataInit.copyValidToGPUBuffer(problem, /*callerOwnsCopySync=*/false);
+
+    auto const& aUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem);
+    auto const& bUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem);
+    auto const& cUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::C, problem);
+    auto const& dUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::D, problem);
+
+    bool sawA = false;
+    bool sawB = false;
+    bool sawC = false;
+    bool sawD = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::Copy)
+            continue;
+        sawA |= call.dst == aUnit.gpuInput.valid.get();
+        sawB |= call.dst == bUnit.gpuInput.valid.get();
+        sawC |= call.dst == cUnit.gpuInput.valid.get();
+        sawD |= call.dst == dUnit.gpuInput.valid.get();
+    }
+
+    EXPECT_FALSE(sawA);
+    EXPECT_TRUE(sawB);
+    EXPECT_TRUE(sawC);
+    EXPECT_TRUE(sawD);
+
+    engine->clear();
+    dataInit.copySwizzledToGPUBuffer(problem);
+
+    bool sawSwizzledA = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::Copy)
+            continue;
+        sawSwizzledA |= call.dst == aUnit.gpuInput.valid.get();
+    }
+
+    EXPECT_TRUE(sawSwizzledA);
 }

@@ -176,41 +176,10 @@ namespace TensileLite
             Entries  entries;
         };
 
-        using BitWidth        = uint8_t;
-        using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        using SwizzleCacheKey = std::tuple<size_t, size_t, size_t>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
-
-        BitWidth toBitWidth(rocisa::DataType datatype)
-        {
-            switch(datatype)
-            {
-            case rocisa::DataType::Double:
-                return 64;
-            case rocisa::DataType::XFloat32:
-            case rocisa::DataType::Float:
-                return 32;
-            case rocisa::DataType::Half:
-            case rocisa::DataType::BFloat16:
-                return 16;
-            case rocisa::DataType::Int8:
-            case rocisa::DataType::Float8_fnuz:
-            case rocisa::DataType::BFloat8_fnuz:
-            case rocisa::DataType::Float8BFloat8_fnuz:
-            case rocisa::DataType::BFloat8Float8_fnuz:
-            case rocisa::DataType::Float8:
-            case rocisa::DataType::BFloat8:
-            case rocisa::DataType::Float8BFloat8:
-            case rocisa::DataType::BFloat8Float8:
-            case rocisa::DataType::E8:
-            case rocisa::DataType::E5M3:
-                return 8;
-            default:
-                throw std::runtime_error("unsupported datatype");
-            }
-        }
 
         std::string ToString(InitMode mode)
         {
@@ -414,51 +383,6 @@ namespace TensileLite
             }
 
             return stream;
-        }
-
-        void calculateKforSwizzling(rocisa::DataType datatype,
-                                    size_t&          MiK,
-                                    size_t&          MiKv,
-                                    size_t&          PackK)
-        {
-            switch(datatype)
-            {
-            case rocisa::DataType::Float:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::Double:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::XFloat32:
-                MiK  = 8;
-                MiKv = 2;
-                break;
-            case rocisa::DataType::Half:
-            case rocisa::DataType::BFloat16:
-                MiK  = 16;
-                MiKv = 4;
-                break;
-            case rocisa::DataType::Int8:
-            case rocisa::DataType::Float8_fnuz:
-            case rocisa::DataType::BFloat8_fnuz:
-            case rocisa::DataType::Float8BFloat8_fnuz:
-            case rocisa::DataType::BFloat8Float8_fnuz:
-            case rocisa::DataType::Float8:
-            case rocisa::DataType::BFloat8:
-            case rocisa::DataType::Float8BFloat8:
-            case rocisa::DataType::BFloat8Float8:
-            case rocisa::DataType::E8:
-            case rocisa::DataType::E5M3:
-                MiK  = 32;
-                MiKv = 8;
-                break;
-            default:
-                throw std::runtime_error("unsupported datatype for swizzling");
-            }
-
-            PackK = 16 / MiKv / rocisa::GetElementSize(datatype);
         }
 
         template <typename T>
@@ -1063,21 +987,7 @@ namespace TensileLite
                 }
             };
 
-            auto guardBackPadding = [&](TensorDescriptor const& desc) -> ptrdiff_t {
-                size_t MiM_N = 16;
-                size_t MiK   = 0;
-                size_t MiKv  = 0;
-                size_t PackK = 0;
-                calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                auto const k        = desc.sizes()[0];
-                auto const m_n      = desc.sizes()[1];
-                auto const b        = desc.sizes()[2];
-                auto const swizzleK = MiK * PackK;
-                auto const paddedMN = (m_n + MiM_N - 1) / MiM_N * MiM_N;
-                auto const paddedK  = (k + swizzleK - 1) / swizzleK * swizzleK;
-                return static_cast<ptrdiff_t>(paddedMN * paddedK * b
-                                              - desc.totalAllocatedElements());
-            };
+            InputLayoutPolicy const layoutPolicy;
 
             for(size_t i = 0; i < m_vdata.size(); ++i)
             {
@@ -1103,10 +1013,11 @@ namespace TensileLite
                 {
                     op.planKind = TensorCopyPlanKind::GuardBack;
                     selectPointers(op, p, /*useBad=*/false);
-                    if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
-                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
+                    auto const swizzlePlan = layoutPolicy.planTensorSwizzle(problem, i);
+                    if(swizzlePlan.enabled)
                     {
-                        op.customPadding = guardBackPadding(desc);
+                        op.customPadding = static_cast<ptrdiff_t>(
+                            swizzlePlan.allocatedElements - desc.totalAllocatedElements());
                     }
                 }
                 else
@@ -1243,12 +1154,11 @@ namespace TensileLite
         {
             OutputResetPlan plan;
 
-            bool const needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
-            bool const needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+            InputLayoutPolicy const layoutPolicy;
             bool const warmReuseAllowed = m_gpuInit
                                           && m_curBoundsCheck == BoundsCheckMode::Disable
-                                          && !m_problemDependentData && !needSwizzle
-                                          && !needMXSwizzle;
+                                          && !m_problemDependentData
+                                          && !layoutPolicy.hasSpecialInputLayout(problem);
 
             if(!warmReuseAllowed)
             {
@@ -1566,32 +1476,6 @@ namespace TensileLite
             return stream;
         }
 
-        size_t getSwizzledTensorNumAllocatedElements(const TensorDescriptor& desc,
-                                                     size_t                  miM_N,
-                                                     size_t                  miK,
-                                                     size_t                  packK)
-        {
-            // TODO: currently [0][1] = k, (m or n) is based on TN, need to make this generic in the future
-            const auto k         = desc.sizes()[0];
-            const auto m_n       = desc.sizes()[1];
-            const auto b         = desc.sizes()[2];
-            const auto swizzleK  = miK * packK;
-            const auto paddedM_N = (m_n + miM_N - 1) / miM_N * miM_N;
-            const auto paddedK   = (k + swizzleK - 1) / swizzleK * swizzleK;
-            return paddedM_N * paddedK * b;
-        }
-
-        size_t getSwizzledMXTensorNumAllocatedElements(const TensorDescriptor& desc,
-                                                       size_t                  dimk,
-                                                       bool                    unrollMajor)
-        {
-            const auto k    = unrollMajor ? desc.sizes()[0] : desc.sizes()[1];
-            const auto m_n  = unrollMajor ? desc.sizes()[1] : desc.sizes()[0];
-            const auto b    = desc.sizes()[2];
-            const auto padk = (k + dimk - 1) / dimk * dimk;
-            return padk * m_n * b;
-        }
-
         double DataInitialization::GetRepresentativeBetaValue(po::variables_map const& args)
         {
             auto argValue = args["init-beta"].as<int>();
@@ -1670,6 +1554,7 @@ namespace TensileLite
 
             // Get tensor info from problem factory.
             // TODO: Let ContractionProblemGroupedGemm use the same API as ContractionProblemGemm if possible.
+            InputLayoutPolicy const layoutPolicy;
             {
                 auto const& p = problemFactory.problems()[0];
                 if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
@@ -1706,35 +1591,8 @@ namespace TensileLite
                         auto& pristine = m_vdata[i].pristine[dataType];
                         pristine.initDescriptor.resize(1);
 
-                        auto numAllocatedElements = problem.tensors()[i].totalAllocatedElements();
-                        auto numAllocatedBytes    = problem.tensors()[i].totalAllocatedBytes();
-
-                        if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
-                           || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
-                        {
-                            //TODO: support more swizzle types,
-                            //      currently, if A then it means MiM = 16, if B then it means MiN = 16
-                            size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(dataType, MiK, MiKv, PackK);
-                            numAllocatedElements = getSwizzledTensorNumAllocatedElements(
-                                problem.tensors()[i], MiM_N, MiK, PackK);
-                            numAllocatedBytes = multiplyElementSize(
-                                numAllocatedElements, rocisa::GetElementSize(dataType));
-                        }
-                        if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA() != 0)
-                        {
-                            bool unrollMajor = (problem.freeIndicesA()[0].i != 0);
-                            size_t MX = problem.mxBlockA();
-                            size_t dimk = 128 / MX;
-                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
-                        }
-                        else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB() != 0)
-                        {
-                            bool unrollMajor = (problem.freeIndicesB()[0].i != 0);
-                            size_t MX = problem.mxBlockB();
-                            size_t dimk = 128 / MX;
-                            numAllocatedElements = getSwizzledMXTensorNumAllocatedElements(problem.tensors()[i], dimk, unrollMajor);
-                        }
+                        auto const numAllocatedElements
+                            = layoutPolicy.plannedAllocatedElements(problem, i);
 
                         pristine.maxElements = std::max(pristine.maxElements, numAllocatedElements);
 
@@ -2472,6 +2330,7 @@ namespace TensileLite
             size_t                        stagingBufferSlot,
             std::optional<size_t>         gpuTargetSlot)
         {
+            InputLayoutPolicy const layoutPolicy;
             auto const& batchIdxs = problem.batchIndices();
             auto selectDataBuffer = [&](auto const& input) -> std::shared_ptr<void> const& {
                 if(gpuTargetSlot)
@@ -2507,18 +2366,10 @@ namespace TensileLite
                 {
                     padding = pUnit.maxElements - tensor.totalAllocatedElements();
 
-                    if((problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
-                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B))
+                    auto const swizzlePlan = layoutPolicy.planTensorSwizzle(problem, i);
+                    if(swizzlePlan.enabled)
                     {
-                        //TODO: support more swizzle types,
-                        //      currently, if A then it means MiM = 16, if B then it means MiN = 16
-                        size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        calculateKforSwizzling(tensor.dataType(), MiK, MiKv, PackK);
-                        padding = pUnit.maxElements
-                                  - getSwizzledTensorNumAllocatedElements(tensor,
-                                                                           MiM_N,
-                                                                           MiK,
-                                                                           PackK);
+                        padding = pUnit.maxElements - swizzlePlan.allocatedElements;
                     }
                 }
                 padding = multiplyElementSize(
@@ -2713,15 +2564,10 @@ namespace TensileLite
 
         void DataInitialization::initializeCPUInputs(ContractionProblemGemm const& problem)
         {
-            // Only the gfx950 subtile MX kernels need the mxDataGenerator (DGen) seeding
-            // of A/B and pre-swizzled E8 scales. Architectures that read canonical scales
-            // (e.g. gfx1250) must use the same plain initArray path develop uses, so the
-            // bytes the kernel sees are identical to the bytes the reference reads. We
-            // gate on m_mxScaleFormat > 0 because that is the user-visible signal that
-            // they opted into the subtile / pre-swizzle layout.
-            bool useMXGenerator = isMXProblemExceptF6(problem) && m_mxScaleFormat > 0;
-            if(useMXGenerator)
-                initializeMXData(problem);
+            InputLayoutPolicy const layoutPolicy;
+            auto const mxPlan = layoutPolicy.planMxInitialization(problem, inputLayoutContext(nullptr));
+            if(mxPlan.useGenerator)
+                initializeMXData(problem, mxPlan);
 
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
@@ -2730,10 +2576,7 @@ namespace TensileLite
                    or i == ContractionProblemGemm::TENSOR::METADATA)
                     continue;
 
-                if(useMXGenerator && (i == ContractionProblemGemm::TENSOR::A
-                                      || i == ContractionProblemGemm::TENSOR::B
-                                      || i == ContractionProblemGemm::TENSOR::MXSA
-                                      || i == ContractionProblemGemm::TENSOR::MXSB))
+                if(layoutPolicy.shouldSkipDefaultInitTensor(i, mxPlan))
                     continue;
 
                 if(m_problemDependentData)
@@ -2843,7 +2686,8 @@ namespace TensileLite
             std::memset(buffer + compactRow, 0x00, padTail);
         }
 
-        void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
+        void DataInitialization::initializeMXData(ContractionProblemGemm const& problem,
+                                                  MxInitializationPlan const&  plan)
         {
             // Initializes A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
             // can safely skip them. For MX-FP4 / MX-FP8 / MX-BFloat8 sides we drive
@@ -2871,52 +2715,12 @@ namespace TensileLite
             m_mxPreswizzledA = false;
             m_mxPreswizzledB = false;
 
-            // Compute preSwizzle parameters from the solution's matrix instruction to rearrange
-            // the scale tensor into the GPU kernel's expected memory layout
-            std::vector<size_t> preSwizzleA, preTileA, preSwizzleB, preTileB;
+            auto const& preSwizzleA = plan.a.preSwizzle;
+            auto const& preTileA    = plan.a.preTile;
+            auto const& preSwizzleB = plan.b.preSwizzle;
+            auto const& preTileB    = plan.b.preTile;
 
-            if(m_mxScaleFormat > 0 && m_currentSolution != nullptr)
-            {
-                auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
-                size_t           MiK           = static_cast<size_t>(mi[2]);
-                constexpr size_t swizzleTileMN = 32; // 2 SIMDs * 16 lanes per wave for MN access
-                constexpr size_t tileK         = 256 / swizzleTileMN; // scale blocks per wave in K
-
-                if(MiK > 0)
-                {
-                    if(problem.mxBlockA() > 0 && MiK % problem.mxBlockA() == 0)
-                    {
-                        // Scale tensor dimensions from setMXScaleA are already padded
-                        // (K/mxBlock to multiple of 8, M to multiple of 32)
-                        auto const& mxsaSizes = problem.mxsa().sizes();
-                        size_t scaleRowsA = mxsaSizes[0];
-                        size_t scaleColsA = mxsaSizes[1];
-                        if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
-                        {
-                            size_t subTileK = MiK / problem.mxBlockA();
-                            preSwizzleA     = {swizzleTileMN, tileK, subTileK};
-                            preTileA        = {tileK, swizzleTileMN};
-                        }
-                    }
-
-                    if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
-                    {
-                        // Scale tensor dimensions from setMXScaleB are already padded
-                        // (K/mxBlock to multiple of 8, N to multiple of 32)
-                        auto const& mxsbSizes = problem.mxsb().sizes();
-                        size_t scaleRowsB = mxsbSizes[0];
-                        size_t scaleColsB = mxsbSizes[1];
-                        if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
-                        {
-                            size_t subTileK = MiK / problem.mxBlockB();
-                            preSwizzleB     = {swizzleTileMN, tileK, subTileK};
-                            preTileB        = {tileK, swizzleTileMN};
-                        }
-                    }
-                }
-            }
-
-            if(isMXTensor(problem.a(), problem.mxBlockA()))
+            if(plan.a.useGenerator)
             {
                 auto const& tensorA = problem.a();
                 auto        rows    = tensorA.sizes()[0];
@@ -3041,7 +2845,7 @@ namespace TensileLite
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSA);
             }
 
-            if(isMXTensor(problem.b(), problem.mxBlockB()))
+            if(plan.b.useGenerator)
             {
                 auto const& tensorB = problem.b();
                 auto        rows    = tensorB.sizes()[0];
@@ -3160,7 +2964,8 @@ namespace TensileLite
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
-        void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)
+        void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/,
+                                                  MxInitializationPlan const&  /*plan*/)
         {
             // The MX data generator is disabled at build time. Reaching this
             // path means a problem requiring MX FP4 or MX FP8 initialization was issued
@@ -3268,12 +3073,45 @@ namespace TensileLite
             }
         }
 
+        SelectedSolutionLayout DataInitialization::selectedSolutionLayout(
+            ContractionSolution const* solution) const
+        {
+            if(solution == nullptr)
+                solution = m_currentSolution;
+
+            SelectedSolutionLayout layout;
+            layout.present = solution != nullptr;
+            if(solution != nullptr)
+            {
+                layout.mxScaleFormat = solution->problemType.mxScaleFormat;
+                layout.matrixInstructionK
+                    = static_cast<size_t>(solution->sizeMapping.matrixInstruction[2]);
+            }
+            return layout;
+        }
+
+        InputLayoutContext DataInitialization::inputLayoutContext(
+            ContractionSolution const* solution) const
+        {
+            InputLayoutContext context;
+            context.userMxScaleFormat  = m_mxScaleFormat;
+            context.isMxPreswizzleArch = m_isMXPreswizzleArch;
+            context.solution           = selectedSolutionLayout(solution);
+            return context;
+        }
+
+        MxPreswizzleState DataInitialization::mxPreswizzleState() const
+        {
+            return {m_mxPreswizzledA, m_mxPreswizzledB};
+        }
+
         bool DataInitialization::shouldRefreshMXForSolution(
             ContractionSolution const*     solution,
             ContractionProblemGemm const& problem) const
         {
-            return solution != nullptr && m_mxScaleFormat > 0 && isMXProblemExceptF6(problem)
-                && gpuInputsPreparedFor(problem);
+            InputLayoutPolicy const layoutPolicy;
+            return layoutPolicy.shouldRefreshMxForSolution(
+                       problem, inputLayoutContext(solution), gpuInputsPreparedFor(problem));
         }
 
         void DataInitialization::initializeConstantInputs(ContractionProblemGemm const& problem)
@@ -3408,18 +3246,18 @@ namespace TensileLite
             ContractionProblemGemm const& problem,
             bool                          callerOwnsCopySync)
         {
+            InputLayoutPolicy layoutPolicy;
+            auto const        layoutContext = inputLayoutContext();
+            auto const        preswizzleState = mxPreswizzleState();
             auto const copyStream = this->copyStream();
             auto const mode       = submissionModeForStream(copyStream);
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
-                bool needSwizzle
-                    = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
-                      || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
-                bool needMXSwizzle
-                    = (problem.mxBlockA() && (i == ContractionProblemGemm::TENSOR::MXSA))
-                      || (problem.mxBlockB() && (i == ContractionProblemGemm::TENSOR::MXSB));
-                //Copy swizzle tensor would be in copySwizzledToGPUBuffer
-                if(needSwizzle || needMXSwizzle)
+                if(layoutPolicy.tensorUploadLayout(problem,
+                                                   i,
+                                                   layoutContext,
+                                                   preswizzleState)
+                   != TensorUploadLayout::Plain)
                     continue;
                 auto& desc = problem.tensors()[i];
                 auto  it   = m_vdata[i].pristine.find(desc.dataType());
@@ -3465,6 +3303,10 @@ namespace TensileLite
                 return upload;
             };
 
+            InputLayoutPolicy layoutPolicy;
+            auto const        layoutContext = inputLayoutContext();
+            auto const        preswizzleState = mxPreswizzleState();
+
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 auto& desc = problem.tensors()[i];
@@ -3475,41 +3317,32 @@ namespace TensileLite
                 if(p.gpuInput.valid.get() == nullptr || p.cpuInput.valid.get() == nullptr)
                     continue;
 
-                bool needSwizzle
-                    = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
-                      || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
-
-                bool needMXSwizzle = false;
-                bool unrollMajor = false;
-                size_t MX = 0;
-                if (i == ContractionProblemGemm::TENSOR::MXSA && problem.mxBlockA())
-                {
-                    needMXSwizzle = true;
-                    unrollMajor = (problem.freeIndicesA()[0].i != 0);
-                    MX = problem.mxBlockA();
-                }
-                else if (i == ContractionProblemGemm::TENSOR::MXSB && problem.mxBlockB())
-                {
-                    needMXSwizzle = true;
-                    unrollMajor = (problem.freeIndicesB()[0].i != 0);
-                    MX = problem.mxBlockB();
-                }
+                auto const uploadLayout
+                    = layoutPolicy.tensorUploadLayout(problem,
+                                                      i,
+                                                      layoutContext,
+                                                      preswizzleState);
+                auto const swizzlePlan
+                    = uploadLayout == TensorUploadLayout::TensorSwizzle
+                          ? layoutPolicy.planTensorSwizzle(problem, i)
+                          : TensorSwizzlePlan{};
+                auto const mxPlan = (uploadLayout == TensorUploadLayout::MxCopyCanonical
+                                     || uploadLayout == TensorUploadLayout::MxUsePreswizzledGpuValid
+                                     || uploadLayout == TensorUploadLayout::MxKSwizzle)
+                                        ? layoutPolicy.planMxTensorUpload(
+                                              problem, i, layoutContext, preswizzleState)
+                                        : MxTensorLayoutPlan{};
 
                 void* ptr{};
 
-                if(needSwizzle)
+                switch(uploadLayout)
+                {
+                case TensorUploadLayout::TensorSwizzle:
                 {
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
-                    size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                    calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
-                    ::Tensor::Manipulation::Shape paddedShape{
-                        ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
-                        (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
-                            * PackK};
-                    auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+                    auto const swizzleKey = std::make_tuple(swizzlePlan.bitWidth,
+                                                            swizzlePlan.unrolledSize,
+                                                            swizzlePlan.tiledSize);
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
@@ -3544,19 +3377,23 @@ namespace TensileLite
                     }
                     else
                     {
-                        ManipTensor tmpTensor({tiledSize, unrolledSize}, desc.elementBytes());
+                        ManipTensor tmpTensor({swizzlePlan.tiledSize, swizzlePlan.unrolledSize},
+                                              desc.elementBytes());
 
                         memcpy(
                             tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                         //Temporary hack
                         uint64_t padVal{};
+                        auto const paddedShape = ::Tensor::Manipulation::Shape{
+                            swizzlePlan.paddedShape[0], swizzlePlan.paddedShape[1]};
                         auto     paddedTensor = ::Tensor::Manipulation::pad(
                             tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                        paddedTensor.reshape({paddedShape[0] / MiM_N,
-                                              MiM_N,
-                                              paddedShape[1] / (MiK * PackK),
-                                              MiK / MiKv,
-                                              MiKv * PackK});
+                        paddedTensor.reshape({paddedShape[0] / swizzlePlan.miMN,
+                                              swizzlePlan.miMN,
+                                              paddedShape[1]
+                                                  / (swizzlePlan.miK * swizzlePlan.packK),
+                                              swizzlePlan.miK / swizzlePlan.miKv,
+                                              swizzlePlan.miKv * swizzlePlan.packK});
                         ManipTensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
                         g_swizzleCache.emplace(swizzleKey, std::move(permuted));
                         auto& cachedPermuted = g_swizzleCache.at(swizzleKey);
@@ -3581,151 +3418,9 @@ namespace TensileLite
                                                    hipMemcpyHostToDevice);
                         }
                     }
+                    break;
                 }
-                else if (needMXSwizzle)
-                {
-                    bool isMXSA = (i == ContractionProblemGemm::TENSOR::MXSA);
-                    bool isMXSB = (i == ContractionProblemGemm::TENSOR::MXSB);
-                    bool preswizzledAlready = (isMXSA && m_mxPreswizzledA)
-                                             || (isMXSB && m_mxPreswizzledB);
-
-                    // The picked solution dictates the in-device MX scale layout via
-                    // problemType.mxScaleFormat (mirrors the MXScaleFormat solution
-                    // parameter): 0=NoSwizzle, 1=HostPreSwizzle, 2=InMemorySwizzle.
-                    // Sentinel -1 means "no solution selected yet" (e.g. the first
-                    // prepareGPUInputs call per problem, before solution iteration);
-                    // in that case the path below uses the arch-driven default
-                    // (gfx950 host preswizzle, otherwise K-swizzle).
-                    int kernelMxScaleFormat = -1;
-                    if (m_currentSolution != nullptr)
-                        kernelMxScaleFormat = m_currentSolution->problemType.mxScaleFormat;
-
-                    if (kernelMxScaleFormat == 0)
-                    {
-                        // NoSwizzle: kernel reads scales in canonical row/column
-                        // layout (buffer_load_* path). Upload cpuInput.valid as-is,
-                        // no K-swizzle, no padding permute.
-                        ptr = copyInputBuffers(*m_copyEngine,
-                                               desc,
-                                               p.gpuInput.valid.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               hipMemcpyHostToDevice,
-                                               copyStream);
-                    }
-                    else if (m_isMXPreswizzleArch && preswizzledAlready)
-                    {
-                        // gfx950 subtile: preswizzle was applied by initializeMXDataForFP4 and
-                        // gpuInput.valid was already populated — use it as-is.
-                        ptr = p.gpuInput.valid.get();
-                    }
-                    else if (m_isMXPreswizzleArch)
-                    {
-                        // gfx950: preswizzle didn't fire (scale dims not divisible by tileK,
-                        // e.g. small K). Kernel expects canonical layout — copy cpuInput.valid
-                        // directly without K-swizzle.
-                        ptr = copyInputBuffers(*m_copyEngine,
-                                               desc,
-                                               p.gpuInput.valid.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               hipMemcpyHostToDevice,
-                                               copyStream);
-                    }
-                    else
-                    {
-                        // gfx1250 and other arches: apply K-dimension swizzle.
-                        // gfx950 is excluded by the branches above.
-                        // Batch dim (if present) goes at the front; pad/reshape/permute
-                        // operate natively on N-D so all batches are processed at once.
-                        size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
-
-                        if (unrollMajor)
-                        {
-                            auto unrolledSize = desc.sizes()[0];
-                            auto tiledSize    = desc.sizes()[1];
-                            size_t dimk       = 128 / MX;
-                            ManipTensor tmpTensor({batch, tiledSize, unrolledSize},
-                                                  desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{
-                                batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
-
-                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                            //Temporary hack
-                            uint64_t padVal{};
-                            auto     paddedTensor = ::Tensor::Manipulation::pad(
-                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({batch,
-                                                  paddedShape[1],
-                                                  paddedShape[2] / dimk,
-                                                  dimk});
-                            ManipTensor permuted = permute(paddedTensor, {0, 2, 1, 3});
-                            if(useAsync)
-                            {
-                                auto& staged = stageTensor(permuted);
-                                ptr          = copyInputBuffers(*m_copyEngine,
-                                                           desc,
-                                                           p.gpuInput.valid.get(),
-                                                           staged.bytes.data(),
-                                                           staged.totalElements,
-                                                   hipMemcpyHostToDevice,
-                                                   copyStream);
-                            }
-                            else
-                            {
-                                ptr = copyInputBuffers(*m_copyEngine,
-                                                       desc,
-                                                       p.gpuInput.valid.get(),
-                                                       permuted.as<void>(),
-                                                       permuted.getDesc().flattenSize(),
-                                                       hipMemcpyHostToDevice);
-                            }
-                        }
-                        else
-                        {
-                            auto unrolledSize = desc.sizes()[1];
-                            auto tiledSize    = desc.sizes()[0];
-                            size_t dimk       = 128 / MX;
-                            ManipTensor tmpTensor({batch, unrolledSize, tiledSize},
-                                                  desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{
-                                batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
-
-                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
-                            //Temporary hack
-                            uint64_t padVal{};
-                            auto     paddedTensor = ::Tensor::Manipulation::pad(
-                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({batch,
-                                                  paddedShape[1] / dimk,
-                                                  dimk,
-                                                  paddedShape[2]});
-                            ManipTensor permuted = permute(paddedTensor, {0, 1, 3, 2});
-                            if(useAsync)
-                            {
-                                auto& staged = stageTensor(permuted);
-                                ptr          = copyInputBuffers(*m_copyEngine,
-                                                           desc,
-                                                           p.gpuInput.valid.get(),
-                                                           staged.bytes.data(),
-                                                           staged.totalElements,
-                                                   hipMemcpyHostToDevice,
-                                                   copyStream);
-                            }
-                            else
-                            {
-                                ptr = copyInputBuffers(*m_copyEngine,
-                                                       desc,
-                                                       p.gpuInput.valid.get(),
-                                                       permuted.as<void>(),
-                                                       permuted.getDesc().flattenSize(),
-                                                       hipMemcpyHostToDevice);
-                            }
-                        }
-                    }
-                }
-                else
-                {
+                case TensorUploadLayout::MxCopyCanonical:
                     ptr = copyInputBuffers(*m_copyEngine,
                                            desc,
                                            p.gpuInput.valid.get(),
@@ -3733,6 +3428,111 @@ namespace TensileLite
                                            p.maxElements,
                                            hipMemcpyHostToDevice,
                                            copyStream);
+                    break;
+                case TensorUploadLayout::MxUsePreswizzledGpuValid:
+                    ptr = p.gpuInput.valid.get();
+                    break;
+                case TensorUploadLayout::MxKSwizzle:
+                {
+                    // gfx1250 and other arches: apply K-dimension swizzle.
+                    // gfx950 is excluded by the branches above.
+                    // Batch dim (if present) goes at the front; pad/reshape/permute
+                    // operate natively on N-D so all batches are processed at once.
+                    size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
+
+                    if (mxPlan.unrollMajor)
+                    {
+                        auto const unrolledSize = desc.sizes()[0];
+                        auto const tiledSize    = desc.sizes()[1];
+                        auto const dimk         = mxPlan.dimK;
+                        ManipTensor tmpTensor({batch, tiledSize, unrolledSize},
+                                              desc.elementBytes());
+                        ::Tensor::Manipulation::Shape paddedShape{
+                            batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+
+                        memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                        //Temporary hack
+                        uint64_t padVal{};
+                        auto     paddedTensor = ::Tensor::Manipulation::pad(
+                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                        paddedTensor.reshape({batch,
+                                              paddedShape[1],
+                                              paddedShape[2] / dimk,
+                                              dimk});
+                        ManipTensor permuted = permute(paddedTensor, {0, 2, 1, 3});
+                        if(useAsync)
+                        {
+                            auto& staged = stageTensor(permuted);
+                            ptr          = copyInputBuffers(*m_copyEngine,
+                                                       desc,
+                                                       p.gpuInput.valid.get(),
+                                                       staged.bytes.data(),
+                                                       staged.totalElements,
+                                                       hipMemcpyHostToDevice,
+                                                       copyStream);
+                        }
+                        else
+                        {
+                            ptr = copyInputBuffers(*m_copyEngine,
+                                                   desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
+                    }
+                    else
+                    {
+                        auto const unrolledSize = desc.sizes()[1];
+                        auto const tiledSize    = desc.sizes()[0];
+                        auto const dimk         = mxPlan.dimK;
+                        ManipTensor tmpTensor({batch, unrolledSize, tiledSize},
+                                              desc.elementBytes());
+                        ::Tensor::Manipulation::Shape paddedShape{
+                            batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
+
+                        memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                        //Temporary hack
+                        uint64_t padVal{};
+                        auto     paddedTensor = ::Tensor::Manipulation::pad(
+                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                        paddedTensor.reshape({batch,
+                                              paddedShape[1] / dimk,
+                                              dimk,
+                                              paddedShape[2]});
+                        ManipTensor permuted = permute(paddedTensor, {0, 1, 3, 2});
+                        if(useAsync)
+                        {
+                            auto& staged = stageTensor(permuted);
+                            ptr          = copyInputBuffers(*m_copyEngine,
+                                                       desc,
+                                                       p.gpuInput.valid.get(),
+                                                       staged.bytes.data(),
+                                                       staged.totalElements,
+                                                       hipMemcpyHostToDevice,
+                                                       copyStream);
+                        }
+                        else
+                        {
+                            ptr = copyInputBuffers(*m_copyEngine,
+                                                   desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
+                    }
+                    break;
+                }
+                case TensorUploadLayout::Plain:
+                    ptr = copyInputBuffers(*m_copyEngine,
+                                           desc,
+                                           p.gpuInput.valid.get(),
+                                           p.cpuInput.valid.get(),
+                                           p.maxElements,
+                                           hipMemcpyHostToDevice,
+                                           copyStream);
+                    break;
                 }
 
                 if(ptr == nullptr)
@@ -4013,8 +3813,8 @@ namespace TensileLite
             bool                             refreshRotatingMode1,
             std::optional<size_t>            gpuTargetSlot)
         {
-            bool needSwizzle   = problem.swizzleTensorA() || problem.swizzleTensorB();
-            bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
+            InputLayoutPolicy const layoutPolicy;
+            bool const hasSpecialLayout = layoutPolicy.hasSpecialInputLayout(problem);
 
             {
                 ScopedTimer t("async_reset_probdep");
@@ -4028,7 +3828,7 @@ namespace TensileLite
                     ScopedTimer t2("async_reset_copyvalid");
                     copyValidToGPUBuffer(problem, targetStream != nullptr);
                 }
-                if(needSwizzle || needMXSwizzle)
+                if(hasSpecialLayout)
                 {
                     ScopedTimer t2("async_reset_swizzle");
                     copySwizzledToGPUBuffer(problem, targetStream, swizzleStaging);

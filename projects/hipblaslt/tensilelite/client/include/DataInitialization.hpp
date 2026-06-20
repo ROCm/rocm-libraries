@@ -33,6 +33,7 @@
 #include "GpuInputSlotSet.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
+#include "InputLayoutPolicy.hpp"
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
@@ -55,43 +56,6 @@ namespace TensileLite
 {
     namespace Client
     {
-        inline bool isMXFP4Tensor(const TensorDescriptor& tensor, size_t mxBlock)
-        {
-            return tensor.dataType() == rocisa::DataType::Float4 && mxBlock > 0;
-        }
-
-        inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
-        {
-            return isMXFP4Tensor(problem.a(), problem.mxBlockA())
-                || isMXFP4Tensor(problem.b(), problem.mxBlockB());
-        }
-
-        inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
-        {
-            if(mxBlock == 0)
-                return false;
-            auto dt = tensor.dataType();
-            return dt == rocisa::DataType::Float4
-                || dt == rocisa::DataType::Float8
-                || dt == rocisa::DataType::BFloat8;
-        }
-
-        inline bool isF6(const TensorDescriptor& tensor)
-        {
-            auto const dt = tensor.dataType();
-
-            return dt == rocisa::DataType::Float6
-                || dt == rocisa::DataType::BFloat6;
-        }
-
-        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
-        {
-            bool isAnyF6 = isF6(problem.a()) or isF6(problem.b());
-            return !isAnyF6 &&
-                (isMXTensor(problem.a(), problem.mxBlockA())
-                || isMXTensor(problem.b(), problem.mxBlockB()));
-        }
-
         // Problem-independent from 0~7, and 16, and 23~26 (fixed values for every problem)
         // And problem-dependent from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
@@ -316,7 +280,11 @@ namespace TensileLite
 
                     if(shouldRefreshMXForSolution(solution, *m_currentGemmProblem))
                     {
-                        initializeMXData(*m_currentGemmProblem);
+                        InputLayoutPolicy layoutPolicy;
+                        auto const        mxPlan
+                            = layoutPolicy.planMxInitialization(*m_currentGemmProblem,
+                                                                inputLayoutContext());
+                        initializeMXData(*m_currentGemmProblem, mxPlan);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
                         copyInputs(m_gpuPtrs,
                                    m_gpuBatchPtrs,
@@ -1137,7 +1105,8 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
-            void initializeMXData(ContractionProblemGemm const& problem);
+            void initializeMXData(ContractionProblemGemm const& problem,
+                                  MxInitializationPlan const&  plan);
 
             struct ProblemInputSignatureBase
             {
@@ -1204,6 +1173,11 @@ namespace TensileLite
             bool cpuInputsNeedRefresh(ContractionProblemGemm const& problem) const;
             void ensureCPUInputsCurrent(ContractionProblemGroupedGemm const& problem);
             void ensureCPUInputsCurrent(ContractionProblemGemm const& problem);
+            SelectedSolutionLayout selectedSolutionLayout(
+                ContractionSolution const* solution = nullptr) const;
+            InputLayoutContext inputLayoutContext(
+                ContractionSolution const* solution = nullptr) const;
+            MxPreswizzleState mxPreswizzleState() const;
             bool shouldRefreshMXForSolution(ContractionSolution const*     solution,
                                             ContractionProblemGemm const& problem) const;
 
