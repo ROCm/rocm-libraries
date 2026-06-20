@@ -6,6 +6,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <string>
 
@@ -16,6 +17,8 @@ namespace TensileLite
         // Global flag to enable/disable timing instrumentation output
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
+
+        inline thread_local std::string g_activePhase = "startup";
 
         // Fast formatters — to_chars into a caller-supplied buffer
         inline char* fmtOne(char* p, char* end, const char* s)
@@ -76,7 +79,10 @@ namespace TensileLite
             ScopedTimer(const std::string& category)
                 : m_category(category)
                 , m_start(clock::now())
+                , m_previousPhase(g_activePhase)
+                , m_uncaughtOnEntry(std::uncaught_exceptions())
             {
+                g_activePhase = category;
             }
 
             ~ScopedTimer()
@@ -87,6 +93,8 @@ namespace TensileLite
                     auto duration = std::chrono::duration<double, std::milli>(end - m_start);
                     writeLine("TIMING:", m_category, ":", duration.count());
                 }
+                if(std::uncaught_exceptions() == m_uncaughtOnEntry)
+                    g_activePhase = m_previousPhase;
             }
 
             // Get elapsed time without stopping
@@ -100,6 +108,8 @@ namespace TensileLite
         private:
             std::string                    m_category;
             std::chrono::time_point<clock> m_start;
+            std::string                    m_previousPhase;
+            int                            m_uncaughtOnEntry;
         };
 
         // Report a timing value directly (for GPU timings already measured)
