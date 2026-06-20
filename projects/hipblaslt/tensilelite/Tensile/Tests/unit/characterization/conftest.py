@@ -48,22 +48,56 @@ def _foreign_path_instantiable() -> bool:
         os.name = saved
 
 
-def pytest_collection_modifyitems(config, items):
-    """Skip ``nt_path_simulation`` tests where foreign Paths can't be instantiated.
+def _snapshot_plugin_available() -> bool:
+    """Return True if syrupy's ``snapshot`` fixture is available here.
 
-    Tests marked ``nt_path_simulation`` flip ``os.name`` to ``"nt"`` and exercise
-    production code that constructs a ``pathlib.Path``.  On any POSIX interpreter
-    this cannot succeed, so they are skipped there and run only where a
-    Windows-flavored ``Path`` is instantiable.
+    The characterization suite asserts against syrupy snapshots via the
+    ``snapshot`` fixture.  The tox ``unit``/``coverage-unit`` environments install
+    syrupy, but the installed-artifact test tree (``share/hipblaslt/tensilelite``,
+    run by TheRock) executes against a leaner interpreter that does not ship
+    syrupy and does not receive this package's ``pyproject``/``tox`` dependency
+    declarations.  There every ``snapshot``-using test errors at setup with
+    ``fixture 'snapshot' not found``.  Detect the capability directly so the suite
+    is cleanly skipped where the plugin is absent rather than erroring the run.
     """
-    if _foreign_path_instantiable():
+    import importlib.util
+
+    return importlib.util.find_spec("syrupy") is not None
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip capability-gated characterization tests where the env can't run them.
+
+    Two independent gates:
+
+    * ``nt_path_simulation`` tests flip ``os.name`` to ``"nt"`` and exercise
+      production code that constructs a ``pathlib.Path``.  On any POSIX
+      interpreter this cannot succeed, so they run only where a Windows-flavored
+      ``Path`` is instantiable.
+    * ``snapshot``-using tests require the syrupy plugin, which the
+      installed-artifact test environment does not provide; they run only where
+      syrupy is importable.
+    """
+    skip_nt = None
+    if not _foreign_path_instantiable():
+        skip_nt = pytest.mark.skip(
+            reason="WindowsPath not instantiable on this interpreter; nt-path simulation skipped"
+        )
+
+    skip_snapshot = None
+    if not _snapshot_plugin_available():
+        skip_snapshot = pytest.mark.skip(
+            reason="syrupy not installed; snapshot characterization tests skipped"
+        )
+
+    if skip_nt is None and skip_snapshot is None:
         return
-    skip_nt = pytest.mark.skip(
-        reason="WindowsPath not instantiable on this interpreter; nt-path simulation skipped"
-    )
+
     for item in items:
-        if "nt_path_simulation" in item.keywords:
+        if skip_nt is not None and "nt_path_simulation" in item.keywords:
             item.add_marker(skip_nt)
+        if skip_snapshot is not None and "snapshot" in getattr(item, "fixturenames", ()):
+            item.add_marker(skip_snapshot)
 
 
 @pytest.fixture(scope="session")
