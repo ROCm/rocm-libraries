@@ -63,6 +63,13 @@ cmake --build <build> --target ckc_core -j$(nproc)
 Optional sanitizer build for diagnostics (not for shipping):
 `-DCKC_SANITIZE=ON`.
 
+> **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
+> emitted IR flavor must match it: set `CK_DSL_LLVM_FLAVOR=llvm22` for a ROCm 7.2
+> `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
+> Full flag list: [`../ck_dsl/dsl_docs/reference/env_flags.md`](../ck_dsl/dsl_docs/reference/env_flags.md).
+> The two engines must stay byte-identical — see the parity rule in
+> [`../ck_dsl/dsl_docs/development/engine_parity.md`](../ck_dsl/dsl_docs/development/engine_parity.md).
+
 ### Provider plugin
 
 ```bash

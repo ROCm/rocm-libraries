@@ -2,6 +2,15 @@
 
 This folder is a deep, code-adjacent guide to `ck_dsl`, the Python authoring layer for CK Tile-style GPU kernels on AMDGPU. The package README is the quick tour. These notes are the field manual: how kernels are described, how the Python SSA IR works, how the lowering stack maps DSL operations to AMDGPU LLVM IR and HSACO, what each primitive means, how the shipped instances execute step by step, what limits matter, and how to validate changes.
 
+> **Getting started / prerequisites.** New to the DSL? Start with
+> [`development/setup_guide.md`](./development/setup_guide.md) — recommended stack
+> (**ROCm 7.2 + PyTorch 2.12, Python 3.12**), virtual-environment setup, building
+> the optional C++ engine, the environment-variable reference (`CK_DSL_BACKEND`,
+> `CK_DSL_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
+> Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
+> to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
+> stack (older ROCm needs `CK_DSL_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
+
 The implementation tree is:
 
 ```text
@@ -49,15 +58,18 @@ New to the DSL? Read in this order:
 23. `autotune/overview.md`
 24. `development/testing.md`
 25. `development/extending.md`
-26. `development/onboarding.md` — guided learning path for kernel authors
-27. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
-28. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
-29. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
-30. `reference/file_index.md`
-31. `reference/api_index.md`
-32. `reference/op_vocabulary.md`
-33. `reference/mfma_atom_catalog.md`
-34. `reference/glossary.md`
+26. `development/setup_guide.md` — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+27. `development/onboarding.md` — guided learning path for kernel authors
+28. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
+29. `development/engine_parity.md` — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+30. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
+31. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
+32. `reference/file_index.md`
+33. `reference/api_index.md`
+34. `reference/env_flags.md` — every environment variable (core, provider, tooling, diagnostic)
+35. `reference/op_vocabulary.md`
+36. `reference/mfma_atom_catalog.md`
+37. `reference/glossary.md`
 
 ## One-Screen Summary
 

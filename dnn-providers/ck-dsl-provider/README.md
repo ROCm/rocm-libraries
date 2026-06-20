@@ -67,6 +67,15 @@ The plugin discovers its kernel bundle from `CK_DSL_KERNEL_LIB_PATH` (a director
 generator). Install the `.so` into hipDNN's plugin dir and point `HIPDNN_PLUGIN_PATH` at it, then
 run any SDPA/matmul graph — same flow as `ck-fmha-provider`'s EndToEnd demo.
 
+## Environment variables
+
+Main provider flags: `CK_DSL_KERNEL_LIB_PATH` (prebuilt HSACO bundle dir; leave
+empty to force C-JIT), `HIPDNN_PLUGIN_PATH` (plugin location), `CK_DSL_C_JIT=1`
+(generate kernels from C source at runtime), `CK_DSL_ALLOW_ENGINE_MISMATCH=1`
+(downgrade the stale-bundle freshness check to a warning). The DSL build toolchain
+also honours `CK_DSL_LLVM_FLAVOR` (`llvm22`/`llvm20`). **Full list of every
+flag:** [`dsl_docs/reference/env_flags.md`](../../projects/composablekernel/python/ck_dsl/dsl_docs/reference/env_flags.md).
+
 ## Status
 
 | Piece | State |

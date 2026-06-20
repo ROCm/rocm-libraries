@@ -126,15 +126,25 @@ runs without per-launch fences inside the timed loop, and returns average
 milliseconds per launch.
 
 ## Requirements
-- ROCm with HIP runtime and `libamd_comgr` available through the default ROCm
-  installation or the dynamic linker.
-- Python with the dependencies used by CK's Python tests.
-- A supported AMDGPU target for GPU launch tests.
+Recommended stack (what the example READMEs' numbers are reproduced on):
+- **ROCm 7.2** with HIP runtime and `libamd_comgr` (also works on ROCm 7.0.x —
+  set `CK_DSL_LLVM_FLAVOR=llvm22` if your `comgr` is 7.2 but `/opt/rocm` is older).
+- **PyTorch 2.12 (+rocm7.2 build)** in a virtual environment — the wheel bundles
+  the `libamd_comgr` the DSL prefers, so the venv selects the build toolchain.
+- **Python 3.12**; plus `numpy` (references) and `ruff` (lint).
+- A supported AMDGPU target for GPU launch tests: CDNA `gfx942`/`gfx950`
+  (Linux) or RDNA `gfx1151`/`gfx1201` (Linux + Windows HIP SDK).
 
 Static IR and lowering tests do not require a GPU. Runtime, parity, and
 benchmark paths do.
 
+**Full setup (venv, building the C++ engine, env-variable flags, Linux &
+Windows):** see [`dsl_docs/development/setup_guide.md`](dsl_docs/development/setup_guide.md).
+
 ## More Documentation
+- `dsl_docs/development/setup_guide.md` — prerequisites, venv, env flags (Linux & Windows)
+- `dsl_docs/reference/env_flags.md` — every environment variable
+- `dsl_docs/development/engine_parity.md` — the Python⇄C++ parity rule (every optimization needs both)
 - `dsl_docs/architecture/mental_model.md`
 - `dsl_docs/runtime/compile_launch_and_manifest.md`
 - `dsl_docs/runtime/manifest_schema.md`

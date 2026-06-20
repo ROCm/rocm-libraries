@@ -108,18 +108,21 @@ test7 both reject (unsupported fp16 warp_tile (32,32,32) on gfx950)
 
 ## How this becomes the `CK_DSL_BACKEND=cpp` backend
 
-This module is the engine side of the dual-backend switch: with the C++ engine
-reachable from Python and proven byte-identical, a `CK_DSL_BACKEND=cpp` selector
-can route GEMM lowering/serialization through `ckc_engine` instead of the pure
-Python lowerer.
+This module is the engine side of the dual-backend switch, and `cpp` is now the
+**default**: `ck_dsl.core.backend` routes lowering through this engine. For a
+Python-authored kernel it serializes the IR and calls the family-agnostic
+`ckc_engine.lower_serialized_ir(...)`; for cataloged families the per-family
+`<fam>_lower_llvm` / `_serialize_ir` / `_verify` entry points are used. If
+`ckc_engine` isn't importable, the chokepoint auto-falls back to the native
+Python lowerer (byte-identical) and records why. Select explicitly with
+`CK_DSL_BACKEND=python|cpp|both`.
 
-**Deeper integration (not yet done here):** wiring
-`CK_DSL_BACKEND` into the `ck_dsl` `IRBuilder`/instances so the **same Python
-authoring API** transparently routes to this C++ engine — edits `ck_dsl/core`.
-It is intentionally **not** done in this task to avoid touching the shared
-Python core concurrently with the hardening work. That step would: (1) read the
-`CK_DSL_BACKEND` env var, (2) when `cpp`, translate the existing
-`UniversalGemmSpec` into the spec dict and call `ckc_engine.*` from
-`build_universal_gemm` / `lower_kernel_to_llvm`, and (3) extend the binding to
-the remaining op families (the same `build_spec` + 3-entry-point pattern
-generalizes to each `ckc_build_*` / `ckc_*_lower_to_llvm`).
+**Environment flags:** this harness uses `CKC_PARITY_BUILD` (the `.so` dir) and
+`CKC_PARITY_EMIT` (the prebuilt-emitter dir) — point both at the **same** fresh
+build. The backend/flavor flags are `CK_DSL_BACKEND`, `CK_DSL_LLVM_FLAVOR`,
+`CK_DSL_CPP_STRICT`. Full list:
+[`../../ck_dsl/dsl_docs/reference/env_flags.md`](../../ck_dsl/dsl_docs/reference/env_flags.md).
+
+**Parity rule:** every optimization in the Python engine must have its C++ twin,
+proven byte-identical — see
+[`../../ck_dsl/dsl_docs/development/engine_parity.md`](../../ck_dsl/dsl_docs/development/engine_parity.md).
