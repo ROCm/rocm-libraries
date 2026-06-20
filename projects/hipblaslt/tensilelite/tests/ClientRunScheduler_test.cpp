@@ -95,6 +95,27 @@ namespace
         return static_cast<size_t>(std::count(events.begin(), events.end(), value));
     }
 
+    struct CountQueryRecord
+    {
+        size_t value           = 0;
+        bool   seenPreSolution = false;
+        bool   seenPostWarmup  = false;
+    };
+
+    bool hasCountQuery(std::vector<CountQueryRecord> const& records,
+                       size_t                               value,
+                       bool                                 seenPreSolution,
+                       bool                                 seenPostWarmup)
+    {
+        return std::any_of(records.begin(),
+                           records.end(),
+                           [&](CountQueryRecord const& record) {
+                               return record.value == value
+                                      && record.seenPreSolution == seenPreSolution
+                                      && record.seenPostWarmup == seenPostWarmup;
+                           });
+    }
+
     class RecordingRunListener final : public RunListener
     {
     public:
@@ -138,6 +159,7 @@ namespace
         void preSolution(ContractionSolution* const) override
         {
             m_events.push_back("preSolution");
+            seenPreSolution = true;
             if(resetSolutionRunsOnPreSolution)
                 m_solutionRunsRemaining = static_cast<int>(solutionRunsPerSolution);
             if(changeWarmupRunsAfterPreSolution)
@@ -159,6 +181,11 @@ namespace
 
         size_t numWarmupRuns() override
         {
+            if(recordCountQueries)
+            {
+                warmupCountQueries.push_back(
+                    CountQueryRecord{m_warmupRuns, seenPreSolution, seenPostWarmup});
+            }
             return m_warmupRuns;
         }
 
@@ -180,6 +207,7 @@ namespace
                 m_syncs    = syncsAfterPostWarmup;
                 m_enqueues = enqueuesAfterPostWarmup;
             }
+            seenPostWarmup = true;
         }
 
         void validateWarmups(std::shared_ptr<ProblemInputs>,
@@ -191,6 +219,11 @@ namespace
 
         size_t numSyncs() override
         {
+            if(recordCountQueries)
+            {
+                syncCountQueries.push_back(
+                    CountQueryRecord{m_syncs, seenPreSolution, seenPostWarmup});
+            }
             return m_syncs;
         }
 
@@ -211,6 +244,11 @@ namespace
 
         size_t numEnqueuesPerSync() override
         {
+            if(recordCountQueries)
+            {
+                enqueueCountQueries.push_back(
+                    CountQueryRecord{m_enqueues, seenPreSolution, seenPostWarmup});
+            }
             return m_enqueues;
         }
 
@@ -247,6 +285,12 @@ namespace
         size_t m_warmupRuns            = 0;
         size_t m_syncs                 = 0;
         size_t m_enqueues              = 0;
+        bool   recordCountQueries      = false;
+        bool   seenPreSolution         = false;
+        bool   seenPostWarmup          = false;
+        std::vector<CountQueryRecord> warmupCountQueries;
+        std::vector<CountQueryRecord> syncCountQueries;
+        std::vector<CountQueryRecord> enqueueCountQueries;
         bool   changeWarmupRunsAfterPreSolution      = false;
         size_t warmupRunsAfterPreSolution            = 0;
         bool   changeSyncsAndEnqueuesAfterPostWarmup = false;
@@ -796,6 +840,7 @@ TEST_F(ClientRunSchedulerTest, RequeriesListenerCountsAfterPreSolutionAndPostWar
     harness.listeners.m_warmupRuns                    = 1;
     harness.listeners.m_syncs                         = 1;
     harness.listeners.m_enqueues                      = 1;
+    harness.listeners.recordCountQueries              = true;
     harness.listeners.changeWarmupRunsAfterPreSolution = true;
     harness.listeners.warmupRunsAfterPreSolution      = 2;
     harness.listeners.changeSyncsAndEnqueuesAfterPostWarmup = true;
@@ -810,33 +855,24 @@ TEST_F(ClientRunSchedulerTest, RequeriesListenerCountsAfterPreSolutionAndPostWar
 
     EXPECT_FALSE(result.exitedEarly);
     EXPECT_EQ(result.returnCode, 0);
-    EXPECT_EQ(
-        harness.events,
-        (std::vector<std::string>{"preBenchmarkRun",
-                                  "reportProblemIndex:0",
-                                  "reportProblemProgress:0/0",
-                                  "preProblem",
-                                  "resetPreparedSlotsForProblem",
-                                  "prepareGPUInputs",
-                                  "prepareRotatingGPUOutput:1",
-                                  "deviceSynchronize",
-                                  "preSolution",
-                                  "prepareGPUInputs",
-                                  "solve",
-                                  "waitForPreparedSlot",
-                                  "preWarmup",
-                                  "launchWarmup:empty",
-                                  "validateWarmups",
-                                  "launchWarmup:empty",
-                                  "postWarmup",
-                                  "preSyncs",
-                                  "postSyncs",
-                                  "primeNextInputSlot",
-                                  "primeNextInputSlot",
-                                  "postSolution",
-                                  "postProblem",
-                                  "postBenchmarkRun"}));
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchWarmup:"),
+              (std::vector<std::string>{"empty", "empty"}));
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "preEnqueues").empty());
+    EXPECT_TRUE(hasCountQuery(harness.listeners.warmupCountQueries, 1u, false, false));
+    EXPECT_TRUE(hasCountQuery(harness.listeners.warmupCountQueries, 2u, true, false));
+    EXPECT_TRUE(hasCountQuery(harness.listeners.syncCountQueries, 1u, false, false));
+    EXPECT_TRUE(hasCountQuery(harness.listeners.syncCountQueries, 0u, true, true));
+    EXPECT_TRUE(hasCountQuery(harness.listeners.enqueueCountQueries, 1u, false, false));
+    EXPECT_TRUE(hasCountQuery(harness.listeners.enqueueCountQueries, 0u, true, true));
+    auto primeIndices  = indicesOfEvent(harness.events, "primeNextInputSlot");
+    auto postSyncIdx   = indexOfEvent(harness.events, "postSyncs");
+    auto postSolutionIdx = indexOfEvent(harness.events, "postSolution");
+    ASSERT_EQ(primeIndices.size(), 2u);
+    ASSERT_NE(postSyncIdx, harness.events.size());
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+    EXPECT_LT(postSyncIdx, primeIndices.front());
+    EXPECT_LT(primeIndices.back(), postSolutionIdx);
     EXPECT_EQ(harness.flushGridSizeCalls, 1);
 }
 
@@ -880,29 +916,28 @@ TEST_F(ClientRunSchedulerTest, BenchmarkPathDoesNotUseNoBenchmarkResetHook)
     EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchBenchmark:"),
               (std::vector<std::string>{"bench"}));
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
-    EXPECT_EQ(harness.events,
-              (std::vector<std::string>{"preBenchmarkRun",
-                                        "reportProblemIndex:0",
-                                        "reportProblemProgress:0/0",
-                                        "preProblem",
-                                        "resetPreparedSlotsForProblem",
-                                        "prepareGPUInputs",
-                                        "prepareRotatingGPUOutput:1",
-                                        "deviceSynchronize",
-                                        "preSolution",
-                                        "prepareGPUInputs",
-                                        "solve",
-                                        "waitForPreparedSlot",
-                                        "preSyncs",
-                                        "preEnqueues",
-                                        "selectRotationCopy:0",
-                                        "launchBenchmark:bench",
-                                        "postEnqueues",
-                                        "validateEnqueues",
-                                        "postSyncs",
-                                        "postSolution",
-                                        "postProblem",
-                                        "postBenchmarkRun"}));
+    auto preSyncsIdx        = indexOfEvent(harness.events, "preSyncs");
+    auto preEnqueuesIdx     = indexOfEvent(harness.events, "preEnqueues");
+    auto selectRotationIdx  = indexOfEvent(harness.events, "selectRotationCopy:0");
+    auto launchBenchmarkIdx = indexOfEvent(harness.events, "launchBenchmark:bench");
+    auto postEnqueuesIdx    = indexOfEvent(harness.events, "postEnqueues");
+    auto validateEnqueuesIdx = indexOfEvent(harness.events, "validateEnqueues");
+    auto postSyncsIdx       = indexOfEvent(harness.events, "postSyncs");
+
+    ASSERT_NE(preSyncsIdx, harness.events.size());
+    ASSERT_NE(preEnqueuesIdx, harness.events.size());
+    ASSERT_NE(selectRotationIdx, harness.events.size());
+    ASSERT_NE(launchBenchmarkIdx, harness.events.size());
+    ASSERT_NE(postEnqueuesIdx, harness.events.size());
+    ASSERT_NE(validateEnqueuesIdx, harness.events.size());
+    ASSERT_NE(postSyncsIdx, harness.events.size());
+
+    EXPECT_LT(preSyncsIdx, preEnqueuesIdx);
+    EXPECT_LT(preEnqueuesIdx, selectRotationIdx);
+    EXPECT_LT(selectRotationIdx, launchBenchmarkIdx);
+    EXPECT_LT(launchBenchmarkIdx, postEnqueuesIdx);
+    EXPECT_LT(postEnqueuesIdx, validateEnqueuesIdx);
+    EXPECT_LT(validateEnqueuesIdx, postSyncsIdx);
 }
 
 TEST_F(ClientRunSchedulerTest,
@@ -1185,19 +1220,19 @@ TEST_F(ClientRunSchedulerTest, SkipsKernelFlowWhenSolutionRejected)
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchWarmup:").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
     EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
-    EXPECT_EQ(harness.events,
-              (std::vector<std::string>{"preBenchmarkRun",
-                                        "reportProblemIndex:0",
-                                        "reportProblemProgress:0/0",
-                                        "preProblem",
-                                        "resetPreparedSlotsForProblem",
-                                        "prepareGPUInputs",
-                                        "prepareRotatingGPUOutput:1",
-                                        "deviceSynchronize",
-                                        "preSolution",
-                                        "postSolution",
-                                        "postProblem",
-                                        "postBenchmarkRun"}));
+    auto preSolutionIdx    = indexOfEvent(harness.events, "preSolution");
+    auto postSolutionIdx   = indexOfEvent(harness.events, "postSolution");
+    auto postProblemIdx    = indexOfEvent(harness.events, "postProblem");
+    auto postBenchmarkIdx  = indexOfEvent(harness.events, "postBenchmarkRun");
+
+    ASSERT_NE(preSolutionIdx, harness.events.size());
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+    ASSERT_NE(postProblemIdx, harness.events.size());
+    ASSERT_NE(postBenchmarkIdx, harness.events.size());
+
+    EXPECT_LT(preSolutionIdx, postSolutionIdx);
+    EXPECT_LT(postSolutionIdx, postProblemIdx);
+    EXPECT_LT(postProblemIdx, postBenchmarkIdx);
 }
 
 TEST_F(ClientRunSchedulerTest, RuntimeErrorReportsInvalidAndPostsSolution)

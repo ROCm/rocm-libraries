@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <any>
 #include <cstdint>
 #include <optional>
@@ -119,11 +120,42 @@ namespace
         return ::testing::AssertionSuccess();
     }
 
-    uint8_t readFirstByte(void* devicePtr)
+    struct SampledByte
     {
-        uint8_t value = 0;
-        HIP_CHECK_EXC(hipMemcpy(&value, devicePtr, sizeof(value), hipMemcpyDeviceToHost));
-        return value;
+        size_t  offset = 0;
+        uint8_t value  = 0;
+    };
+
+    std::vector<SampledByte> readSampledBytes(void const* devicePtr, size_t size)
+    {
+        std::vector<size_t> offsets;
+        offsets.reserve(3);
+
+        auto const addOffset = [&](size_t offset) {
+            if(std::find(offsets.begin(), offsets.end(), offset) == offsets.end())
+                offsets.push_back(offset);
+        };
+
+        addOffset(0);
+        addOffset(size / 2);
+        addOffset(size - 1);
+
+        std::vector<SampledByte> samples;
+        samples.reserve(offsets.size());
+
+        HipStreamGuard probeStream(hipStreamNonBlocking);
+        for(size_t offset : offsets)
+        {
+            samples.push_back({offset, 0});
+            HIP_CHECK_EXC(hipMemcpyAsync(&samples.back().value,
+                                         static_cast<uint8_t const*>(devicePtr) + offset,
+                                         sizeof(samples.back().value),
+                                         hipMemcpyDeviceToHost,
+                                         probeStream.get()));
+        }
+
+        probeStream.synchronize();
+        return samples;
     }
 
     class OutputResetPlanDataInitialization : public DataInitialization
@@ -349,35 +381,24 @@ TEST(DataInitializationOutputResetPlan, RingWarmValidationPlansResetFromValid)
     EXPECT_EQ(plan.targetSlot, *targetSlot);
 }
 
-TEST(DataInitializationOutputResetPlan, RingWarmNoValidationPlansNoReset)
+TEST(DataInitializationOutputResetPlan, NoValidationPublicArgsDisableRingWarmPath)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
         GTEST_SKIP() << hipDevice.message();
 
-    auto args = TensileLite::testing::buildRingArgs({{32, 32, 32}}, 1);
+    auto args = TensileLite::testing::buildRingArgs({{32, 32, 32}}, 0);
     ClientProblemFactory             factory(args);
     OutputResetPlanDataInitialization dataInit(args, factory);
+    auto problem = makePlainProblem(32, 32, 32);
 
-    dataInit.setWarmOutputResetRequired(false);
-    dataInit.setGpuInit(true);
-    dataInit.setHasAltBuffers(true);
-    dataInit.setAltSlotsReady(true);
-    dataInit.setProblemDependentData(false);
-    dataInit.setBoundsCheck(BoundsCheckMode::Disable);
+    EXPECT_FALSE(dataInit.ringEligible());
 
-    ASSERT_TRUE(dataInit.ringEligible());
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
 
-    auto const targetSlot = dataInit.nextPrimeSlot();
-    ASSERT_TRUE(targetSlot.has_value());
-
-    auto const plan = dataInit.planRingSlotOutputReset(*targetSlot, dataInit.altSlotsReady());
-    EXPECT_EQ(plan.action, OutputResetPlanDataInitialization::Action::NoReset);
-    EXPECT_EQ(plan.reason, OutputResetPlanDataInitialization::Reason::RingWarmValidation);
-    EXPECT_FALSE(plan.requiresPristineGpuCopy);
-    EXPECT_TRUE(plan.usesExistingSlotContents);
-    EXPECT_TRUE(plan.targetIsRingSlot);
-    EXPECT_EQ(plan.targetSlot, *targetSlot);
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_FALSE(dataInit.altSlotsReady());
 }
 
 TEST(DataInitializationOutputResetPlan, WarmRingValidationPathResetsOutputsBeforeReuse)
@@ -406,6 +427,7 @@ TEST(DataInitializationOutputResetPlan, WarmRingValidationPathResetsOutputsBefor
     auto& dUnit = dataInit.dPristineUnit(problem);
     auto const& dDesc = problem.tensors().at(ContractionProblemGemm::TENSOR::D);
     auto const   dBytes = multiplyElementSize(dUnit.maxElements, dDesc.elementBytes());
+    ASSERT_GT(dBytes, 0u);
 
     auto* slotD = static_cast<uint8_t*>(
         dataInit.ringTensorPtr(*targetSlot, ContractionProblemGemm::TENSOR::D));
@@ -413,9 +435,20 @@ TEST(DataInitializationOutputResetPlan, WarmRingValidationPathResetsOutputsBefor
     ASSERT_NE(slotD, nullptr);
     ASSERT_NE(validD, nullptr);
 
-    uint8_t expectedByte = readFirstByte(validD);
+    auto const expectedSamples = readSampledBytes(validD, dBytes);
+    for(auto const& sample : expectedSamples)
+    {
+        SCOPED_TRACE(sample.offset);
+        EXPECT_NE(sample.value, 0xA5);
+    }
+
     HIP_CHECK_EXC(hipMemset(slotD, 0xA5, dBytes));
-    EXPECT_EQ(readFirstByte(slotD), 0xA5);
+    auto const poisonedSamples = readSampledBytes(slotD, dBytes);
+    for(auto const& sample : poisonedSamples)
+    {
+        SCOPED_TRACE(sample.offset);
+        EXPECT_EQ(sample.value, 0xA5);
+    }
 
     DeviceSignalBuffer gateValue;
     gateValue.allocate();
@@ -449,5 +482,11 @@ TEST(DataInitializationOutputResetPlan, WarmRingValidationPathResetsOutputsBefor
     HIP_CHECK_EXC(hipStreamSynchronize(gateStream.get()));
     HIP_CHECK_EXC(hipStreamSynchronize(computeStream.get()));
 
-    EXPECT_EQ(readFirstByte(slotD), expectedByte);
+    auto const finalSamples = readSampledBytes(slotD, dBytes);
+    ASSERT_EQ(finalSamples.size(), expectedSamples.size());
+    for(size_t i = 0; i < finalSamples.size(); ++i)
+    {
+        SCOPED_TRACE(finalSamples[i].offset);
+        EXPECT_EQ(finalSamples[i].value, expectedSamples[i].value);
+    }
 }

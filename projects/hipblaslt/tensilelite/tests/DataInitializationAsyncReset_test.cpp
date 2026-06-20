@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 
 #include <hip/hip_runtime.h>
@@ -69,27 +70,10 @@ namespace
         }
     };
 
-    struct HostByteBuffer
+    struct SampledByte
     {
-        uint8_t* ptr = nullptr;
-
-        ~HostByteBuffer()
-        {
-            if(ptr)
-                (void)hipHostFree(ptr);
-        }
-
-        void allocate()
-        {
-            void* raw = nullptr;
-            HIP_CHECK_EXC(hipHostMalloc(&raw, sizeof(uint8_t), 0));
-            ptr = static_cast<uint8_t*>(raw);
-        }
-
-        uint8_t* get() const
-        {
-            return ptr;
-        }
+        size_t  offset = 0;
+        uint8_t value  = 0;
     };
 
     ::testing::AssertionResult hasHipDeviceAndWaitValueSupport()
@@ -170,19 +154,35 @@ namespace
         }
     };
 
-    uint8_t readFirstByte(void* devicePtr)
+    std::vector<SampledByte> readSampledBytes(void const* devicePtr, size_t size)
     {
-        HostByteBuffer host;
-        host.allocate();
+        std::vector<size_t> offsets;
+        offsets.reserve(3);
 
+        auto const addOffset = [&](size_t offset) {
+            if(std::find(offsets.begin(), offsets.end(), offset) == offsets.end())
+                offsets.push_back(offset);
+        };
+
+        addOffset(0);
+        addOffset(size / 2);
+        addOffset(size - 1);
+
+        std::vector<SampledByte> samples;
+        samples.reserve(offsets.size());
         HipStreamGuard probeStream(hipStreamNonBlocking);
-        HIP_CHECK_EXC(hipMemcpyAsync(host.get(),
-                                     devicePtr,
-                                     sizeof(uint8_t),
-                                     hipMemcpyDeviceToHost,
-                                     probeStream.get()));
+        for(size_t offset : offsets)
+        {
+            samples.push_back({offset, 0});
+            HIP_CHECK_EXC(hipMemcpyAsync(&samples.back().value,
+                                         static_cast<uint8_t const*>(devicePtr) + offset,
+                                         sizeof(samples.back().value),
+                                         hipMemcpyDeviceToHost,
+                                         probeStream.get()));
+        }
+
         probeStream.synchronize();
-        return *host.get();
+        return samples;
     }
 } // namespace
 
@@ -217,11 +217,19 @@ TEST(DataInitializationAsyncReset, NaNResetOutputD2DUsesTargetStream)
     auto&       dUnit  = dataInit.dPristineUnit(problem);
     auto const& dDesc  = problem.tensors().at(ContractionProblemGemm::TENSOR::D);
     auto const   dSize = multiplyElementSize(dUnit.maxElements, dDesc.elementBytes());
+    ASSERT_GT(dSize, 0u);
     ASSERT_NE(dUnit.gpuInput.current, nullptr);
     ASSERT_NE(dUnit.gpuInput.bad, nullptr);
 
     HIP_CHECK_EXC(hipMemset(dUnit.gpuInput.current.get(), 0x00, dSize));
     HIP_CHECK_EXC(hipMemset(dUnit.gpuInput.bad.get(), 0xA5, dSize));
+
+    auto const pristineSamples = readSampledBytes(dUnit.gpuInput.current.get(), dSize);
+    for(auto const& sample : pristineSamples)
+    {
+        SCOPED_TRACE(sample.offset);
+        EXPECT_EQ(sample.value, 0x00);
+    }
 
     DeviceSignalBuffer gateValue;
     gateValue.allocate();
@@ -248,12 +256,22 @@ TEST(DataInitializationAsyncReset, NaNResetOutputD2DUsesTargetStream)
 
     EXPECT_EQ(hipEventQuery(gateEvent.get()), hipErrorNotReady);
 
-    EXPECT_EQ(readFirstByte(dUnit.gpuInput.current.get()), 0x00)
-        << "resetOutput should not run its D2D NaN reset before the target stream gate";
+    auto const blockedSamples = readSampledBytes(dUnit.gpuInput.current.get(), dSize);
+    for(auto const& sample : blockedSamples)
+    {
+        SCOPED_TRACE(sample.offset);
+        EXPECT_EQ(sample.value, 0x00)
+            << "resetOutput should not run its D2D NaN reset before the target stream gate";
+    }
 
     HIP_CHECK_EXC(hipStreamWriteValue32(releaseStream.get(), gateValue.get(), 1, 0));
     HIP_CHECK_EXC(hipStreamSynchronize(targetStream.get()));
 
-    EXPECT_EQ(readFirstByte(dUnit.gpuInput.current.get()), 0xA5)
-        << "resetOutput should enqueue its D2D NaN reset on the caller stream";
+    auto const resetSamples = readSampledBytes(dUnit.gpuInput.current.get(), dSize);
+    for(auto const& sample : resetSamples)
+    {
+        SCOPED_TRACE(sample.offset);
+        EXPECT_EQ(sample.value, 0xA5)
+            << "resetOutput should enqueue its D2D NaN reset on the caller stream";
+    }
 }
