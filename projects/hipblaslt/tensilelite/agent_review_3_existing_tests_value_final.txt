@@ -11,6 +11,9 @@ Caveat:
   the test binaries. Many of the DataInitialization regression tests are
   GPU-backed and would likely skip in this sandbox when no ROCm-capable device is
   present.
+- These findings are about test signal, maintainability, and claim accuracy.
+  Except where explicitly stated, they should not be read as proof that the
+  production implementation is wrong.
 
 Findings:
 
@@ -20,8 +23,10 @@ Findings:
    - tests/DataInitializationCopyPlan_test.cpp:279-324
 
    Production context:
-   - client/src/DataInitialization.cpp:821-823
+   - client/src/DataInitialization.cpp:818-823
    - client/src/DataInitialization.cpp:836-868
+   - client/src/DataInitialization.cpp:964-983
+   - client/src/DataInitialization.cpp:1242-1250
 
    `DataInitializationCopyPlan.BadBoundsPlanSubmitsSentinelFillAndValidCopy`
    claims to prove that the sentinel-filled bad-bounds buffer is followed by a
@@ -30,15 +35,25 @@ Findings:
    That is not evidence that valid input data was copied. It is evidence of a
    self-copy/no-op-shaped submission.
 
-   This is especially misleading because `copyTensorVoidThroughEngine()` currently
-   ignores its `src` argument and derives `srcBytes` from `dst` at
-   client/src/DataInitialization.cpp:821-823. So the test can pass while the
-   "valid copy" never reads from the valid source buffer after the sentinel fill.
-   The test validates submission shape, not the behavior advertised by its name.
+   The plan does select the expected valid source (`op.src`) at
+   client/src/DataInitialization.cpp:964-983, and `executeTensorCopyPlan()`
+   forwards that source into `copyBadInputBuffers()` at
+   client/src/DataInitialization.cpp:1242-1250. But
+   `copyTensorVoidThroughEngine()` currently ignores its `src` argument, derives
+   `srcBytes` from `dst`, and documents that this intentionally mirrors
+   CopyTensorVoid's current source-pointer behavior at
+   client/src/DataInitialization.cpp:818-823. So the test can pass while the
+   "valid copy" never proves that bytes were read from the valid source buffer
+   after the sentinel fill. The test validates submission shape and current
+   mirroring behavior, not the stronger behavior advertised by its name.
 
    Better shape:
-   - Assert that the second copy source is derived from the valid buffer, not the
-     destination.
+   - Rename/narrow the test if the intended contract is "sentinel fill followed
+     by a current CopyTensorVoid-style mirrored valid-region submission."
+   - If the intended contract is an actual source-to-destination valid-data copy,
+     assert that the second copy source is derived from the valid buffer, not the
+     destination; that would also require changing the current implementation
+     behavior.
    - Or execute the operation on a small tensor with distinguishable sentinel and
      valid data, then read back enough bytes to prove the valid region was
      overwritten from the correct source.
@@ -49,23 +64,32 @@ Findings:
    - tests/DataInitializationOutputResetPlan_test.cpp:352-380
 
    Production context:
+   - tests/include/DataInitializationTestUtils.hpp:286-313
    - client/include/RingPolicy.hpp:38-40
    - client/include/RingPolicy.hpp:63-79
    - client/src/DataInitialization.cpp:1521-1527
+   - client/include/DataInitialization.hpp:1331-1339
 
    `DataInitializationOutputResetPlan.RingWarmNoValidationPlansNoReset` is named
    like it covers a no-validation ring path, but it starts from
-   `buildRingArgs({{32, 32, 32}}, 1)` and then manually mutates protected
-   internals: `m_warmOutputResetRequired`, `m_gpuInit`, `m_hasAltBuffers`,
-   `m_altSlotsReady`, `m_problemDependentData`, and `m_curBoundsCheck`
-   (tests/DataInitializationOutputResetPlan_test.cpp:358-369).
+   `buildRingArgs({{32, 32, 32}}, 1)`, which is a validation-enabled setup, and
+   then manually mutates protected internals: `m_warmOutputResetRequired`,
+   `m_gpuInit`, `m_hasAltBuffers`, `m_altSlotsReady`,
+   `m_problemDependentData`, and `m_curBoundsCheck`
+   (tests/DataInitializationOutputResetPlan_test.cpp:358-369). The helper's
+   default ring args set `num-elements-to-validate` from the provided value and
+   leave all print knobs off, so passing `1` deliberately gives the constructor a
+   validation driver.
 
    In production, no-validation/no-print inputs fail `hasValidationDriver()`, and
    `chooseRingPolicy()` returns the disabled one-slot policy. The constructor
    derives `m_ringPolicy`, `m_warmOutputResetRequired`, and the controller from
-   that policy at client/src/DataInitialization.cpp:1521-1527. The test bypasses
-   that lifecycle and freezes a private planner branch that is not reachable from
-   the public configuration it claims to model.
+   that policy at client/src/DataInitialization.cpp:1521-1527. `ringEligible()`
+   also requires `m_ringPolicy.allowed`. A real no-validation/no-print
+   configuration cannot produce "ring policy allowed but
+   `m_warmOutputResetRequired == false`"; the test bypasses that lifecycle and
+   freezes a private planner branch that is not reachable from the public
+   configuration it claims to model.
 
    Better shape:
    - If the branch is reachable, build it through real args and public calls.
@@ -81,26 +105,37 @@ Findings:
    and executing the plan at lines 376-377 it creates local vectors, copies them,
    and immediately compares each vector to its own copy at lines 382-396. Nothing
    occurs between those snapshots, so those assertions cannot catch mutation from
-   `planInputCopies()` or `executeTensorCopyPlan()`.
+   `planInputCopies()`, `executeTensorCopyPlan()`, or `copyInputs()`.
 
    The useful part is the later `copyInputs()` call and comparison against
    expected plan results. The purity section should either be removed or moved to
    a real before/after check around the function whose purity matters.
 
-4. LOW - `AutoIcacheRotationLoadsExtraCopiesOnce` does not exercise "once".
+4. LOW - `AutoIcacheRotationLoadsExtraCopiesOnce` does not exercise the scheduler-level "once" path.
 
    Tests:
    - tests/ClientRunScheduler_test.cpp:980-1025
+   - tests/ClientRunPolicies_test.cpp:149-156
 
    Production context:
    - client/src/ClientRunScheduler.cpp:44-89
-   - client/src/ClientRunScheduler.cpp:147
+   - client/src/ClientRunScheduler.cpp:91-147
 
    `ClientRunScheduler.AutoIcacheRotationComputesExtraCopyCount` and
    `ClientRunScheduler.AutoIcacheRotationLoadsExtraCopiesOnce` both run the
    default single-problem / single-flush scheduler path and assert one load of
-   three extra copies. The second test never creates a second opportunity to call
-   `maybeLoadAutoIcacheRotation()`, so it cannot detect repeated extra-copy loads.
+   three extra copies. `maybeLoadAutoIcacheRotation()` is called once per problem
+   inside the run loop; with the default harness there is only one problem and one
+   `icacheFlushArgs` entry. The second scheduler test therefore never creates a
+   second scheduler-level opportunity to call `maybeLoadAutoIcacheRotation()`, so
+   that test alone cannot detect repeated extra-copy loads.
+
+   This is not a total coverage gap. The lower-level
+   `IcacheRotationPolicy.ShouldLoadAutoCopiesRequiresAutoRequestAndSingleModule`
+   test checks that `shouldLoadAutoCopies(-1, 2)` is false, which protects the
+   guard predicate used by the scheduler after extra modules have been loaded.
+   The issue is narrower: the scheduler test name overclaims because the
+   scheduler-level repeated-call behavior is not exercised there.
 
    Better shape:
    - Use two problems, two `icacheFlushArgs`, or another repeated scheduler path
@@ -119,9 +154,11 @@ Findings:
    - benchmark paths must not submit the no-benchmark reset hook;
    - rejected solutions must skip solve, launch, wait, and reset.
 
-   Whole-trace assertions make the tests fragile under harmless callback or
-   reporting refactors. The nearby focused assertions already carry most of the
-   value; the full vectors add coupling more than signal.
+   Whole-trace assertions do enforce some important callback ordering, so this is
+   a maintainability/fragility finding rather than an objective correctness
+   failure. The problem is that they also pin unrelated callback and reporting
+   order. That makes harmless scheduler refactors more expensive, while the
+   nearby focused assertions already carry most of the behavioral signal.
 
 6. LOW - Some reset tests prove stream ordering but only weakly prove reset data.
 
@@ -133,7 +170,7 @@ Findings:
    weak for reset correctness. They set a whole destination region, then verify
    only `readFirstByte(...)` after the reset. A wrong copy size, partial reset, or
    tensor coverage mistake could still pass if the first byte is correct. The
-   warm-ring test also checks only D's pointer/data path.
+   warm-ring test also focuses on D's pointer/data path.
 
    Better shape:
    - Assert at least first, middle, and last bytes or use a tiny typed tensor with
@@ -143,10 +180,13 @@ Findings:
 
 Tests with comparatively strong signal:
 - `BatchPointerReset` contains useful problem-switch and stale-alt-slot checks
-  that inspect batch-pointer strides across real GPU prepare paths.
+  that inspect batch-pointer strides across real GPU prepare paths
+  (tests/BatchPointerReset_test.cpp:226-301 and
+  tests/BatchPointerReset_test.cpp:477-520).
 - `DataInitializationSlotStorage.ValidationOnlyConfigurationUsesThreeSlots`
   has useful pointer-identity and copy-engine ordering assertions for the ring
-  slot lifecycle.
+  slot lifecycle (tests/DataInitializationSlotStorage_test.cpp:796-902).
 - `RingPolicy` and `RingSlotController` are reasonable HIP-free units, although
   they mainly protect the extracted policy/controller contracts rather than the
-  end-to-end production path.
+  end-to-end production path (tests/RingPolicy_test.cpp:52-188 and
+  tests/RingSlotController_test.cpp:13-173).

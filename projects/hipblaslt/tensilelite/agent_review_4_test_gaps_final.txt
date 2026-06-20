@@ -5,24 +5,27 @@ Branch: `users/alvasile/ring_buffer`
 Summary:
 The branch adds a substantial amount of host-side coverage, especially around `RingPolicy`,
 `RingSlotController`, copy planning, slot storage, and several negative ring-eligibility cases.
-The remaining gaps are mostly production-path and lifecycle gaps where the tests validate seams in
-isolation but do not yet prove the composed client behavior.
+The remaining gaps are mostly production-composition, ring lifecycle, and outer scheduler-loop gaps:
+the tests validate many seams in isolation, but they do not yet prove several composed client
+behaviors that this branch changes.
 
 Findings:
 
 1. High: no production-composition test for the scheduler, listener stack, and DataInitialization.
 
-`client/main.cpp` now wires the extracted scheduler through production adapters and real listener
-objects at `client/main.cpp:1253-1286`. The scheduler tests use fake collaborators instead:
-`RecordingDataCoordinator` in `tests/ClientRunScheduler_test.cpp:287-326` and a fully synthetic
-`SchedulerHarness` in `tests/ClientRunScheduler_test.cpp:501-548`.
+`client/main.cpp` constructs the real `DataInitialization`, listener stack, `ReferenceValidator`,
+and `BenchmarkTimer` at `client/main.cpp:1179-1208`, then passes the listener stack and production
+adapters into `ClientRunScheduler` at `client/main.cpp:1253-1286`. The scheduler tests use fake
+collaborators instead: `RecordingDataCoordinator` in `tests/ClientRunScheduler_test.cpp:287-326`
+and a fully synthetic `SchedulerHarness` in `tests/ClientRunScheduler_test.cpp:501-548`.
 
 That is useful unit coverage, but it does not prove that parsed client options, `RingPolicy`,
 `DataInitialization`, `ReferenceValidator`, `BenchmarkTimer`, and `MetaRunListener` compose into the
 same no-benchmark validation behavior. The no-benchmark reset test at
-`tests/ClientRunScheduler_test.cpp:562-609` verifies that the scheduler calls `primeNextInputSlot()`
-twice on a fake object; it does not prove the real `DataInitialization` instance accepts those calls,
-uses the ring, and exposes the prepared slot through the real listener-driven flow.
+`tests/ClientRunScheduler_test.cpp:562-609` verifies fake event order and two
+`primeNextInputSlot()` calls on a fake object. It does not prove the real `DataInitialization`
+instance accepts those calls, uses the ring, and exposes the prepared slot through the real
+listener-driven flow.
 
 Recommended coverage:
 Add a thin integration-style scheduler/client test that uses real `MetaRunListener`,
@@ -45,6 +48,11 @@ advance, `waitForPreparedSlot()`, and validation. The helper can set `groupedGem
 `tests/include/DataInitializationTestUtils.hpp:163-165`), but current test references only exercise
 grouped offsets/planning support, not the grouped ring lifecycle.
 
+This is not a claim that the grouped path has no guard: `ringEligible()` still gates ring filling and
+consumption. The untested contract is narrower and more important: the representative `gemms[0]`
+assumption, grouped offsets, per-group pointer state, and validation/readback behavior are not
+covered through the actual ring lifecycle.
+
 Recommended coverage:
 Add a GPU-backed grouped-GEMM ring test with at least two groups and non-identical offsets/sizes, then
 cycle through a prepared warm slot and validate pointer identity plus result/readback for every group.
@@ -59,24 +67,31 @@ setting `ClientRunSchedulerConfig::useUserArgs = true`.
 
 This leaves the extracted scheduler's user-args call path, release ordering, and exception behavior
 uncovered. That matters because the extraction moved this branch out of `main.cpp`, and the normal
-`solve()` tests do not exercise the `dUA`/`dUAHost` lifetime.
+`solve()` tests do not exercise the `dUA`/`dUAHost` lifetime. The release call currently sits inside
+the try block after enqueue/sync handling, before the catch at `client/src/ClientRunScheduler.cpp:335-342`,
+so failure behavior after solve or launch errors is especially worth pinning down.
 
 Recommended coverage:
 Add success and failure tests with `useUserArgs = true`: one that asserts `solveTensileGPU()` and
 `relaseDeviceUserArgs()` ordering, and one that documents expected release behavior when solve or
 launch fails after user args have been allocated.
 
-4. Medium: solution-dependent MX refresh is only predicate-tested, not lifecycle-tested.
+4. Medium: solution-dependent MX refresh lacks beginSolution/preSolution lifecycle coverage.
 
 `DataInitialization::beginSolution()` now performs solution-dependent MX FP4/FP8 regeneration,
 copies refreshed valid inputs back to GPU, and syncs CPU current buffers at
-`client/include/DataInitialization.hpp:262-318`. The test coverage I found stops at predicate level:
+`client/include/DataInitialization.hpp:262-318`; `DataInitialization::preSolution()` reaches that
+logic through the `RunListener` override at `client/include/DataInitialization.hpp:852-854`. The
+MX-specific scheduler/lifecycle coverage I found stops at predicate level:
 `tests/BatchPointerReset_test.cpp:451-473` verifies `shouldRefreshMXForSolution()` after GPU inputs
 are prepared, but no test calls `beginSolution()` or `preSolution()` and verifies the full refresh.
 
 This is a lifecycle gap because `ReferenceValidator::preSolution()` reruns the CPU reference for MX
 problems after the data refresh and relies on the CPU current buffers being updated
 (`client/src/ReferenceValidator.cpp:127-149`).
+There is lower-level helper coverage such as `copyValidToGPUBuffer()` in
+`tests/DataInitializationCopyPlan_test.cpp:794-814`, but that does not cover `initializeMXData()`,
+D2D `copyInputs()`, CPU-current sync, or interaction with `ReferenceValidator`.
 
 Recommended coverage:
 Add an MX-enabled test that calls `DataInitialization::preSolution()` after `prepareGPUInputs()` and
@@ -84,17 +99,25 @@ asserts that MX data regeneration, `copyValidToGPUBuffer()`, D2D `copyInputs()`,
 sync all occurred. If the generator dependency makes this conditional, gate it the same way existing
 MX tests are gated.
 
-5. Medium: scheduler loop coverage is single-problem and mostly single-pass.
+5. Medium: outer scheduler-loop coverage is single-problem and single benchmark-pass.
 
 Production scheduling iterates benchmark runs, icache-flush modes, and
 `problemIdx = firstProblemIdx..lastProblemIdx`, while resetting prepared slots before each problem
 (`client/src/ClientRunScheduler.cpp:91-123`). The test harness defaults to exactly one problem at
-`tests/ClientRunScheduler_test.cpp:501-548`; I did not find tests overriding the problem count,
-using a non-zero `firstProblemIdx`, or exercising multiple benchmark passes.
+`tests/ClientRunScheduler_test.cpp:501-548`, specifically `tests/ClientRunScheduler_test.cpp:506-507`.
+I did not find tests overriding the problem count, using a non-zero `firstProblemIdx`, or exercising
+multiple benchmark passes; `RecordingRunListener` supports benchmark-run count
+(`tests/ClientRunScheduler_test.cpp:100-105`) but defaults it to one
+(`tests/ClientRunScheduler_test.cpp:243`).
 
-Lower-level tests cover manual problem switches in `DataInitialization`, but not scheduler-driven
-multi-problem cleanup, progress reporting, and ring cancellation. That leaves off-by-one range
-behavior and cross-problem state cleanup mostly unproven at the scheduler layer.
+This should be read as an outer-loop gap, not as a general lack of scheduler loop coverage. Existing
+scheduler tests cover inner behavior such as multiple warmups/sync/enqueue paths
+(`tests/ClientRunScheduler_test.cpp:646-684`), rotating benchmark selection
+(`tests/ClientRunScheduler_test.cpp:735-756`), and two solution runs
+(`tests/ClientRunScheduler_test.cpp:844-875`). What remains uncovered is scheduler-driven
+multi-problem cleanup, progress reporting, ring cancellation, and benchmark-pass repetition. That
+leaves off-by-one range behavior and cross-problem state cleanup mostly unproven at the scheduler
+layer.
 
 Recommended coverage:
 Add scheduler tests for a non-zero problem start, multiple problems, and two benchmark passes. Assert

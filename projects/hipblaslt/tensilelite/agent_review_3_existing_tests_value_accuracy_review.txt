@@ -1,0 +1,178 @@
+Accuracy review of agent_review_3_existing_tests_value_final.txt
+
+Scope:
+- Reviewed report file: agent_review_3_existing_tests_value_final.txt
+- Checked branch diff: git diff origin/develop...HEAD -- .
+- Static source review only; no builds or test binaries were run.
+
+Overall verdict:
+- The report is broadly accurate. I did not find a clearly false finding.
+- Findings 1, 2, 3, 5, and 6 are supported by the cited source ranges.
+- Finding 4 is also directionally accurate, but it misses that the lower-level
+  IcacheRotationPolicy unit test already covers the "do not load after there is
+  more than one module" predicate. The scheduler test name still overclaims
+  because that scheduler test creates only one maybeLoadAutoIcacheRotation()
+  opportunity.
+- Several items are value/fragility judgments rather than objective failures.
+  They should be treated as review feedback on test signal, not proof that the
+  implementation is wrong.
+
+Finding-by-finding accuracy:
+
+1. Accurate, with one important nuance: bad-bounds copy test self-copy claim.
+   Report lines: agent_review_3_existing_tests_value_final.txt:17-44.
+   Cited source support:
+   - tests/DataInitializationCopyPlan_test.cpp:279-324 builds a NaN/bad-bounds
+     input plan, executes it through RecordingCopyEngine, and identifies the
+     "valid region" path solely with call.dst == call.src at lines 311-315.
+   - client/src/DataInitialization.cpp:836-868 fills the whole destination from
+     the bad buffer, then calls copyTensorVoidThroughEngine(copyEngine,
+     dstOffset, src, ...) for the valid region.
+   - client/src/DataInitialization.cpp:818-823 computes srcBytes from dst, not
+     src, and explicitly discards src.
+   - client/src/DataInitialization.cpp:964-983 shows the plan did select the
+     intended valid source in op.src, but executeTensorCopyPlan forwards that
+     into copyBadInputBuffers at client/src/DataInitialization.cpp:1242-1250,
+     where copyTensorVoidThroughEngine ignores it.
+   Accuracy notes:
+   - The report correctly says the test validates submission shape, not a copy
+     from the valid source buffer.
+   - The missing nuance is that the production helper currently documents this
+     as intentional mirroring of CopyTensorVoid behavior at
+     client/src/DataInitialization.cpp:821-823. Therefore "assert the second
+     copy source is derived from the valid buffer" is not only a test rewrite;
+     it would also reject the current implementation behavior.
+
+2. Accurate: ring no-validation output-reset test constructs an unreachable
+   policy state.
+   Report lines: agent_review_3_existing_tests_value_final.txt:46-73.
+   Cited source support:
+   - tests/DataInitializationOutputResetPlan_test.cpp:352-380 starts from
+     buildRingArgs({{32, 32, 32}}, 1), then mutates warm reset, gpu-init,
+     alt-buffer, problem-dependent, and bounds-check state through test hooks
+     at lines 362-367.
+   - tests/include/DataInitializationTestUtils.hpp:286-313 shows buildRingArgs
+     with elementsToValidate=1 sets validation on, benchmark/enqueue knobs to
+     no-enqueue values, pristine-on-gpu true, and bounds-check disabled.
+   - client/include/RingPolicy.hpp:38-40 defines the validation driver as
+     numElementsToValidate != 0 || printAny.
+   - client/include/RingPolicy.hpp:63-79 returns the disabled one-slot policy
+     when there is no validation driver, and returns the allowed three-slot
+     policy only after that validation-driver gate passes.
+   - client/src/DataInitialization.cpp:1521-1527 derives m_ringPolicy,
+     m_warmOutputResetRequired, and the RingSlotController from those policy
+     inputs in the constructor.
+   - client/include/DataInitialization.hpp:1331-1339 also requires
+     m_ringPolicy.allowed for ringEligible().
+   Accuracy notes:
+   - The cited lines support the report's claim. A real no-validation/no-print
+     configuration cannot produce "ring policy allowed but
+     m_warmOutputResetRequired=false"; the test forces that private planner
+     state by starting with a validation-enabled config and mutating internals.
+
+3. Accurate: InputPlanIsPureAndMatchesViewMetadata contains vacuous purity
+   checks.
+   Report lines: agent_review_3_existing_tests_value_final.txt:75-88.
+   Cited source support:
+   - tests/DataInitializationCopyPlan_test.cpp:363-451 is the test.
+   - The plan is generated/executed before the local vectors are created at
+     lines 376-377.
+   - The local vectors are then copied at lines 382-391 and immediately compared
+     to their copies at lines 393-396, with no intervening operation that could
+     mutate them.
+   - The later copyInputs() call at lines 398-403 and expected metadata checks
+     at lines 414-450 are the non-vacuous part.
+   Accuracy notes:
+   - The report is correct. The "purity" checks do not prove purity of
+     planInputCopies(), executeTensorCopyPlan(), or copyInputs().
+
+4. Mostly accurate but missing lower-level coverage: AutoIcacheRotationLoadsExtraCopiesOnce.
+   Report lines: agent_review_3_existing_tests_value_final.txt:90-107.
+   Cited source support:
+   - tests/ClientRunScheduler_test.cpp:980-1025 contains the two i-cache
+     scheduler tests. Both use the default one-problem, one-flush harness and
+     each asserts one extra-copy load.
+   - client/src/ClientRunScheduler.cpp:91-147 shows maybeLoadAutoIcacheRotation()
+     is called once per problem inside the run loop. With the default harness
+     there is only one problem and one icacheFlushArgs entry, so the "LoadsExtraCopiesOnce"
+     test does not create a second scheduler-level load opportunity.
+   - client/src/ClientRunScheduler.cpp:44-89 shows repeated loads are guarded by
+     shouldLoadAutoCopies() and the current module count.
+   Missing nuance:
+   - The lower-level policy test at tests/ClientRunPolicies_test.cpp:149-156
+     already checks shouldLoadAutoCopies(-1, 2) is false. That does protect the
+     predicate used by the scheduler.
+   Accuracy notes:
+   - The report's criticism of the scheduler test name is accurate: the
+     scheduler test itself does not prove "once" across repeated calls.
+   - It is slightly incomplete because it does not credit the policy-level
+     coverage for the guard condition.
+
+5. Accurate as a test-fragility judgment: several scheduler tests are coupled
+   to exact event traces.
+   Report lines: agent_review_3_existing_tests_value_final.txt:109-124.
+   Cited source support:
+   - tests/ClientRunScheduler_test.cpp:705-730 asserts the complete
+     harness.events vector for RequeriesListenerCountsAfterPreSolutionAndPostWarmup.
+   - tests/ClientRunScheduler_test.cpp:775-797 asserts the complete vector for
+     BenchmarkPathDoesNotUseNoBenchmarkResetHook.
+   - tests/ClientRunScheduler_test.cpp:896-908 asserts the complete vector for
+     SkipsKernelFlowWhenSolutionRejected.
+   Accuracy notes:
+   - The report's line references support the claim.
+   - This is not an objective test failure. Whole-trace assertions also enforce
+     ordering of important callbacks. The accurate criticism is that they
+     additionally pin unrelated callback/reporting order, increasing maintenance
+     coupling.
+
+6. Accurate: reset tests strongly prove stream gating but weakly sample reset data.
+   Report lines: agent_review_3_existing_tests_value_final.txt:126-142.
+   Cited source support:
+   - tests/DataInitializationAsyncReset_test.cpp:189-258 gates the target stream,
+     memset()s the whole D current buffer and bad buffer at lines 223-224, then
+     checks only readFirstByte() before and after the reset at lines 251-258.
+   - tests/DataInitializationOutputResetPlan_test.cpp:383-452 gates the copy
+     stream for a warm ring slot, records the target D pointer, memset()s the
+     whole slot D buffer at line 417, and checks only readFirstByte(slotD) at
+     lines 418 and 452.
+   Accuracy notes:
+   - The report is correct that these tests are useful for ordering but do not
+     strongly validate full reset coverage, copy size, or non-first-byte data.
+   - The caveat "warm-ring test also checks only D's pointer/data path" is
+     supported by tests/DataInitializationOutputResetPlan_test.cpp:406-452,
+     which focuses on the D unit and slot D pointer.
+
+Strong-signal section:
+- Accurate. Report lines agent_review_3_existing_tests_value_final.txt:144-152
+  describe tests that do contain meaningful signal.
+- BatchPointerReset has real problem-switch/stale-alt-slot coverage:
+  tests/BatchPointerReset_test.cpp:226-301 verifies changed batchA stride across
+  two problems, and tests/BatchPointerReset_test.cpp:477-520 starts the stale
+  alt-slot refresh case after switching problems.
+- DataInitializationSlotStorage.ValidationOnlyConfigurationUsesThreeSlots has
+  useful slot lifecycle and copy-engine ordering checks:
+  tests/DataInitializationSlotStorage_test.cpp:796-902 checks three active
+  slots, distinct cached inputs, slot rotation, and RecordCopyDone /
+  WaitForCopyDone ordering.
+- RingPolicy and RingSlotController are HIP-free unit contracts:
+  tests/RingPolicy_test.cpp:52-188 covers policy enable/disable combinations,
+  and tests/RingSlotController_test.cpp:13-173 covers controller priming,
+  advancing, barriers, single-slot behavior, and cancel.
+
+Unsupported or inaccurate claims:
+- I found no clearly inaccurate claim.
+- The most overstated item is finding 4 only if read as "there is no coverage at
+  all for once-only i-cache behavior"; the report text does not quite say that,
+  but it omits the policy-level test at tests/ClientRunPolicies_test.cpp:149-156.
+- Finding 5 should remain LOW because it is a maintainability/fragility concern,
+  not evidence that the tests assert incorrect behavior.
+
+Cited references check:
+- The report's cited file/line ranges all point to relevant code.
+- The DataInitialization.cpp references in finding 1 are especially strong: the
+  cited production helper literally ignores src.
+- The RingPolicy/DataInitialization constructor references in finding 2 support
+  the unreachable-state argument.
+- The ClientRunScheduler references in finding 4 support the "single
+  opportunity" criticism, but a complete accuracy review should add the
+  ClientRunPolicies_test.cpp:149-156 nuance.

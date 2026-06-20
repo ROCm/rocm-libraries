@@ -1,0 +1,189 @@
+Combined final deduped review: users/alvasile/ring_buffer
+
+Scope:
+- Inputs consolidated:
+  - agent_review_1_architecture_testability_final.txt
+  - agent_review_2_overdesign_simplification_final.txt
+  - agent_review_3_existing_tests_value_final.txt
+  - agent_review_4_test_gaps_final.txt
+- Reviewed branch/diff as reported by the inputs: users/alvasile/ring_buffer, git diff origin/develop...HEAD -- .
+- This consolidation is based on the four final review reports only. It does not add new source inspection, builds, or test runs.
+
+Executive verdict:
+- The branch adds useful seams and host-side tests around ClientRunScheduler, RingPolicy, RingSlotController, BatchPointerLayout, InputLayoutPolicy, CopyEngine, async reset, ring eligibility, D2D copy-stream behavior, no-benchmark execution, and slot storage.
+- The highest-risk issue is that the new copy-engine seam preserves an existing bad source-pointer behavior in the BadBounds path and the new test treats that behavior as success.
+- The strongest remaining coverage gaps are production-composition tests for the real scheduler/listener/DataInitialization stack, grouped-GEMM ring lifecycle coverage, stale prepared-slot protection in the pointer-wrapper ring fast path, and user-args/outer-loop scheduler paths.
+- Several new seams are useful for testing but may be broader than the runtime needs: DataInitialization now has overlapping slot-state representations; copy/reset planning has grown into a test-visible plan/executor/apply framework; ClientRunScheduler exposes durable virtual interfaces for one production caller; OutputResetPlan carries metadata that production does not consume.
+
+Findings:
+
+1. High - BadBounds valid-copy behavior and tests preserve a bad source-pointer contract.
+
+Merged from the architecture/testability and existing-tests-value reports.
+
+In client/src/DataInitialization.cpp:772-823, copyTensorVoidThroughEngine() accepts a src argument but computes srcBytes from dst and discards src at lines 821-823. copyBadInputBuffers() fills the destination from the bad/sentinel buffer at client/src/DataInitialization.cpp:845-853, computes a padded destination offset, and then calls copyTensorVoidThroughEngine(copyEngine, dstOffset, src, ...) at client/src/DataInitialization.cpp:866-867. For BoundsCheckMode::NaN, planInputCopies() maps to TensorCopyPlanKind::BadBounds at client/src/DataInitialization.cpp:1007-1011, and executeTensorCopyPlan() dispatches BadBounds to copyBadInputBuffers() at client/src/DataInitialization.cpp:1242-1250.
+
+The branch did not invent the underlying behavior: include/Tensile/hip/HipUtils.hpp:157-205 shows CopyTensorVoid() also accepts src but derives srcBytes from dst at lines 202-203 before hipMemcpyAsync(). The architectural issue is that the new CopyEngine seam carries that legacy behavior forward instead of isolating or fixing it.
+
+The test DataInitializationCopyPlan.BadBoundsPlanSubmitsSentinelFillAndValidCopy in tests/DataInitializationCopyPlan_test.cpp:279-325 identifies the valid-region copy with call.dst == call.src at tests/DataInitializationCopyPlan_test.cpp:311-315. That proves a current self-copy/no-op-shaped submission, not that valid input bytes were copied from the valid source buffer after sentinel fill. The plan may select op.src at client/src/DataInitialization.cpp:964-983 and forward it through executeTensorCopyPlan(), but the executor helper ignores it.
+
+Nuance: this finding is specifically about the BadBounds/BoundsCheckMode::NaN path. It should not be generalized to copyNaNInputBuffers(), used by the GuardBack path, which copies from src at client/src/DataInitialization.cpp:871-895.
+
+Recommended shape:
+- Fix copyTensorVoidThroughEngine() to compute srcBytes from src, not dst, or explicitly quarantine the legacy CopyTensorVoid behavior behind a named compatibility path.
+- Replace call.dst == call.src as the success condition with semantic assertions about the real valid source and destination.
+- Add a content-level test for a padded or non-contiguous descriptor that proves sentinel padding remains sentinel and the valid region is overwritten from the valid source. A small readback with distinguishable sentinel and valid data would be stronger than submission-shape assertions.
+- If preserving the current behavior is intentional, rename/narrow the test to state that it verifies CopyTensorVoid-style mirrored submission rather than a valid-data copy.
+
+2. High - The branch lacks production-composition coverage for the real scheduler, listener stack, and DataInitialization ring path.
+
+Merged from the test-gaps scheduler composition finding and related scheduler design observations.
+
+client/main.cpp constructs the real DataInitialization, listener stack, ReferenceValidator, and BenchmarkTimer at client/main.cpp:1179-1208, then passes the listener stack and production adapters into ClientRunScheduler at client/main.cpp:1253-1286. The scheduler tests use recording fakes instead: RecordingDataCoordinator in tests/ClientRunScheduler_test.cpp:287-326 and SchedulerHarness in tests/ClientRunScheduler_test.cpp:501-548.
+
+The fake-based tests are useful, especially for sequencing-sensitive behavior inside ClientRunScheduler::run() at client/src/ClientRunScheduler.cpp:91-366. They cover parts of listener-count rereads, rotating outputs, icache rotation, waitForPreparedSlot(), and no-benchmark primeNextInputSlot() submissions. However, the no-benchmark reset test at tests/ClientRunScheduler_test.cpp:562-609 verifies fake event order and two fake primeNextInputSlot() calls; it does not prove that parsed client options, RingPolicy, real DataInitialization, ReferenceValidator, BenchmarkTimer, and MetaRunListener compose into the intended validation-only no-benchmark behavior.
+
+The design and coverage issues reinforce each other. ClientRunScheduler was extracted into callback/config/dependency structs and four virtual interfaces at client/include/ClientRunScheduler.hpp:25-43, 45-100, and 102-122. main.cpp then adds forwarding adapter classes at client/main.cpp:894-1037 and instantiates them at client/main.cpp:1253-1256. That may be justified as a long-term extension point, but the current production use is a single caller and the strongest tests use synthetic collaborators.
+
+Recommended coverage/design direction:
+- Add a thin integration-style scheduler/client test using real MetaRunListener, DataInitialization, and ReferenceValidator with a fake or minimal RunKernelLauncher/solution source.
+- Assert the composed behavior, not another full event trace: a validation-only, no-benchmark run should prime and consume ring slots through the real data coordinator and real listener-driven flow.
+- If the virtual interface shape remains, document why these are durable production interfaces rather than only unit-test adapters. If not, consider a concrete helper/free function that takes existing collaborators plus a narrow callback struct for HIP-only side effects.
+
+3. High - Grouped-GEMM ring lifecycle is not exercised through the fast path.
+
+From the test-gaps report, preserved as a separate high-severity gap because it targets a different production contract than the general scheduler composition gap.
+
+The new fast path in DataInitialization::prepareGPUInputs(ContractionProblem const*) bypasses typed dispatch once the ring has an available prepared slot at client/include/DataInitialization.hpp:223-238. The comments include grouped GEMM in that contract. Grouped preparation and ring priming then reduce the problem to gemms[0] after only an element-type invariant assertion at client/include/DataInitialization.hpp:351-364, client/include/DataInitialization.hpp:1291-1316, client/src/DataInitialization.cpp:4395-4407, and client/src/DataInitialization.cpp:4476-4481.
+
+The reports did not find a test that drives a ContractionProblemGroupedGemm through warm slot priming, advance, waitForPreparedSlot(), and validation. The helper can set groupedGemm at tests/include/DataInitializationTestUtils.hpp:48-50 and tests/include/DataInitializationTestUtils.hpp:163-165, but the current references exercise grouped offsets/planning support rather than the grouped ring lifecycle.
+
+Nuance: this is not a claim that grouped ring use has no guard. ringEligible() still gates ring filling and consumption. The untested contract is that the representative gemms[0] assumption, grouped offsets, per-group pointer state, and validation/readback behavior all hold through the actual ring lifecycle.
+
+Recommended coverage:
+- Add a GPU-backed grouped-GEMM ring test with at least two groups and non-identical offsets/sizes.
+- Cycle through a prepared warm slot and validate pointer identity plus result/readback for every group.
+
+4. Medium - The pointer-wrapper ring fast path can consume stale prepared slot state if callers do not follow scheduler discipline.
+
+Merged from the architecture/testability ring fast-path finding and the test-gaps outer-loop cleanup concerns.
+
+client/include/DataInitialization.hpp:223-237 is the risky path: prepareGPUInputs(ContractionProblem const*) consumes a prepared ring slot when m_ringPolicy.allowed && m_ring.hasAvailableSlot(), asserts ringEligible(), advances the buffer, and returns m_cachedGPUInputs. In release builds, the assert is not a gate. ringEligible() is stronger than the release fast-path condition: client/include/DataInitialization.hpp:1331-1340 checks the policy bit, alt buffers, copy stream, GPU init, bounds mode, problem-dependent data, and warm-output reset requirements. It still does not validate that the prepared slot matches the problem being requested.
+
+The branch already has nearby machinery: PreparedProblemSignature and gpuInputsPreparedFor() are declared at client/include/DataInitialization.hpp:1149-1170 and implemented at client/src/DataInitialization.cpp:2303-2324. The pointer-wrapper fast path does not call that machinery before advanceBuffer(). This is specifically about the ContractionProblem const* wrapper path; the typed overloads at client/include/DataInitialization.hpp:350-373 route through prepareGPUInputsInternal().
+
+Production scheduler discipline lowers the main-path risk: client/src/ClientRunScheduler.cpp:119-127 resets prepared slots before preparing inputs for each problem. But the API shape is fragile because DataInitialization exposes both primeNextInputSlot() and prepareGPUInputs(ContractionProblem const*). primeNextInputSlot() returns early only on ringEligible(), records the copy, and marks the ring slot primed at client/src/DataInitialization.cpp:4444-4485. A caller can prime p1 and then call prepareGPUInputs(p2) without reset, satisfying the release fast-path gate and consuming stale cached state.
+
+Existing tests cover nearby reset discipline but not this exact hole. tests/BatchPointerReset_test.cpp:477-545 covers stale alt-slot refresh after beginProblem()/reset, with lines 515-518 explicitly resetting before preparing p2. tests/BatchPointerReset_test.cpp:618-677 covers resetPreparedSlotsForProblem() invalidating batch pointers without beginProblem(). tests/BatchPointerReset_test.cpp:680-742 covers structural reinit without beginProblem() for the typed path. The reports did not find a regression that primes p1 and then calls the pointer-wrapper prepareGPUInputs(p2) without reset.
+
+Recommended shape:
+- Make the release fast-path gate require ringEligible() and a current prepared-problem signature, or an equivalent release-mode match, before advanceBuffer().
+- If the signature does not match, fall back to the typed prepare path or reset prepared slots instead of consuming the ring.
+- Add a regression that primes a ring slot for p1, calls prepareGPUInputs(ContractionProblem const*) for p2 without scheduler reset, and proves p2 does not receive p1's cached ring input.
+
+5. Medium - CuCount_test.cpp was removed from the default tensilelite-tests target.
+
+From the architecture/testability report.
+
+tests/CMakeLists.txt:20-35 comments out "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp" while adding the new policy/layout tests. The branch diff against origin/develop had CuCount_test.cpp as an active source before this branch. This is removal from the default tensilelite-tests target, not deletion of the source file, but it is still a coverage regression unless the branch explains why the test no longer belongs in that target.
+
+Recommended shape:
+- Restore CuCount_test.cpp to tensilelite-tests, or split/guard it behind an explicit option or condition with a comment explaining the dependency and replacement coverage.
+- If it was disabled because it blocks this branch's build, document the failure mode in the PR and add the narrowest replacement coverage.
+
+6. Medium - DataInitialization now has overlapping mutable representations of active GPU input slot state.
+
+From the overdesign/simplification report.
+
+MemoryInput owns per-tensor allocation/active-alias state: current, batch, and per-slot buffers[]/batchBufs[] in client/include/DataInitialization.hpp:916-979. Slot-0 and alternate-slot allocations are stored at client/src/DataInitialization.cpp:2172-2180 and client/src/DataInitialization.cpp:2182-2203. GpuInputSlotSet separately owns assembled per-slot pointer vectors and cached ProblemInputs views in client/include/GpuInputSlotSet.hpp:16-33 and client/include/GpuInputSlotSet.hpp:35-74; those views are populated at client/src/DataInitialization.cpp:4230-4233, client/src/DataInitialization.cpp:4259-4262, and client/src/DataInitialization.cpp:4304-4313.
+
+These structures are not literal duplicates: MemoryInput owns tensor allocation aliases, while GpuInputSlotSet stores the assembled pointer vectors and cached ProblemInputs snapshots used by buildGPUProblemInputs() / populateTensorSlot() at client/src/DataInitialization.cpp:3688-3729 and client/src/DataInitialization.cpp:3804-3869. The risk is the invariant between them. activateRingSlot() must update every pristine tensor's active alias and also replace m_gpuPtrs, m_gpuBatchPtrs, and m_cachedGPUInputs from the slot set at client/src/DataInitialization.cpp:4338-4350.
+
+Recommended shape:
+- Prove whether one slot-owned representation can be the source of truth, deriving legacy m_gpuPtrs/m_gpuBatchPtrs only at the ProblemInputs boundary or only for old API surfaces.
+- Until then, treat changes to slot lifetime, grouped GEMM offsets, swizzle staging, or batch-pointer setup as touching a two-representation invariant.
+
+7. Medium - Copy/reset planning is valuable but has become broader than its immediate production use.
+
+Merged from the overdesign/simplification report and the architecture/testability report's HIP-coupling point.
+
+The copy/reset model is defined in client/include/DataInitialization.hpp:1005-1030. The input/reset planners duplicate pointer-selection logic at client/src/DataInitialization.cpp:936-1149; execution is a second pass at client/src/DataInitialization.cpp:1216-1287; result application is a third pass at client/src/DataInitialization.cpp:1289-1387. Production wrappers immediately run plan -> execute -> apply at client/src/DataInitialization.cpp:1389-1415 and client/src/DataInitialization.cpp:3210-3243.
+
+The framework centralizes real complexity: bounds modes, guard-page padding, D2D stream selection, batch pointer selection, grouped offsets, and output-only reset behavior. It also gives tests direct plan inspection through tests/DataInitializationCopyPlan_test.cpp:33-50. However, there is no production path that stores, transforms, combines, or reorders plans. That makes the abstraction look like a small internal planning language whose main consumer is tests.
+
+The remaining testability smell is that important planning behavior is still often exercised through DataInitialization subclasses rather than pure planner APIs. tests/DataInitializationCopyPlan_test.cpp:33-49 exposes protected internals through CopyPlanDataInitialization. Constructing DataInitialization can create a real HipCopyEngine at client/src/DataInitialization.cpp:1517-1519 and allocate CPU/GPU input storage at client/src/DataInitialization.cpp:1928-1929. tests/DataInitializationCopyPlan_test.cpp:95-109 defines a HIP-device probe, and many tests in that file skip through it. The first test, ExecutorPreservesD2DOnlyStreamForwarding at tests/DataInitializationCopyPlan_test.cpp:212-228, is HIP-free, so this is not a claim that every test in the file requires a device.
+
+Recommended shape:
+- Continue extracting planner objects that operate on descriptor/config/view metadata without owning HIP allocations.
+- Keep DataInitialization as executor/resource owner.
+- Consider replacing broad plan/executor/apply domain objects with narrower tensor loops plus small pointer-selection and bounds-handling helpers, but only with behavior-equivalence proof.
+
+8. Medium - Scheduler user-args and outer-loop paths are not covered.
+
+Merged from the test-gaps user-args and outer-loop findings, with related existing-test nuance.
+
+ClientRunScheduler has a separate user-argument branch: solveTensileGPU() is called instead of solve() at client/src/ClientRunScheduler.cpp:186-196, and device user args are released at client/src/ClientRunScheduler.cpp:322-325. The test fake implements both hooks at tests/ClientRunScheduler_test.cpp:357-387, but the reports found no scheduler test setting ClientRunSchedulerConfig::useUserArgs = true. This leaves user-args call routing, release ordering, and exception behavior uncovered, especially because the release call sits inside the try block before the catch at client/src/ClientRunScheduler.cpp:335-342.
+
+Outer scheduler-loop coverage is also narrow. Production iterates benchmark runs, icache-flush modes, and problemIdx = firstProblemIdx..lastProblemIdx while resetting prepared slots before each problem at client/src/ClientRunScheduler.cpp:91-123. The test harness defaults to one problem at tests/ClientRunScheduler_test.cpp:501-548, specifically tests/ClientRunScheduler_test.cpp:506-507, and RecordingRunListener defaults benchmark runs to one at tests/ClientRunScheduler_test.cpp:243. Existing tests cover inner behavior such as multiple warmups/sync/enqueue paths at tests/ClientRunScheduler_test.cpp:646-684, rotating benchmark selection at tests/ClientRunScheduler_test.cpp:735-756, and two solution runs at tests/ClientRunScheduler_test.cpp:844-875. What remains uncovered is scheduler-driven multi-problem cleanup, non-zero problem starts, progress reporting, ring cancellation, benchmark-pass repetition, and cross-problem state cleanup.
+
+Related existing-test nuance: AutoIcacheRotationComputesExtraCopyCount and AutoIcacheRotationLoadsExtraCopiesOnce at tests/ClientRunScheduler_test.cpp:980-1025 run the default single-problem/single-flush path and therefore do not create a second scheduler-level opportunity to call maybeLoadAutoIcacheRotation(). There is lower-level predicate coverage in tests/ClientRunPolicies_test.cpp:149-156, so the gap is specifically scheduler-level repeated-call behavior.
+
+Recommended coverage:
+- Add success and failure tests with useUserArgs = true, asserting solveTensileGPU() and relaseDeviceUserArgs() ordering plus expected release behavior after solve or launch failures.
+- Add scheduler tests for non-zero firstProblemIdx, multiple problems, and two benchmark passes.
+- Assert resetPreparedSlotsForProblem() precedes each problem's first prepareGPUInputs(), progress strings are correct, and no primed slot from one problem is consumed by the next.
+- Exercise a repeated scheduler opportunity for auto icache rotation and assert extra-copy loading remains once-only.
+
+9. Medium - Solution-dependent MX refresh lacks beginSolution/preSolution lifecycle coverage.
+
+From the test-gaps report.
+
+DataInitialization::beginSolution() performs solution-dependent MX FP4/FP8 regeneration, copies refreshed valid inputs back to GPU, and syncs CPU current buffers at client/include/DataInitialization.hpp:262-318. DataInitialization::preSolution() reaches that logic through the RunListener override at client/include/DataInitialization.hpp:852-854. The MX-specific scheduler/lifecycle coverage found in the reports stops at predicate level: tests/BatchPointerReset_test.cpp:451-473 verifies shouldRefreshMXForSolution() after GPU inputs are prepared, but no test calls beginSolution() or preSolution() and verifies the full refresh.
+
+This matters because ReferenceValidator::preSolution() reruns the CPU reference for MX problems after data refresh and relies on CPU current buffers being updated at client/src/ReferenceValidator.cpp:127-149. Lower-level helper coverage such as copyValidToGPUBuffer() at tests/DataInitializationCopyPlan_test.cpp:794-814 does not cover initializeMXData(), D2D copyInputs(), CPU-current sync, or ReferenceValidator interaction.
+
+Recommended coverage:
+- Add an MX-enabled test that calls DataInitialization::preSolution() after prepareGPUInputs().
+- Assert MX data regeneration, copyValidToGPUBuffer(), D2D copyInputs(), and CPU-current sync all occurred.
+- If generator dependencies make this conditional, gate it the same way existing MX tests are gated.
+
+10. Low - OutputResetPlan carries metadata that production does not consume.
+
+From the overdesign/simplification report.
+
+OutputResetPlan fields reason, requiresPristineGpuCopy, usesExistingSlotContents, targetIsRingSlot, and targetSlot are defined at client/include/DataInitialization.hpp:1040-1056 and assigned in client/src/DataInitialization.cpp:1152-1214. Production call sites branch only on action at client/src/DataInitialization.cpp:4214-4239 and client/src/DataInitialization.cpp:4452-4471. In the ring path, targetSlot used by production is the local variable passed into the planner, not outputPlan.targetSlot at client/src/DataInitialization.cpp:4451-4484.
+
+Tests do read the metadata as planner-intent assertions through tests/DataInitializationOutputResetPlan_test.cpp:129-139, with examples at tests/DataInitializationOutputResetPlan_test.cpp:242-247, 293-298, 343-349, and 374-380. That is a useful white-box signal, but it is not runtime policy.
+
+Recommended shape:
+- If these fields are explanatory, replace or narrow them with comments/focused test helpers.
+- If they are intended policy, make production consume them.
+
+11. Low - Some tests overclaim or assert weak/non-semantic behavior.
+
+Merged from the existing-tests-value report's lower-severity test-quality findings.
+
+- DataInitializationOutputResetPlan.RingWarmNoValidationPlansNoReset at tests/DataInitializationOutputResetPlan_test.cpp:352-380 constructs a state that the public configuration does not appear to reach. It starts from buildRingArgs({{32, 32, 32}}, 1), which is validation-enabled, then mutates protected internals including m_warmOutputResetRequired, m_gpuInit, m_hasAltBuffers, m_altSlotsReady, m_problemDependentData, and m_curBoundsCheck at tests/DataInitializationOutputResetPlan_test.cpp:358-369. Production no-validation/no-print inputs fail hasValidationDriver(), chooseRingPolicy() returns a disabled one-slot policy at client/include/RingPolicy.hpp:38-40 and client/include/RingPolicy.hpp:63-79, and the constructor derives m_ringPolicy/m_warmOutputResetRequired/controller at client/src/DataInitialization.cpp:1521-1527. Either build this branch through real args/public calls, or rename/remove it as a private planner-unit test.
+- InputPlanIsPureAndMatchesViewMetadata at tests/DataInitializationCopyPlan_test.cpp:363-451 contains vacuous purity checks: after generating/executing the plan at lines 376-377, it creates local vector copies and immediately compares each vector to its own copy at tests/DataInitializationCopyPlan_test.cpp:382-396. The useful part is the later copyInputs() comparison; the purity section should be removed or turned into a real before/after check around the function whose purity matters.
+- Several scheduler tests assert entire event traces at tests/ClientRunScheduler_test.cpp:705-730, 775-797, and 896-908. The material behaviors are narrower: listener counts must be re-read after preSolution()/postWarmup(); benchmark paths must not submit the no-benchmark reset hook; rejected solutions must skip solve/launch/wait/reset. Whole-trace assertions provide some ordering signal, but they also pin unrelated callback/reporting order and make harmless refactors more expensive.
+- Reset tests at tests/DataInitializationAsyncReset_test.cpp:223-258 and tests/DataInitializationOutputResetPlan_test.cpp:416-452 prove stream ordering but weakly prove reset data by checking only readFirstByte(...). A wrong copy size, partial reset, or tensor coverage mistake could still pass if the first byte is right. Assert at least first/middle/last bytes or use a tiny typed tensor with multiple distinguishable elements, and ensure the expected byte differs from the poison byte.
+
+Positive test signal worth preserving:
+- BatchPointerReset has useful problem-switch and stale-alt-slot checks that inspect batch-pointer strides across real GPU prepare paths at tests/BatchPointerReset_test.cpp:226-301 and tests/BatchPointerReset_test.cpp:477-520.
+- DataInitializationSlotStorage.ValidationOnlyConfigurationUsesThreeSlots has useful pointer-identity and copy-engine ordering assertions for the ring slot lifecycle at tests/DataInitializationSlotStorage_test.cpp:796-902.
+- RingPolicy and RingSlotController are reasonable HIP-free units at tests/RingPolicy_test.cpp:52-188 and tests/RingSlotController_test.cpp:13-173, though they mainly protect extracted policy/controller contracts rather than end-to-end production behavior.
+- The newly added DataInitializationTestUtils_test.cpp, InputLayoutPolicy_test.cpp, BatchPointerLayout_test.cpp, GpuInputSlotSet_test.cpp, HipStreamGuard_test.cpp, RingPolicy_test.cpp, and RingSlotController_test.cpp entries in tests/CMakeLists.txt:28-34 are real progress toward lower-level coverage.
+
+Caveats:
+- The four input reports were static reviews. They did not run builds, C++ test binaries, or GPU-backed runtime validation.
+- Some DataInitialization regression tests are GPU-backed and would likely skip in environments without a ROCm-capable device.
+- Simplification recommendations are design directions, not proven drop-in replacements. Each needs behavior-equivalence proof before implementation.
+
+Dedupe/merge note:
+- Merged the BadBounds/valid-copy findings from reports 1 and 3 into one high-severity functional/test-contract finding, preserving both the CopyTensorVoid legacy nuance and the weak test assertion.
+- Merged scheduler production-composition coverage from report 4 with ClientRunScheduler interface/adapter overdesign from report 2, because both concern the gap between fake-tested seams and the real main.cpp composition.
+- Kept grouped-GEMM ring lifecycle as a separate high-severity gap because it targets a distinct production contract even though it also involves the ring fast path.
+- Merged stale prepared-slot risk from report 1 with outer-loop reset/cleanup concerns from report 4 where they share the cross-problem stale-state theme, while keeping user-args and MX lifecycle as separate gaps.
+- Merged copy/reset planner overdesign from report 2 with DataInitialization HIP-coupled planning-testability from report 1, preserving the nuance that the abstraction centralizes real complexity but is broader than immediate production use.
+- Collapsed lower-severity test-quality findings from report 3 into one section to avoid repeating "test overclaims" across individual findings, while retaining each concrete source reference.
+- Removed duplicate caveats about static review/no tests and consolidated them into the caveats section.

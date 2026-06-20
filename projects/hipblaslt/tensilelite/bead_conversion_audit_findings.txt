@@ -1,0 +1,82 @@
+Bead conversion audit findings
+
+Scope
+- Branch checked: users/alvasile/ring_buffer.
+- Inputs inspected: agent_review_combined_final_deduped.txt, current br tracker state, and .beads/issues.jsonl entries for the expected converted beads.
+- This was an audit only. I did not modify beads, source files, report files, or git state.
+
+Verdict
+- Nothing actionable from agent_review_combined_final_deduped.txt appears to be missing.
+- I found no duplicate beads and no incorrectly merged or incorrectly split report findings.
+- The conversion is effectively one report finding to one open bead for all 11 actionable findings.
+- Bead type and priority choices are reasonable: High findings became P1, Medium findings became P2, Low findings became P3; functional/coverage regressions were typed as bugs where appropriate.
+- The expected dependency links are present and there are no dependency cycles.
+- Recommended follow-up: add at least one coverage-before-refactor dependency for tensilelite-qam, detailed below. Also fix two minor self-containment details if the beads are edited later.
+
+Finding-to-bead coverage
+
+1. Report finding 1, High, BadBounds valid-copy source-pointer semantics, maps to tensilelite-7co.
+   Assessment: Complete and correctly typed as P1 bug. The bead carries the source refs, motivation, goal, and content-level validation requirement. Minor self-containment note: the report explicitly says this must not be generalized to copyNaNInputBuffers()/GuardBack; the bead is already scoped to BadBounds/NaN, but adding that negative-scope note would reduce implementation risk.
+
+2. Report finding 2, High, production-composition coverage for real scheduler/listener/DataInitialization, maps to tensilelite-nxb.
+   Assessment: Complete and correctly typed as P1 task. The bead preserves the fake-vs-production coverage gap, the main.cpp/ClientRunScheduler refs, and the acceptance shape for real MetaRunListener/DataInitialization/ReferenceValidator composition.
+
+3. Report finding 3, High, grouped-GEMM ring lifecycle fast path, maps to tensilelite-5ob.
+   Assessment: Complete and correctly typed as P1 task. The bead preserves the grouped gemms[0] representative-risk, the need for at least two groups, and the pointer identity plus readback acceptance criteria.
+
+4. Report finding 4, Medium, stale prepared slot state through the pointer-wrapper ring fast path, maps to tensilelite-yn6.
+   Assessment: Complete and reasonably typed as P2 bug. The bead preserves the release-mode fast-path risk, the missing prepared-problem signature gate, the scheduler-discipline nuance, and the direct-API regression test shape.
+
+5. Report finding 5, Medium, CuCount_test.cpp removed from the default tensilelite-tests target, maps to tensilelite-90f.
+   Assessment: Complete and correctly typed as P2 bug. The bead captures that this is target coverage removal, not source deletion, and gives the restore-or-guard acceptance path.
+
+6. Report finding 6, Medium, overlapping DataInitialization active slot state ownership, maps to tensilelite-qam.
+   Assessment: Complete and correctly typed as P2 task. The bead is self-contained and preserves the MemoryInput/GpuInputSlotSet/m_gpuPtrs invariant. Dependency sequencing needs one recommended addition below.
+
+7. Report finding 7, Medium, copy/reset planning broader than production use, maps to tensilelite-3h4.
+   Assessment: Complete and correctly typed as P2 task. The bead preserves the plan/execute/apply structure, HIP-coupled testability concern, and behavior-equivalence acceptance. Its dependency on tensilelite-7co is correct.
+
+8. Report finding 8, Medium, scheduler user-args and outer-loop paths not covered, maps to tensilelite-8en.
+   Assessment: Complete and correctly typed as P2 task. The bead preserves user-args success/failure coverage, multi-problem/multi-pass coverage, progress/reset/ring cleanup assertions, and repeated auto-icache opportunity coverage. Minor self-containment note: the actual code symbol is misspelled as relaseDeviceUserArgs(); the bead uses the correct English spelling releaseDeviceUserArgs() in places, which may make grep-based implementation slightly less direct.
+
+9. Report finding 9, Medium, beginSolution/preSolution MX refresh lifecycle coverage, maps to tensilelite-qfr.
+   Assessment: Complete and correctly typed as P2 task. The bead preserves the MX refresh lifecycle, CPU-current sync, copyValidToGPUBuffer/copyInputs expectations, and ReferenceValidator interaction.
+
+10. Report finding 10, Low, OutputResetPlan metadata not consumed by production, maps to tensilelite-zhx.
+    Assessment: Complete and correctly typed as P3 task. The bead preserves the policy-vs-test-intent decision and its dependency on the broader planning seam bead, tensilelite-3h4.
+
+11. Report finding 11, Low, tests overclaim or assert weak behavior, maps to tensilelite-0u2.
+    Assessment: Complete and correctly typed as P3 task. The bead preserves all four concrete weak-test buckets and the positive coverage worth preserving.
+
+Dependency audit
+- Present and correct: tensilelite-3h4 depends on tensilelite-7co.
+- Present and correct: tensilelite-zhx depends on tensilelite-3h4.
+- Present and correct: tensilelite-qam depends on tensilelite-yn6.
+- br dep cycles reported no dependency cycles.
+- br ready showed 8 ready issues: tensilelite-7co, tensilelite-nxb, tensilelite-5ob, tensilelite-yn6, tensilelite-90f, tensilelite-8en, tensilelite-qfr, and tensilelite-0u2. The blocked set is therefore tensilelite-3h4, tensilelite-zhx, and tensilelite-qam, matching the three current dependency chains.
+
+Recommended dependency fixes
+- Add tensilelite-qam depends on tensilelite-5ob. Rationale: qam is a slot-state ownership refactor, and its own acceptance says slot lifetime/grouped GEMM offsets/batch-pointer setup touch the active-slot invariant. The report separately identifies grouped-GEMM ring lifecycle as an untested high-risk production contract. Covering grouped ring lifecycle before consolidating slot state would reduce refactor risk.
+- Consider adding tensilelite-qam depends on tensilelite-nxb if the intended policy is "production-composition coverage before state-owner refactors." This is a softer recommendation than qam -> 5ob because qam could add its own targeted composition checks, but nxb is the broader real scheduler/listener/DataInitialization proof that would protect the same ring-slot surface.
+- I would not add hard dependencies from tensilelite-8en to tensilelite-yn6 or from tensilelite-qfr to tensilelite-nxb. Those beads can be implemented independently even though their tests touch adjacent scheduler/listener paths.
+
+Self-containment audit
+- Overall, the beads are self-contained enough: each expected bead has background, motivation, goal, source references, and acceptance/validation notes.
+- The descriptions are detailed enough for a later worker to implement without reopening the deduped report for core context.
+- Minor improvements if beads are edited later:
+  - tensilelite-7co: add the explicit negative-scope note that the BadBounds/NaN issue should not be generalized to GuardBack/copyNaNInputBuffers().
+  - tensilelite-8en: use the exact code symbol relaseDeviceUserArgs() somewhere in the bead, while optionally noting that the spelling is inherited from the code.
+
+Tracker checks run
+- git status --short --branch
+- br list --status=open
+- br show for tensilelite-7co, tensilelite-nxb, tensilelite-5ob, tensilelite-yn6, tensilelite-90f, tensilelite-qam, tensilelite-3h4, tensilelite-8en, tensilelite-qfr, tensilelite-zhx, and tensilelite-0u2
+- br dep list for each expected bead ID above
+- br dep cycles
+- br ready
+- br sync --status
+- rg over .beads/issues.jsonl for the expected bead IDs
+- rg for relaseDeviceUserArgs/releaseDeviceUserArgs to verify the exact code symbol used by the user-args scheduler bead
+
+Caveat
+- This audit checks conversion fidelity from the deduped report into tracker records. It does not re-review the full branch implementation, run builds, run C++ tests, or perform GPU-backed validation. The deduped report itself says the underlying reviews were static and did not run builds or tests.
