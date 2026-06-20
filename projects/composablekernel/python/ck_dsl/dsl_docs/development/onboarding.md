@@ -794,7 +794,7 @@ Extend Exercise 6 to `E = (A*B + D0) * D1` by passing
 **Study the elementwise / quantization ops:**
 ```bash
 # Activation + quant ops available as standalone elementwise kernels:
-python python/ck_dsl/examples/common/ck_tile_parity.py --op relu
+python python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
 cat python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
 ```
 

@@ -24,10 +24,22 @@
 #
 # Transitional note: the default gate compares the C++ engine against THIS tree's
 # Python engine. While engine reconciliation work is in flight, the C++ side may
-# intentionally match a not-yet-merged reference (e.g. a deliberately suppressed
-# scheduler-hint sequence), which shows up here as GEMM-family `sched.group.barrier`
-# drift. That is expected during the window, not a regression. To check against the
-# reconciliation reference instead, point --ref-pyroot/--ref-shim at that tree.
+# intentionally match a not-yet-merged reference, which shows up here as drift.
+# Known intentional pre-merge drifts (all GREEN against --ref-pyroot=target):
+#   * GEMM family `sched.group.barrier`: this-branch Python emits the scheduler-hint
+#     intrinsics; the C++ side suppresses them to match the reference.
+#   * deep_fused_conv_pool kernel-name spelling: this-branch Python mangles filter
+#     dims as `R<>S<>` while the C++/target side uses `Y<>X<>`. IR bodies are
+#     byte-identical; only the symbol/smem-global names differ.
+#   * GEMM bf16 32x32 catalog-validity asymmetry: this-branch Python's
+#     core/arch/data/arch_specs.json predates the bf16 32x32x8 / 32x32x16 (+fp32)
+#     gfx950 MFMA atoms that the C++ engine and the target tree already carry, so
+#     Python REJECTS a config (e.g. bf16 warp_tile 32x32x8 on gfx950) that the C++
+#     engine correctly ACCEPTS. The C++/target side is correct (these are real CDNA
+#     atoms); the reconciliation edit belongs to this-branch Python and arrives with
+#     the merge -- do NOT "fix" by trimming the C++ catalog or relaxing the validator.
+# All of the above are expected during the window, not regressions. To check against
+# the reconciliation reference instead, point --ref-pyroot/--ref-shim at that tree.
 # Once the reference is merged into this tree, the default gate is authoritative
 # again. See dsl_docs/development/troubleshooting.md.
 #
