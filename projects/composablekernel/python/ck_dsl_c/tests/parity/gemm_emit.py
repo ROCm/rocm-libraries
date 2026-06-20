@@ -162,6 +162,53 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=256,
             batched=False,
         )
+    if idx == 7:
+        # Split-K regression: split_k=1 must stay byte-identical to the
+        # single-K-pass body (same shape as idx 0).
+        return UniversalGemmSpec(
+            name="test8",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv3", epilogue="default", split_k=1),
+            data=DataSpec(
+                dtype_a="fp16", dtype_b="fp16", dtype_c="fp16", dtype_acc="fp32"
+            ),
+            wave_size=64,
+            block_size=256,
+            batched=False,
+        )
+    if idx == 8:
+        # Split-K active: split_k=8 on the M=2 N=4096 K=4096 bf16 decode
+        # shape, tile 16x64x64. Exercises the f32 Cf32 workspace + atomic-add
+        # epilogue (atomicrmw fadd).
+        return UniversalGemmSpec(
+            name="test9",
+            tile=TileSpec(
+                tile_m=16,
+                tile_n=64,
+                tile_k=64,
+                warp_m=1,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="compv4", epilogue="default", split_k=8),
+            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+            wave_size=64,
+            block_size=256,
+            batched=False,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -169,7 +216,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..6>\n",
+        usage="usage: gemm_emit.py <config_index 0..8>\n",
     )
 
 

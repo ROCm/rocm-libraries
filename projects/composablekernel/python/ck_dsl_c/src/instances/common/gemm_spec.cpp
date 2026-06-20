@@ -141,6 +141,7 @@ ckc_gemm_universal_spec_t ckc_gemm_universal_spec_default(void)
     s.trait.lds_swizzle          = false;
     s.trait.emit_sched_hints_set = false; /* Python None (arch-resolved) */
     s.trait.emit_sched_hints     = false;
+    s.trait.split_k              = 1; /* default 1 (single-K-pass body) */
 
     /* DataSpec defaults. */
     s.data.dtype_a   = "fp16"; /* default "fp16" */
@@ -194,9 +195,10 @@ ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out,
     char part_w[64];
     char part_wt[64];
     char part_pipe[128];
+    char part_spk[32];
     const char* parts[5];
-    const char* flag_names[7];
-    int flag_on[7];
+    const char* flag_names[8];
+    int flag_on[8];
     const ckc_gemm_tile_spec_t* t;
     const ckc_gemm_trait_spec_t* tr;
 
@@ -228,6 +230,9 @@ ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out,
     flag_names[4] = "dtl";
     flag_names[5] = "pref";
     flag_names[6] = "actt";
+    /* Python flag key f"spk{tr.split_k}" (dynamic name; on when split_k > 1). */
+    snprintf(part_spk, sizeof(part_spk), "spk%d", tr->split_k);
+    flag_names[7] = part_spk;
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -236,8 +241,9 @@ ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out,
     flag_on[4] = tr->direct_to_lds ? 1 : 0;
     flag_on[5] = tr->dtl_prefetch ? 1 : 0;
     flag_on[6] = tr->active_tile_skip ? 1 : 0;
+    flag_on[7] = (tr->split_k > 1) ? 1 : 0;
 
-    return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 7, out, out_cap, NULL);
+    return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 8, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -606,6 +612,22 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
     if(a_total < threads || b_total < threads)
     {
         CK_GEMM_REJECT("block too small for one element/thread/phase");
+    }
+
+    /* Split-K (over the production body): only static invariants are checked
+     * here -- split_k >= 1, and the atomic-add epilogue is MFMA (CDNA) only.
+     * The K % split_k and ks % tile_k divisibility are the caller's
+     * responsibility (K is a runtime arg in the universal body). */
+    {
+        int sk = spec->trait.split_k;
+        if(sk < 1)
+        {
+            CK_GEMM_REJECT("split_k must be >= 1 (got %d)", sk);
+        }
+        if(sk > 1 && strcmp(family, "mma") != 0)
+        {
+            CK_GEMM_REJECT("split_k > 1 is CDNA-only (got family '%s' on %s)", family, arch);
+        }
     }
 
     if(reason != NULL && reason_cap > 0)

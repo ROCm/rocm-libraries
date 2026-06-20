@@ -217,6 +217,21 @@ class TraitSpec:
     # store and ds_read columns -> bit-exact. Measured ~+3% on square fp16/bf16.
     # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
     lds_swizzle: bool = False
+    # Split-K over the production universal body. When > 1, the kernel:
+    #   * takes a third grid dim ``block_id_z`` in [0, split_k) selecting
+    #     a K-slice ``[z*ks, (z+1)*ks)`` (``ks = K // split_k``) for the
+    #     CTA's K-loop, instead of the full ``[0, K)``;
+    #   * replaces the ``C`` output param with an f32 workspace
+    #     ``Cf32[M, N]`` and the epilogue atomic-adds each warp's f32
+    #     accumulator into it (instead of the direct/cshuffle bf16 store).
+    # The grid becomes ``(N_tiles, M_tiles, split_k)``. The caller must
+    # zero-init the f32 workspace before launch and cast it to the target
+    # dtype afterwards (Python-side finalisation, matching the v1 StreamK
+    # atomic-strategy contract). This re-uses the fast vectorized +
+    # LDS-double-buffered ``compv4`` load/MFMA inner verbatim; only the
+    # K-loop bound and the epilogue change. ``split_k == 1`` (default)
+    # keeps the canonical single-K-pass body byte-identical.
+    split_k: int = 1
 
 
 @dataclass(frozen=True)
@@ -288,6 +303,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 "dtl": tr.direct_to_lds,
                 "pref": tr.dtl_prefetch,
                 "actt": tr.active_tile_skip,
+                f"spk{tr.split_k}": tr.split_k > 1,
             },
         )
 
@@ -549,6 +565,21 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if a_total < threads or b_total < threads:
         return False, "block too small for one element/thread/phase"
 
+    # Split-K (over the production body): the K-slice each CTA processes
+    # is ``ks = K // split_k`` and must itself be a whole number of
+    # K-tiles. We can only validate the K-slice divisibility at build
+    # time when K is a compile-time fact, which it is not in the
+    # universal body (K is a runtime arg). So we only check the
+    # static invariants here: split_k >= 1, and the atomic-add epilogue
+    # is only wired for the MFMA (CDNA) family. The K % split_k and
+    # ks % tile_k divisibility are the caller's responsibility (mirrors
+    # the v1 StreamK contract, where the partitioner enforces it).
+    sk = spec.trait.split_k
+    if sk < 1:
+        return False, f"split_k must be >= 1 (got {sk})"
+    if sk > 1 and family != "mma":
+        return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
+
     return True, "ok"
 
 
@@ -801,15 +832,30 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     if spec.trait.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
     storage_dtype = _storage_dtype(spec)
+    _split_k = spec.trait.split_k
+    _is_split_k = _split_k > 1
     A = b.param(
         "A", PtrType(storage_dtype, "global"), noalias=True, readonly=True, align=16
     )
     Bp = b.param(
         "B", PtrType(storage_dtype, "global"), noalias=True, readonly=True, align=16
     )
-    C = b.param(
-        "C", PtrType(storage_dtype, "global"), noalias=True, writeonly=True, align=16
-    )
+    # In split-K mode the output is the f32 accumulation workspace the
+    # epilogue atomic-adds into (the caller casts it to the target dtype
+    # afterwards). It is read+write (atomicrmw), so drop the writeonly
+    # attribute. Outside split-K the C param is byte-identical to before.
+    if _is_split_k:
+        from ...core.ir import F32 as _F32
+
+        C = b.param("Cf32", PtrType(_F32, "global"), noalias=True, align=4)
+    else:
+        C = b.param(
+            "C",
+            PtrType(storage_dtype, "global"),
+            noalias=True,
+            writeonly=True,
+            align=16,
+        )
     M = b.param("M", I32)
     N = b.param("N", I32)
     K = b.param("K", I32)
@@ -844,6 +890,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
     # Common geometry.
     c0 = b.const_i32(0)
+    # Split-K K-slice bounds. Each CTA along ``block_id_z`` owns the slice
+    # ``[z * ks, (z+1) * ks)`` where ``ks = K // split_k``; the K-loop runs
+    # over that slice instead of ``[0, K)``. ``block_id_z`` is CTA-uniform so
+    # the slice base is SGPR-pinned. For ``split_k == 1`` these collapse to
+    # ``k_lo = 0`` / ``k_hi = K`` (the bound expressions below substitute them
+    # verbatim, so the non-split body stays byte-identical).
+    if _is_split_k:
+        ks = b.div(K, b.const_i32(_split_k))
+        k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), ks))
+        k_hi = b.to_sgpr_u32(b.add(k_lo, ks))
+    else:
+        k_lo = c0
+        k_hi = None  # use K directly so the bound SSA is unchanged
     c_wave = b.const_i32(spec.wave_size)
     c_warps_n = b.const_i32(t.warp_n)
     c_block_m = b.const_i32(block_m)
@@ -1662,15 +1721,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         tile's MFMA from the last-written half after one drain barrier.
         """
         c1_i32 = b.const_i32(1)
-        K_minus_one_tile = b.sub(K, c_block_k)
+        K_minus_one_tile = b.sub(_k_upper, c_block_k)
 
         # Prologue: issue tile 0's load into half 0. The first iteration's
         # start-sync drains these ds_writes before the MFMA reads half 0.
-        emit_load_phase(A_smem, B_smem, c0, lds_parity=0)
+        # In split-K mode tile 0 is the slice base ``k_lo``.
+        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
 
         loop_args = [("par", c0)] + list(accs)
         for_op = b.scf_for_iter(
-            c0, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
+            k_lo, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
         )
         with for_op as (k0, iter_vars):
             parity = iter_vars[0]
@@ -1697,8 +1757,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         nonlocal _for_results
         _for_results = epi_accs
 
+    # K-loop upper bound: full ``K`` (byte-identical) or the split-K slice
+    # end ``k_hi``. Computed lazily so the non-split path's SSA is unchanged.
+    _k_upper = K if k_hi is None else k_hi
+
     def _emit_kloop_simple() -> None:
-        for_op = b.scf_for_iter(c0, K, c_block_k, accs, iv_name="k0")
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
             # Single-buffer, load-then-compute pipeline (``mem``,
             # ``compv3``, and the cshuffle-epilogue ``compv4`` that opts
@@ -1743,18 +1807,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_kloop_simple()
             return
 
-        # Prologue: load tile 0 into half 0.
-        emit_load_phase(A_smem, B_smem, c0, lds_parity=0)
+        # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
+        emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
 
-        # Loop bounds: iterate k in [0, K - block_k), so the last tile
+        # Loop bounds: iterate k in [k_lo, k_hi - block_k), so the last tile
         # is handled by the epilogue (which doesn't need to issue a
         # next-tile load).
-        K_minus_one_tile = b.sub(K, c_block_k)
+        K_minus_one_tile = b.sub(_k_upper, c_block_k)
         # iter_args: (parity_i32, acc...). parity flips each iter.
         c1_i32 = b.const_i32(1)
         loop_args = [("par", c0)] + list(accs)
         for_op = b.scf_for_iter(
-            c0, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
+            k_lo, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
         )
         with for_op as (k0, iter_vars):
             parity = iter_vars[0]
@@ -1797,6 +1861,27 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     def _emit_epilogue() -> None:
         # ---- epilogue ----
         fused_ep = getattr(spec, "_fused_epilogue", None)
+        if _is_split_k:
+            # Split-K: atomic-add each warp's f32 accumulator into the
+            # Cf32[M, N] workspace. Reuses the same MFMA acc -> (row, col)
+            # scatter as the direct epilogue, but the per-cell write is an
+            # f32 atomicrmw fadd instead of a bf16 global store. The caller
+            # zero-inits the workspace and casts it to bf16 afterwards.
+            _emit_epilogue_split_k(
+                b,
+                spec,
+                _for_results,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off,
+                block_n_off,
+                M,
+                N,
+                C,
+                c_per_lane,
+            )
+            return
         if spec.trait.epilogue == "cshuffle":
             _emit_epilogue_cshuffle(
                 b,
@@ -2100,6 +2185,97 @@ def _emit_epilogue_default(
         storage_dtype,
         _store_cell,
     )
+
+
+def _emit_epilogue_split_k(
+    b: IRBuilder,
+    spec: UniversalGemmSpec,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    M: Value,
+    N: Value,
+    Cf32: Value,
+    c_per_lane: int,
+) -> None:
+    """Split-K atomic-add epilogue.
+
+    Each warp owns a per-lane ``<c_per_lane x f32>`` accumulator that is the
+    partial product over this CTA's K-slice. We scatter every slot to its
+    output ``(c_m, c_n)`` (the canonical MFMA layout, identical to the direct
+    epilogue) and atomic-add the raw f32 value into ``Cf32[c_m, c_n]``. The
+    split-K reduction across the ``split_k`` CTAs that share a ``(m_tile,
+    n_tile)`` converges to the full f32 GEMM; the caller casts the workspace
+    to the target dtype.
+
+    The MFMA C-fragment ``(row_in_atom, col_in_atom)`` decode reuses the
+    atom's ``CWarpDstrEncoding`` distribution exactly as
+    :func:`_emit_mfma_acc_scatter` does, so the scattered output coords match
+    the direct epilogue cell-for-cell -- only the per-cell write differs
+    (f32 atomicrmw fadd vs bf16 global store).
+    """
+    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
+    from ...helpers.distribution import make_static_tile_distribution
+
+    t = spec.tile
+    mfmas_m = t.mfmas_per_warp_m
+    mfmas_n = t.mfmas_per_warp_n
+
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
+    atom = mfma_atom(spec.data.dtype_a, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
+    _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+
+    c_nlane = b.const_i32(kc_nlane)
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    row_in_atom: List[Value] = []
+    col_in_atom: Optional[Value] = None
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        row_in_atom.append(x_row)
+        col_in_atom = x_col
+
+    pad_m = bool(spec.trait.pad_m)
+    pad_n = bool(spec.trait.pad_n)
+
+    flat = 0
+    for mi in range(mfmas_m):
+        base_m = b.add(block_warp_m_off, b.const_i32(mi * t.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            c_n = b.add(
+                block_warp_n_off,
+                b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom),
+            )
+            for i in range(c_per_lane):
+                c_m = b.add(base_m, row_in_atom[i])
+                c_off = b.add(b.mul(c_m, N), c_n)
+                val = b.vec_extract(acc, i)
+                checks: List[Value] = []
+                if pad_m:
+                    checks.append(b.cmp_lt(c_m, M))
+                if pad_n:
+                    checks.append(b.cmp_lt(c_n, N))
+                if checks:
+                    in_bounds = (
+                        checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+                    )
+                    with b.scf_if(in_bounds):
+                        b.global_atomic_add_f32(Cf32, c_off, val)
+                else:
+                    b.global_atomic_add_f32(Cf32, c_off, val)
 
 
 def _emit_epilogue_cshuffle(

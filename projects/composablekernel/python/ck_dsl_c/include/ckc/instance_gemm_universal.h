@@ -108,6 +108,13 @@ typedef struct ckc_gemm_trait_spec
      * two-stage sched_group_barrier HotLoop interleave. */
     bool emit_sched_hints_set; /* false => Python None (arch-resolved) */
     bool emit_sched_hints;
+    /* Split-K over the production universal body. When > 1, the kernel takes a
+     * third grid dim block_id_z in [0, split_k) selecting a K-slice
+     * [z*ks, (z+1)*ks) (ks = K // split_k) for the CTA's K-loop, replaces the
+     * C output param with an f32 workspace Cf32[M, N], and the epilogue
+     * atomic-adds each warp's f32 accumulator into it. split_k == 1 (default)
+     * keeps the canonical single-K-pass body byte-identical. */
+    int split_k; /* default 1 */
 } ckc_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

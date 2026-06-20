@@ -29,6 +29,7 @@ from ..core import (
 )
 from .common import (
     GemmRequest,
+    apply_split_k,
     arch_family_supported,
     rcr_request_errors,
     selector_matches,
@@ -198,7 +199,10 @@ def _make_candidate(
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, GemmRequest)
-        return spec_fn(req, name)
+        # Engage split-K for skinny/tall-N decode shapes that leave the device
+        # idle; a no-op (returns the spec unchanged) for shapes that already
+        # fill the device, keeping the default / square path byte-identical.
+        return apply_split_k(req, spec_fn(req, name))
 
     candidate = KernelCandidate(
         name=name,
@@ -220,7 +224,9 @@ def _make_candidate(
 def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     t = spec.tile
     assert isinstance(req, GemmRequest)
-    return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m))
+    # Split-K adds a Z dimension of ``split_k`` K-slice CTAs per (m,n) tile;
+    # split_k == 1 (default) collapses to the canonical 2D grid.
+    return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
 
 
 GEMM_FP16_REGISTRY = CandidateRegistry(_FAMILY)

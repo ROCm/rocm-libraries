@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Tuple
 
 from ...core.arch import ArchTarget
+from ...helpers.split_k import select_split_k
+from ...instances.common.gemm_universal import UniversalGemmSpec
 from ..core import KernelCandidate, OperatorRequest
 
 
@@ -108,6 +110,34 @@ def arch_family_supported(req: GemmRequest, arch_family: str) -> Tuple[bool, str
             f"{target.family!r}-family arch {req.arch}"
         )
     return True, "ok"
+
+
+def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
+    """Return ``spec`` with a split-K degree chosen for ``req`` on its arch.
+
+    Split-K is engaged only for skinny / tall-N decode shapes whose base grid
+    leaves the CU-rich CDNA device idle, and only on the MFMA (CDNA) family the
+    kernel's atomic-add epilogue supports. For any shape that already fills the
+    device -- and on RDNA, where the split-K epilogue is not wired -- the chosen
+    degree is ``1`` and this returns the spec **unchanged** (so the default /
+    square-GEMM path stays byte-identical). The ``CK_DSL_GEMM_SPLIT_K`` env flag
+    overrides the heuristic (see :mod:`ck_dsl.helpers.split_k`).
+    """
+    target = ArchTarget.from_gfx(req.arch)
+    if target.family != "cdna":
+        return spec
+    t = spec.tile
+    decision = select_split_k(
+        M=req.M,
+        N=req.N,
+        K=req.K,
+        tile_m=t.tile_m,
+        tile_n=t.tile_n,
+        tile_k=t.tile_k,
+    )
+    if decision.split_k <= 1:
+        return spec
+    return replace(spec, trait=replace(spec.trait, split_k=decision.split_k))
 
 
 def selector_matches(req: GemmRequest, candidate: KernelCandidate) -> Tuple[bool, str]:

@@ -1011,14 +1011,30 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
         ctx.A             = ckc_b_param(b, "A", ptr_storage, &opts);
         ctx.Bp            = ckc_b_param(b, "B", ptr_storage, &opts);
 
-        memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
-        opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        ctx.C              = ckc_b_param(b, "C", ptr_storage, &opts);
+        /* In split-K mode the output is the f32 accumulation workspace the
+         * epilogue atomic-adds into (the caller casts it afterwards). It is
+         * read+write (atomicrmw), so drop writeonly. Outside split-K the C
+         * param is byte-identical to before. */
+        if(spec->trait.split_k > 1)
+        {
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias     = true;
+            opts.noalias_set = true;
+            opts.align       = 4;
+            opts.align_set   = true;
+            ctx.C            = ckc_b_param(b, "Cf32", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        }
+        else
+        {
+            memset(&opts, 0, sizeof(opts));
+            opts.noalias       = true;
+            opts.noalias_set   = true;
+            opts.writeonly     = true;
+            opts.writeonly_set = true;
+            opts.align         = 16;
+            opts.align_set     = true;
+            ctx.C              = ckc_b_param(b, "C", ptr_storage, &opts);
+        }
 
         ctx.M = ckc_b_param(b, "M", ckc_i32(), NULL);
         ctx.N = ckc_b_param(b, "N", ckc_i32(), NULL);
@@ -1057,7 +1073,27 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     ctx.block_k = t->tile_k;
 
     /* ---- common geometry constants (SSA) -- */
-    ctx.c0        = ckc_b_const_i32(b, 0);
+    ctx.c0 = ckc_b_const_i32(b, 0);
+
+    /* ---- split-K K-slice bounds -- *
+     * Each CTA along block_id_z owns the slice [z*ks, (z+1)*ks) where
+     * ks = K // split_k; the K-loop runs over that slice instead of [0, K).
+     * For split_k == 1 these collapse to k_lo = c0 / k_upper = K so the
+     * non-split body stays byte-identical (Python: k_hi None -> _k_upper = K). */
+    ctx.split_k    = spec->trait.split_k;
+    ctx.is_split_k = ctx.split_k > 1;
+    if(ctx.is_split_k)
+    {
+        ckc_value_t* ks = ckc_b_div(b, ctx.K, ckc_b_const_i32(b, ctx.split_k));
+        ctx.k_lo        = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ckc_b_block_id_z(b), ks));
+        ctx.k_upper     = ckc_b_to_sgpr_u32(b, ckc_b_add(b, ctx.k_lo, ks));
+    }
+    else
+    {
+        ctx.k_lo    = ctx.c0;
+        ctx.k_upper = ctx.K;
+    }
+
     ctx.c_wave    = ckc_b_const_i32(b, spec->wave_size);
     ctx.c_warps_n = ckc_b_const_i32(b, t->warp_n);
     ctx.c_block_m = ckc_b_const_i32(b, ctx.block_m);

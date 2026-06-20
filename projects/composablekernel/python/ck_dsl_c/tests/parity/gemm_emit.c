@@ -122,6 +122,39 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t *spec) {
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 7: /* test8 -- split-K regression: split_k=1, byte-identical to idx 0 */
+        spec->name = "test8";
+        spec->tile = (ckc_gemm_tile_spec_t){
+            .tile_m = 128, .tile_n = 128, .tile_k = 32,
+            .warp_m = 2, .warp_n = 2, .warp_k = 1,
+            .warp_tile_m = 16, .warp_tile_n = 16, .warp_tile_k = 16};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "default";
+        spec->trait.split_k = 1;
+        spec->data.dtype_a = "fp16";
+        spec->data.dtype_b = "fp16";
+        spec->data.dtype_c = "fp16";
+        spec->data.dtype_acc = "fp32";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
+        break;
+    case 8: /* test9 -- split-K active: split_k=8, decode shape, atomic-add */
+        spec->name = "test9";
+        spec->tile = (ckc_gemm_tile_spec_t){
+            .tile_m = 16, .tile_n = 64, .tile_k = 64,
+            .warp_m = 1, .warp_n = 4, .warp_k = 1,
+            .warp_tile_m = 16, .warp_tile_n = 16, .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.epilogue = "default";
+        spec->trait.split_k = 8;
+        spec->data.dtype_a = "bf16";
+        spec->data.dtype_b = "bf16";
+        spec->data.dtype_c = "bf16";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -131,7 +164,7 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t *spec) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <config_index 0..6>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..8>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

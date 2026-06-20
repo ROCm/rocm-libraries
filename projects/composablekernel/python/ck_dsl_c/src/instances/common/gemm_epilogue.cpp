@@ -504,6 +504,156 @@ static void gemm_cshuffle_smem_cell(ckc_ir_builder_t* b,
     ckc_b_smem_store_vN(b, u->Cs, idx, 2, h, 1);
 }
 
+/* =====================================================================
+ * _emit_epilogue_split_k
+ *
+ * Faithful, byte-identical port of the Python _emit_epilogue_split_k. Each warp
+ * owns a per-lane <c_per_lane x f32> accumulator; every slot is scattered to its
+ * output (c_m, c_n) using the atom's CWarpDstrEncoding (exactly as the default
+ * epilogue scatter) and the raw f32 value is atomic-added into Cf32[c_m, c_n].
+ * Only the per-cell write differs from the direct epilogue (f32 atomicrmw fadd
+ * vs bf16 global store).
+ * ===================================================================== */
+void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
+                                    const ckc_gemm_universal_spec_t* spec,
+                                    ckc_value_t* const* accs,
+                                    int num_accs,
+                                    ckc_value_t* warp_m_idx,
+                                    ckc_value_t* warp_n_idx,
+                                    ckc_value_t* lane,
+                                    ckc_value_t* block_m_off,
+                                    ckc_value_t* block_n_off,
+                                    ckc_value_t* M,
+                                    ckc_value_t* N,
+                                    ckc_value_t* Cf32,
+                                    int c_per_lane)
+{
+    const ckc_gemm_tile_spec_t* t = &spec->tile;
+    int mfmas_m                   = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n                   = ckc_gemm_tile_mfmas_per_warp_n(t);
+    ckc_value_t* warp_m_off;
+    ckc_value_t* warp_n_off;
+    ckc_value_t* block_warp_m_off;
+    ckc_value_t* block_warp_n_off;
+    bool pad_m;
+    bool pad_n;
+
+    (void)num_accs;
+
+    /* warp_m_off = mul(warp_m_idx, mfmas_m*warp_tile_m)
+     * warp_n_off = mul(warp_n_idx, mfmas_n*warp_tile_n)
+     * block_warp_m_off = add(block_m_off, warp_m_off)
+     * block_warp_n_off = add(block_n_off, warp_n_off) */
+    warp_m_off       = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
+    warp_n_off       = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * t->warp_tile_n));
+    block_warp_m_off = ckc_b_add(b, block_m_off, warp_m_off);
+    block_warp_n_off = ckc_b_add(b, block_n_off, warp_n_off);
+
+    /* atom = mfma_atom(dtype_a, warp_tile_m, warp_tile_n, warp_tile_k)
+     * _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+     * c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom)) */
+    const ckc_mfma_atom_t* atom =
+        ckc_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    if(!ckc_ir_builder_ok(b))
+        return;
+
+    int kc_m1    = 0;
+    int kc_nlane = 0;
+    if(ckc_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != CKC_OK)
+        return;
+
+    ckc_tile_distribution_encoding_t* c_enc = ckc_make_c_warp_dstr_encoding(b, atom);
+    ckc_tile_distribution_t* c_dist         = ckc_make_static_tile_distribution(b, c_enc);
+    if(!ckc_ir_builder_ok(b))
+        return;
+
+    /* c_nlane = const(kc_nlane); n_in_atom = mod(lane, c_nlane);
+     * m_blk = div(lane, c_nlane); p_lane = [m_blk, n_in_atom] */
+    ckc_value_t* c_nlane   = ckc_b_const_i32(b, kc_nlane);
+    ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_nlane);
+    ckc_value_t* m_blk     = ckc_b_div(b, lane, c_nlane);
+    ckc_value_t* p_lane[2] = {m_blk, n_in_atom};
+
+    /* row_in_atom[i], col_in_atom via c_dist.calculate_x for each slot. */
+    ckc_value_t* row_in_atom[CKC_GEMM_MAX_ACCS];
+    ckc_value_t* col_in_atom = n_in_atom;
+    {
+        int i;
+        ckc_value_t* const* ps[1] = {p_lane};
+        int ps_counts[1]          = {2};
+        for(i = 0; i < c_per_lane; ++i)
+        {
+            ckc_value_t* ys[2]    = {ckc_b_const_i32(b, i / kc_m1), ckc_b_const_i32(b, i % kc_m1)};
+            ckc_value_t* x_out[2] = {NULL, NULL};
+            if(!ckc_tile_distribution_calculate_x(b, c_dist, ys, 2, ps, ps_counts, 1, x_out, 2))
+                return;
+            row_in_atom[i] = x_out[0];
+            col_in_atom    = x_out[1];
+        }
+    }
+
+    pad_m = spec->trait.pad_m;
+    pad_n = spec->trait.pad_n;
+
+    /* flat = 0
+     * for mi in range(mfmas_m):
+     *   base_m = add(block_warp_m_off, mi*warp_tile_m)
+     *   for ni in range(mfmas_n):
+     *     acc = accs[flat]; flat += 1
+     *     c_n = add(block_warp_n_off, add(ni*warp_tile_n, col_in_atom))
+     *     for i in range(c_per_lane):
+     *       c_m = add(base_m, row_in_atom[i])
+     *       c_off = add(mul(c_m, N), c_n)
+     *       val = vec_extract(acc, i)
+     *       [guard c_m<M / c_n<N] -> global_atomic_add_f32(Cf32, c_off, val) */
+    {
+        int flat = 0;
+        int mi, ni, i;
+        for(mi = 0; mi < mfmas_m; ++mi)
+        {
+            ckc_value_t* base_m =
+                ckc_b_add(b, block_warp_m_off, ckc_b_const_i32(b, mi * t->warp_tile_m));
+            for(ni = 0; ni < mfmas_n; ++ni)
+            {
+                ckc_value_t* acc = accs[flat];
+                ckc_value_t* c_n;
+                flat += 1;
+                c_n = ckc_b_add(b,
+                                block_warp_n_off,
+                                ckc_b_add(b, ckc_b_const_i32(b, ni * t->warp_tile_n), col_in_atom));
+                for(i = 0; i < c_per_lane; ++i)
+                {
+                    ckc_value_t* c_m   = ckc_b_add(b, base_m, row_in_atom[i]);
+                    ckc_value_t* c_off = ckc_b_add(b, ckc_b_mul(b, c_m, N), c_n);
+                    ckc_value_t* val   = ckc_b_vec_extract(b, acc, i);
+                    if(pad_m || pad_n)
+                    {
+                        ckc_value_t* checks[2];
+                        int nchecks = 0;
+                        ckc_value_t* in_bounds;
+                        if(pad_m)
+                            checks[nchecks++] = ckc_b_cmp_lt(b, c_m, M);
+                        if(pad_n)
+                            checks[nchecks++] = ckc_b_cmp_lt(b, c_n, N);
+                        in_bounds =
+                            (nchecks == 1) ? checks[0] : ckc_b_land(b, checks[0], checks[1]);
+                        {
+                            ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
+                            ckc_b_region_enter(b, iff.then_region);
+                            ckc_b_global_atomic_add_f32(b, Cf32, c_off, val);
+                            ckc_b_region_leave(b);
+                        }
+                    }
+                    else
+                    {
+                        ckc_b_global_atomic_add_f32(b, Cf32, c_off, val);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
                                      const ckc_gemm_universal_spec_t* spec,
                                      ckc_value_t* smem_unused,
@@ -709,6 +859,28 @@ void ckc_gemm_emit_epilogue(ckc_gemm_build_ctx_t* ctx)
      * NULL keeps the matmul-only path byte-identical. */
     void* fused_ep    = spec->_fused_epilogue;
     bool fused_is_mde = spec->_fused_epilogue_is_mde;
+
+    if(ctx->is_split_k)
+    {
+        /* Split-K: atomic-add each warp's f32 accumulator into the Cf32[M, N]
+         * workspace. Reuses the same MFMA acc -> (row, col) scatter as the
+         * default epilogue, but the per-cell write is an f32 atomicrmw fadd
+         * instead of a bf16 global store. */
+        ckc_gemm_emit_epilogue_split_k(b,
+                                       spec,
+                                       ctx->for_results,
+                                       ctx->num_for_results,
+                                       ctx->warp_m_idx,
+                                       ctx->warp_n_idx,
+                                       ctx->lane,
+                                       ctx->block_m_off,
+                                       ctx->block_n_off,
+                                       ctx->M,
+                                       ctx->N,
+                                       ctx->C,
+                                       ctx->c_per_lane);
+        return;
+    }
 
     if(spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") == 0)
     {

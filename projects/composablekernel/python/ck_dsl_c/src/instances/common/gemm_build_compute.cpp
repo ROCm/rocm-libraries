@@ -223,11 +223,12 @@ void ckc_gemm_emit_kloop_db(ckc_gemm_build_ctx_t* ctx)
     ckc_for_t for_op;
     int i;
 
-    c1_i32           = ckc_b_const_i32(b, 1);
-    K_minus_one_tile = ckc_b_sub(b, ctx->K, ctx->c_block_k);
+    c1_i32 = ckc_b_const_i32(b, 1);
+    /* K-loop upper bound is the slice end (k_upper == K when not split-K). */
+    K_minus_one_tile = ckc_b_sub(b, ctx->k_upper, ctx->c_block_k);
 
-    /* Prologue: issue tile 0's load into half 0. */
-    ckc_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->c0, 0, NULL);
+    /* Prologue: issue tile 0's load into half 0 (slice base k_lo in split-K). */
+    ckc_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
 
     /* loop_args = [("par", c0)] + list(accs) */
     loop_args[0].name = "par";
@@ -240,7 +241,7 @@ void ckc_gemm_emit_kloop_db(ckc_gemm_build_ctx_t* ctx)
     num_loop_args = 1 + ctx->num_accs;
 
     for_op = ckc_b_scf_for_iter(b,
-                                ctx->c0,
+                                ctx->k_lo,
                                 K_minus_one_tile,
                                 ctx->c_block_k,
                                 loop_args,
@@ -308,8 +309,8 @@ void ckc_gemm_emit_kloop_simple(ckc_gemm_build_ctx_t* ctx)
     }
 
     for_op = ckc_b_scf_for_iter(b,
-                                ctx->c0,
-                                ctx->K,
+                                ctx->k_lo,
+                                ctx->k_upper,
                                 ctx->c_block_k,
                                 loop_args,
                                 ctx->num_accs,
@@ -367,10 +368,10 @@ void ckc_gemm_emit_kloop_prefetch(ckc_gemm_build_ctx_t* ctx)
         return;
     }
 
-    /* Prologue: load tile 0 into half 0. */
-    ckc_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->c0, 0, NULL);
+    /* Prologue: load tile 0 into half 0 (slice base k_lo in split-K). */
+    ckc_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
 
-    K_minus_one_tile = ckc_b_sub(b, ctx->K, ctx->c_block_k);
+    K_minus_one_tile = ckc_b_sub(b, ctx->k_upper, ctx->c_block_k);
     c1_i32           = ckc_b_const_i32(b, 1);
 
     loop_args[0].name = "par";
@@ -383,7 +384,7 @@ void ckc_gemm_emit_kloop_prefetch(ckc_gemm_build_ctx_t* ctx)
     num_loop_args = 1 + ctx->num_accs;
 
     for_op = ckc_b_scf_for_iter(b,
-                                ctx->c0,
+                                ctx->k_lo,
                                 K_minus_one_tile,
                                 ctx->c_block_k,
                                 loop_args,

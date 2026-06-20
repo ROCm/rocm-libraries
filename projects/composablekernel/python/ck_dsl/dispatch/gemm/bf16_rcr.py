@@ -44,6 +44,7 @@ from ..core import (
 )
 from .common import (
     GemmRequest,
+    apply_split_k,
     arch_family_supported,
     rcr_request_errors,
     selector_matches,
@@ -161,6 +162,53 @@ def _spec_rdna_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+# Decode-shaped GEMMs (tiny M) leave a 128x128 / 64x128 tile's grid far below
+# the device CU count. This small-M candidate uses the deep-K bf16 hero atom
+# (16x16x32) with a 16-row tile and a padded shape so a 1-4 token M is legal; it
+# is the carrier for the split-K heuristic, which fills the idle CUs by slicing
+# K. Mirrors the proven streamk block-tile recipe.
+_DECODE_TILE_N = 64
+_DECODE_M_MAX = 32  # only compete for skinny (decode/GEMV) M
+
+
+def _spec_cdna_decode(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    wt_m, wt_n, wt_k = 16, 16, 32
+    warp_n = max(1, _DECODE_TILE_N // wt_n)
+    while warp_n > 1 and (warp_n * 64 > 1024 or _DECODE_TILE_N % (warp_n * wt_n) != 0):
+        warp_n //= 2
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=16,
+            tile_n=_DECODE_TILE_N,
+            tile_k=32,
+            warp_m=1,
+            warp_n=warp_n,
+            warp_k=1,
+            warp_tile_m=wt_m,
+            warp_tile_n=wt_n,
+            warp_tile_k=wt_k,
+        ),
+        trait=TraitSpec(
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="default",
+            pad_m=True,
+            pad_n=True,
+            pad_k=True,
+        ),
+    )
+
+
+def _decode_shape_gate(req: GemmRequest) -> Tuple[bool, str]:
+    if req.M > _DECODE_M_MAX:
+        return False, (
+            f"decode candidate targets skinny M (<= {_DECODE_M_MAX}); got M={req.M}"
+        )
+    return True, "ok"
+
+
 def _make_candidate(
     *,
     name: str,
@@ -168,6 +216,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arch_family: str,
+    shape_gate: Callable[[GemmRequest], Tuple[bool, str]] | None = None,
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -177,6 +226,10 @@ def _make_candidate(
         ok, why = arch_family_supported(req, arch_family)
         if not ok:
             return False, why
+        if shape_gate is not None:
+            ok, why = shape_gate(req)
+            if not ok:
+                return False, why
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -193,7 +246,10 @@ def _make_candidate(
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, GemmRequest)
-        return spec_fn(req, name)
+        # Engage split-K for skinny/tall-N decode shapes that leave the device
+        # idle; a no-op (returns the spec unchanged) for shapes that already
+        # fill the device, keeping the default / square path byte-identical.
+        return apply_split_k(req, spec_fn(req, name))
 
     candidate = KernelCandidate(
         name=name,
@@ -215,7 +271,9 @@ def _make_candidate(
 def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     t = spec.tile
     assert isinstance(req, GemmRequest)
-    return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m))
+    # Split-K adds a Z dimension of ``split_k`` K-slice CTAs per (m,n) tile;
+    # split_k == 1 (default) collapses to the canonical 2D grid.
+    return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
 
 
 GEMM_BF16_REGISTRY = CandidateRegistry(_FAMILY)
@@ -248,6 +306,14 @@ GEMM_BF16_REGISTRY.extend(
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
             arch_family="rdna",
+        ),
+        _make_candidate(
+            name="universal_gemm_bf16_cdna_decode",
+            spec_id="cdna_decode_16x64",
+            priority=30,
+            spec_fn=_spec_cdna_decode,
+            arch_family="cdna",
+            shape_gate=_decode_shape_gate,
         ),
     )
 )

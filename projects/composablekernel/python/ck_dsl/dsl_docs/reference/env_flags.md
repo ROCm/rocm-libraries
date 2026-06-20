@@ -19,6 +19,12 @@ default. For setup and the most common flags in context, see
 | `CK_DSL_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
 | `CK_DSL_USE_SUDO` | `1` (unset) | Benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
 
+## GEMM dispatch
+
+| Variable | Values (default) | Purpose |
+|---|---|---|
+| `CK_DSL_GEMM_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Split-K degree for CDNA UniversalGemm dispatch. `auto` runs the selection heuristic (engages split-K only for skinny / tall-N decode shapes whose grid leaves the CU-rich device idle; `1` for shapes that already fill it, keeping the default/square path byte-identical). `off` (or `0`/`1`) forces split-K disabled. `<n>` (>= 2) forces that degree, snapped down to the largest factor that evenly slices K. When engaged, the dispatcher launches a `(N_tiles, M_tiles, split_k)` grid and the caller must zero-init an f32 `[M, N]` workspace before launch and cast it back to the output dtype after. |
+
 ## hipDNN provider
 
 | Variable | Values (default) | Purpose |

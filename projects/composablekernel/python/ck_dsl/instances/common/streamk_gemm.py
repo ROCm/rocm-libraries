@@ -38,9 +38,12 @@ What v1 ships:
   ``streamk_gemm_kernel.hpp:339-462``). This keeps the per-tile
   address arithmetic in scalar registers instead of re-materialising
   it in VGPRs at every use inside the K loop and atomic-store epilogue.
-* fp16 inputs, f32 workspace output. A separate finalisation kernel
-  (or a Python-side ``workspace.to(target_dtype)``) converts to the
-  caller's target dtype.
+* fp16 **or bf16** inputs (selected via ``StreamKGemmSpec.dtype``),
+  f32 workspace output. bf16 uses the deep-K ``bf16_16x16x32`` MFMA
+  atom (FlyDSL's winning split-K recipe); the f32 atomic-add
+  reduction is dtype-agnostic (bf16 in, f32 accumulate). A separate
+  finalisation kernel (or a Python-side ``workspace.to(target_dtype)``)
+  converts to the caller's target dtype.
 
 When to use this v1 kernel:
 
@@ -63,7 +66,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
-from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.atoms import MfmaAtom
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
@@ -82,7 +85,7 @@ from ...helpers.streamk import (
 )
 
 
-DType = Literal["f16"]
+DType = Literal["f16", "bf16"]
 
 
 @dataclass(frozen=True)
@@ -122,6 +125,13 @@ class StreamKGemmSpec:
     #                       CK Tile's persistent DP dispatcher pattern
     #                       (``streamk_common.hpp::StreamKDispatch``).
     persistent: bool = False
+    # Split-K degree for the block-tile path
+    # (:func:`build_streamk_gemm_block_tile`): the number of K-slices each
+    # ``(m_tile, n_tile)`` output tile is partitioned into and atomic-reduced
+    # over the f32 workspace. ``ks = K // split_k`` is the per-CTA K extent;
+    # the grid gains a ``split_k`` Z-dimension. Only consumed by the
+    # block-tile (universal-body) builder; the v1 scalar inner ignores it.
+    split_k: int = 1
     name: str = "ck_dsl_streamk_gemm"
 
     @property
@@ -148,7 +158,26 @@ class StreamKGemmSpec:
 
     @property
     def atom(self) -> MfmaAtom:
-        # Pick a square MFMA atom matching (tile_m, tile_n).
+        # Pick a square MFMA atom matching (tile_m, tile_n) + dtype.
+        #
+        # f16 keeps the legacy atoms it has always emitted (16x16x16 /
+        # 32x32x8) so the f16 StreamK emission stays byte-identical.
+        #
+        # bf16 prefers the *deep-K* gfx950 atoms (16x16x32 / 32x32x16):
+        # for K=4096 the 16x16x32 atom halves the K-trip count vs the
+        # legacy 16x16x16, matching FlyDSL's bf16 16x16x32 split-K
+        # path. The bf16 32x32x8 atom is intentionally unavailable
+        # (the LLVM intrinsic uses the _1k shape), so the 32x32 bf16
+        # tile maps onto the K-packed 32x32x16 hero.
+        if self.dtype == "bf16":
+            if (self.tile_m, self.tile_n) == (16, 16):
+                return MfmaAtom.bf16_16x16x32()
+            if (self.tile_m, self.tile_n) == (32, 32):
+                return MfmaAtom.bf16_32x32x16()
+            raise ValueError(
+                f"streamk_gemm bf16 MFMA path supports (16,16) or (32,32) "
+                f"atom shapes; got ({self.tile_m}, {self.tile_n})"
+            )
         if (self.tile_m, self.tile_n) == (16, 16):
             return MfmaAtom.f16_16x16x16()
         if (self.tile_m, self.tile_n) == (32, 32):
@@ -192,8 +221,8 @@ class StreamKGemmSpec:
 
 
 def is_valid_spec(spec: StreamKGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
-    if spec.dtype != "f16":
-        return False, f"v1 ships f16 only, got {spec.dtype!r}"
+    if spec.dtype not in ("f16", "bf16"):
+        return False, f"streamk_gemm ships f16 / bf16, got {spec.dtype!r}"
     if spec.reduction != StreamKReductionStrategy.Atomic:
         return False, (
             f"v1 ships the Atomic reduction strategy only; "
@@ -214,10 +243,12 @@ def is_valid_spec(spec: StreamKGemmSpec, arch: str = "gfx950") -> Tuple[bool, st
             f"tile_k ({spec.tile_k}) must be a multiple of atom.k "
             f"({spec.atom.k}) so the K-loop emits whole MFMA invocations"
         )
-    # Arch gating: the streamk MFMA inner uses the legacy f16 atoms
-    # (16x16x16 / 32x32x8), both of which exist on gfx942 and gfx950.
-    # Validate against the target's MFMA catalog so the predicate stays
-    # honest if a future spec selects a gfx950-only K-packed atom.
+    # Arch gating: the streamk MFMA inner uses the f16 legacy atoms
+    # (16x16x16 / 32x32x8) or the bf16 K-packed atoms (16x16x32 /
+    # 32x32x16). The f16 atoms exist on gfx942 and gfx950; the bf16
+    # deep-K atoms are gfx950+ (CDNA3). Validate against the target's
+    # MFMA catalog using the *atom's own* input dtype so the predicate
+    # stays honest for either family.
     from ...core.arch import ArchTarget
 
     try:
@@ -225,16 +256,18 @@ def is_valid_spec(spec: StreamKGemmSpec, arch: str = "gfx950") -> Tuple[bool, st
     except KeyError as e:
         return False, str(e)
     atom = spec.atom
+    # The catalog keys f16 under "fp16"; bf16 keys directly as "bf16".
+    a_dtype = "fp16" if atom.dtype_in == "f16" else atom.dtype_in
     if not target.mma.has_shape(
-        a_dtype="fp16",
-        b_dtype="fp16",
+        a_dtype=a_dtype,
+        b_dtype=a_dtype,
         c_dtype="fp32",
         m=atom.m,
         n=atom.n,
         k=atom.k,
     ):
         return False, (
-            f"f16 MFMA atom {atom.m}x{atom.n}x{atom.k} not available on {arch}"
+            f"{spec.dtype} MFMA atom {atom.m}x{atom.n}x{atom.k} not available on {arch}"
         )
     # ``persistent=True`` composes :func:`ck_dsl.helpers.persistent_tile_for_each`
     # whose cooperative LDS-broadcast counter path has a correctness
@@ -315,8 +348,11 @@ def build_streamk_gemm(spec: StreamKGemmSpec, arch: str = "gfx950") -> KernelDef
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    # A / B element type follows the spec dtype; the f32 workspace +
+    # atomic-add reduction is dtype-agnostic (bf16 in, f32 accumulate).
+    ab_elem = BF16 if spec.dtype == "bf16" else F16
+    A = b.param("A", PtrType(ab_elem, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(ab_elem, "global"), noalias=True, readonly=True, align=16)
     Cf32 = b.param("Cf32", PtrType(F32, "global"), align=4)
     Counter = b.param("Counter", PtrType(I32, "global"), align=4)
 
@@ -483,31 +519,99 @@ def streamk_gemm_workspace_bytes(spec: StreamKGemmSpec) -> int:
     return 4 * spec.M * spec.N + 4
 
 
+def streamk_block_tile_universal_spec(spec: StreamKGemmSpec):
+    """Map a :class:`StreamKGemmSpec` onto the production universal-GEMM
+    split-K spec the block-tile path drives.
+
+    The block-tile StreamK kernel *is* a universal GEMM whose K-loop is
+    sliced ``split_k`` ways and whose epilogue atomic-adds into an f32
+    workspace. We translate the StreamK macro-tile sizes (``tile_m`` /
+    ``tile_n`` / ``tile_k``) and the K-split degree (``k_iters`` =
+    ``K // tile_k`` collapsed into the spec's split factor) into a
+    :class:`~ck_dsl.instances.common.gemm_universal.UniversalGemmSpec`
+    with ``trait.split_k`` set, the fast ``compv4`` pipeline, and the
+    direct (atomic) epilogue.
+
+    The StreamK ``tile_k`` here is the per-CTA K-slice *granularity* the
+    universal K-loop iterates; the **split degree** comes from
+    ``spec.split_k`` (the number of K-slices to atomic-reduce). The
+    universal body computes ``ks = K // split_k`` at runtime and each
+    ``block_id_z`` CTA owns one slice.
+    """
+    from .gemm_universal import (
+        DataSpec,
+        TileSpec,
+        TraitSpec,
+        UniversalGemmSpec,
+    )
+
+    # The block-tile path's MFMA atom is the deep-K square atom (NOT the
+    # ``spec.atom`` derived from the *block* tile_m/tile_n, which only
+    # applies to the v1 one-atom-per-CTA inner). bf16 uses the gfx950
+    # 16x16x32 hero (matches FlyDSL's split-K recipe); f16 uses 16x16x16.
+    dt = "bf16" if spec.dtype == "bf16" else "fp16"
+    wt_m, wt_n, wt_k = (16, 16, 32) if spec.dtype == "bf16" else (16, 16, 16)
+    # warp grid: 1 warp along M (tile_m == one atom row band) and enough
+    # warps along N to cover the block tile_n with one atom step each. The
+    # universal body's mfmas_per_warp_* picks up any remaining repeats.
+    warp_m = 1
+    warp_n = max(1, spec.tile_n // wt_n)
+    # Cap warps so block_size = warp_m*warp_n*64 stays within the per-block
+    # thread budget (1024 -> warp_n <= 16) and tile_n stays divisible.
+    while warp_n > 1 and (
+        warp_m * warp_n * 64 > 1024 or spec.tile_n % (warp_n * wt_n) != 0
+    ):
+        warp_n //= 2
+    tile = TileSpec(
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=1,
+        warp_tile_m=wt_m,
+        warp_tile_n=wt_n,
+        warp_tile_k=wt_k,
+    )
+    trait = TraitSpec(
+        pipeline="compv4",
+        scheduler="intrawave",
+        epilogue="default",  # atomic split-K epilogue overrides the store
+        pad_m=True,
+        pad_n=True,
+        pad_k=True,
+        split_k=spec.split_k,
+    )
+    data = DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt, dtype_acc="fp32", layout="RCR")
+    return UniversalGemmSpec(name=spec.name, tile=tile, trait=trait, data=data)
+
+
 def build_streamk_gemm_block_tile(
     spec: StreamKGemmSpec, arch: str = "gfx950"
 ) -> KernelDef:
-    """Block-tile / multi-warp variant of streamk_gemm (P66).
+    """Block-tile / multi-warp variant of streamk_gemm.
 
-    Today's :func:`build_streamk_gemm` uses one wave per CTA with a
-    "scalar-style" MFMA inner (one warp tile per CTA). This variant
-    re-uses the universal-GEMM block-tile body inside the persistent
-    StreamK loop, parameterised on the StreamK partitioner. With P35
-    fixed, the persistent loop is safe at any ``max_iters`` so this
-    builder defaults to ``persistent=True``.
+    Routes split-K through the **production universal-GEMM body**: the
+    fast vectorized + LDS-double-buffered ``compv4`` load/MFMA inner that
+    reaches ~0.96x rocBLAS on square GEMM. Each CTA computes one
+    ``(m_tile, n_tile)`` output tile over a K-slice ``[z*ks, (z+1)*ks)``
+    (``ks = K // split_k``, ``z = block_id_z``) using that inner, then
+    atomic-adds its partial f32 tile into the f32 workspace ``Cf32[M, N]``.
+    The grid is ``(N_tiles, M_tiles, split_k)``; the caller zero-inits the
+    workspace and casts it to the target dtype after launch.
 
-    Minimum-viable: dispatches into :func:`build_streamk_gemm` with
-    ``persistent=True``; the block-tile body is inherited from the
-    universal-gemm path the streamk kernel already wraps. Real
-    perf hoist is enabling ``streamk`` with multi-warp tile + larger
-    M/N bands — exposed via the spec's ``tile_m`` / ``tile_n`` /
-    ``warp_m`` / ``warp_n`` fields.
+    This replaces the v1 scalar "correctness oracle" inner
+    (:func:`build_streamk_gemm`, one wave/CTA, scalar B loads) with the
+    real production body. The split degree is ``spec.split_k``; sweep it
+    (4 / 8 / 16 / 32) against ``tile_m`` / ``tile_n`` / ``tile_k`` to
+    maximise CU fill for the target shape.
 
-    Reference: CK Tile ``streamk_gemm_kernel.hpp`` block-tile body.
+    Reference: CK Tile ``streamk_gemm_kernel.hpp`` block-tile body;
+    FlyDSL ``splitk_hgemm.py`` vectorized bf16 split-K hot loop.
     """
-    from dataclasses import replace
+    from .gemm_universal import build_universal_gemm
 
-    block_tile_spec = replace(spec, persistent=True)
-    return build_streamk_gemm(block_tile_spec, arch=arch)
+    return build_universal_gemm(streamk_block_tile_universal_spec(spec), arch=arch)
 
 
 __all__ = [

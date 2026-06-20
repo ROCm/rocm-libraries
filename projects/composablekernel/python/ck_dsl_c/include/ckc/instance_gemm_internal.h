@@ -116,7 +116,15 @@ typedef struct ckc_gemm_build_ctx
     int block_k; /* t.tile_k */
 
     /* ---- common geometry constants (SSA) -- */
-    ckc_value_t* c0;        /* const_i32(0)             */
+    ckc_value_t* c0; /* const_i32(0)             */
+    /* ---- split-K K-slice bounds (_split_k / _is_split_k / k_lo / k_hi) -- *
+     * Python computes these right after c0 and before c_wave; the C populate
+     * follows the same order so the SSA value ids line up. */
+    int split_k;            /* spec->trait.split_k                              */
+    bool is_split_k;        /* split_k > 1                                      */
+    ckc_value_t* k_lo;      /* slice base: c0 (non-split) or sgpr(z*ks)         */
+    ckc_value_t* k_upper;   /* slice end: K (non-split, Python k_hi==None) or   */
+                            /* sgpr(k_lo+ks). Python `_k_upper`.                */
     ckc_value_t* c_wave;    /* const_i32(wave_size)     */
     ckc_value_t* c_warps_n; /* const_i32(t.warp_n)      */
     ckc_value_t* c_block_m; /* const_i32(block_m)       */
@@ -412,6 +420,25 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
                                     ckc_value_t* batch_off_c,
                                     void* fused_epilogue,
                                     bool fused_is_mde);
+
+/* _emit_epilogue_split_k(...): split-K atomic-add epilogue. Scatters each
+ * warp's per-lane f32 accumulator to its output (c_m, c_n) (the canonical MFMA
+ * CWarpDstrEncoding layout, identical to the default epilogue) and atomic-adds
+ * the raw f32 value into Cf32[c_m, c_n] (atomicrmw fadd), guarded by c_m<M /
+ * c_n<N when pad_m / pad_n is set. */
+void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
+                                    const ckc_gemm_universal_spec_t* spec,
+                                    ckc_value_t* const* accs,
+                                    int num_accs,
+                                    ckc_value_t* warp_m_idx,
+                                    ckc_value_t* warp_n_idx,
+                                    ckc_value_t* lane,
+                                    ckc_value_t* block_m_off,
+                                    ckc_value_t* block_n_off,
+                                    ckc_value_t* M,
+                                    ckc_value_t* N,
+                                    ckc_value_t* Cf32,
+                                    int c_per_lane);
 
 /* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. */
 void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
