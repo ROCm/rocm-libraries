@@ -75,7 +75,7 @@ custom.config:
    GlobalSplitU: 19
    GlobalSplitUAlgorithm: MultipleBuffer
    InternalSupportParams: {KernArgsVersion: 0, SupportCustomWGM: True, SupportUserGSU: True, SupportCustomStaggerU: True, UseUniversalArgs: False}
-   PreloadKernArgs: 1
+   PreloadKernArgs: True
    NoReject: True
 amdhsa.version:
   - 1
