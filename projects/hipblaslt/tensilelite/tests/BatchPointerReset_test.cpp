@@ -15,11 +15,14 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 
 #include <variant>
+#include <vector>
 
 #include "DataInitializationTestUtils.hpp"
 #include "ClientProblemFactory.hpp"
@@ -40,6 +43,16 @@ namespace
         using DataInitialization::cpuInputsNeedRefresh;
         using DataInitialization::gpuInputsPreparedFor;
         using DataInitialization::shouldRefreshMXForSolution;
+
+        bool altSlotsReady() const
+        {
+            return m_altSlotsReady;
+        }
+
+        auto const& slotState(size_t slot) const
+        {
+            return m_gpuInputSlots.at(slot);
+        }
     };
 
     ::testing::AssertionResult hasHipDevice()
@@ -102,6 +115,25 @@ namespace
         HIP_CHECK_EXC(
             hipMemcpy(&value, devicePtr + index, sizeof(T), hipMemcpyDeviceToHost));
         return value;
+    }
+
+    std::ptrdiff_t readBatchAStride(void const* const* deviceBatchA, size_t batch)
+    {
+        if(batch < 2)
+        {
+            ADD_FAILURE() << "readBatchAStride requires at least two batch entries";
+            return 0;
+        }
+
+        std::vector<void const*> batchPtrs(batch);
+        HIP_CHECK_EXC(hipMemcpy(batchPtrs.data(),
+                                deviceBatchA,
+                                batch * sizeof(void const*),
+                                hipMemcpyDeviceToHost));
+
+        auto const* first  = static_cast<std::uint8_t const*>(batchPtrs[0]);
+        auto const* second = static_cast<std::uint8_t const*>(batchPtrs[1]);
+        return second - first;
     }
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -441,6 +473,79 @@ TEST(BatchPointerReset, MXPreparedInputsAreEligibleForSolutionRefresh)
     EXPECT_TRUE(dataInit.shouldRefreshMXForSolution(&solution, problem));
 }
 #endif
+
+TEST(BatchPointerReset, StaleAltSlotRefreshAfterProblemSwitch)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+
+    auto args = makeRingBatchPointerArgs({{64, 64, BATCH, 64}}, 1);
+
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization  dataInit(args, factory);
+
+    auto inputs1 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
+    auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->batchA, nullptr);
+
+    auto const expectedP1Stride = std::ptrdiff_t(32 * 32);
+    auto const p1Slot0Stride = readBatchAStride(ci1->batchA, BATCH);
+    EXPECT_EQ(p1Slot0Stride, expectedP1Stride);
+
+    dataInit.primeNextInputSlot(&p1);
+    auto p1WarmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
+    dataInit.waitForPreparedSlot(nullptr);
+
+    auto* p1WarmCi = dynamic_cast<ContractionInputs*>(p1WarmInputs.get());
+    ASSERT_NE(p1WarmCi, nullptr);
+    ASSERT_NE(p1WarmCi->batchA, nullptr);
+    EXPECT_NE(p1WarmCi->batchA, ci1->batchA);
+    auto const p1WarmStride = readBatchAStride(p1WarmCi->batchA, BATCH);
+    EXPECT_EQ(p1WarmStride, expectedP1Stride);
+
+    dataInit.beginProblem(&p2);
+    dataInit.resetPreparedSlotsForProblem();
+
+    auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
+    auto* ci2    = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+
+    auto const expectedP2Stride = std::ptrdiff_t(64 * 64);
+    auto const p2Slot0Stride = readBatchAStride(ci2->batchA, BATCH);
+    EXPECT_EQ(p2Slot0Stride, expectedP2Stride);
+
+    ASSERT_TRUE(dataInit.altSlotsReady());
+    auto const& p2Slot1 = dataInit.slotState(1);
+    ASSERT_TRUE(p2Slot1.populated());
+    auto const p2Slot1BatchA = reinterpret_cast<void const* const*>(
+        p2Slot1.batchPtrs.at(ContractionProblemGemm::TENSOR::A));
+    ASSERT_NE(p2Slot1BatchA, nullptr);
+    EXPECT_NE(p2Slot1BatchA, ci2->batchA);
+    auto const p2Slot1Stride = readBatchAStride(p2Slot1BatchA, BATCH);
+    EXPECT_EQ(p2Slot1Stride, expectedP2Stride);
+    EXPECT_NE(p2Slot1Stride, expectedP1Stride);
+
+    dataInit.primeNextInputSlot(&p2);
+    auto p2WarmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
+    dataInit.waitForPreparedSlot(nullptr);
+
+    auto* p2WarmCi = dynamic_cast<ContractionInputs*>(p2WarmInputs.get());
+    ASSERT_NE(p2WarmCi, nullptr);
+    ASSERT_NE(p2WarmCi->batchA, nullptr);
+    EXPECT_EQ(p2WarmCi->batchA, p2Slot1BatchA);
+    auto const p2WarmStride = readBatchAStride(p2WarmCi->batchA, BATCH);
+    EXPECT_EQ(p2WarmStride, expectedP2Stride);
+}
 
 TEST(BatchPointerReset, ResetPreparedSlotsForProblemClearsWarmRingBeforeProblemSwitch)
 {

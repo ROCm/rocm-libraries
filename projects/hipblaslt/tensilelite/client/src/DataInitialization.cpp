@@ -4225,6 +4225,15 @@ namespace TensileLite
                                 kind,
                                 targetStream);
                 }
+                if(!targetStream)
+                {
+                    auto& slot0 = m_gpuInputSlots.at(0);
+                    slot0.ptrs         = m_gpuPtrs;
+                    slot0.batchPtrs    = m_gpuBatchPtrs;
+                    slot0.cachedInputs = m_cachedGPUInputs;
+
+                    initializeAltBufferSets(problem, cpuInputsAlreadyCurrent);
+                }
                 markGpuInputsPrepared(problem);
                 return m_cachedGPUInputs;
             }
