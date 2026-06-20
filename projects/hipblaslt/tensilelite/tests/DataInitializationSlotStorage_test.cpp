@@ -161,6 +161,92 @@ namespace
     {
         return TensileLite::testing::buildRingArgs(std::move(problemSizes), 1);
     }
+
+    BoundsCheckMode expectedCurBoundsCheck(BoundsCheckMode mode)
+    {
+        return mode == BoundsCheckMode::GuardPageAll ? BoundsCheckMode::GuardPageFront : mode;
+    }
+
+    void expectBoundsCheckDoesNotPrimeRing(BoundsCheckMode boundsCheckMode)
+    {
+        auto problem = makePlainProblem(32, 32, 32);
+        auto args    = makeRingArgs({{32, 32, 32}});
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "bounds-check",
+                                                     std::any(boundsCheckMode));
+
+        auto engine = std::make_shared<RecordingCopyEngine>();
+
+        ClientProblemFactory         factory(args);
+        SlotStorageDataInitialization dataInit(args, factory, engine);
+
+        auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+        ASSERT_NE(inputs, nullptr);
+
+        EXPECT_TRUE(dataInit.ringPolicyAllowed());
+        EXPECT_TRUE(dataInit.ringPolicyAllocatesAltBuffers());
+        EXPECT_EQ(dataInit.activeBufferCount(), 3u);
+        EXPECT_TRUE(dataInit.hasAltBuffers());
+        EXPECT_TRUE(dataInit.altSlotsReady());
+        EXPECT_EQ(dataInit.getCurBoundsCheck(), expectedCurBoundsCheck(boundsCheckMode));
+        EXPECT_NE(dataInit.getCurBoundsCheck(), BoundsCheckMode::Disable);
+        EXPECT_FALSE(dataInit.ringEligible());
+        EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+        EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+        EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+        EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+        auto const candidateSlot = dataInit.nextPrimeSlot();
+        ASSERT_TRUE(candidateSlot.has_value());
+        EXPECT_EQ(*candidateSlot, 1u);
+
+        auto const& candidateState = dataInit.slotState(*candidateSlot);
+        ASSERT_NE(candidateState.cachedInputs, nullptr);
+        auto const candidateInputs = candidateState.cachedInputs;
+
+        auto const& slot0State = dataInit.slotState(0);
+        ASSERT_NE(slot0State.cachedInputs, nullptr);
+        auto const slot0Inputs = slot0State.cachedInputs;
+
+        EXPECT_EQ(inputs, slot0Inputs);
+
+        engine->clear();
+
+        dataInit.beginAsyncReset(&problem);
+
+        EXPECT_TRUE(engine->calls.empty());
+        EXPECT_FALSE(dataInit.ringEligible());
+        EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+        EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+        EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+        EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+        EXPECT_EQ(dataInit.slotState(*candidateSlot).cachedInputs, candidateInputs);
+
+        auto secondInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+        ASSERT_NE(secondInputs, nullptr);
+        EXPECT_EQ(secondInputs, slot0Inputs);
+        EXPECT_NE(secondInputs, candidateInputs);
+        EXPECT_EQ(dataInit.slotState(*candidateSlot).cachedInputs, candidateInputs);
+        EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+        EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+        EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+        EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+        dataInit.waitForPreparedSlot(nullptr);
+
+        bool sawRecordCopyDone = false;
+        bool sawWaitForCopyDone = false;
+        for(auto const& call : engine->calls)
+        {
+            if(call.type == RecordingCopyEngine::CallType::RecordCopyDone)
+                sawRecordCopyDone = true;
+            else if(call.type == RecordingCopyEngine::CallType::WaitForCopyDone)
+                sawWaitForCopyDone = true;
+        }
+
+        EXPECT_FALSE(sawRecordCopyDone);
+        EXPECT_FALSE(sawWaitForCopyDone);
+    }
 } // namespace
 
 TEST(DataInitializationSlotStorage, PrimingAltSlotDoesNotMutateActiveAliases)
@@ -256,6 +342,24 @@ TEST(DataInitializationSlotStorage, PristineOnGpuFalseDisablesWarmD2DReset)
     EXPECT_TRUE(engine->calls.empty());
     EXPECT_FALSE(dataInit.ringHasAvailableSlot());
     EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+}
+
+TEST(DataInitializationSlotStorage, BoundsCheckDoesNotPrimeRing)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    for(BoundsCheckMode mode : {BoundsCheckMode::NaN,
+                                BoundsCheckMode::GuardPageFront,
+                                BoundsCheckMode::GuardPageBack,
+                                BoundsCheckMode::GuardPageAll})
+    {
+        SCOPED_TRACE(::testing::Message() << "bounds-check=" << mode);
+        expectBoundsCheckDoesNotPrimeRing(mode);
+    }
 }
 
 TEST(DataInitializationSlotStorage,
