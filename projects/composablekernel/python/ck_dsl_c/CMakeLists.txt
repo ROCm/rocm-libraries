@@ -69,9 +69,9 @@ target_include_directories(ckc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 
 # --- Engine freshness / provenance stamp -------------------------------------
 # Compute a deterministic, git-independent content hash of the engine source
-# tree and inject it (plus a human version) ONLY into src/core/build_id.cpp via
+# tree and inject it (plus a human version) ONLY into src/core/ckc_build_id.cpp via
 # compile definitions. Scoping the -D to that single TU keeps every other object
-# untouched: only build_id.o recompiles when the hash changes, and -- crucially
+# untouched: only ckc_build_id.o recompiles when the hash changes, and -- crucially
 # -- no lowering/emission TU ever sees these values, so the emitted LLVM-IR is
 # byte-identical. The build_id TU exposes ckc_build_id()/ckc_engine_version()
 # and is intentionally NOT referenced by any emission path; consumers (harnesses,
@@ -84,7 +84,7 @@ string(TIMESTAMP CKC_BUILD_DATE "%Y%m%d" UTC)
 set(CKC_ENGINE_VERSION "1.0.0+${CKC_BUILD_DATE}")
 message(STATUS "ckc_core build-id: ${CKC_BUILD_ID}  version: ${CKC_ENGINE_VERSION}")
 set_source_files_properties(
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/core/build_id.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ckc_build_id.cpp"
   PROPERTIES COMPILE_DEFINITIONS
   "CKC_BUILD_ID=${CKC_BUILD_ID};CKC_ENGINE_VERSION=${CKC_ENGINE_VERSION}")
 # Required so the .a can be linked into the shared ck_dsl_provider plugin

@@ -35,7 +35,7 @@
 #include "family_glue.hpp"
 
 extern "C" {
-#include "ckc/build_id.h"
+#include "ckc/ckc_build_id.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"

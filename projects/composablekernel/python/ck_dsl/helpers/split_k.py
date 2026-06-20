@@ -38,6 +38,17 @@ GFX950_NUM_XCDS = 8
 GFX950_CU_PER_XCD = 32
 GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
 
+# Empirically (gfx950 decode-GEMM split-K sweep) the launch + atomic-reduce
+# overhead floor sits near a per-slice K-depth of ~512 elements. Splitting K so
+# each slice is ~512 deep maximises throughput: shallower slices let the fixed
+# per-CTA overhead (launch + extra atomic partials) dominate, deeper slices leave
+# CUs idle. The measured optimum across decode shapes tracks slice depth, NOT raw
+# device fill -- K=2048 -> 4, K=4096 -> 8, K=768 -> 2, and a 128-CTA config at
+# depth 512 beats a 256-CTA config at depth 256. So the auto heuristic sets the
+# degree from slice depth (~K/512) and uses the CTA count only as the engage gate
+# (don't split a grid that already fills the device).
+TARGET_SLICE_K = 512
+
 _ENV_FLAG = "CK_DSL_GEMM_SPLIT_K"
 
 
@@ -119,15 +130,26 @@ def select_split_k(
         m_tiles      = ceil(M / tile_m)
         n_tiles      = ceil(N / tile_n)
         base_grid    = m_tiles * n_tiles * batch
-        split_k_raw  = clamp(round(target_ctas / base_grid), 1, K // tile_k)
+        # engage gate: only split a grid that leaves the device mostly idle
+        if base_grid >= target_ctas / 2: split_k = 1
+        # degree from per-slice K-depth, not raw fill (see TARGET_SLICE_K)
+        split_k_raw  = clamp(round(K / TARGET_SLICE_K), 1, K // tile_k)
         split_k      = largest valid factor <= split_k_raw
                        (K % s == 0 and (K / s) % tile_k == 0)
+
+    The degree is set by slice depth (~``K / TARGET_SLICE_K``) rather than the
+    CTA count needed to fill the device: the sweep showed the launch/atomic
+    overhead floor is a slice-depth effect, so e.g. K=4096 wants split_k=8 (slice
+    512) even though that over-subscribes the CUs, while K=2048 wants split_k=4
+    (slice 512) even where raw fill would ask for more.
 
     Guards:
 
     * only engage when the base grid is genuinely small
       (``base_grid < target_ctas / 2``); otherwise return ``1`` so square /
-      large / prefill GEMMs that already fill the device are untouched;
+      large / prefill GEMMs that already fill the device are untouched (the
+      depth target never over-splits a well-filled grid because the gate fires
+      first);
     * never return a degree that does not evenly slice K (falls back to ``1``).
 
     The ``CK_DSL_GEMM_SPLIT_K`` env override takes precedence:
@@ -159,22 +181,30 @@ def select_split_k(
             f"env override: forced {forced} -> valid {chosen}",
         )
 
-    # auto
+    # auto: only split a grid that leaves the device mostly idle (the decode /
+    # GEMV regime). A grid that already fills the device keeps split_k == 1 even
+    # if it has deep K -- the gate fires before the depth target is consulted.
     if base_grid >= target_ctas // 2:
         return SplitKDecision(
             1, base_grid, target_ctas, f"grid {base_grid} already fills device"
         )
 
-    split_k_raw = round(target_ctas / base_grid) if base_grid else max_split
+    # Degree from per-slice K-depth (~K / TARGET_SLICE_K), not raw CTA fill: the
+    # measured optimum tracks slice depth (see TARGET_SLICE_K).
+    split_k_raw = round(K / TARGET_SLICE_K) if K else 1
     split_k_raw = max(1, min(int(split_k_raw), max_split))
     chosen = _largest_valid_split_k(K, tile_k, split_k_raw)
     if chosen <= 1:
         return SplitKDecision(
-            1, base_grid, target_ctas, f"no valid split factor <= {split_k_raw}"
+            1,
+            base_grid,
+            target_ctas,
+            f"no valid split factor <= {split_k_raw} (K-depth target)",
         )
     return SplitKDecision(
         chosen,
         base_grid,
         target_ctas,
-        f"grid {base_grid} << target {target_ctas}; split_k {chosen}",
+        f"grid {base_grid} << target {target_ctas}; "
+        f"K-depth target -> split_k {chosen} (slice K={K // chosen})",
     )

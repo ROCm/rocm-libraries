@@ -16,7 +16,7 @@ silently".
 ## TL;DR: the canonical build script
 
 ```bash
-projects/composablekernel/python/ck_dsl_c/tools/build.sh
+projects/composablekernel/python/ck_dsl_c/tools/ckc_build.sh
 ```
 
 This single script:
