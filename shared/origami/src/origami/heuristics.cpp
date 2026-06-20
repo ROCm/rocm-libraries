@@ -428,23 +428,58 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
+  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels in three regimes
   // ========================================================================
-  // Subtile kernels are not competitive when the reduction dimension is small
-  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
+  // Subtile kernels are not competitive for gfx950 BF16 TN in three regimes:
+  // two extreme aspect-ratio regimes (each with a small/moderate reduction
+  // dimension and one free dimension dominating the other) and a small-K
+  // regime where the reduction depth is too shallow to amortize the subtile
+  // overhead:
+  //
+  //   * "Tall"    (large M, small N): M >= 20480 AND N <= 2560 AND K <= 1024.
+  //   * "Wide"    (small M, large N): M <= 768 AND N >= 163840 AND K <= 1536.
+  //   * "Small-K" (any M, N):         K <= 256.
+  //
+  // A heuristic_key_t ANDs all of its fields, so each regime is expressed as a
+  // separate entry; if any matches, the merged params set reject = true.
+  // Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
   {
     heuristic_params_t reject_params;
     reject_params.reject = true;
 
-    // K < 512
-    heuristic_key_t key;
-    key.arch        = hardware_t::architecture_t::gfx950;
-    key.mi_dtype    = data_type_t::BFloat16;
-    key.a_transpose = transpose_t::T;
-    key.b_transpose = transpose_t::N;
-    key.subtile     = true;
-    key.max_k       = 511;
-    add_entry(key, reject_params);
+    // "Tall": M >= 20480 AND N <= 2560 AND K <= 1024
+    heuristic_key_t key_tall;
+    key_tall.arch        = hardware_t::architecture_t::gfx950;
+    key_tall.mi_dtype    = data_type_t::BFloat16;
+    key_tall.a_transpose = transpose_t::T;
+    key_tall.b_transpose = transpose_t::N;
+    key_tall.subtile     = true;
+    key_tall.min_m       = 20480;
+    key_tall.max_n       = 2560;
+    key_tall.max_k       = 1024;
+    add_entry(key_tall, reject_params);
+
+    // "Wide": M <= 768 AND N >= 163840 AND K <= 1536
+    heuristic_key_t key_wide;
+    key_wide.arch        = hardware_t::architecture_t::gfx950;
+    key_wide.mi_dtype    = data_type_t::BFloat16;
+    key_wide.a_transpose = transpose_t::T;
+    key_wide.b_transpose = transpose_t::N;
+    key_wide.subtile     = true;
+    key_wide.max_m       = 768;
+    key_wide.min_n       = 163840;
+    key_wide.max_k       = 1536;
+    add_entry(key_wide, reject_params);
+
+    // "Small-K": K <= 256 (any M, N)
+    heuristic_key_t key_smallk;
+    key_smallk.arch        = hardware_t::architecture_t::gfx950;
+    key_smallk.mi_dtype    = data_type_t::BFloat16;
+    key_smallk.a_transpose = transpose_t::T;
+    key_smallk.b_transpose = transpose_t::N;
+    key_smallk.subtile     = true;
+    key_smallk.max_k       = 256;
+    add_entry(key_smallk, reject_params);
   }
 }
 
