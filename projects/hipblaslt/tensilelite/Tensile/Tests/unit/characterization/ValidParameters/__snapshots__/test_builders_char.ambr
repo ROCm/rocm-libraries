@@ -1374,6 +1374,7 @@
     'BufferStore',
     'ClusterDim',
     'ClusterLocalRead',
+    'CompactLoopStore',
     'ConvertAfterDS',
     'CustomKernelName',
     'DebugPersistentKernelLoopForever',
@@ -1653,6 +1654,14 @@
       'head': list([
         0,
         1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'CompactLoopStore': dict({
+      'head': list([
+        False,
+        True,
       ]),
       'len': 2,
       'type': 'list',
@@ -2539,7 +2548,7 @@
         1,
         2,
       ]),
-      'len': 5,
+      'len': 6,
       'type': 'list',
     }),
     'StreamKAtomic': dict({
