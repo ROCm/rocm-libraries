@@ -163,8 +163,6 @@ namespace
     public:
         using DataInitialization::DataInitialization;
         using Action = DataInitialization::OutputResetAction;
-        using Plan   = DataInitialization::OutputResetPlan;
-        using Reason = DataInitialization::OutputResetReason;
         using PristineUnit = DataInitialization::PristineUnit;
         using DataInitialization::planNormalWarmOutputReset;
         using DataInitialization::planRingSlotOutputReset;
@@ -173,16 +171,6 @@ namespace
         bool altSlotsReady() const
         {
             return m_altSlotsReady;
-        }
-
-        bool warmOutputResetRequired() const
-        {
-            return m_warmOutputResetRequired;
-        }
-
-        bool gpuInit() const
-        {
-            return m_gpuInit;
         }
 
         hipStream_t copyStream() const
@@ -210,34 +198,9 @@ namespace
             return ringSlot(slot).batchPtrs.at(tensorIndex);
         }
 
-        void setAltSlotsReady(bool value)
-        {
-            m_altSlotsReady = value;
-        }
-
-        void setWarmOutputResetRequired(bool value)
-        {
-            m_warmOutputResetRequired = value;
-        }
-
         void setGpuInit(bool value)
         {
             m_gpuInit = value;
-        }
-
-        void setHasAltBuffers(bool value)
-        {
-            m_hasAltBuffers = value;
-        }
-
-        void setProblemDependentData(bool value)
-        {
-            m_problemDependentData = value;
-        }
-
-        void setBoundsCheck(BoundsCheckMode value)
-        {
-            m_curBoundsCheck = value;
         }
 
         PristineUnit& dPristineUnit(ContractionProblemGemm const& problem)
@@ -271,12 +234,8 @@ TEST(DataInitializationOutputResetPlan, NormalWarmValidationPlansResetFromValid)
     auto inputs = dataInit.prepareGPUInputs(problem);
     ASSERT_NE(inputs, nullptr);
 
-    auto const plan = dataInit.planNormalWarmOutputReset(problem);
-    EXPECT_EQ(plan.action, OutputResetPlanDataInitialization::Action::ResetFromValid);
-    EXPECT_EQ(plan.reason, OutputResetPlanDataInitialization::Reason::NormalWarmValidation);
-    EXPECT_TRUE(plan.requiresPristineGpuCopy);
-    EXPECT_FALSE(plan.usesExistingSlotContents);
-    EXPECT_FALSE(plan.targetIsRingSlot);
+    auto const action = dataInit.planNormalWarmOutputReset(problem);
+    EXPECT_EQ(action, OutputResetPlanDataInitialization::Action::ResetFromValid);
 }
 
 TEST(DataInitializationOutputResetPlan, NormalWarmValidationWithoutPristineGpuPlansResetFromValid)
@@ -300,12 +259,8 @@ TEST(DataInitializationOutputResetPlan, NormalWarmValidationWithoutPristineGpuPl
     auto inputs = dataInit.prepareGPUInputs(problem);
     ASSERT_NE(inputs, nullptr);
 
-    auto const plan = dataInit.planNormalWarmOutputReset(problem);
-    EXPECT_EQ(plan.action, OutputResetPlanDataInitialization::Action::ResetFromValid);
-    EXPECT_EQ(plan.reason, OutputResetPlanDataInitialization::Reason::NormalWarmValidation);
-    EXPECT_FALSE(plan.requiresPristineGpuCopy);
-    EXPECT_FALSE(plan.usesExistingSlotContents);
-    EXPECT_FALSE(plan.targetIsRingSlot);
+    auto const action = dataInit.planNormalWarmOutputReset(problem);
+    EXPECT_EQ(action, OutputResetPlanDataInitialization::Action::ResetFromValid);
 }
 
 TEST(DataInitializationOutputResetPlan, NormalWarmWithoutValidationPlansNoReset)
@@ -322,12 +277,8 @@ TEST(DataInitializationOutputResetPlan, NormalWarmWithoutValidationPlansNoReset)
     auto inputs = dataInit.prepareGPUInputs(problem);
     ASSERT_NE(inputs, nullptr);
 
-    auto const plan = dataInit.planNormalWarmOutputReset(problem);
-    EXPECT_EQ(plan.action, OutputResetPlanDataInitialization::Action::NoReset);
-    EXPECT_EQ(plan.reason, OutputResetPlanDataInitialization::Reason::NormalWarmValidation);
-    EXPECT_FALSE(plan.requiresPristineGpuCopy);
-    EXPECT_TRUE(plan.usesExistingSlotContents);
-    EXPECT_FALSE(plan.targetIsRingSlot);
+    auto const action = dataInit.planNormalWarmOutputReset(problem);
+    EXPECT_EQ(action, OutputResetPlanDataInitialization::Action::NoReset);
 }
 
 TEST(DataInitializationOutputResetPlan, NormalColdOrSwizzledPlansFullFill)
@@ -341,16 +292,14 @@ TEST(DataInitializationOutputResetPlan, NormalColdOrSwizzledPlansFullFill)
     OutputResetPlanDataInitialization dataInit(args, factory);
     auto problem = makePlainProblem(32, 32, 32);
 
-    auto const coldPlan = dataInit.planNormalWarmOutputReset(problem);
-    EXPECT_EQ(coldPlan.action, OutputResetPlanDataInitialization::Action::FullFill);
-    EXPECT_EQ(coldPlan.reason, OutputResetPlanDataInitialization::Reason::ColdSlotFill);
+    auto const coldAction = dataInit.planNormalWarmOutputReset(problem);
+    EXPECT_EQ(coldAction, OutputResetPlanDataInitialization::Action::FullFill);
 
     dataInit.setGpuInit(true);
     problem.setSwizzleTensorA(true);
 
-    auto const swizzledPlan = dataInit.planNormalWarmOutputReset(problem);
-    EXPECT_EQ(swizzledPlan.action, OutputResetPlanDataInitialization::Action::FullFill);
-    EXPECT_EQ(swizzledPlan.reason, OutputResetPlanDataInitialization::Reason::ColdSlotFill);
+    auto const swizzledAction = dataInit.planNormalWarmOutputReset(problem);
+    EXPECT_EQ(swizzledAction, OutputResetPlanDataInitialization::Action::FullFill);
 }
 
 TEST(DataInitializationOutputResetPlan, RingWarmValidationPlansResetFromValid)
@@ -372,13 +321,8 @@ TEST(DataInitializationOutputResetPlan, RingWarmValidationPlansResetFromValid)
     auto const targetSlot = dataInit.nextPrimeSlot();
     ASSERT_TRUE(targetSlot.has_value());
 
-    auto const plan = dataInit.planRingSlotOutputReset(*targetSlot, dataInit.altSlotsReady());
-    EXPECT_EQ(plan.action, OutputResetPlanDataInitialization::Action::ResetFromValid);
-    EXPECT_EQ(plan.reason, OutputResetPlanDataInitialization::Reason::RingWarmValidation);
-    EXPECT_TRUE(plan.requiresPristineGpuCopy);
-    EXPECT_FALSE(plan.usesExistingSlotContents);
-    EXPECT_TRUE(plan.targetIsRingSlot);
-    EXPECT_EQ(plan.targetSlot, *targetSlot);
+    auto const action = dataInit.planRingSlotOutputReset(dataInit.altSlotsReady());
+    EXPECT_EQ(action, OutputResetPlanDataInitialization::Action::ResetFromValid);
 }
 
 TEST(DataInitializationOutputResetPlan, NoValidationPublicArgsDisableRingWarmPath)

@@ -1061,11 +1061,9 @@ namespace TensileLite
             return pointers;
         }
 
-        DataInitialization::OutputResetPlan DataInitialization::planNormalWarmOutputReset(
+        DataInitialization::OutputResetAction DataInitialization::planNormalWarmOutputReset(
             ContractionProblemGemm const& problem) const
         {
-            OutputResetPlan plan;
-
             InputLayoutPolicy const layoutPolicy;
             bool const warmReuseAllowed = m_gpuInit
                                           && m_curBoundsCheck == BoundsCheckMode::Disable
@@ -1073,56 +1071,21 @@ namespace TensileLite
                                           && !layoutPolicy.hasSpecialInputLayout(problem);
 
             if(!warmReuseAllowed)
-            {
-                plan.action = OutputResetAction::FullFill;
-                plan.reason = OutputResetReason::ColdSlotFill;
-                return plan;
-            }
+                return OutputResetAction::FullFill;
 
-            plan.reason = OutputResetReason::NormalWarmValidation;
             if(m_elementsToValidate != 0)
-            {
-                plan.action                  = OutputResetAction::ResetFromValid;
-                plan.requiresPristineGpuCopy = m_keepPristineCopyOnGPU;
-                plan.usesExistingSlotContents = false;
-            }
-            else
-            {
-                plan.action                 = OutputResetAction::NoReset;
-                plan.usesExistingSlotContents = true;
-            }
+                return OutputResetAction::ResetFromValid;
 
-            return plan;
+            return OutputResetAction::NoReset;
         }
 
-        DataInitialization::OutputResetPlan DataInitialization::planRingSlotOutputReset(
-            size_t targetSlot, bool altSlotsReady) const
+        DataInitialization::OutputResetAction DataInitialization::planRingSlotOutputReset(
+            bool altSlotsReady) const
         {
-            OutputResetPlan plan;
-            plan.targetIsRingSlot = true;
-            plan.targetSlot       = targetSlot;
-
             if(!altSlotsReady)
-            {
-                plan.action = OutputResetAction::FullFill;
-                plan.reason = OutputResetReason::ColdSlotFill;
-                return plan;
-            }
+                return OutputResetAction::FullFill;
 
-            plan.reason = OutputResetReason::RingWarmValidation;
-            if(m_warmOutputResetRequired)
-            {
-                plan.action                  = OutputResetAction::ResetFromValid;
-                plan.requiresPristineGpuCopy = true;
-                plan.usesExistingSlotContents = false;
-            }
-            else
-            {
-                plan.action                 = OutputResetAction::NoReset;
-                plan.usesExistingSlotContents = true;
-            }
-
-            return plan;
+            return OutputResetAction::ResetFromValid;
         }
 
         std::vector<void*> DataInitialization::executeTensorCopyInstructions(
@@ -4153,11 +4116,11 @@ namespace TensileLite
                 markBatchPointersCurrent(problem);
             }
 
-            auto&      slot0      = m_gpuInputSlots.at(0);
-            auto const outputPlan = planNormalWarmOutputReset(problem);
-            if(outputPlan.action != OutputResetAction::FullFill)
+            auto&      slot0        = m_gpuInputSlots.at(0);
+            auto const outputAction = planNormalWarmOutputReset(problem);
+            if(outputAction != OutputResetAction::FullFill)
             {
-                if(outputPlan.action == OutputResetAction::ResetFromValid)
+                if(outputAction == OutputResetAction::ResetFromValid)
                 {
                     ScopedTimer t("async_reset_resetoutput");
                     auto const beforeSlot = slot0;
@@ -4488,7 +4451,7 @@ namespace TensileLite
             if(!targetIdx)
                 return; // all non-active slots already have pending DMA
             size_t const targetSlot = *targetIdx;
-            auto const   outputPlan = planRingSlotOutputReset(targetSlot, m_altSlotsReady);
+            auto const   outputAction = planRingSlotOutputReset(m_altSlotsReady);
 
             // Warm path: this target slot's input tensors have already
             // been prepared for the current problem, either by the
@@ -4502,12 +4465,12 @@ namespace TensileLite
             // validation-sensitive reuse must reset output tensors before
             // recording copy completion. Record a no-op event as a sync
             // marker.
-            if(outputPlan.action == OutputResetAction::ResetFromValid)
+            if(outputAction == OutputResetAction::ResetFromValid)
             {
                 ScopedTimer resetTimer("async_reset_warm_resetoutput");
                 resetOutputsForRingSlot(targetSlot, problem);
             }
-            else if(outputPlan.action == OutputResetAction::FullFill)
+            else if(outputAction == OutputResetAction::FullFill)
             {
                 ScopedTimer prepTimer("async_reset_prepare");
                 if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))

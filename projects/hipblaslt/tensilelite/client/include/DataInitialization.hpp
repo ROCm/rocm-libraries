@@ -1039,24 +1039,6 @@ namespace TensileLite
                 FullFill
             };
 
-            enum class OutputResetReason
-            {
-                None,
-                NormalWarmValidation,
-                RingWarmValidation,
-                ColdSlotFill
-            };
-
-            struct OutputResetPlan
-            {
-                OutputResetAction action                    = OutputResetAction::NoReset;
-                OutputResetReason reason                    = OutputResetReason::None;
-                bool              requiresPristineGpuCopy   = false;
-                bool              usesExistingSlotContents  = false;
-                bool              targetIsRingSlot          = false;
-                size_t            targetSlot                = 0;
-            };
-
             // Properties for each tensor (arranged in index)
             struct VectorDataInitProperties
             {
@@ -1379,8 +1361,8 @@ namespace TensileLite
                 return m_copyEngine ? m_copyEngine->stream() : nullptr;
             }
 
-            OutputResetPlan planNormalWarmOutputReset(ContractionProblemGemm const& problem) const;
-            OutputResetPlan planRingSlotOutputReset(size_t targetSlot, bool altSlotsReady) const;
+            OutputResetAction planNormalWarmOutputReset(ContractionProblemGemm const& problem) const;
+            OutputResetAction planRingSlotOutputReset(bool altSlotsReady) const;
 
             void resetOutputsForRingSlot(size_t targetSlot, ContractionProblem const* problem);
 
