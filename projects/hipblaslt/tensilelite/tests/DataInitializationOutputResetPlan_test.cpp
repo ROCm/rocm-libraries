@@ -380,7 +380,7 @@ TEST(DataInitializationOutputResetPlan, RingWarmNoValidationPlansNoReset)
     EXPECT_EQ(plan.targetSlot, *targetSlot);
 }
 
-TEST(DataInitializationOutputResetPlan, PrimeNextInputSlotStillResetsBeforeEvent)
+TEST(DataInitializationOutputResetPlan, WarmRingValidationPathResetsOutputsBeforeReuse)
 {
     auto hipDevice = hasHipDeviceAndWaitValueSupport();
     if(!hipDevice)
