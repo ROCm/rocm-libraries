@@ -43,6 +43,7 @@ TRUE branch  (predicate True):  Assert.multiple_b32 enters the if-block at L9867
 CPU-only.  No GPU hardware required.
 """
 
+import linecache
 import traceback
 
 import pytest
@@ -190,25 +191,28 @@ class TestMultipleB32TrueBranch:
             a.multiple_b32(sval=None, multiple2=8, vtmp=None)
 
     def test_true_branch_exception_is_inside_if_block(self):
-        """The NameError originates at KernelWriter.py line 10816 (inside the if-block).
+        """The NameError originates at the ``SAndBX`` statement inside the if-block.
 
-        Line 10816 is ``SAndBX = SAndB64 if self.wavefrontSize else SAndB32``.
-        It is the first statement INSIDE the if self.enableAsserts: block, so
-        reaching it proves the predicate at L9867 evaluated True.
+        The statement is ``SAndBX = SAndB64 if self.wavefrontSize else SAndB32``.
+        It is the first statement INSIDE the ``if self.enableAsserts:`` block, so
+        reaching it proves the predicate evaluated True. The exact source line
+        number drifts as KernelWriter.py changes, so the frame is matched by the
+        statement text rather than a hardcoded line number.
         """
         a = Assert(laneSGPRCount=2, wavefrontSize=64, enableAsserts=True)
         try:
             a.multiple_b32(sval=None, multiple2=8, vtmp=None)
-            pytest.fail("Expected NameError from inside the if-block at L10816")
+            pytest.fail("Expected NameError from inside the if-block")
         except NameError as exc:
             tb_frames = traceback.extract_tb(exc.__traceback__)
-            # The deepest frame must be inside KernelWriter.py at line 10816
             deepest = tb_frames[-1]
             assert "KernelWriter.py" in deepest.filename, (
                 f"Deepest frame not in KernelWriter.py: {deepest.filename}"
             )
-            assert deepest.lineno == 10816, (
-                f"Expected exception at L10816 (inside if-block), got L{deepest.lineno}"
+            src_line = linecache.getline(deepest.filename, deepest.lineno)
+            assert "SAndBX = SAndB64" in src_line, (
+                f"Expected exception at the SAndBX statement inside the if-block, "
+                f"got L{deepest.lineno}: {src_line.strip()!r}"
             )
 
     def test_derived_from_debug_config_true(self):
