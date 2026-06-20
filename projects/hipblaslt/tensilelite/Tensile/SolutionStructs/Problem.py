@@ -822,14 +822,25 @@ class ProblemType(Mapping):
   def FromDefaultConfig(printIndexAssignmentInfo: bool):
     return ProblemType(_defaultProblemType, printIndexAssignmentInfo)
 
-  def __init__(self, config, printIndexAssignmentInfo: bool, srcFile: str = ""):
+  def __init__(
+      self,
+      config,
+      printIndexAssignmentInfo: bool,
+      srcFile: str = "",
+      *,
+      raiseOnTypeMismatch: bool = True,
+  ):
     self.state = {}
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
 
     # Validate parameter types against the _defaultProblemType registry
-    validateProblemTypeParameterTypes(self.state, srcFile=srcFile)
+    validateProblemTypeParameterTypes(
+        self.state,
+        srcFile=srcFile,
+        raiseOnMismatch=raiseOnTypeMismatch,
+    )
 
     # adjusting all data types
     if "DataType" in config:

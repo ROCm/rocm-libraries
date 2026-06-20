@@ -33,6 +33,7 @@ from Tensile.SolutionStructs.Solution import (
     printTypeMismatchSummary,
 )
 from Tensile.SolutionStructs.Problem import (
+    ProblemType,
     validateProblemTypeParameterTypes,
     _expectedProblemTypeParamTypes,
     _defaultProblemType,
@@ -570,6 +571,32 @@ class TestValidateProblemTypeRaiseMode:
                 {"UseBeta": 1}, keyPathPrefix="BenchmarkProblems[0][0].ProblemType",
             )
         assert "BenchmarkProblems[0][0].ProblemType.UseBeta" in str(exc.value)
+
+    def test_problem_type_constructor_strict_by_default(self):
+        """ProblemType construction still raises for input-YAML callers."""
+        from Tensile.Common.TypeValidationErrors import ConfigTypeError
+        cfg = dict(_defaultProblemType)
+        cfg["DataType"] = "s"
+        cfg["TransposeA"] = 0
+        with pytest.raises(ConfigTypeError) as exc:
+            ProblemType(cfg, printIndexAssignmentInfo=False)
+        assert "TransposeA" in str(exc.value)
+
+    def test_problem_type_constructor_library_logic_mode_collects(self):
+        """Library-logic callers can collect legacy type mismatches without aborting."""
+        cfg = dict(_defaultProblemType)
+        cfg["DataType"] = "s"
+        cfg["TransposeA"] = 0
+        problem_type = ProblemType(
+            cfg,
+            printIndexAssignmentInfo=False,
+            srcFile="logic.yaml",
+            raiseOnTypeMismatch=False,
+        )
+        assert problem_type["TransposeA"] == 0
+        key = ("TransposeA", "int", "bool")
+        assert key in _typeMismatchCollector
+        assert "logic.yaml" in _typeMismatchCollector[key]["files"]
 
 
 class TestWorkerPassthroughBackstop:
