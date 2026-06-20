@@ -423,6 +423,114 @@ TEST(DataInitializationSlotStorage, FastPathReturnsDistinctValidAltSlot)
     EXPECT_FLOAT_EQ(bValue, 1.0f);
 }
 
+TEST(DataInitializationSlotStorage, ValidationOnlyConfigurationUsesThreeSlots)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x7654)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto initialInputs
+        = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(initialInputs, nullptr);
+
+    EXPECT_TRUE(dataInit.ringPolicyAllowed());
+    EXPECT_TRUE(dataInit.ringPolicyAllocatesAltBuffers());
+    EXPECT_EQ(dataInit.activeBufferCount(), 3u);
+    EXPECT_TRUE(dataInit.hasAltBuffers());
+    EXPECT_TRUE(dataInit.warmOutputResetRequired());
+    EXPECT_TRUE(dataInit.ringEligible());
+    EXPECT_TRUE(dataInit.altSlotsReady());
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+    auto const slot0Inputs = dataInit.slotState(0).cachedInputs;
+    auto const slot1Inputs = dataInit.slotState(1).cachedInputs;
+    auto const slot2Inputs = dataInit.slotState(2).cachedInputs;
+
+    ASSERT_TRUE(dataInit.slotState(0).populated());
+    ASSERT_TRUE(dataInit.slotState(1).populated());
+    ASSERT_TRUE(dataInit.slotState(2).populated());
+    ASSERT_NE(slot0Inputs, nullptr);
+    ASSERT_NE(slot1Inputs, nullptr);
+    ASSERT_NE(slot2Inputs, nullptr);
+    EXPECT_EQ(initialInputs, slot0Inputs);
+    EXPECT_NE(slot0Inputs, slot1Inputs);
+    EXPECT_NE(slot1Inputs, slot2Inputs);
+    EXPECT_NE(slot0Inputs, slot2Inputs);
+
+    engine->clear();
+
+    auto const waitStream = reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1357));
+    size_t const expectedSlots[] = {1u, 2u, 0u};
+
+    for(size_t expectedSlot : expectedSlots)
+    {
+        auto const nextSlot = dataInit.nextPrimeSlot();
+        ASSERT_TRUE(nextSlot.has_value());
+        EXPECT_EQ(*nextSlot, expectedSlot);
+
+        dataInit.primeNextInputSlot(&problem);
+
+        EXPECT_TRUE(dataInit.ringHasAvailableSlot());
+        EXPECT_EQ(dataInit.ringAvailableSlots(), 1u);
+
+        auto cycleInputs
+            = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+        ASSERT_NE(cycleInputs, nullptr);
+        EXPECT_EQ(dataInit.activeRingSlot(), expectedSlot);
+        EXPECT_EQ(cycleInputs, dataInit.slotState(expectedSlot).cachedInputs);
+        EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+        EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+        EXPECT_TRUE(dataInit.ringNeedsCopyBarrier());
+
+        dataInit.waitForPreparedSlot(waitStream);
+        EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+    }
+
+    size_t relevantIndex = 0;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::RecordCopyDone
+           && call.type != RecordingCopyEngine::CallType::WaitForCopyDone)
+        {
+            continue;
+        }
+
+        ASSERT_LT(relevantIndex, 6u);
+
+        size_t const phase = relevantIndex / 2;
+        size_t const slot  = expectedSlots[phase];
+        if((relevantIndex % 2) == 0)
+        {
+            EXPECT_EQ(call.type, RecordingCopyEngine::CallType::RecordCopyDone);
+            EXPECT_EQ(call.slot, slot);
+            EXPECT_EQ(call.stream, engine->stream());
+        }
+        else
+        {
+            EXPECT_EQ(call.type, RecordingCopyEngine::CallType::WaitForCopyDone);
+            EXPECT_EQ(call.slot, slot);
+            EXPECT_EQ(call.computeStream, waitStream);
+        }
+
+        ++relevantIndex;
+    }
+    EXPECT_EQ(relevantIndex, 6u);
+}
+
 TEST(DataInitializationSlotStorage, SyncCopyStreamDelegatesToCopyEngine)
 {
     auto hipDevice = hasHipDevice();
