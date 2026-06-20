@@ -107,7 +107,7 @@ def test_populate_cache_rename_failure_cleans_up(tmp_path, monkeypatch):
     # Force the tmpDir.rename() OSError arm -> tmp dir is cleaned up, no entry.
     cacheDir = tmp_path / "cache"; cacheDir.mkdir()
     src = tmp_path / "a.hsaco"; src.write_text("data")
-    monkeypatch.setattr(os, "rename", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    monkeypatch.setattr(Path, "rename", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
     _populateCache(cacheDir, "k", [src])
     assert not (cacheDir / "k").exists()
     assert not list(cacheDir.glob(".tmp_*"))
