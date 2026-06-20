@@ -5202,9 +5202,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
 
+    # Route the subtile body through StinkyTofu when ScheduleIterAlg=4
+    # (remapped to _StinkyTofuOptLevel) selects it and the arch supports it.
+    # Subtile supplies its own neutral pass-through options.
+    st_asm = None
+    stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
+    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+      from .Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+      stinky_module_options = buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, self)
+      st_asm = self._maybeRunStinkyTofu(kernel, moduleKernelBody, fs,
+                                        stinky_module_options=stinky_module_options)
+
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
+    if st_asm is not None:
+      return (error, st_asm)
     return (error, str(moduleKernelBody))
 
 
@@ -6542,10 +6555,75 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # may have reduced the instruction-level VGPR count below the pool estimate.
     self.updateOccupancyFromScan(kernel, moduleKernelBody)
 
-    # Initialize stModule as None (will be set for supported architectures)
+    st_asm = self._maybeRunStinkyTofu(kernel, moduleKernelBody, fs)
+
+    error = self.states.overflowedResources
+    print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
+
+    if st_asm is not None:
+      print2(f"Using StinkyTofu Assembly")
+      return (error, st_asm)
+    else:
+      print2(f"Using Original Rocisa Assembly")
+      return (error, str(moduleKernelBody))
+
+  ##############################################################################
+  # StinkyTofu invocation (shared by classic and subtile kernel bodies)
+  ##############################################################################
+  def _classicStinkyTofuOptions(self, kernel, stinky_opt_level):
+    return {"OptLevel": stinky_opt_level,
+            "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+            "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
+            "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
+            "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
+            "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
+            "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+            "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
+            # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
+            "EnableESM2": kernel["EnableStinkyTofuESM2"],
+            "TileA0": kernel["ThreadTile0"],
+            "TileB0": kernel["ThreadTile1"],
+            "TileM0": kernel["MacroTile0"],
+            "wavefrontSize": kernel["WavefrontSize"],
+            "SubGroup0": kernel["SubGroup0"],
+            "SubGroup1": kernel["SubGroup1"],
+            "WaveGroup0": kernel["MIWaveGroup"][0],
+            "WaveGroup1": kernel["MIWaveGroup"][1],
+            "VectorWidthA": kernel["VectorWidthA"],
+            "VectorWidthB": kernel["VectorWidthB"],
+            "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
+            "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
+            "DirectToLdsA": bool(kernel["DirectToLdsA"]),
+            "DirectToLdsB": bool(kernel["DirectToLdsB"]),
+            "UseSgprForGRO": kernel["_UseSgprForGRO"],
+            # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
+            "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+            # Cluster-barrier handshake insertion in Gfx1250Backend
+            # (kernel-scope at every OptLevel when set).
+            "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+            # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
+            # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
+            # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
+            # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
+            # Defaults to 1 when unset.
+            "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
+            # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
+            # When PLR == 0, enables Rule 3 anchor mode (b): if no
+            # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
+            # a workgroup sync inside the LCL-gated signal block.
+            # Defaults to 1 (fallback off) when unset.
+            "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+           }
+
+  def _maybeRunStinkyTofu(self, kernel, moduleKernelBody, fs, stinky_module_options=None):
+    """Convert a rocisa kernel body through StinkyTofu and return its assembly.
+
+    Returns the StinkyTofu assembly string, or None when StinkyTofu did not
+    run (caller falls back to str(moduleKernelBody)). When stinky_module_options
+    is None the classic option set is used; the subtile path supplies its own.
+    """
     stModule = None
 
-    # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
     if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
@@ -6553,50 +6631,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       moduleKernelBody.body.setParent()
 
-      # Set StinkyTofu module options
-      stinky_module_options = {"OptLevel": stinky_opt_level,
-                               "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
-                               "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
-                               "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
-                               "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
-                               "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
-                               "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
-                               "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
-                               # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
-                               "EnableESM2": kernel["EnableStinkyTofuESM2"],
-                               "TileA0": kernel["ThreadTile0"],
-                               "TileB0": kernel["ThreadTile1"],
-                               "TileM0": kernel["MacroTile0"],
-                               "wavefrontSize": kernel["WavefrontSize"],
-                               "SubGroup0": kernel["SubGroup0"],
-                               "SubGroup1": kernel["SubGroup1"],
-                               "WaveGroup0": kernel["MIWaveGroup"][0],
-                               "WaveGroup1": kernel["MIWaveGroup"][1],
-                               "VectorWidthA": kernel["VectorWidthA"],
-                               "VectorWidthB": kernel["VectorWidthB"],
-                               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
-                               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
-                               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
-                               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
-                               "UseSgprForGRO": kernel["_UseSgprForGRO"],
-                               # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
-                               "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
-                               # Cluster-barrier handshake insertion in Gfx1250Backend
-                               # (kernel-scope at every OptLevel when set).
-                               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
-                               # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
-                               # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
-                               # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
-                               # Defaults to 1 when unset.
-                               "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
-                               # When PLR == 0, enables Rule 3 anchor mode (b): if no
-                               # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
-                               # a workgroup sync inside the LCL-gated signal block.
-                               # Defaults to 1 (fallback off) when unset.
-                               "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
-                              }
+      if stinky_module_options is None:
+        stinky_module_options = self._classicStinkyTofuOptions(kernel, stinky_opt_level)
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
@@ -6617,61 +6653,55 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t1b_end = time.perf_counter()
       print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
 
-    error = self.states.overflowedResources
-    print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
+    if stModule is None:
+      return None
 
-    # Check if StinkyTofu assembly output should be used
-    if stModule is not None:
-      t2_start = time.perf_counter()
-      st_asm = stModule.emitAssembly()
-      t2_end = time.perf_counter()
-      print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
+    t2_start = time.perf_counter()
+    st_asm = stModule.emitAssembly()
+    t2_end = time.perf_counter()
+    print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
-        t3_start = time.perf_counter()
-        import hashlib, fcntl
-        os.makedirs("cmpasm/orig", exist_ok=True)
-        os.makedirs("cmpasm/st", exist_ok=True)
+    if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      t3_start = time.perf_counter()
+      import hashlib, fcntl
+      os.makedirs("cmpasm/orig", exist_ok=True)
+      os.makedirs("cmpasm/st", exist_ok=True)
 
-        kernel_name = self.states.kernelName
-        name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
-        base_name = f"{name_hash}"
+      kernel_name = self.states.kernelName
+      name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
+      base_name = f"{name_hash}"
 
-        orig_path = f"cmpasm/orig/{base_name}.s"
-        st_path = f"cmpasm/st/{base_name}.s"
-        suffix = 0
-        while os.path.exists(orig_path) or os.path.exists(st_path):
-          orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
-          st_path = f"cmpasm/st/{base_name}_{suffix}.s"
-          suffix += 1
+      orig_path = f"cmpasm/orig/{base_name}.s"
+      st_path = f"cmpasm/st/{base_name}.s"
+      suffix = 0
+      while os.path.exists(orig_path) or os.path.exists(st_path):
+        orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
+        st_path = f"cmpasm/st/{base_name}_{suffix}.s"
+        suffix += 1
 
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+      t_str_start = time.perf_counter()
+      orig_asm_str = str(moduleKernelBody)
+      t_str_end = time.perf_counter()
+      print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
 
-        with open(orig_path, "w") as f:
-          f.write(orig_asm_str)
-        with open(st_path, "w") as f:
-          f.write(st_asm)
+      with open(orig_path, "w") as f:
+        f.write(orig_asm_str)
+      with open(st_path, "w") as f:
+        f.write(st_asm)
 
-        manifest = f"cmpasm/manifest.txt"
-        with open(manifest, "a") as f:
-          fcntl.flock(f, fcntl.LOCK_EX)
-          f.write(f"{os.path.basename(orig_path)} -> {kernel_name}\n")
-          fcntl.flock(f, fcntl.LOCK_UN)
+      manifest = f"cmpasm/manifest.txt"
+      with open(manifest, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(f"{os.path.basename(orig_path)} -> {kernel_name}\n")
+        fcntl.flock(f, fcntl.LOCK_UN)
 
-        t3_end = time.perf_counter()
-        print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
+      t3_end = time.perf_counter()
+      print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
 
-      t0_end = time.perf_counter()
-      print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
+    t0_end = time.perf_counter()
+    print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
 
-      print2(f"Using StinkyTofu Assembly")
-      return (error, st_asm)
-    else:
-      print2(f"Using Original Rocisa Assembly")
-      return (error, str(moduleKernelBody))
+    return st_asm
 
   ##############################################################################
   # Init Kernel

@@ -261,3 +261,158 @@ class TestGfx1250SubtileCodegen:
         module = emitSingleBufferLoad(ti, kernel, 0, 0)
         asm = str(module)
         assert "tensor_load_to_lds" in asm
+
+
+def _stinky_kernel():
+    """Minimal kernel dict carrying the keys the StinkyTofu option builders read."""
+    return {
+        "_StinkyTofuOptLevel": 3,
+        "EnableStinkyTofuESM2": False,
+        "ThreadTile0": 1,
+        "ThreadTile1": 1,
+        "MacroTile0": 64,
+        "WavefrontSize": WAVESIZE_32,
+        "SubGroup0": 16,
+        "SubGroup1": 16,
+        "MIWaveGroup": [1, 1],
+        "VectorWidthA": 4,
+        "VectorWidthB": 4,
+        "GlobalReadVectorWidthA": 8,
+        "GlobalReadVectorWidthB": 8,
+        "DirectToLdsA": 0,
+        "DirectToLdsB": 0,
+        "_UseSgprForGRO": False,
+        "PrefetchGlobalRead": 1,
+        "PrefetchLocalRead": 1,
+        "ClusterBarrier": True,
+    }
+
+
+def _stinky_mock_writer():
+    """Mock KernelWriter self exposing only what the StinkyTofu helpers touch."""
+    return SimpleNamespace(
+        sgprs={},
+        states=SimpleNamespace(version=GFX1250_ISA, kernelName="kernel_name"),
+    )
+
+
+def _build_minimal_kernel_body():
+    """A tiny but valid gfx1250 KernelBody + signature StinkyTofu can convert."""
+    from rocisa.code import Module, KernelBody, SignatureBase, Label
+    from rocisa.instruction import SEndpgm, SNop
+
+    body = Module("body")
+    body.add(Label("ASM_Start", "start"))
+    body.add(SNop(waitState=0, comment="nop"))
+    body.add(SEndpgm(comment="end"))
+
+    sig = SignatureBase("kernel_name", 1, "V5", 0, [0, 1, 2], 0, 256,
+                        totalVgprs=4, totalSgprs=16)
+
+    kb = KernelBody("kernelBody")
+    kb.addSignature(sig)
+    kb.addBody(body)
+    return kb, sig
+
+
+class TestSubtileStinkyTofu:
+    """StinkyTofu wiring for the gfx1250 subtile path (Phase 0 + Phase 1)."""
+
+    # -- Phase 1: subtile options are a neutral pass-through --
+
+    def test_subtile_options_are_neutral_passthrough(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()
+        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
+                                             _stinky_mock_writer())
+        # Pass-through: StinkyTofu must not insert/strip waits or barriers yet.
+        assert opts["EnableWaitCntInsertion"] is False
+        assert opts["ClusterBarrier"] is False
+        # Subtile forces unit vector widths regardless of the kernel values.
+        assert opts["VectorWidthA"] == 1
+        assert opts["VectorWidthB"] == 1
+        assert opts["OptLevel"] == 3
+
+    def test_subtile_options_mirror_classic_keys(self):
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()
+        writer = _stinky_mock_writer()
+        classic = KernelWriter._classicStinkyTofuOptions(writer, kernel,
+                                                         kernel["_StinkyTofuOptLevel"])
+        subtile = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
+                                                writer)
+        # Same option surface; only the neutral/forced values differ.
+        assert set(subtile.keys()) == set(classic.keys())
+        differing = {k for k in classic if classic[k] != subtile[k]}
+        assert differing <= {"EnableWaitCntInsertion", "ClusterBarrier",
+                             "VectorWidthA", "VectorWidthB"}
+
+    # -- Phase 1: subtile drives the helper and emits parseable asm --
+
+    def test_helper_emits_assembly_for_subtile(self):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()
+        writer = _stinky_mock_writer()
+        kb, sig = _build_minimal_kernel_body()
+        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"], writer)
+        asm = KernelWriter._maybeRunStinkyTofu(writer, kernel, kb, sig,
+                                               stinky_module_options=opts)
+        assert asm is not None
+        assert len(asm) > 0
+        assert 'amdgcn-amd-amdhsa--gfx1250' in asm
+        assert 'kernel_name' in asm
+
+    # -- Phase 0: helper falls back (returns None) when StinkyTofu is off --
+
+    def test_helper_returns_none_when_disabled(self):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        kernel = _stinky_kernel()
+        kernel["_StinkyTofuOptLevel"] = None  # SIA != 4: classic str() fallback
+        writer = _stinky_mock_writer()
+        kb, sig = _build_minimal_kernel_body()
+        assert KernelWriter._maybeRunStinkyTofu(writer, kernel, kb, sig) is None
+
+    # -- Phase 0: classic option set is unchanged by the refactor --
+
+    def test_classic_options_unchanged(self):
+        from Tensile.KernelWriter import KernelWriter
+        kernel = _stinky_kernel()
+        writer = _stinky_mock_writer()
+        opts = KernelWriter._classicStinkyTofuOptions(writer, kernel,
+                                                     kernel["_StinkyTofuOptLevel"])
+        expected = {
+            "OptLevel": 3,
+            "EnableRemarks": False,
+            "DebugLevel": 0,
+            "PrintBeforePass": "",
+            "PrintAfterPass": "",
+            "DebugPass": "",
+            "PassOrderSnapshotJson": "",
+            # OptLevel != 0 -> wait-count insertion forced on for classic.
+            "EnableWaitCntInsertion": True,
+            "EnableESM2": False,
+            "TileA0": 1,
+            "TileB0": 1,
+            "TileM0": 64,
+            "wavefrontSize": WAVESIZE_32,
+            "SubGroup0": 16,
+            "SubGroup1": 16,
+            "WaveGroup0": 1,
+            "WaveGroup1": 1,
+            "VectorWidthA": 4,
+            "VectorWidthB": 4,
+            "GlobalReadVectorWidthA": 8,
+            "GlobalReadVectorWidthB": 8,
+            "DirectToLdsA": False,
+            "DirectToLdsB": False,
+            "UseSgprForGRO": False,
+            "SwPrefetchScratchSgpr": -1,
+            "ClusterBarrier": True,
+            "PrefetchGlobalRead": 1,
+            "PrefetchLocalRead": 1,
+        }
+        assert opts == expected
