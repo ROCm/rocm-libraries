@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <any>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -14,6 +16,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationTestUtils.hpp"
+#include "HipCopyEngine.hpp"
 #include "HipStreamGuard.hpp"
 #include "RecordingCopyEngine.hpp"
 
@@ -25,6 +28,91 @@ namespace
     using TensileLite::testing::HipStreamGuard;
     using TensileLite::testing::makePlainProblem;
     using TensileLite::testing::RecordingCopyEngine;
+
+    class RecordingDelegatingCopyEngine final : public CopyEngine
+    {
+    public:
+        using CallType            = RecordingCopyEngine::CallType;
+        using Call                = RecordingCopyEngine::Call;
+        using CopySubmissionMode   = CopyEngine::CopySubmissionMode;
+
+        hipStream_t stream() const noexcept override
+        {
+            return m_delegate.stream();
+        }
+
+        void copy(void*             dst,
+                  void const*       src,
+                  size_t            bytes,
+                  hipMemcpyKind     kind,
+                  hipStream_t       stream,
+                  CopySubmissionMode mode) override
+        {
+            calls.push_back({CallType::Copy, dst, src, bytes, kind, stream, mode});
+            m_delegate.copy(dst, src, bytes, kind, stream, mode);
+        }
+
+        void synchronize(hipStream_t stream) override
+        {
+            calls.push_back({CallType::Synchronize,
+                             nullptr,
+                             nullptr,
+                             0,
+                             hipMemcpyHostToHost,
+                             stream,
+                             CopySubmissionMode::Sync});
+            m_delegate.synchronize(stream);
+        }
+
+        void synchronizeDefaultStream() override
+        {
+            calls.push_back({CallType::SynchronizeDefaultStream,
+                             nullptr,
+                             nullptr,
+                             0,
+                             hipMemcpyHostToHost,
+                             stream(),
+                             CopySubmissionMode::Sync});
+            m_delegate.synchronizeDefaultStream();
+        }
+
+        void recordCopyDone(size_t slot) override
+        {
+            calls.push_back({CallType::RecordCopyDone,
+                             nullptr,
+                             nullptr,
+                             0,
+                             hipMemcpyHostToHost,
+                             stream(),
+                             CopySubmissionMode::Sync,
+                             slot});
+            m_delegate.recordCopyDone(slot);
+        }
+
+        void waitForCopyDone(size_t slot, hipStream_t computeStream) override
+        {
+            calls.push_back({CallType::WaitForCopyDone,
+                             nullptr,
+                             nullptr,
+                             0,
+                             hipMemcpyHostToHost,
+                             nullptr,
+                             CopySubmissionMode::Sync,
+                             slot,
+                             computeStream});
+            m_delegate.waitForCopyDone(slot, computeStream);
+        }
+
+        void clear()
+        {
+            calls.clear();
+        }
+
+        std::vector<Call> calls;
+
+    private:
+        HipCopyEngine m_delegate{3};
+    };
 
     class SlotStorageDataInitialization : public DataInitialization
     {
@@ -160,6 +248,54 @@ namespace
     Client::po::variables_map makeRingArgs(std::vector<std::vector<size_t>> problemSizes)
     {
         return TensileLite::testing::buildRingArgs(std::move(problemSizes), 1);
+    }
+
+    Client::po::variables_map makeGroupedRingArgs(
+        std::vector<std::vector<size_t>> problemSizes)
+    {
+        TensileLite::testing::DataInitConfig config;
+        config.problemSizes = std::move(problemSizes);
+        config.groupedGemm  = true;
+
+        auto args = TensileLite::testing::buildBaseDataInitArgs(config);
+        args      = TensileLite::testing::buildRingArgs(std::move(args), 1);
+
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-a",
+                                                     std::any(Client::InitMode::Two));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-b",
+                                                     std::any(Client::InitMode::One));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-c",
+                                                     std::any(Client::InitMode::Two));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-d",
+                                                     std::any(Client::InitMode::Zero));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-alpha",
+                                                     std::any(Client::InitMode::Two));
+        TensileLite::testing::detail::setDataInitArg(args,
+                                                     "init-beta",
+                                                     std::any(Client::InitMode::Two));
+        return args;
+    }
+
+    uint8_t const* asBytes(void const* ptr)
+    {
+        return static_cast<uint8_t const*>(ptr);
+    }
+
+    uint8_t const* asBytes(void* ptr)
+    {
+        return static_cast<uint8_t const*>(ptr);
+    }
+
+    float readDeviceFloat(void const* ptr)
+    {
+        float value = 0.0f;
+        HIP_CHECK_EXC(hipMemcpy(&value, ptr, sizeof(value), hipMemcpyDeviceToHost));
+        return value;
     }
 
     BoundsCheckMode expectedCurBoundsCheck(BoundsCheckMode mode)
@@ -791,6 +927,222 @@ TEST(DataInitializationSlotStorage, FastPathReturnsDistinctValidAltSlot)
     HIP_CHECK_EXC(hipMemcpy(&bValue, warmCi->b, sizeof(bValue), hipMemcpyDeviceToHost));
     EXPECT_FLOAT_EQ(aValue, 2.0f);
     EXPECT_FLOAT_EQ(bValue, 1.0f);
+}
+
+TEST(DataInitializationSlotStorage, GroupedGemmFastPathCyclesWarmSlotAndResetsEveryGroup)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto args = makeGroupedRingArgs({{32, 24, 16}, {48, 20, 8}});
+
+    ClientProblemFactory factory(args);
+    ASSERT_EQ(factory.problems().size(), 1u);
+
+    auto const* groupedProblem
+        = dynamic_cast<ContractionProblemGroupedGemm const*>(factory.problems().front().get());
+    ASSERT_NE(groupedProblem, nullptr);
+    ASSERT_EQ(groupedProblem->gemms.size(), 2u);
+    EXPECT_NE(groupedProblem->gemms.at(0).a().sizes(), groupedProblem->gemms.at(1).a().sizes());
+
+    auto const group0ABytes = groupedProblem->gemms.at(0)
+                                  .tensors()
+                                  .at(ContractionProblemGemm::TENSOR::A)
+                                  .totalAllocatedBytes();
+    auto const group0BBytes = groupedProblem->gemms.at(0)
+                                  .tensors()
+                                  .at(ContractionProblemGemm::TENSOR::B)
+                                  .totalAllocatedBytes();
+    auto const group0CBytes = groupedProblem->gemms.at(0)
+                                  .tensors()
+                                  .at(ContractionProblemGemm::TENSOR::C)
+                                  .totalAllocatedBytes();
+    auto const group0DBytes = groupedProblem->gemms.at(0)
+                                  .tensors()
+                                  .at(ContractionProblemGemm::TENSOR::D)
+                                  .totalAllocatedBytes();
+    EXPECT_NE(group0ABytes, groupedProblem->gemms.at(1)
+                                .tensors()
+                                .at(ContractionProblemGemm::TENSOR::A)
+                                .totalAllocatedBytes());
+    EXPECT_NE(group0BBytes, groupedProblem->gemms.at(1)
+                                .tensors()
+                                .at(ContractionProblemGemm::TENSOR::B)
+                                .totalAllocatedBytes());
+    EXPECT_NE(group0CBytes, groupedProblem->gemms.at(1)
+                                .tensors()
+                                .at(ContractionProblemGemm::TENSOR::C)
+                                .totalAllocatedBytes());
+    EXPECT_NE(group0DBytes, groupedProblem->gemms.at(1)
+                                .tensors()
+                                .at(ContractionProblemGemm::TENSOR::D)
+                                .totalAllocatedBytes());
+
+    auto engine = std::make_shared<RecordingDelegatingCopyEngine>();
+
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto initialInputs
+        = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(groupedProblem));
+    ASSERT_NE(initialInputs, nullptr);
+    auto* initialGrouped = dynamic_cast<ContractionGroupedInputs*>(initialInputs.get());
+    ASSERT_NE(initialGrouped, nullptr);
+    ASSERT_EQ(initialGrouped->grouped.size(), groupedProblem->gemms.size());
+
+    EXPECT_TRUE(dataInit.ringEligible());
+    EXPECT_TRUE(dataInit.altSlotsReady());
+    EXPECT_EQ(dataInit.activeBufferCount(), 3u);
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+
+    auto const& slot0State = dataInit.slotState(0);
+    auto const& slot1State = dataInit.slotState(1);
+    auto const& slot2State = dataInit.slotState(2);
+    ASSERT_TRUE(slot0State.populated());
+    ASSERT_TRUE(slot1State.populated());
+    ASSERT_TRUE(slot2State.populated());
+    ASSERT_NE(slot0State.cachedInputs, nullptr);
+    ASSERT_NE(slot1State.cachedInputs, nullptr);
+    ASSERT_NE(slot2State.cachedInputs, nullptr);
+    EXPECT_EQ(initialInputs, slot0State.cachedInputs);
+
+    auto const* slot0Grouped = dynamic_cast<ContractionGroupedInputs const*>(
+        slot0State.cachedInputs.get());
+    auto const* slot1Grouped = dynamic_cast<ContractionGroupedInputs const*>(
+        slot1State.cachedInputs.get());
+    auto const* slot2Grouped = dynamic_cast<ContractionGroupedInputs const*>(
+        slot2State.cachedInputs.get());
+    ASSERT_NE(slot0Grouped, nullptr);
+    ASSERT_NE(slot1Grouped, nullptr);
+    ASSERT_NE(slot2Grouped, nullptr);
+    ASSERT_EQ(slot0Grouped->grouped.size(), groupedProblem->gemms.size());
+    ASSERT_EQ(slot1Grouped->grouped.size(), groupedProblem->gemms.size());
+    ASSERT_EQ(slot2Grouped->grouped.size(), groupedProblem->gemms.size());
+
+    auto const targetSlot = dataInit.nextPrimeSlot();
+    ASSERT_TRUE(targetSlot.has_value());
+    EXPECT_EQ(*targetSlot, 1u);
+
+    auto const* candidateInputs = dynamic_cast<ContractionGroupedInputs const*>(
+        dataInit.slotState(*targetSlot).cachedInputs.get());
+    ASSERT_NE(candidateInputs, nullptr);
+    ASSERT_EQ(candidateInputs->grouped.size(), groupedProblem->gemms.size());
+
+    engine->clear();
+
+    for(auto& groupedInputs : candidateInputs->grouped)
+    {
+        float dirty = 7.0f;
+        ASSERT_NE(groupedInputs.d, nullptr);
+        HIP_CHECK_EXC(hipMemcpy(groupedInputs.d,
+                                &dirty,
+                                sizeof(dirty),
+                                hipMemcpyHostToDevice));
+    }
+
+    dataInit.beginAsyncReset(groupedProblem);
+
+    EXPECT_TRUE(dataInit.ringHasAvailableSlot());
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 1u);
+    EXPECT_TRUE(std::any_of(engine->calls.begin(),
+                            engine->calls.end(),
+                            [&](RecordingDelegatingCopyEngine::Call const& call) {
+                                return call.type == RecordingDelegatingCopyEngine::CallType::RecordCopyDone
+                                    && call.slot == *targetSlot;
+                            }));
+
+    auto warmInputs
+        = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(groupedProblem));
+    ASSERT_NE(warmInputs, nullptr);
+    auto* warmGrouped = dynamic_cast<ContractionGroupedInputs*>(warmInputs.get());
+    ASSERT_NE(warmGrouped, nullptr);
+    ASSERT_EQ(warmGrouped->grouped.size(), groupedProblem->gemms.size());
+    EXPECT_EQ(warmInputs, dataInit.slotState(*targetSlot).cachedInputs);
+    EXPECT_EQ(warmInputs.get(), candidateInputs);
+    EXPECT_NE(warmInputs, initialInputs);
+    EXPECT_EQ(dataInit.activeRingSlot(), *targetSlot);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_TRUE(dataInit.ringNeedsCopyBarrier());
+
+    auto const& warmGroup0 = warmGrouped->grouped.at(0);
+    auto const& warmGroup1 = warmGrouped->grouped.at(1);
+    auto const& slot0Group0 = slot0Grouped->grouped.at(0);
+    auto const& slot0Group1 = slot0Grouped->grouped.at(1);
+    ASSERT_NE(warmGroup0.a, nullptr);
+    ASSERT_NE(warmGroup0.b, nullptr);
+    ASSERT_NE(warmGroup0.c, nullptr);
+    ASSERT_NE(warmGroup0.d, nullptr);
+    ASSERT_NE(warmGroup1.a, nullptr);
+    ASSERT_NE(warmGroup1.b, nullptr);
+    ASSERT_NE(warmGroup1.c, nullptr);
+    ASSERT_NE(warmGroup1.d, nullptr);
+    ASSERT_NE(slot0Group0.a, nullptr);
+    ASSERT_NE(slot0Group0.b, nullptr);
+    ASSERT_NE(slot0Group0.c, nullptr);
+    ASSERT_NE(slot0Group0.d, nullptr);
+    ASSERT_NE(slot0Group1.a, nullptr);
+    ASSERT_NE(slot0Group1.b, nullptr);
+    ASSERT_NE(slot0Group1.c, nullptr);
+    ASSERT_NE(slot0Group1.d, nullptr);
+
+    EXPECT_NE(warmGroup0.a, slot0Group0.a);
+    EXPECT_NE(warmGroup0.b, slot0Group0.b);
+    EXPECT_NE(warmGroup0.c, slot0Group0.c);
+    EXPECT_NE(warmGroup0.d, slot0Group0.d);
+    EXPECT_NE(warmGroup1.a, slot0Group1.a);
+    EXPECT_NE(warmGroup1.b, slot0Group1.b);
+    EXPECT_NE(warmGroup1.c, slot0Group1.c);
+    EXPECT_NE(warmGroup1.d, slot0Group1.d);
+
+    EXPECT_EQ(asBytes(warmGroup1.a), asBytes(warmGroup0.a) + group0ABytes);
+    EXPECT_EQ(asBytes(warmGroup1.b), asBytes(warmGroup0.b) + group0BBytes);
+    EXPECT_EQ(asBytes(warmGroup1.c), asBytes(warmGroup0.c) + group0CBytes);
+    EXPECT_EQ(asBytes(warmGroup1.d), asBytes(warmGroup0.d) + group0DBytes);
+
+    HipStreamGuard computeStream(hipStreamNonBlocking);
+    dataInit.waitForPreparedSlot(computeStream.get());
+    computeStream.synchronize();
+
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+    size_t recordIndex = engine->calls.size();
+    size_t waitIndex   = engine->calls.size();
+    for(size_t i = 0; i < engine->calls.size(); ++i)
+    {
+        auto const& call = engine->calls[i];
+        if(call.type == RecordingDelegatingCopyEngine::CallType::RecordCopyDone
+           && call.slot == *targetSlot)
+        {
+            if(recordIndex == engine->calls.size())
+                recordIndex = i;
+            EXPECT_EQ(call.stream, engine->stream());
+        }
+        else if(call.type == RecordingDelegatingCopyEngine::CallType::WaitForCopyDone
+                && call.slot == *targetSlot)
+        {
+            if(waitIndex == engine->calls.size())
+                waitIndex = i;
+            EXPECT_EQ(call.computeStream, computeStream.get());
+        }
+    }
+
+    ASSERT_NE(recordIndex, engine->calls.size());
+    ASSERT_NE(waitIndex, engine->calls.size());
+    EXPECT_LT(recordIndex, waitIndex);
+
+    for(size_t group = 0; group < warmGrouped->grouped.size(); ++group)
+    {
+        SCOPED_TRACE(::testing::Message() << "group=" << group);
+        auto const& groupedInputs = warmGrouped->grouped.at(group);
+        EXPECT_FLOAT_EQ(readDeviceFloat(groupedInputs.a), 2.0f);
+        EXPECT_FLOAT_EQ(readDeviceFloat(groupedInputs.b), 1.0f);
+        EXPECT_FLOAT_EQ(readDeviceFloat(groupedInputs.c), 2.0f);
+        EXPECT_FLOAT_EQ(readDeviceFloat(groupedInputs.d), 0.0f);
+    }
 }
 
 TEST(DataInitializationSlotStorage, ValidationOnlyConfigurationUsesThreeSlots)
