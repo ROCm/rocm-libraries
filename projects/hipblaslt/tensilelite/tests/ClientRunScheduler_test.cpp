@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -89,6 +90,11 @@ namespace
         return indices;
     }
 
+    size_t countExactEvent(std::vector<std::string> const& events, std::string const& value)
+    {
+        return static_cast<size_t>(std::count(events.begin(), events.end(), value));
+    }
+
     class RecordingRunListener final : public RunListener
     {
     public:
@@ -115,9 +121,13 @@ namespace
             m_events.push_back("postBenchmarkRun");
         }
 
-        void preProblem(ContractionProblem* const) override
+        void preProblem(ContractionProblem* const problem) override
         {
             m_events.push_back("preProblem");
+            if(setCurrentProblemFn)
+                setCurrentProblemFn(problem);
+            if(resetSolutionSourceOnPreProblem && resetSolutionSourceFn)
+                resetSolutionSourceFn();
         }
 
         void postProblem() override
@@ -128,6 +138,8 @@ namespace
         void preSolution(ContractionSolution* const) override
         {
             m_events.push_back("preSolution");
+            if(resetSolutionRunsOnPreSolution)
+                m_solutionRunsRemaining = static_cast<int>(solutionRunsPerSolution);
             if(changeWarmupRunsAfterPreSolution)
                 m_warmupRuns = warmupRunsAfterPreSolution;
         }
@@ -240,8 +252,13 @@ namespace
         bool   changeSyncsAndEnqueuesAfterPostWarmup = false;
         size_t syncsAfterPostWarmup                  = 0;
         size_t enqueuesAfterPostWarmup               = 0;
+        bool   resetSolutionSourceOnPreProblem       = false;
+        bool   resetSolutionRunsOnPreSolution        = false;
+        size_t solutionRunsPerSolution               = 1;
         mutable int m_benchmarkRunsRemaining = 1;
         mutable int m_solutionRunsRemaining  = 1;
+        std::function<void(ContractionProblem const*)> setCurrentProblemFn;
+        std::function<void()>                         resetSolutionSourceFn;
 
     private:
         std::vector<std::string>& m_events;
@@ -258,11 +275,13 @@ namespace
         void reportProblemIndex(int idx) override
         {
             m_events.push_back("reportProblemIndex:" + std::to_string(idx));
+            reportedProblemIndices.push_back(idx);
         }
 
         void reportProblemProgress(std::string const& text) override
         {
             m_events.push_back("reportProblemProgress:" + text);
+            reportedProblemProgress.push_back(text);
         }
 
         void reportInvalid() override
@@ -279,6 +298,8 @@ namespace
 
         int                        invalidCount = 0;
         std::vector<std::string>   errorMessages;
+        std::vector<int>           reportedProblemIndices;
+        std::vector<std::string>   reportedProblemProgress;
 
     private:
         std::vector<std::string>& m_events;
@@ -292,14 +313,32 @@ namespace
         {
         }
 
+        void setCurrentProblem(ContractionProblem const* problem)
+        {
+            currentProblemIndex = -1;
+            if(!recordProblemContext || problems == nullptr || problem == nullptr)
+                return;
+
+            for(size_t i = 0; i < problems->size(); ++i)
+            {
+                if(problems->at(i).get() == problem)
+                {
+                    currentProblemIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+
         void resetPreparedSlotsForProblem() override
         {
             m_events.push_back("resetPreparedSlotsForProblem");
+            recordProblemEvent("reset");
         }
 
         std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const*) override
         {
             m_events.push_back("prepareGPUInputs");
+            recordProblemEvent("prepare");
             return std::make_shared<NullProblemInputs>();
         }
 
@@ -310,6 +349,7 @@ namespace
             hipStream_t) override
         {
             m_events.push_back("prepareRotatingGPUOutput:" + std::to_string(maxRotatingBufferNum));
+            recordProblemRotateEvent(maxRotatingBufferNum);
             std::vector<std::shared_ptr<ProblemInputs>> rv(std::max<size_t>(1, rotatingSlots),
                                                            std::move(inputs));
             return rv;
@@ -323,11 +363,31 @@ namespace
         void primeNextInputSlot(ContractionProblem const*) override
         {
             m_events.push_back("primeNextInputSlot");
+            recordProblemEvent("prime");
         }
 
         size_t rotatingSlots = 1;
+        bool   recordProblemContext = false;
+        std::vector<std::shared_ptr<ContractionProblem>> const* problems = nullptr;
+        std::vector<std::string> problemEvents;
+        int currentProblemIndex = -1;
 
     private:
+        void recordProblemEvent(std::string const& prefix)
+        {
+            if(currentProblemIndex >= 0)
+                problemEvents.push_back(prefix + ":p" + std::to_string(currentProblemIndex));
+        }
+
+        void recordProblemRotateEvent(int32_t maxRotatingBufferNum)
+        {
+            if(currentProblemIndex >= 0)
+            {
+                problemEvents.push_back("rotate:p" + std::to_string(currentProblemIndex) + ":"
+                                        + std::to_string(maxRotatingBufferNum));
+            }
+        }
+
         std::vector<std::string>& m_events;
     };
 
@@ -370,8 +430,8 @@ namespace
         std::vector<KernelInvocation> solveTensileGPU(ContractionProblem const&,
                                                       ProblemInputs const&,
                                                       Hardware const&,
-                                                      void**,
-                                                      void**,
+                                                      void** dUA,
+                                                      void** dUAHost,
                                                       void*,
                                                       size_t,
                                                       hipStream_t) const override
@@ -379,16 +439,31 @@ namespace
             m_events.push_back("solveTensileGPU");
             if(throwOnSolve)
                 throw std::runtime_error("solve failed");
+            auto const allocationId = assignedUserArgs.size();
+            dUASentinels.push_back(
+                std::make_unique<int>(static_cast<int>(allocationId * 2 + 1)));
+            dUAHostSentinels.push_back(
+                std::make_unique<int>(static_cast<int>(allocationId * 2 + 2)));
+            void* dUAValue     = dUASentinels.back().get();
+            void* dUAHostValue = dUAHostSentinels.back().get();
+            if(dUA)
+                *dUA = dUAValue;
+            if(dUAHost)
+                *dUAHost = dUAHostValue;
+            assignedUserArgs.emplace_back(dUAValue, dUAHostValue);
             return nextKernels();
         }
 
-        void relaseDeviceUserArgs(void*, void*) override
+        void relaseDeviceUserArgs(void* dUA, void* dUAHost) override
         {
             m_events.push_back("releaseDeviceUserArgs");
+            releasedUserArgs.emplace_back(dUA, dUAHost);
         }
 
         std::vector<std::vector<KernelInvocation>> kernelsPerSolveCall;
         bool                                        throwOnSolve = false;
+        mutable std::vector<std::pair<void*, void*>> assignedUserArgs;
+        mutable std::vector<std::pair<void*, void*>> releasedUserArgs;
 
     private:
         std::vector<KernelInvocation> nextKernels() const
@@ -400,8 +475,10 @@ namespace
             return kernelsPerSolveCall[idx];
         }
 
-        std::vector<std::string>& m_events;
-        mutable size_t            solveCallIndex = 0;
+        std::vector<std::string>&               m_events;
+        mutable size_t                          solveCallIndex = 0;
+        mutable std::vector<std::unique_ptr<int>> dUASentinels;
+        mutable std::vector<std::unique_ptr<int>> dUAHostSentinels;
     };
 
     class RecordingSolutionSource final : public RunSolutionSource
@@ -420,6 +497,11 @@ namespace
         bool runCurrentSolution() override
         {
             return runCurrentSolutionResult;
+        }
+
+        void resetForProblem()
+        {
+            nextSolution = 0;
         }
 
         std::vector<std::shared_ptr<ContractionSolution>> solutions;
@@ -464,7 +546,7 @@ namespace
                                  std::vector<hipEvent_t> const&) override
         {
             m_events.push_back("launchWarmup:" + kernelLabel(kernels));
-            return hipSuccess;
+            return takeLaunchResult(warmupLaunchResult, warmupLaunchResultConsumeOnce);
         }
 
         hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
@@ -473,7 +555,7 @@ namespace
                                  hipEvent_t) override
         {
             m_events.push_back("launchBenchmark:" + kernelLabel(kernels));
-            return hipSuccess;
+            return takeLaunchResult(benchmarkLaunchResult, benchmarkLaunchResultConsumeOnce);
         }
 
         int numRotationModulesValue() const
@@ -484,8 +566,20 @@ namespace
         int                                            rotationModules = 1;
         std::vector<int>                               rotationSelections;
         std::vector<std::pair<std::string, int>>       extraCopyLoads;
+        hipError_t                                     warmupLaunchResult = hipSuccess;
+        hipError_t                                     benchmarkLaunchResult = hipSuccess;
+        bool                                           warmupLaunchResultConsumeOnce = false;
+        bool                                           benchmarkLaunchResultConsumeOnce = false;
 
     private:
+        static hipError_t takeLaunchResult(hipError_t& result, bool consumeOnce)
+        {
+            auto rv = result;
+            if(consumeOnce && rv != hipSuccess)
+                result = hipSuccess;
+            return rv;
+        }
+
         static std::string kernelLabel(std::vector<KernelInvocation> const& kernels)
         {
             if(kernels.empty())
@@ -507,6 +601,11 @@ namespace
             config.lastProblemIdx = static_cast<int>(problems.size() - 1);
             config.icacheFlushArgs = {false};
             solutionSource.solutions.push_back(solution);
+            data.problems = &problems;
+            listeners.setCurrentProblemFn = [this](ContractionProblem const* problem) {
+                data.setCurrentProblem(problem);
+            };
+            listeners.resetSolutionSourceFn = [this] { solutionSource.resetForProblem(); };
             callbacks.flushGridSizeFn = [this] {
                 ++flushGridSizeCalls;
                 return uint32_t{17};
@@ -533,6 +632,15 @@ namespace
                                           &hardware,
                                           nullptr,
                                           callbacks});
+        }
+
+        void setProblems(std::vector<std::shared_ptr<ContractionProblem>> newProblems)
+        {
+            problems = std::move(newProblems);
+            config.lastProblemIdx = problems.empty() ? -1
+                                                     : static_cast<int>(problems.size() - 1);
+            data.problems = &problems;
+            data.setCurrentProblem(nullptr);
         }
 
         std::vector<std::string>      events;
@@ -797,6 +905,190 @@ TEST_F(ClientRunSchedulerTest, BenchmarkPathDoesNotUseNoBenchmarkResetHook)
                                         "postBenchmarkRun"}));
 }
 
+TEST_F(ClientRunSchedulerTest,
+       UserArgsBenchmarkRunRoutesThroughSolveTensileGPUAndReleasesAllRotatingSlots)
+{
+    harness.listeners.m_warmupRuns = 0;
+    harness.listeners.m_syncs      = 1;
+    harness.listeners.m_enqueues   = 1;
+    harness.listeners.resetSolutionSourceOnPreProblem = true;
+    harness.listeners.resetSolutionRunsOnPreSolution  = true;
+    harness.listeners.solutionRunsPerSolution         = 1;
+    harness.data.recordProblemContext                 = true;
+    harness.data.rotatingSlots                        = 2;
+    harness.config.runKernels                         = true;
+    harness.config.gpuTimer                           = false;
+    harness.config.useUserArgs                        = true;
+    harness.solution->kernelsPerSolveCall             = {{makeKernel("slot0")},
+                                                          {makeKernel("slot1")}};
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(countExactEvent(harness.events, "solveTensileGPU"), 2u);
+    EXPECT_EQ(countExactEvent(harness.events, "solve"), 0u);
+    EXPECT_EQ(harness.solution->assignedUserArgs.size(), 2u);
+    EXPECT_EQ(harness.solution->releasedUserArgs.size(), 2u);
+    EXPECT_NE(harness.solution->assignedUserArgs[0].first,
+              harness.solution->assignedUserArgs[1].first);
+    EXPECT_NE(harness.solution->assignedUserArgs[0].second,
+              harness.solution->assignedUserArgs[1].second);
+    EXPECT_EQ(harness.solution->assignedUserArgs, harness.solution->releasedUserArgs);
+    EXPECT_EQ(harness.reporter.reportedProblemIndices, (std::vector<int>{0}));
+    EXPECT_EQ(harness.reporter.reportedProblemProgress, (std::vector<std::string>{"0/0"}));
+
+    auto solveIndices       = indicesOfEvent(harness.events, "solveTensileGPU");
+    auto waitIdx            = indexOfEvent(harness.events, "waitForPreparedSlot");
+    auto launchIdx          = indexOfEvent(harness.events, "launchBenchmark:slot0");
+    auto releaseIndices     = indicesOfEvent(harness.events, "releaseDeviceUserArgs");
+    auto postSolutionIdx    = indexOfEvent(harness.events, "postSolution");
+
+    ASSERT_EQ(solveIndices.size(), 2u);
+    ASSERT_NE(waitIdx, harness.events.size());
+    ASSERT_NE(launchIdx, harness.events.size());
+    ASSERT_EQ(releaseIndices.size(), 2u);
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+
+    EXPECT_LT(solveIndices[1], waitIdx);
+    EXPECT_LT(waitIdx, launchIdx);
+    EXPECT_LT(launchIdx, releaseIndices.front());
+    EXPECT_LT(releaseIndices.back(), postSolutionIdx);
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
+}
+
+TEST_F(ClientRunSchedulerTest,
+       UserArgsNoBenchmarkRunReleasesAllRotatingSlotArgsBeforeRingResetSubmission)
+{
+    harness.listeners.m_warmupRuns = 0;
+    harness.listeners.m_syncs      = 0;
+    harness.listeners.m_enqueues   = 0;
+    harness.listeners.resetSolutionSourceOnPreProblem = true;
+    harness.listeners.resetSolutionRunsOnPreSolution  = true;
+    harness.listeners.solutionRunsPerSolution         = 1;
+    harness.data.recordProblemContext                 = true;
+    harness.data.rotatingSlots                        = 2;
+    harness.config.runKernels                         = true;
+    harness.config.gpuTimer                           = false;
+    harness.config.useUserArgs                        = true;
+    harness.solution->kernelsPerSolveCall             = {{makeKernel("slot0")},
+                                                          {makeKernel("slot1")}};
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(countExactEvent(harness.events, "solveTensileGPU"), 2u);
+    EXPECT_EQ(countExactEvent(harness.events, "solve"), 0u);
+    EXPECT_EQ(harness.solution->assignedUserArgs.size(), 2u);
+    EXPECT_EQ(harness.solution->releasedUserArgs.size(), 2u);
+    EXPECT_EQ(harness.solution->assignedUserArgs, harness.solution->releasedUserArgs);
+
+    auto releaseIndices = indicesOfEvent(harness.events, "releaseDeviceUserArgs");
+    auto primeIndices    = indicesOfEvent(harness.events, "primeNextInputSlot");
+    auto postSolutionIdx = indexOfEvent(harness.events, "postSolution");
+
+    ASSERT_EQ(releaseIndices.size(), 2u);
+    ASSERT_EQ(primeIndices.size(), 2u);
+    ASSERT_NE(postSolutionIdx, harness.events.size());
+
+    EXPECT_LT(releaseIndices.back(), primeIndices.front());
+    EXPECT_LT(primeIndices.back(), postSolutionIdx);
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
+    EXPECT_EQ(harness.reporter.reportedProblemIndices, (std::vector<int>{0}));
+    EXPECT_EQ(harness.reporter.reportedProblemProgress, (std::vector<std::string>{"0/0"}));
+}
+
+TEST_F(ClientRunSchedulerTest, UserArgsSolveFailureDoesNotReleaseAndReportsInvalid)
+{
+    harness.listeners.m_warmupRuns = 0;
+    harness.listeners.m_syncs      = 1;
+    harness.listeners.m_enqueues   = 1;
+    harness.config.runKernels      = true;
+    harness.config.gpuTimer        = false;
+    harness.config.useUserArgs     = true;
+    harness.solution->throwOnSolve  = true;
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(countExactEvent(harness.events, "solveTensileGPU"), 1u);
+    EXPECT_EQ(countExactEvent(harness.events, "solve"), 0u);
+    EXPECT_TRUE(harness.solution->assignedUserArgs.empty());
+    EXPECT_TRUE(harness.solution->releasedUserArgs.empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "waitForPreparedSlot").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchWarmup:").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "launchBenchmark:").empty());
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
+    EXPECT_EQ(countExactEvent(harness.events, "reportInvalid"), 1u);
+    EXPECT_EQ(harness.reporter.invalidCount, 1);
+    ASSERT_EQ(harness.reporter.errorMessages.size(), 1u);
+    EXPECT_NE(harness.reporter.errorMessages.front().find("solve failed"),
+              std::string::npos);
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postSolution"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postProblem"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postBenchmarkRun"),
+              harness.events.end());
+}
+
+TEST_F(ClientRunSchedulerTest, UserArgsLaunchFailureReleasesAllocatedArgsAndReportsInvalid)
+{
+    harness.listeners.m_warmupRuns = 0;
+    harness.listeners.m_syncs      = 1;
+    harness.listeners.m_enqueues   = 1;
+    harness.listeners.resetSolutionSourceOnPreProblem = true;
+    harness.listeners.resetSolutionRunsOnPreSolution  = true;
+    harness.listeners.solutionRunsPerSolution         = 1;
+    harness.data.recordProblemContext                 = true;
+    harness.data.rotatingSlots                        = 2;
+    harness.config.runKernels                         = true;
+    harness.config.gpuTimer                           = false;
+    harness.config.useUserArgs                        = true;
+    harness.solution->kernelsPerSolveCall             = {{makeKernel("slot0")},
+                                                          {makeKernel("slot1")}};
+    harness.launcher.benchmarkLaunchResult            = hipErrorInvalidValue;
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(countExactEvent(harness.events, "solveTensileGPU"), 2u);
+    EXPECT_EQ(countExactEvent(harness.events, "solve"), 0u);
+    EXPECT_EQ(harness.solution->assignedUserArgs.size(), 2u);
+    EXPECT_EQ(harness.solution->releasedUserArgs.size(), 2u);
+    EXPECT_EQ(harness.solution->assignedUserArgs, harness.solution->releasedUserArgs);
+
+    auto launchIdx       = indexOfEvent(harness.events, "launchBenchmark:slot0");
+    auto releaseIndices   = indicesOfEvent(harness.events, "releaseDeviceUserArgs");
+    auto reportInvalidIdx = indexOfEvent(harness.events, "reportInvalid");
+
+    ASSERT_NE(launchIdx, harness.events.size());
+    ASSERT_EQ(releaseIndices.size(), 2u);
+    ASSERT_NE(reportInvalidIdx, harness.events.size());
+
+    EXPECT_LT(launchIdx, releaseIndices.front());
+    EXPECT_LT(releaseIndices.back(), reportInvalidIdx);
+    EXPECT_TRUE(extractEventsWithPrefix(harness.events, "primeNextInputSlot").empty());
+    EXPECT_EQ(countExactEvent(harness.events, "reportInvalid"), 1u);
+    EXPECT_EQ(harness.reporter.invalidCount, 1);
+    ASSERT_EQ(harness.reporter.errorMessages.size(), 1u);
+    EXPECT_NE(harness.reporter.errorMessages.front().find("Exception occurred:"),
+              std::string::npos);
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postSolution"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postProblem"),
+              harness.events.end());
+    EXPECT_NE(std::find(harness.events.begin(), harness.events.end(), "postBenchmarkRun"),
+              harness.events.end());
+}
+
 TEST_F(ClientRunSchedulerTest, SkipsFlushGridCallbackWhenNoBenchmarkRuns)
 {
     harness.config.runKernels             = false;
@@ -975,6 +1267,112 @@ TEST_F(ClientRunSchedulerTest, ExitOnErrorReturnsCappedError)
                 == harness.events.end());
     EXPECT_TRUE(std::find(harness.events.begin(), harness.events.end(), "postBenchmarkRun")
                 == harness.events.end());
+}
+
+TEST_F(ClientRunSchedulerTest, NonZeroFirstProblemMultiProblemRunResetsAndPrimesPerProblem)
+{
+    harness.setProblems(makeProblems(4));
+    harness.config.firstProblemIdx = 1;
+    harness.config.lastProblemIdx  = 3;
+    harness.listeners.m_warmupRuns = 0;
+    harness.listeners.m_syncs      = 0;
+    harness.listeners.m_enqueues   = 0;
+    harness.listeners.resetSolutionSourceOnPreProblem = true;
+    harness.listeners.resetSolutionRunsOnPreSolution  = true;
+    harness.listeners.solutionRunsPerSolution         = 1;
+    harness.data.recordProblemContext                 = true;
+    harness.data.rotatingSlots                        = 2;
+    harness.config.runKernels                         = true;
+    harness.config.gpuTimer                           = false;
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(harness.reporter.reportedProblemIndices, (std::vector<int>{1, 2, 3}));
+    EXPECT_EQ(harness.reporter.reportedProblemProgress,
+              (std::vector<std::string>{"1/3", "2/3", "3/3"}));
+    EXPECT_EQ(harness.data.problemEvents,
+              (std::vector<std::string>{"reset:p1",
+                                        "prepare:p1",
+                                        "rotate:p1:0",
+                                        "prepare:p1",
+                                        "prime:p1",
+                                        "prime:p1",
+                                        "reset:p2",
+                                        "prepare:p2",
+                                        "rotate:p2:0",
+                                        "prepare:p2",
+                                        "prime:p2",
+                                        "prime:p2",
+                                        "reset:p3",
+                                        "prepare:p3",
+                                        "rotate:p3:0",
+                                        "prepare:p3",
+                                        "prime:p3",
+                                        "prime:p3"}));
+    EXPECT_EQ(countExactEvent(harness.events, "primeNextInputSlot"), 6u);
+}
+
+TEST_F(ClientRunSchedulerTest, TwoBenchmarkPassesRepeatSchedulerOuterLoop)
+{
+    harness.listeners.m_benchmarkRunsRemaining = 2;
+    harness.listeners.m_warmupRuns             = 0;
+    harness.listeners.m_syncs                  = 1;
+    harness.listeners.m_enqueues               = 1;
+    harness.listeners.resetSolutionSourceOnPreProblem = true;
+    harness.listeners.resetSolutionRunsOnPreSolution  = true;
+    harness.listeners.solutionRunsPerSolution         = 1;
+    harness.config.runKernels                         = true;
+    harness.config.gpuTimer                           = false;
+    harness.solution->kernelsPerSolveCall             = {{makeKernel("bench")}};
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    EXPECT_EQ(countExactEvent(harness.events, "preBenchmarkRun"), 2u);
+    EXPECT_EQ(countExactEvent(harness.events, "postBenchmarkRun"), 2u);
+    EXPECT_EQ(harness.reporter.reportedProblemIndices, (std::vector<int>{0, 0}));
+    EXPECT_EQ(harness.reporter.reportedProblemProgress, (std::vector<std::string>{"0/0", "0/0"}));
+    EXPECT_EQ(countExactEvent(harness.events, "solve"), 2u);
+    EXPECT_EQ(extractEventsWithPrefix(harness.events, "launchBenchmark:"),
+              (std::vector<std::string>{"bench", "bench"}));
+    EXPECT_EQ(harness.flushGridSizeCalls, 2);
+}
+
+TEST_F(ClientRunSchedulerTest, AutoIcacheRotationLoadsExtraCopiesOnceAcrossOuterLoop)
+{
+    harness.setProblems(makeProblems(3));
+    harness.config.firstProblemIdx    = 1;
+    harness.config.lastProblemIdx     = 2;
+    harness.listeners.m_benchmarkRunsRemaining = 2;
+    harness.config.runKernels                = false;
+    harness.config.gpuTimer                  = false;
+    harness.config.icacheFlushArgs           = {false, true};
+    harness.config.icacheFlushTimeUs         = 123.0f;
+    harness.config.icacheRotateCopies        = -1;
+    harness.config.icacheRotateSizeKB        = 64;
+    harness.config.codeObjectFilenames       = {"kernel.co"};
+    harness.data.rotatingSlots               = 2;
+    harness.launcher.rotationModules         = 1;
+    harness.callbacks.kernelHotPathSizeFn    = [](std::string const&) {
+        return std::uintmax_t{32768};
+    };
+
+    auto scheduler = harness.makeScheduler();
+    auto result    = scheduler.run(harness.dUA, harness.dUAHost);
+
+    EXPECT_FALSE(result.exitedEarly);
+    EXPECT_EQ(result.returnCode, 0);
+    ASSERT_EQ(harness.launcher.extraCopyLoads.size(), 1u);
+    EXPECT_EQ(harness.launcher.extraCopyLoads[0],
+              std::make_pair(std::string("kernel.co"), 3));
+    EXPECT_EQ(harness.launcher.rotationModules, 4);
+    EXPECT_EQ(harness.flushTimeUs,
+              (std::vector<float>{0.f, 123.f, 0.f, 123.f}));
 }
 
 TEST_F(ClientRunSchedulerTest, AutoIcacheRotationComputesExtraCopyCount)

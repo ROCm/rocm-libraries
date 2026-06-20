@@ -165,6 +165,18 @@ namespace TensileLite
 
                             if(m_deps.solutionSource->runCurrentSolution() && m_config.runKernels)
                             {
+                                std::vector<std::pair<void*, void*>> userArgHandles;
+                                auto releaseUserArgs = [&]() {
+                                    for(auto const& userArgs : userArgHandles)
+                                    {
+                                        solution->relaseDeviceUserArgs(userArgs.first,
+                                                                       userArgs.second);
+                                    }
+                                    userArgHandles.clear();
+                                    dUA     = nullptr;
+                                    dUAHost = nullptr;
+                                };
+
                                 try
                                 {
                                     while(m_deps.listeners->needMoreRunsInSolution())
@@ -178,6 +190,7 @@ namespace TensileLite
                                         }
                                         resetInput = true;
 
+                                        userArgHandles.reserve(inputArr.size());
                                         std::vector<std::vector<KernelInvocation>> kernels;
                                         {
                                             ScopedTimer timer("kernel_solving");
@@ -200,6 +213,8 @@ namespace TensileLite
                                                                                     0,
                                                                                     m_deps.stream);
                                                 kernels.push_back(kernel);
+                                                if(m_config.useUserArgs)
+                                                    userArgHandles.emplace_back(dUA, dUAHost);
                                             }
                                         }
 
@@ -319,10 +334,7 @@ namespace TensileLite
                                             m_deps.listeners->postSyncs();
                                         }
 
-                                        if(m_config.useUserArgs)
-                                        {
-                                            solution->relaseDeviceUserArgs(dUA, dUAHost);
-                                        }
+                                        releaseUserArgs();
 
                                         if(!ranBenchmarkEnqueue)
                                         {
@@ -334,6 +346,7 @@ namespace TensileLite
                                 }
                                 catch(std::runtime_error const& err)
                                 {
+                                    releaseUserArgs();
                                     m_deps.reporter->reportInvalid();
                                     std::string message = "Exception occurred: ";
                                     message += err.what();
