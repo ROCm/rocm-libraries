@@ -102,6 +102,16 @@ rocsparse_spic0()
 
 .. doxygenfunction:: rocsparse_spic0
 
+rocsparse_spildlt0_buffer_size()
+--------------------------------
+
+.. doxygenfunction:: rocsparse_spildlt0_buffer_size
+
+rocsparse_spildlt0()
+--------------------
+
+.. doxygenfunction:: rocsparse_spildlt0
+
 rocsparse_spsm()
 ----------------
 

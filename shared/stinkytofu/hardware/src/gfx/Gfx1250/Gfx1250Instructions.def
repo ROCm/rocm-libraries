@@ -739,6 +739,16 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     },
 )
 
+// Vector ALU — VOP1 only (indirect dst via M0)
+// v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+// runtime (indirect VGPR write).
+DEF_T(VMovRelsD2B32Inst, "v_movrelsd_2_b32", .format = VOP1,
+    .operand_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, vgpr, 32},
+    },
+)
+
 // Vector ALU — VOP2 non-commutative (dual VOP2/VOP3 encoding)
 DEF_BATCH(.format = VOP2,
     VSubF16Inst, "v_sub_f16",
@@ -1200,6 +1210,23 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
     .operand_fields = {
         {D0, vdst, vgpr, 128},
         {S0, src0, src_vgpr, 64},
+        {S1, src1, src, 32},
+    },
+)
+// Pack-of-8 conversion (8x F32 -> 8x FP8/BF8) with F32 scale.
+DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
         {S1, src1, src, 32},
     },
 )

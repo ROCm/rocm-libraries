@@ -51,7 +51,6 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 | `CFGBuilderPass` | Splits `BasicBlock`s at labels, builds CFG edges |
 | `StinkyDAGSchedulerPass` | DAG-based instruction scheduling. Calls `buildUseDefChain` (inserts pseudo-PHI nodes) before scheduling |
 | `StinkyWaitCntInsertionPass` | Def-use based wait count insertion for memory operations |
-| `StinkyConfigurableWaitCntPass` | Register-level load tracking with precise `dlcnt` computation, cross-block state propagation, multi-path analysis at join points. See [Adding WaitCnt Support](adding-waitcnt.md) |
 | `DeadCodeEliminationPass` | Block-local forward scan: removes instructions whose destination is overwritten before use. Iterates to fixpoint. Preserves memory ops, barriers, side-effects, in-place ops, and dummy registers |
 | `RedundantMovEliminationPass` | Block-local backward search: removes duplicate mov-type instructions (same opcode + dest + src, source unmodified between occurrences) |
 | `PeepholeOptimizationPass` | Declarative pattern-based optimizations compiled from `.pattern` files. See [Adding Peephole Patterns](adding-peephole-patterns.md) |

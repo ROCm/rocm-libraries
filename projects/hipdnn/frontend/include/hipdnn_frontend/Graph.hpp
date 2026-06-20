@@ -2167,6 +2167,30 @@ public:
         return _preferredEngineId;
     }
 
+    /// @brief Get the engine ID actually backing the current execution plan.
+    ///
+    /// Returns the engine cached when the plan's engine config was selected
+    /// (_selectedEngineId): the engine that will execute, regardless of how it
+    /// was chosen (heuristic, soft preferred-engine with fallback, hard
+    /// create_execution_plan_ext, or a deserialized compiled plan). Unlike
+    /// get_preferred_engine_id_ext (which returns the *request*), this returns
+    /// what was *selected*, so callers can detect a silent fallback.
+    ///
+    /// Fails if no execution plan has been created (create_execution_plans /
+    /// create_execution_plan_ext).
+    // NOLINTBEGIN(readability-identifier-naming)
+    Error get_execution_plan_engine_id(int64_t& engineId) const
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(!_selectedEngineId.has_value())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "No execution plan available; build a plan before querying its engine."};
+        }
+        engineId = *_selectedEngineId;
+        return {ErrorCode::OK, ""};
+    }
+
     /// @brief Set the graph name
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
