@@ -547,6 +547,85 @@ TEST(BatchPointerReset, StaleAltSlotRefreshAfterProblemSwitch)
     EXPECT_EQ(p2WarmStride, expectedP2Stride);
 }
 
+TEST(BatchPointerReset, PointerWrapperFastPathRejectsStalePreparedRingSlot)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t BATCH = 4;
+
+    auto p1 = makeBatchedProblem(32, 32, 32, BATCH);
+    auto p2 = makeBatchedProblem(64, 64, 64, BATCH);
+
+    auto args = makeRingBatchPointerArgs({{64, 64, BATCH, 64}}, 1);
+
+    ClientProblemFactory       factory(args);
+    PredicateDataInitialization dataInit(args, factory);
+
+    auto inputs1 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
+    auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
+    ASSERT_NE(ci1, nullptr);
+    ASSERT_NE(ci1->batchA, nullptr);
+
+    auto const expectedP1Stride = std::ptrdiff_t(32 * 32);
+    auto const p1Slot0Stride    = readBatchAStride(ci1->batchA, BATCH);
+    EXPECT_EQ(p1Slot0Stride, expectedP1Stride);
+
+    ASSERT_TRUE(dataInit.altSlotsReady());
+    auto const& p1Slot1State = dataInit.slotState(1);
+    ASSERT_TRUE(p1Slot1State.populated());
+    auto const p1Slot1Inputs = p1Slot1State.cachedInputs;
+    ASSERT_NE(p1Slot1Inputs, nullptr);
+    auto const* p1Slot1Ci = dynamic_cast<ContractionInputs const*>(p1Slot1Inputs.get());
+    ASSERT_NE(p1Slot1Ci, nullptr);
+    ASSERT_NE(p1Slot1Ci->batchA, nullptr);
+
+    auto const expectedP2Stride = std::ptrdiff_t(64 * 64);
+    auto const p1Slot1Stride     = readBatchAStride(p1Slot1Ci->batchA, BATCH);
+    EXPECT_EQ(p1Slot1Stride, expectedP1Stride);
+
+    dataInit.primeNextInputSlot(&p1);
+
+    auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
+    auto* ci2    = dynamic_cast<ContractionInputs*>(inputs2.get());
+    ASSERT_NE(ci2, nullptr);
+    ASSERT_NE(ci2->batchA, nullptr);
+
+    auto const p2Slot0Stride = readBatchAStride(ci2->batchA, BATCH);
+    EXPECT_EQ(p2Slot0Stride, expectedP2Stride)
+        << "The pointer-wrapper fast path must not consume the stale p1 slot "
+           "when preparing p2.";
+
+    ASSERT_TRUE(dataInit.altSlotsReady());
+    auto const& p2Slot1State = dataInit.slotState(1);
+    ASSERT_TRUE(p2Slot1State.populated());
+    auto const p2Slot1Inputs = p2Slot1State.cachedInputs;
+    ASSERT_NE(p2Slot1Inputs, nullptr);
+    EXPECT_NE(p2Slot1Inputs, p1Slot1Inputs);
+    auto const* p2Slot1Ci = dynamic_cast<ContractionInputs const*>(p2Slot1Inputs.get());
+    ASSERT_NE(p2Slot1Ci, nullptr);
+    ASSERT_NE(p2Slot1Ci->batchA, nullptr);
+
+    auto const p2Slot1Stride = readBatchAStride(p2Slot1Ci->batchA, BATCH);
+    EXPECT_EQ(p2Slot1Stride, expectedP2Stride);
+    EXPECT_NE(p2Slot1Stride, p1Slot1Stride);
+
+    dataInit.primeNextInputSlot(&p2);
+    auto p2WarmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
+    dataInit.waitForPreparedSlot(nullptr);
+
+    auto* p2WarmCi = dynamic_cast<ContractionInputs*>(p2WarmInputs.get());
+    ASSERT_NE(p2WarmCi, nullptr);
+    ASSERT_NE(p2WarmCi->batchA, nullptr);
+
+    auto const p2WarmStride = readBatchAStride(p2WarmCi->batchA, BATCH);
+    EXPECT_EQ(p2WarmStride, expectedP2Stride);
+    EXPECT_NE(p2WarmStride, p1Slot1Stride);
+}
+
 TEST(BatchPointerReset, ResetPreparedSlotsForProblemClearsWarmRingBeforeProblemSwitch)
 {
     auto hipDevice = hasHipDevice();

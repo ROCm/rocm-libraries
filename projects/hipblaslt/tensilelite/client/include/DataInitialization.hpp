@@ -224,17 +224,17 @@ namespace TensileLite
             {
                 if(m_ringPolicy.allowed && m_ring.hasAvailableSlot())
                 {
-                    // The ring is only ever filled under ringEligible() (enforced in
-                    // primeNextInputSlot), i.e. the explicit policy bit plus the physical
-                    // state guards below.  Under those conditions the typed overloads'
-                    // GuardPage flip and conditional CPU-init are both no-ops, so
-                    // bypassing the dynamic_cast dispatch is exact, not approximate,
-                    // for GEMM and grouped GEMM alike.  The grouped representative
-                    // invariant is asserted when the slot is prepared.  Caller must
-                    // waitForPreparedSlot() before use (main.cpp before benchmark_runs).
-                    assert(ringEligible());
-                    advanceBuffer();
-                    return m_cachedGPUInputs;
+                    // A ready ring slot is only consumable when it still matches the
+                    // current problem.  If the slot is stale, clear the ring before
+                    // falling back so a later direct call cannot consume the old slot
+                    // after typed preparation marks the new problem prepared.
+                    if(ringFastPathPreparedFor(problem))
+                    {
+                        advanceBuffer();
+                        return m_cachedGPUInputs;
+                    }
+
+                    resetPreparedSlotsForProblem();
                 }
 
                 if(auto groupedProblem
@@ -1167,6 +1167,7 @@ namespace TensileLite
             PreparedProblemSignature makePreparedProblemSignature(
                 ContractionProblemGemm const& problem) const;
             bool gpuInputsPreparedFor(ContractionProblemGemm const& problem) const;
+            bool ringFastPathPreparedFor(ContractionProblem const* problem) const;
             void markGpuInputsPrepared(ContractionProblemGemm const& problem);
 
             bool cpuInputsNeedRefresh(ContractionProblemGroupedGemm const& problem) const;
@@ -1317,8 +1318,9 @@ namespace TensileLite
 
             // True when the ring may serve pre-filled slots in place of re-running the
             // typed prepareGPUInputs dispatch.  This is the SINGLE source of truth for
-            // "ring is usable"; every site that fills, advances, or consumes a slot must
-            // agree with it.
+            // whether the ring can be primed or maintained, but consuming a prepared
+            // slot still requires a matching prepared-problem signature; see
+            // ringFastPathPreparedFor().
             //
             // m_ring.hasAvailableSlot() is only a valid proxy for "safe to bypass
             // dispatch" when this predicate holds.  Gating primeNextInputSlot on

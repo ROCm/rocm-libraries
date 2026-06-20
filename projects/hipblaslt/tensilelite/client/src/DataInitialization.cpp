@@ -2315,6 +2315,25 @@ namespace TensileLite
                 && m_preparedProblemSignature == makePreparedProblemSignature(problem);
         }
 
+        bool DataInitialization::ringFastPathPreparedFor(ContractionProblem const* problem) const
+        {
+            if(!ringEligible())
+                return false;
+
+            if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
+            {
+                return gpuInputsPreparedFor(*gemmProblem);
+            }
+
+            if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
+            {
+                assertGroupedRingFastPathInvariant(*groupedProblem);
+                return gpuInputsPreparedFor(groupedProblem->gemms[0]);
+            }
+
+            return false;
+        }
+
         void DataInitialization::markGpuInputsPrepared(
             ContractionProblemGemm const& problem)
         {
