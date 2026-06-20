@@ -63,7 +63,7 @@ allowed_vecs        = (2, 4, 8)
 
 For GEMM / conv, validation also covers:
 
-- supported architecture (current focus: gfx950);
+- supported architecture (gfx950 is the default target; gfx942 and the RDNA WMMA targets gfx1151 / gfx1201 are also supported);
 - supported MFMA atom shape for the dtype;
 - `tile_m, tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;

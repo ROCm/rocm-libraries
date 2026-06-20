@@ -11,7 +11,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
   python python/test/test_ck_dsl.py
 ```
 
-Result on this checkout: **286 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
+Result on this checkout: **245 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
 
 ## Documentation Verifier
 
@@ -92,11 +92,11 @@ Shape: N=8, Hi=Wi=56, C=K=64, R=S=3, pad=1, stride=1, dilation=1. Implicit-GEMM 
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
+  python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 # -> distribution-driven reduce  M=32 N=4096 bs=256 vec=8  max_abs=0.000e+00
 
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+  python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 # -> 2D distribution-driven add  H=64 W=128 tile=(32,64) vec=8  max_abs=0.000e+00
 ```
 
@@ -106,7 +106,7 @@ Both demos go through the full `TileDistributionEncoding -> make_static_tile_dis
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/ck_tile_parity.py --op all
+  python/ck_dsl/examples/common/ck_tile_parity.py --op all
 ```
 
 | op                                          | max_abs    | CK lat | torch ref | speedup | ok |
@@ -132,7 +132,7 @@ PYTHONPATH=python python \
 | batched_gemm.B16_512x512x128                | 3.125e-02  | 12.1us |    20.2us |   1.67x | OK |
 | grouped_gemm.5                              | 3.125e-02  | 53.3us |    96.9us |   1.82x | OK |
 
-All passes within the per-op tolerance table (`examples/ck_tile_parity.py::TOL`):
+All passes within the per-op tolerance table (`examples/common/ck_tile_parity.py::TOL`):
 
 - elementwise linear ops: bit-exact (`max_abs <= 0`);
 - silu / gelu_tanh: `<= 2e-4`;
@@ -225,9 +225,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl_examp
 PYTHONPATH=python python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-PYTHONPATH=python python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=python python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-PYTHONPATH=python python python/ck_dsl/examples/ck_tile_parity.py --op all
+PYTHONPATH=python python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=python python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=python python python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \

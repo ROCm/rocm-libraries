@@ -29,6 +29,10 @@ Every manifest carries:
 | `notes`              | string  | free text                                                    |
 | `ck_dependency`      | bool    | `false` — these kernels do not link CK templates             |
 | `ir_authored`        | bool    | `true`                                                       |
+| `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `ckc_engine` binding isn't importable) |
+| `engine_version`     | string  | version of the engine that produced the artifact (`"unknown"` fallback) |
+
+The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `ckc_build_id()` / `ckc_engine_version()`, exposed via the `ckc_engine` binding) so a consumer such as the ck-dsl-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
 
 ## Per-Kind Fields
 

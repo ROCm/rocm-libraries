@@ -10,11 +10,15 @@ File: `helpers/compile.py`.
 from ck_dsl.helpers import compile_kernel
 art = compile_kernel(
     kernel,
-    isa="amdgcn-amd-amdhsa--gfx950",
+    arch="gfx950",                       # gfx942 / gfx950 / gfx1151 / gfx1201; takes precedence over isa
+    isa="amdgcn-amd-amdhsa--gfx950",     # raw comgr triple, kept for back-compat (gfx950 default)
     capture_ir_text=True,
     optimize_ir=False,
+    backend=None,                        # None -> CK_DSL_BACKEND (default "cpp", falls back to native python)
 ) -> KernelArtifact
 ```
+
+`backend` selects which engine produces the lowered AMDGPU `.ll`: `"python"` (native lowerer), `"cpp"` (the C++ engine binding), or `"both"` (lower with both and assert byte-equality). When unset it follows `core/backend.py::resolve_backend` — `CK_DSL_BACKEND` env, else the package default `"cpp"`, which auto-falls back to the native Python lowerer when the `ckc_engine` binding isn't built. The two engines emit byte-identical IR.
 
 `KernelArtifact` fields:
 
@@ -54,8 +58,11 @@ hsaco, timings = build_hsaco_from_llvm_ir(
 )
 ```
 
-The driver loads `libamd_comgr.so` via ctypes from the default ROCm library
-locations or the dynamic linker search path; passes the IR text through
+The driver loads `libamd_comgr.so` via ctypes, preferring the
+torch-bundled `<torch>/lib/libamd_comgr.so` when torch is imported (so
+ck_dsl and torch share one HIP runtime), then the default ROCm library
+locations / dynamic linker search path (see `runtime/hip_module.py::_candidate_lib_paths`);
+passes the IR text through
 `COMPILE_SOURCE_TO_BC -> CODEGEN_BC_TO_RELOCATABLE -> LINK_RELOCATABLE_TO_EXECUTABLE`;
 and extracts the executable bytes.
 
@@ -333,7 +340,7 @@ write_artifact(artifact, out_dir, manifest,
 <out_dir>/manifest.json
 ```
 
-Runner: `python -m ck_dsl.run_manifest <hsaco> <manifest> [--shape MxNxK] [--verify]`. The runner allocates problem buffers, packs args from the signature, launches via `time_launches`, optionally verifies with a numpy / torch reference, and prints a `Perf: <ms>, <TFlops>, <GB/s>` line.
+Runner: `python -m ck_dsl.run_manifest <hsaco> <manifest> [--shape M,N,K] [--verify]`. The runner allocates problem buffers, packs args from the signature, launches via `time_launches`, optionally verifies with a numpy / torch reference, and prints a `Perf: <ms>, <TFlops>, <GB/s>` line.
 
 ## Sweep Flow
 

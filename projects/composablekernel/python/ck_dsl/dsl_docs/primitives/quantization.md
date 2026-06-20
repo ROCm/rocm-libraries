@@ -138,10 +138,10 @@ For int8 GEMM:
 
 ## Limitations
 
-- The conversion ops are single-element. Packed 2-element `v_cvt_pk_*` codepaths exist on the hardware but are not exposed at the DSL level today; the helpers extract the low byte. If you need the high byte from the same `cvt.pk` instruction (e.g. to convert two f32 in one instruction), reach into raw LLVM IR or extend `core/ir.py`.
+- The scalar `cvt_*` ops above are single-element, but packed `v_cvt_pk_*` codepaths are now exposed: `cvt_pk_f32_fp8x4` / `cvt_pk_f32_bf8x4` (decode `<4 x fp8/bf8> -> <4 x f32>`) and `cvt_pk_fp8_f32x4` / `cvt_pk_bf8_f32x4` / `cvt_pk_i8_f32x4` (encode `<4 x f32> -> <4 x quantized>`), each covering all 4 bytes of the packed instruction. Use the packed forms in dequant/quant loops that process 4-or-more contiguous elements per lane; reach into raw LLVM IR or extend `core/ir.py` only for widths these don't cover.
 - `cvt_f32_to_i8_sat` is a true saturating cast. Non-saturating int8 truncation is not exposed.
 - bf8e5m2 is supported in the type system and conversions; full-pipeline support is documented in attention but not yet uniform across every instance.
-- FP4 / FP6 / scaled MFMA conversions are not implemented in this DSL today; the runbook lists them as natural extensions.
+- OCP MX (FP4 / FP6) MFMA atoms and the scaled-conversion ops are now implemented: `MfmaAtom.fp4_16x16x128` / `fp6_16x16x96` (catalog `MFMA_MX_ATOMS`) plus the scaled FP8/BF8 conversions `cvt_scalef32_pk_f32_fp8x4` / `cvt_scalef32_pk_f32_bf8x4` (and the reverse pack ops) in `core/ir.py`. Standalone single-element `cvt_fp4_to_f32` / `cvt_fp6_to_f32` ops are still not exposed — fp4 / fp6 values are consumed through the MX MFMA path with per-warp E8M0 scales, not a per-element cast.
 
 ## See Also
 

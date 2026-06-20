@@ -2,6 +2,15 @@
 
 Quick reference for the shipped instance builders. Each row points to the per-family doc.
 
+The `File` columns list module basenames. Cross-arch builders live under
+`instances/common/`; arch-specialized matrix-core bodies (e.g. the tiled
+attention kernels) live in the per-arch dirs `instances/gfx942/`,
+`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`. All public
+symbols are re-exported from `ck_dsl.instances`. Targets: gfx942 / gfx950
+(CDNA, wave64, MFMA) and gfx1151 / gfx1201 (RDNA, wave32, WMMA — gfx1201 is
+RDNA4); gfx950 is the default build target. See `instances/SUPPORT_MATRIX.md`
+for the per-instance arch grid.
+
 ## GEMM Family
 
 | File | Spec | Doc |
@@ -64,9 +73,9 @@ Runtime entry point: `run_unified_attention_torch(...)`.
 
 Path selection: `select_2d_config` / `select_3d_config` / `use_2d_kernel`. The runtime picks 3D split-KV for long-context decode and 2D for chunked-prefill / sliding-window / qq-bias rows.
 
-Coverage: fp16 / bf16, head_size in `{128, 256}`, block_size in `{16, 64}`, causal / sliding window / softcap / sinks / ALiBi / QQ-bias.
+Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, causal / sliding window / softcap / sinks / ALiBi / QQ-bias.
 
-FP8 K/V cache + output scale/clamp is the next coverage step (see attention parity README).
+FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
 
 ## Small Ops
 

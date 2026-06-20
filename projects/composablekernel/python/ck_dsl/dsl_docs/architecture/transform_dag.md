@@ -8,7 +8,7 @@ simple bijective linear permutation of the underlying memory layout.
 
 This doc walks through every transform with worked examples, ending
 with the full implicit-GEMM convolution descriptor used in
-`example/ck_tile/dsl/08_bake_off_implicit_gemm` (which reaches ~280
+`ck_dsl/examples/common/bake_off_implicit_gemm.py` (which reaches ~280
 TFLOPS in HIP-graph mode on MI300X).
 
 ## The core idea
@@ -218,7 +218,7 @@ After the chain:
   - `desc.offset(b, m=m_val, k=k_val)` produces `(i32 offset, i1
     valid)`.
 
-This is the exact descriptor used by `ck_dsl/instances/conv_implicit_gemm.py`.
+This is the exact descriptor used by `ck_dsl/instances/common/conv_implicit_gemm.py`.
 The kernel body never writes `(m / (Ho*Wo)) * Hi*Wi*C + (m / Wo) % Ho
 * Wi * C + ...` by hand. The algebra captures every offset
 computation, and editing the conv shape (e.g., stride 2 or dilated)

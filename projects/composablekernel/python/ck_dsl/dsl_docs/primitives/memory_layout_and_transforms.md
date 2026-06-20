@@ -208,7 +208,7 @@ LoadStoreTraits scalar fallback         done
 Snake traversal                         done
 Row-major (non-snake) traversal         done (iterate_accesses(snake=False))
 TileWindow.load/store(distribution=...) done
-Validity / mask threading through load_tile   not yet
+Validity / mask threading through load_tile   done (load_tile mask_fn=, buffer-window OOB-zero)
 ```
 
 Use the distribution layer when:

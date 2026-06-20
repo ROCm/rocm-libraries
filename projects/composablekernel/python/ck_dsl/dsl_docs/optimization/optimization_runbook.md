@@ -80,8 +80,9 @@ transpose-read and cross-lane intrinsics, VGPR / AGPR / occupancy caps,
 chiplet swizzle parameters, buffer-descriptor flags, fp8 / quantization
 support, and compiler caveats), see
 **[§21 Target Architecture Reference](#21-target-architecture-reference)** —
-the single hub that lists the per-arch files (currently gfx950, the
-DSL's default target). The base runbook itself stays arch-neutral; the
+the single hub that lists the per-arch files (gfx950 — the DSL's
+default target — and gfx942; RDNA wave32 targets gfx1151 / gfx1201 are
+also supported). The base runbook itself stays arch-neutral; the
 arch reference holds the concrete facts.
 - `utilities/skills/` — focused skill docs (`gemm-optimization`,
   `lds-optimization`, `kernel-trace-analysis`,
@@ -162,7 +163,7 @@ Decide what the kernel computes before deciding how it should run.
   `ir_to_qdtype`). `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`.
 - MX block-scale support in `helpers/mx_scale.py` and the spec
   `MxGemmSpec`.
-- Always set a tolerance policy. The `examples/ck_tile_parity.py`
+- Always set a tolerance policy. The `examples/common/ck_tile_parity.py`
   harness encodes the per-op tolerances we currently believe in
   (elementwise linear ops bit-exact, silu/gelu `<= 2e-4`, layer/rms
   norm `<= 5e-3` (was 2.5e-3 before noise widening, see
@@ -198,7 +199,7 @@ Decide what the kernel computes before deciding how it should run.
 The DSL ships several layered correctness gates. Use them in order
 from cheapest to most expensive:
 
-1. `pytest test/test_ck_dsl.py` — 286 static tests (IR construction,
+1. `pytest test/test_ck_dsl.py` — 245 static tests (IR construction,
    transform DAG, helpers, instance smoke). ~1.7 s.
 2. `python python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` —
    imports every symbol, exercises every IR builder method, lowers
@@ -207,13 +208,13 @@ from cheapest to most expensive:
 3. `python -m ck_dsl.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python python/ck_dsl/examples/ck_tile_parity.py --op all` — small
+4. `python python/ck_dsl/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python python/ck_dsl/examples/parity_extended_kernels.py --op all`
+5. `python python/ck_dsl/examples/common/parity_extended_kernels.py --op all`
    — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
 6. `python python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python python/ck_dsl/examples/hip_lowering_parity.py` — production
+7. `python python/ck_dsl/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit across every shipped
    spec.
 
@@ -233,7 +234,7 @@ Use the best available vendor / library baseline:
 - Triton: AITER ships the production `unified_attention` kernel that
   vLLM and AITER use. Path comes in via `AITER_PATH` env var.
 - AITER FA / FA2 for the FMHA shapes.
-- Torch eager: `examples/ck_tile_parity.py::_bench_torch`.
+- Torch eager: `examples/common/ck_tile_parity.py::_bench_torch`.
 - A naive scalar `_fmha_warp_body.py` (`fmha_warp_fwd_inner_body`) is
   the **correctness oracle** for the FMHA family. Several FMHA specs
   still ship with the warp-scalar body (paged_prefill, splitkv_decode,
@@ -539,7 +540,7 @@ Consider:
 |---|---|
 | Direct convolution | `instances/conv_direct_grouped.py::DirectConv16cSpec`, `DirectConv4cSpec` |
 | Implicit GEMM | `instances/conv_implicit_gemm.py::ImplicitGemmConvSpec` |
-| Implicit GEMM (auto-unrolled) | `instances/conv_implicit_gemm_auto.py` |
+| Implicit GEMM (auto-unrolled) | `instances/conv_implicit_gemm.py` with `unroll_k=True` |
 | im2col + GEMM | `instances/img2col.py` materializes the im2col operand |
 | Winograd | not yet implemented |
 | FFT | not yet implemented |
@@ -1054,7 +1055,11 @@ General selection guidance (then confirm against the arch catalog):
 - `4x4x4` for many independent small-channel computations
   (used by `DirectConv4cSpec`).
 - Scaled MFMA for fp8 / fp6 / fp4 where available.
-- WMMA for RDNA / wave32 architectures — not currently exposed.
+- WMMA for RDNA / wave32 architectures (`gfx1151`, `gfx1201`): the
+  `WmmaAtom` catalog in `helpers/atoms.py::WMMA_*_ATOMS` and the
+  `Gfx11RdnaBackend` lowering path expose the `16x16x16` f16 / bf16 WMMA
+  atoms. The base runbook stays CDNA-focused; pick the atom against your
+  target's catalog.
 
 Always confirm the emitted intrinsic with `probe_intrinsic_counts.py`.
 For example, switching from the default to `mfma_f32_32x32x16_f16` is
@@ -1642,16 +1647,19 @@ family. For each knob: where it lives, what it controls, what direction
 it usually moves perf, and when **not** to flip it.
 
 To discover all knobs for a specific kernel: open the spec dataclass
-under `instances/<kernel>.py` and read the `@dataclass` field list.
-Every field is a knob (the validator in `__post_init__` documents the
-constraints).
+under `instances/common/<kernel>.py` (arch-specialized overrides, when
+they exist, live under `instances/<arch>/<kernel>.py`) and read the
+`@dataclass` field list. Every field is a knob (the validator in
+`__post_init__` documents the constraints). The shorthand
+`instances/<kernel>.py` used throughout this runbook refers to that
+`instances/common/` builder unless an arch directory is named.
 
 #### 12.1.A Algorithmic variant (choose the kernel before the knobs)
 
 | Lever | Where | Direction |
 |---|---|---|
 | GEMM family member | `instances/gemm_universal.py` / `batched_gemm.py` / `grouped_gemm.py` / `streamk_gemm.py` / `gemm_multi_d.py` / `gemm_multi_abd.py` / `mfma_gemm.py` / `flatmm.py` / `block_scale_gemm.py` / `mx_gemm.py` | small / decode shapes → `flatmm`; many small problems → `grouped_gemm` or `persistent`; tail-balance → `streamk_gemm`; fused chain → `gemm_multi_d` / `gemm_multi_abd` |
-| Conv family | `conv_implicit_gemm.py` / `conv_implicit_gemm_auto.py` / `conv_direct_grouped.py` (16c, 4c) / `img2col.py` | tiny K or C*R*S → direct conv; 3×3 hero shapes → implicit GEMM; explicit im2col → if downstream stage is plain GEMM |
+| Conv family | `conv_implicit_gemm.py` (incl. `unroll_k=True` auto-unrolled path) / `conv_direct_grouped.py` (16c, 4c) / `img2col.py` | tiny K or C*R*S → direct conv; 3×3 hero shapes → implicit GEMM; explicit im2col → if downstream stage is plain GEMM |
 | Attention family | `attention_unified.py` (scalar oracle) / `attention_tiled_2d.py` / `attention_tiled_3d.py` (split-KV) | prefill → 2D; long-context decode → 3D; sliding-window — see §17.4 final policy |
 | FMHA family | `fmha_mfma.py` / `fmha_varlen.py` / `fmha_head_grouping.py` / `fmha_paged_prefill.py` / `fmha_splitkv_decode.py` / `fmha_fwd_fp8.py` / `fmha_bwd.py` / `fmha_appendkv.py` / `sage_attention.py` / `sparse_attention.py` | choose based on KV layout (paged vs varlen), GQA, dtype, sparse pattern |
 
@@ -2296,7 +2304,7 @@ that dominate every MFMA-tiled kernel's optimisation log.
 
 The documented validation pass at the time of writing exercises:
 
-- The 286-test static unit suite (`test_ck_dsl.py`) — IR construction,
+- The 245-test static unit suite (`test_ck_dsl.py`) — IR construction,
   transform DAG, helpers, instance smoke.
 - `verify_dsl_docs.py` — imports every symbol referenced by the docs,
   exercises every IR builder method, lowers every spec to LLVM / HIP
@@ -2969,7 +2977,7 @@ from probe_config_sweep import probe_config_sweep
 from probe_targeted_bench import bench_shapes, time_cuda_event
 
 # Example: feed a custom kernel + spec to probe_occupancy
-from ck_dsl.instances.attention_tiled_2d import (
+from ck_dsl.instances import (
     UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
 )
 spec = UnifiedAttention2DTiledSpec(
@@ -3031,9 +3039,9 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-python python/ck_dsl/examples/ck_tile_parity.py --op all
+python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \

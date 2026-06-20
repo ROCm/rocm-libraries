@@ -2,11 +2,15 @@
 
 This page covers:
 
-- `instances/conv_implicit_gemm.py`
-- `instances/conv_implicit_gemm_auto.py` (experimental alternate builder, not exported from `instances/__init__.py`)
-- `instances/conv_direct_grouped.py`
-- `instances/img2col.py`
-- `instances/pooling.py`
+- `instances/common/conv_implicit_gemm.py`
+- `instances/common/conv_direct_grouped.py`
+- `instances/common/img2col.py`
+- `instances/common/pooling.py`
+
+The implicit-GEMM tile/pipeline heuristic (formerly an experimental
+`conv_implicit_gemm_auto.py` alternate builder) now lives under
+`ck_dsl/heuristics/` (ML-driven config selection for the forward
+implicit-GEMM path).
 
 Two convolution strategies:
 
@@ -21,7 +25,7 @@ Direct grouped:
 
 ## Implicit-GEMM Convolution
 
-Source: `instances/conv_implicit_gemm.py`.
+Source: `instances/common/conv_implicit_gemm.py`.
 
 ### Contract
 
@@ -282,7 +286,7 @@ for each thread's coalesced output chunk:
 
 ## Direct Grouped Convolution
 
-Source: `instances/conv_direct_grouped.py`.
+Source: `instances/common/conv_direct_grouped.py`.
 
 These are specialized kernels for grouped direct convolution bake-off cases (`cpg=kpg in {16, 4}`), not generic implicit-GEMM conv.
 
@@ -390,7 +394,7 @@ This path avoids the implicit-GEMM LDS machinery because the channel group is ti
 
 ## Img2Col
 
-Source: `instances/img2col.py`.
+Source: `instances/common/img2col.py`.
 
 Materializes the implicit-GEMM A matrix `[M_gemm, K_gemm]`:
 
@@ -426,7 +430,7 @@ Use for debugging, verification, and baselines. Generally not the fastest produc
 
 ## Pooling
 
-Source: `instances/pooling.py`.
+Source: `instances/common/pooling.py`.
 
 ```python
 @dataclass(frozen=True)

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Implemented (Python side) |
+| **Status** | Implemented on both engines (Python and C++) |
 | **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
-| **Implementation** | `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py` |
+| **Implementation** | Python: `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py`. C++: `ck_dsl_c/src/core/ir/serialize.cpp` (`ckc_ir_parse` and the serializer), header `ck_dsl_c/include/ckc/ir_serialize.h`. |
 | **Scope** | A fully round-trippable text encoding of a `KernelDef` (`ck_dsl/core/ir.py`) |
 
 ---
@@ -293,9 +293,8 @@ elements are sorted by the same rule.
 - **Type tags on attrs.** Eliminates the `1` vs `True` ambiguity that makes
   `print_ir` unparseable, with zero guessing in the parser.
 - **`repr(float)` for floats.** Shortest round-tripping decimal; deterministic
-  on CPython; identical to what the C++ side gets if it uses the same
-  shortest-round-trip algorithm (the two backends must agree here — flagged for
-  the C++ port).
+  on CPython; the C++ engine uses the same shortest-round-trip algorithm, so the
+  two engines agree on the float wire form.
 - **Sorted attr keys.** Determinism independent of dict insertion order, so two
   builders that add the same attrs in different orders serialize identically.
 - **`loc` retained.** Round-trip must be total; `loc` is part of `KernelDef`.

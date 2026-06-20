@@ -7,10 +7,11 @@ This page covers how to run the `ck_dsl` test suites, how to build and validate 
 ```text
 python/test/test_ck_dsl.py            # static unit suite (no GPU required)
 python/test/test_ck_dsl_examples.py   # end-to-end example harness (HIP required)
-example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected.json
+example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected.json (when shipped)
 python/ck_dsl/examples/               # Python-owned example generators
 python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
-python/ck_dsl/examples/ck_tile_parity.py                       # small-op parity harness
+python/ck_dsl/examples/common/ck_tile_parity.py               # small-op parity harness
+ck_dsl_c/tests/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
 
 ## Environment
@@ -25,7 +26,7 @@ Required environment:
 
 - ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker.
 - Python 3.12 with `torch` built for ROCm.
-- AMDGPU device visible to HIP (e.g. MI300X, MI325X, MI350X, MI355X for the gfx950 default ISA).
+- AMDGPU device visible to HIP (e.g. MI300X, MI325X, MI350X, MI355X for the gfx950 default ISA). gfx942 plus the RDNA targets gfx1151 / gfx1201 are also supported.
 
 Verify quickly:
 
@@ -55,7 +56,7 @@ In-process. Tests:
 - `TestHelpers`: atoms catalog, `WarpGrid`, `CoalescedTileLoader`, `AsyncTileLoader`, `LdsLayout`, `SchedulePolicy`, `SoftwarePipeline`, `make_gemm_manifest`.
 - `TestInstances`: end-to-end build smoke for `build_universal_gemm`, `build_implicit_gemm_conv`, `build_direct_conv_4c`, `build_direct_conv_16c`, all attention builders.
 
-Expected runtime: ~2 seconds. The validation pass for this doc tree had `231 tests, OK`.
+Expected runtime: ~2 seconds. The validation pass for this doc tree had `245 tests, OK`.
 
 These tests do not require a GPU. They prove IR builds, LLVM text shape, and helpers' static contracts.
 
@@ -105,10 +106,10 @@ The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
+  python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+  python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 ```
 
 These exercise the distribution-driven `load_tile` / `store_tile` path end-to-end (build HSACO + launch + verify vs torch reference).
@@ -117,7 +118,7 @@ These exercise the distribution-driven `load_tile` / `store_tile` path end-to-en
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/ck_tile_parity.py --op all
+  python/ck_dsl/examples/common/ck_tile_parity.py --op all
 ```
 
 Runs every shipped small-op against a torch reference with per-op tolerance gates. Exit non-zero if any kernel exceeds its tolerance.
@@ -148,12 +149,21 @@ The harness writes a JSON report. Use the `--scenario` filter for targeted rerun
 
 ## Benchmark + Sweep
 
-Build many configs in parallel:
+Build many configs in parallel and write a sweep manifest with the
+programmatic sweep API (`ck_dsl.sweep`):
 
-```bash
-PYTHONPATH=python python \
-  example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
-  --output-dir "$OUT_DIR" --subset compute --parallel 16
+```python
+from pathlib import Path
+from ck_dsl.sweep import (
+    build_default_dispatcher_set, write_sweep_manifest,
+)
+
+out_dir = Path("/tmp/sweep")
+records = build_default_dispatcher_set(cache_dir=out_dir, parallel=16)
+write_sweep_manifest(
+    records, out_dir / "sweep_manifest.json",
+    shapes=[(4096, 4096, 4096), (8192, 8192, 8192)],
+)
 ```
 
 Benchmark each with median + spread:
@@ -164,7 +174,7 @@ PYTHONPATH=python python \
   --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
-The benchmark driver writes a CSV: one row per `(kernel, shape)` with `median_tflops, min_tflops, max_tflops, spread_pct, max_abs_diff`. Use `benchmark_manifest(..., attempts=5, discard_first=True, verify_first=True)` for one manifest.
+The benchmark driver writes a CSV: one row per `(kernel, shape)` with `name, M, N, K, attempts, median_tflops, min_tflops, max_tflops, spread_pct, correct`. Use `benchmark_manifest(..., attempts=5, discard_first=True, verify_first=True)` for one manifest.
 
 ## Inspecting Generated Code
 
@@ -266,7 +276,7 @@ python -m ck_dsl.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
-python python/ck_dsl/examples/ck_tile_parity.py --op elementwise
+python python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
 ```
 
 If all four pass, the build, COMGR, HIP module, launcher, manifest, and at least one production instance work end-to-end.

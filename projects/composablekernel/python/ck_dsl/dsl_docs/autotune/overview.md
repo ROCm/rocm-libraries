@@ -4,73 +4,86 @@
 
 ## Concepts
 
-- **Config**: one `AutotuneConfig(spec=..., name=..., extra=...)` per point in the search space. `spec` is a kernel spec dataclass (e.g. `UniversalGemmSpec`, `ImplicitGemmConvSpec`).
-- **Key**: a tuple of runtime shape / dtype / layout values. The autotuner caches the per-key winner.
-- **Build callable**: user-supplied `build_fn(spec) -> KernelDef` plus a signature function and an `args_prepare` callable.
-- **Cache**: in-memory dict, plus an optional JSON file on disk keyed by `AutotuneKey` (or a user-supplied `key_fn` tuple).
+- **Config**: one `AutotuneConfig(spec=..., name=..., extra={})` per point in the search space. `spec` is a kernel spec dataclass (e.g. `UniversalGemmSpec`, `ImplicitGemmConvSpec`).
+- **Key**: a tuple of runtime shape / dtype / layout values, produced by the user-supplied `key_fn`. The autotuner caches the per-key winner.
+- **Bench callable**: user-supplied `bench_fn(config, **runtime_args) -> ms`. The caller builds the kernel from `config.spec`, runs warmups, and returns a HIP-event-timed average (typically via `time_launches`).
+- **Launch callable**: user-supplied `launch_fn(config, **runtime_args) -> None`, invoked once per real launch with the winning config.
+- **Cache**: in-memory dict, plus an optional JSON file on disk keyed by the `key_fn` tuple.
 
 ## Top-Level API
 
 ```text
 AutotuneConfig(spec, name, extra={})
-AutotuneResult(config_name, ms_per_iter, error)
+AutotuneResult(config_name, ms_per_iter, error=None)   # .is_ok property
 AutotuneKey(graph_hash, shape, dtype, layout="RCR", arch="gfx950",
             compiler="comgr", lowerer="unknown", spec_hash="any")
-make_autotune_key(...)
-Autotuner(configs, key_fn, cache_path, build_fn, signature_fn, prepare_args)
-autotune_sweep(configs, build_fn, prepare_args, signature_fn,
-               iters=..., warmup=..., key=None) -> List[AutotuneResult]
+make_autotune_key(*, graph_hash, shape, dtype, layout="RCR", arch="gfx950",
+                  compiler="comgr", lowerer="unknown", spec_hash="any")
+Autotuner(configs, *, key_fn, bench_fn, launch_fn, cache_path=None,
+          warmup_iters=10, bench_iters=50, verbose=False)
+autotune_sweep(configs, *, bench_fn, on_progress=None)
+    -> (winner_config, List[AutotuneResult])
 spec_replace(spec, **kwargs)  # dataclasses.replace alias
 ```
 
 ## End-to-End Recipe
 
 ```python
-from ck_dsl.helpers import (
-    Autotuner, AutotuneConfig,
+from ck_dsl.helpers import Autotuner, AutotuneConfig, autotune_sweep
+from ck_dsl.runtime.launcher import time_launches
+from ck_dsl.instances import (
     UniversalGemmSpec, TileSpec, TraitSpec,
-    gemm_args_signature,
+    build_universal_gemm,
 )
-from ck_dsl.instances import build_universal_gemm
 
-def prepare_gemm_args(spec, M, N, K, dtype, A, B, C):
-    return {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K}
+configs = [
+    AutotuneConfig(name="t128_a32x32x16",
+                   spec=UniversalGemmSpec(
+                       name="hero",
+                       tile=TileSpec(128,128,32, warp_m=2, warp_n=2,
+                                     warp_tile_m=32, warp_tile_n=32, warp_tile_k=16),
+                       trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+                   )),
+    AutotuneConfig(name="t256_a32x32x16",
+                   spec=UniversalGemmSpec(
+                       name="hero",
+                       tile=TileSpec(256,128,32, warp_m=2, warp_n=2,
+                                     warp_tile_m=32, warp_tile_n=32, warp_tile_k=16),
+                       trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+                   )),
+]
 
-@Autotuner(
-    configs=[
-        AutotuneConfig(name="t128_a32x32x16",
-                       spec=UniversalGemmSpec(
-                           name="hero",
-                           tile=TileSpec(128,128,32, warp_m=2, warp_n=2,
-                                         warp_tile_m=32, warp_tile_n=32, warp_tile_k=16),
-                           trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
-                       )),
-        AutotuneConfig(name="t256_a32x32x16",
-                       spec=UniversalGemmSpec(
-                           name="hero",
-                           tile=TileSpec(256,128,32, warp_m=2, warp_n=2,
-                                         warp_tile_m=32, warp_tile_n=32, warp_tile_k=16),
-                           trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
-                       )),
-    ],
-    key_fn=lambda M, N, K, dtype, A, B, C: (int(M), int(N), int(K), str(dtype)),
+# bench_fn owns build + compile + launch + timing for one config.
+def bench_gemm(config, *, M, N, K, dtype, A, B, C, **_):
+    kdef = build_universal_gemm(config.spec)
+    # ... compile_kernel(kdef), construct a KernelLauncher, then:
+    return time_launches(launcher_call, warmup=10, iters=100)  # ms/iter
+
+# launch_fn dispatches a single real launch with the winning config.
+def launch_gemm(config, *, M, N, K, dtype, A, B, C, **_):
+    ...  # build/compile (cached) + launch once
+
+tuner = Autotuner(
+    configs,
+    key_fn=lambda *, M, N, K, dtype, **_: (int(M), int(N), int(K), str(dtype)),
+    bench_fn=bench_gemm,
+    launch_fn=launch_gemm,
     cache_path="~/.cache/ck_dsl_autotune.json",
-    build_fn=build_universal_gemm,
-    signature_fn=lambda spec: gemm_args_signature(),
-    prepare_args=prepare_gemm_args,
 )
-def launch_gemm(M, N, K, dtype, A, B, C):
-    pass  # the autotuner inserts the launch; the body is ignored.
+
+# First call for a key sweeps + caches; later calls dispatch directly.
+tuner(M=4096, N=4096, K=4096, dtype="fp16", A=A, B=B, C=C)
 ```
 
 First call for a given key:
 
-1. The autotuner builds each `config.spec` through `build_fn`.
-2. Compiles each via `compile_kernel`.
-3. Constructs a `KernelLauncher` per config.
-4. Calls `time_launches(launcher_call, warmup=..., iters=...)`.
-5. Picks the config with the lowest median ms.
-6. Caches `(key, winner_name)` to disk.
+1. `key_fn(**runtime_args)` produces the cache key; on a miss the sweep runs.
+2. The autotuner calls `bench_fn(config, **runtime_args)` for each config — the
+   caller builds/compiles the kernel from `config.spec` and returns a
+   HIP-event-timed ms/iter (typically via `time_launches`).
+3. Picks the config with the lowest ms (`AutotuneResult.is_ok` filters errors).
+4. Caches `(key, winner_name)` to disk.
+5. Subsequent calls look up the cached winner and call `launch_fn` directly.
 
 Subsequent calls for the same key:
 
@@ -97,21 +110,21 @@ The JSON cache is a flat dict:
 
 `AutotuneKey` extends the basic tuple with `arch`, `compiler`, and `lowerer` fields to avoid cache poisoning across ROCm versions or backend changes.
 
-## Manual Sweep (No Decorator)
+## Manual Sweep (No Caching)
 
-`autotune_sweep(configs, build_fn, ...)` runs the sweep without caching, returning a list of `AutotuneResult` rows. Use this for one-shot exploration and CSV export.
+`autotune_sweep(configs, *, bench_fn, on_progress=None)` runs the sweep without
+any cache, returning a `(winner_config, results)` pair where `results` is a list
+of `AutotuneResult` rows. Use this for one-shot exploration and CSV export.
 
 ```python
 from ck_dsl.helpers import autotune_sweep
 
-results = autotune_sweep(
-    configs=configs,
-    build_fn=build_universal_gemm,
-    signature_fn=lambda spec: gemm_args_signature(),
-    prepare_args=prepare_gemm_args,
-    args=(4096, 4096, 4096, "fp16", A, B, C),
-    iters=100,
-    warmup=10,
+# bench_fn takes only the config here (close over the fixed shape/args).
+winner, results = autotune_sweep(
+    configs,
+    bench_fn=lambda cfg: bench_gemm(
+        cfg, M=4096, N=4096, K=4096, dtype="fp16", A=A, B=B, C=C
+    ),
 )
 
 for r in sorted(results, key=lambda r: r.ms_per_iter):
@@ -122,16 +135,16 @@ for r in sorted(results, key=lambda r: r.ms_per_iter):
 
 - Configs are typed `Spec` dataclasses, not kwargs. The search space is checked at construction.
 - Timing uses HIP events through `time_launches`, not host timing.
-- The cache is persistent JSON, not in-memory only.
+- The cache is in-memory by default; pass `cache_path=` to also persist it as JSON across processes.
 - Build + launch is < 30 ms per config warm vs minutes per CK Tile template.
-- Errors during build (validation failure, unsupported config) are recorded as `AutotuneResult(error=...)` rather than crashing the sweep.
+- Errors raised by `bench_fn` (validation failure, unsupported config) are recorded as `AutotuneResult(error=...)` rather than crashing the sweep.
 
 ## Failure Modes
 
 - `key_fn` accidentally captures non-hashable values (lists, tensors). Use `int`, `str`, `tuple` only.
-- `prepare_args` returns a dict that doesn't match `signature_fn(spec)` for some config. Validate the signature against the spec before adding the config.
+- `bench_fn` builds a kernel whose launch signature doesn't match the `runtime_args` it was handed. Validate the signature against the spec before adding the config.
 - Cache file on a slow filesystem; the autotuner does a write per winner. Move the cache to a fast disk if many keys are seen.
-- `iters` too small to discount cold-cache effects on the first config. Use `discard_first=True` semantics by running a throw-away warmup loop before the sweep.
+- `bench_fn` uses too few iters to discount cold-cache effects on the first config. Run a throw-away warmup loop inside `bench_fn` before timing.
 
 ## When To Use vs The Sweep CLI
 

@@ -94,12 +94,19 @@ plan below shifts.
 
 ### 2.1 CK DSL surface
 
-- The DSL is Python-only. The compile entry is `ck_dsl.helpers.compile.
+- The DSL compile entry is `ck_dsl.helpers.compile.
   compile_kernel(kernel) → KernelArtifact` which contains **portable
   HSACO bytes** (loadable via `hipModuleLoadData`, no Python state
-  required at launch time).
-- Per-op spec builders live in `ck_dsl/instances/` (e.g.
-  `elementwise.py`, `gemm_universal.py`, `conv_implicit_gemm.py`). Each
+  required at launch time). (This finding reflects the M1 state, when
+  the DSL was Python-only. There is now also a peer C++ engine
+  (`ck_dsl_c/`) that lowers byte-identical LLVM-IR; the provider has
+  since shipped with three execution modes — prebuilt HSACO, JIT from
+  shipped `.ll` via comgr, and a Python-free C-JIT path — so the
+  "runtime JIT requires a Python interpreter" implication below is
+  superseded for the C-JIT mode. See the provider README.)
+- Per-op spec builders live in `ck_dsl/instances/common/` (e.g.
+  `elementwise.py`, `gemm_universal.py`, `conv_implicit_gemm.py`), with
+  arch-specialized overrides under `ck_dsl/instances/<arch>/`. Each
   takes a Python dataclass `Spec` and returns a `KernelDef` IR object.
 - An existing C++ launcher at `projects/composablekernel/example/ck_tile/
   dsl/common/launcher.cpp` already loads `gen.py` output and runs it —
@@ -364,10 +371,10 @@ real CPU-reference verification, both of which are meaningful only on a
 non-trivial kernel.
 
 **Op:** forward 2D convolution via `build_implicit_gemm_conv`
-(`projects/composablekernel/python/ck_dsl/instances/conv_implicit_gemm.py`).
+(`projects/composablekernel/python/ck_dsl/instances/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
-`projects/composablekernel/python/ck_dsl/examples/bake_off_implicit_gemm.py`
+`projects/composablekernel/python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
 — `N=8, H=W=56, C=64, K=64, R=S=3, stride=1, pad=1, dilation=1`, FP16,
 NHWC. This is the smallest shape we know already compiles cleanly; the
 example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
@@ -565,8 +572,8 @@ simplicity.
 - **P-4.** Confirm the `ck_dsl` package version surface. Does
   `ck_dsl.__version__` exist? If not, plan a small upstream patch to
   add it (we need it for the cache key).
-- **P-5.** Read `instances/conv_implicit_gemm.py` and
-  `examples/bake_off_implicit_gemm.py` end to end. Inventory the 36
+- **P-5.** Read `instances/common/conv_implicit_gemm.py` and
+  `examples/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
   spec fields, mark which are graph-derived vs constexpr defaults, and
   capture the bake-off knob values verbatim. This becomes the
   initialiser for `ConvImplicitGemmSpec.hpp`.
@@ -815,8 +822,8 @@ All entries are committed code or in-tree documentation.
 
 - DSL compile entry: `projects/composablekernel/python/ck_dsl/helpers/compile.py`
 - DSL instances: `projects/composablekernel/python/ck_dsl/instances/`
-- DSL conv builder used for M1: `projects/composablekernel/python/ck_dsl/instances/conv_implicit_gemm.py`
-- DSL conv example (shape + perf numbers cited in §4): `projects/composablekernel/python/ck_dsl/examples/bake_off_implicit_gemm.py`
+- DSL conv builder used for M1: `projects/composablekernel/python/ck_dsl/instances/common/conv_implicit_gemm.py`
+- DSL conv example (shape + perf numbers cited in §4): `projects/composablekernel/python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
 - RFC 0002 (Plugin SDK design): `projects/hipdnn/docs/rfcs/0002_PluginSdkDesign.md`

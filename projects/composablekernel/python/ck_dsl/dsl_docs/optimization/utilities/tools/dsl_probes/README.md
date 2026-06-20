@@ -98,7 +98,7 @@ is narrower than LLVM-direct's).
 
 Useful for: triaging "kernel works in LLVM but the HIP debug source
 won't compile" parity issues. The
-`examples/hip_lowering_parity.py` harness exercises the same path on a
+`examples/common/hip_lowering_parity.py` harness exercises the same path on a
 matrix of all shipped instance specs.
 
 ### `probe_config_sweep.py`
