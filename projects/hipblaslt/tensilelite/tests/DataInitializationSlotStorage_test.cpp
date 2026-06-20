@@ -144,6 +144,70 @@ TEST(DataInitializationSlotStorage, PrimingAltSlotDoesNotMutateActiveAliases)
     dataInit.waitForPreparedSlot(computeStream.get());
 }
 
+TEST(DataInitializationSlotStorage, FastPathReturnsDistinctValidAltSlot)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+    TensileLite::testing::detail::setDataInitArg(
+        args, "init-a", std::any(Client::InitMode::Two));
+    TensileLite::testing::detail::setDataInitArg(
+        args, "init-b", std::any(Client::InitMode::One));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.ringEligible());
+    ASSERT_TRUE(dataInit.altSlotsReady());
+
+    auto* initialCi = dynamic_cast<ContractionInputs*>(inputs.get());
+    ASSERT_NE(initialCi, nullptr);
+
+    auto const targetSlot = dataInit.nextPrimeSlot();
+    ASSERT_TRUE(targetSlot.has_value());
+    ASSERT_TRUE(dataInit.slotState(*targetSlot).populated());
+
+    auto const slot0Cached = dataInit.slotState(0).cachedInputs;
+    auto const slot0A      = initialCi->a;
+    auto const slot0B      = initialCi->b;
+    ASSERT_NE(slot0A, nullptr);
+    ASSERT_NE(slot0B, nullptr);
+    EXPECT_EQ(inputs, slot0Cached);
+
+    dataInit.primeNextInputSlot(&problem);
+
+    auto warmInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(warmInputs, nullptr);
+    auto* warmCi = dynamic_cast<ContractionInputs*>(warmInputs.get());
+    ASSERT_NE(warmCi, nullptr);
+    ASSERT_NE(warmCi->a, nullptr);
+    ASSERT_NE(warmCi->b, nullptr);
+
+    auto const& targetState = dataInit.slotState(*targetSlot);
+    EXPECT_EQ(warmInputs, targetState.cachedInputs);
+    EXPECT_NE(warmInputs, inputs);
+    EXPECT_EQ(warmCi->a, targetState.ptrs.at(ContractionProblemGemm::TENSOR::A));
+    EXPECT_NE(warmCi->a, slot0A);
+    EXPECT_EQ(warmCi->b, targetState.ptrs.at(ContractionProblemGemm::TENSOR::B));
+    EXPECT_NE(warmCi->b, slot0B);
+
+    dataInit.waitForPreparedSlot(nullptr);
+
+    float aValue = 0.0f;
+    float bValue = 0.0f;
+    HIP_CHECK_EXC(hipMemcpy(&aValue, warmCi->a, sizeof(aValue), hipMemcpyDeviceToHost));
+    HIP_CHECK_EXC(hipMemcpy(&bValue, warmCi->b, sizeof(bValue), hipMemcpyDeviceToHost));
+    EXPECT_FLOAT_EQ(aValue, 2.0f);
+    EXPECT_FLOAT_EQ(bValue, 1.0f);
+}
+
 TEST(DataInitializationSlotStorage, SyncCopyStreamDelegatesToCopyEngine)
 {
     auto hipDevice = hasHipDevice();
