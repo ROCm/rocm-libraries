@@ -4,6 +4,13 @@ This folder hosts the cross-backend parity + benchmark script for AITER's
 `unified_attention` kernel. It is the canonical performance harness for
 the CK DSL attention work.
 
+> **New to flash attention or this kernel family?** [`ALGORITHM.md`](ALGORITHM.md)
+> derives both kernels from the math up — the paged/varlen attention spec, the
+> bias/mask order, the online-softmax core, and *why* the dispatcher chooses
+> between the 2D (one CTA per q-block) and 3D split-KV (many CTAs share a
+> q-block) paths on gfx950. Read it first if you want to understand *what* the
+> kernels compute before reading the parity + optimization history below.
+
 The script (`parity_unified_attention.py`):
 
 1. Builds the standard AITER unified-attention inputs (paged KV cache,
@@ -47,18 +54,20 @@ export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 30 --warmup 10 \
-  --report ck/dsl/unified_attention_parity.json
+  --report /tmp/unified_attention_parity.json
 ```
 
-Flags:
+Flags (exactly as accepted by `parity_unified_attention.py`):
 
 | Flag | Default | Notes |
 |------|---------|-------|
+| `--set {default,creative,fmha,all}` | `default` | which scenario set to use (see "Scenarios" below) |
 | `--scenario NAME` (repeatable) | all | restrict to the named scenarios |
 | `--paths auto,2d,3d` | `auto,2d,3d` | which apples-to-apples lanes to run |
 | `--attempts N` | `10` | timed iterations per lane; reported number is `elapsed_ms / N` from a single HIP-event pair recorded on torch's current stream |
 | `--warmup N`   | `3`  | untimed warmup iterations |
 | `--skip-ck`    | off  | only run Triton (useful when CK is unavailable) |
+| `--skip-triton` | off | only run CK DSL lanes (useful when AITER/Triton deps are unavailable) |
 | `--report PATH` | none | dump every measurement to JSON |
 
 `sudo -n` is needed because the runner uses `libamd_comgr` and HIP
@@ -66,23 +75,48 @@ modules that require KFD ioctl permissions.
 
 ## Scenarios
 
-The script ships eleven baseline scenarios in `default_scenarios()`. All
-use `fp16` unless noted otherwise. The sequence-length pairs
-`(q_len, kv_len)` mirror typical paged-KV decode + prefill workloads.
+The `default` set in `default_scenarios()` ships **13** scenarios: the
+**11 d128/d256 reference scenarios** below (all `fp16` unless noted
+otherwise) plus **two bf16 d64/b32 GQA-8 "combo" cohort scenarios**
+(`combo_bf16_d64_b32_gqa8_64x8`, `combo_bf16_d64_b32_gqa8_16x2`) that
+exercise the transposed-32×32 combo stack — see the prefill-2D section
+below. The sequence-length pairs `(q_len, kv_len)` mirror typical
+paged-KV decode + prefill workloads. (Column `heads` below is the number
+of query heads `num_query_heads`; every reference scenario uses
+`num_query_heads=16` and `num_kv_heads=2`. The `b16`/`b64` suffix in the
+scenario name refers to the paged-cache `block_size`, not the head
+count.)
 
-| Scenario | q lens / kv lens | dtype | b | d | extras |
-|----------|------------------|-------|---|---|--------|
-| `decode_d128_b16`             | 4 sequences, all q=1, kv ∈ {512, 1024, 2048, 4096}     | fp16 | 16 | 128 | – |
-| `decode_d128_b64`             | same as above                                          | fp16 | 64 | 128 | – |
+The 11 reference scenarios:
+
+| Scenario | q lens / kv lens | dtype | heads | d | extras |
+|----------|------------------|-------|-------|---|--------|
+| `decode_d128_b16`             | 4 sequences, all q=1, kv ∈ {1024, 2048, 4096, 512}     | fp16 | 16 | 128 | – |
+| `decode_d128_b64`             | same as above (block_size=64)                          | fp16 | 16 | 128 | – |
 | `decode_d256_b16`             | 2 sequences, q=1, kv ∈ {1024, 2048}                    | fp16 | 16 | 256 | – |
 | `prefill_d128_b16`            | (64, 64), (128, 256), (32, 256)                        | fp16 | 16 | 128 | – |
 | `mixed_d128_b16`              | (1, 1328), (5, 18), (129, 463)                         | fp16 | 16 | 128 | – |
 | `sliding_d128_b16`            | (1, 2048), (1, 4096), (1, 8192)                        | fp16 | 16 | 128 | sliding_window=256 |
 | `softcap_d128_b16`            | (1, 1024), (1, 2048)                                   | fp16 | 16 | 128 | softcap=50 |
-| `bf16_decode_d128_b64`        | (1, 1024), (1, 2048), (1, 4096)                        | bf16 | 64 | 128 | – |
+| `bf16_decode_d128_b64`        | (1, 1024), (1, 2048), (1, 4096)                        | bf16 | 16 | 128 | – |
 | `alibi_decode_d128_b16`       | (1, 1024), (1, 2048), (1, 4096)                        | fp16 | 16 | 128 | ALiBi |
 | `alibi_mixed_d128_b16`        | (1, 1328), (5, 18), (129, 463)                         | fp16 | 16 | 128 | ALiBi |
 | `qq_bias_prefill_d128_b16`    | (64, 64), (128, 256), (32, 256)                        | fp16 | 16 | 128 | QQ-bias, stride=256 |
+
+The two combo scenarios (`block_size=32`, `head_size=64`, `(512, 1024)`
+× 2 sequences, bf16): `combo_bf16_d64_b32_gqa8_64x8` (64 query / 8 KV
+heads) and `combo_bf16_d64_b32_gqa8_16x2` (16 query / 2 KV heads).
+
+The results tables below cover the 11 reference scenarios. The two combo
+scenarios share the d64/b32 GQA-8 trace family profiled in the
+"Prefill-2D trace cohort" section.
+
+Other scenario sets are selectable with `--set`: `creative` (21
+exploratory scenarios — long-context decode up to 64K, GQA/MQA variants,
+head_size=256, bf16, sliding-window extremes, bias combinations), `fmha`
+(26 scenarios adapted from CK Tile's
+`tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml` subset that fits the
+paged-attention constraints), and `all` (`default` + `creative`).
 
 ## Latest results (MI355X, gfx950, ROCm 7.2 / torch 2.12)
 
@@ -90,7 +124,7 @@ use `fp16` unless noted otherwise. The sequence-length pairs
 > earlier 2026-05-28 tables reported CK DSL winning ~1.27x (auto) / ~1.28x
 > (3d). On the current ROCm 7.2 / torch 2.12 stack, **AITER's Triton
 > `unified_attention` has improved further and CK DSL now trails it**:
-> geomean **0.88x (auto)** / **0.92x (3d)** across the eleven baseline
+> geomean **0.88x (auto)** / **0.92x (3d)** across the eleven reference
 > scenarios. CK DSL's absolute `ck-3d` times are essentially unchanged
 > within noise (~56-58us); the ratio moved entirely because Triton's own
 > kernels keep getting faster on newer ROCm. **Correctness is unchanged** —
@@ -197,9 +231,9 @@ ported into the segment kernel are still what keep CK DSL competitive:
 - 16-tile P_lds publish + `s_waitcnt(lgkmcnt=kv_calls_per_tile)`
   partial wait so K's LDS writes can overlap softmax
 
-See
-[`ck/dsl/unified_attention_results.md`](../../../ck/dsl/unified_attention_results.md)
-for the full algorithm writeup.
+See [`ALGORITHM.md`](ALGORITHM.md) for the full kernel-strategy writeup
+(the 2D vs 3D split-KV math, online softmax, bias/mask order, and the
+CDNA mapping that motivates the optimizations above).
 
 **Variance note.** `alibi_mixed_d128_b16` contains one tiny sequence
 (5 query tokens / 18 KV tokens) alongside two larger ones; with 16
@@ -243,9 +277,9 @@ The ALiBi / QQ-bias rows previously had a 2D-kernel correctness gap
 transposed-32x32 softmax path now applies ALiBi (``slope * (key_pos
 - context_len) * RCP_LN2``) and QQ-bias (``qq_bias[q_pos, key_pos -
 context_len] * RCP_LN2``) inline before the per-row max reduce, so
-all three scenarios are now within fp16 / bf16 ULP. See
-``PROPOSALS_IMPLEMENTATION_REPORT.md::2D Attention Correctness
-Fix`` for the diff.
+all three scenarios are now within fp16 / bf16 ULP. The fix lives in the
+transposed-32×32 softmax path of
+``ck_dsl.instances.gfx950.attention_tiled_2d``.
 
 **Note on the earlier 2D table.** Previous versions of this README
 (pre v1) reported CK 2D as universally faster than Triton 2D. Those
@@ -333,8 +367,9 @@ real limitation) lifts the fp8 prefill cohort to:
 | full attention                    | ~0.34x | 0.87x |
 | overall fp8 prefill               | ~0.50x | **0.98x (near parity)** |
 
-(numbers from `prefill2d_fp8_triton_ckdsl_perf.csv`, 42-shape live sample,
-all bit-accurate vs Triton). The two fp8 buckets behave very differently
+(numbers from `prefill2d_fp8_triton_ckdsl_perf.csv`, 74-shape live sample
+— 37 sliding-window + 37 full-attention, all bit-accurate vs Triton). The
+two fp8 buckets behave very differently
 with cache scale:
 
 * **fp8 sliding-window is HBM-bound** (the window caps compute, many CTAs
@@ -444,7 +479,9 @@ identical kernel; the delta is scheduling/VALU, not the algorithm), which
 is the open follow-up. On the **low-num-seqs** shapes CK DSL already wins
 (e.g. ns=1: **1.5-1.8x**).
 
-Regenerate the cohort numbers + CSV (`prefill2d_bf16_triton_ckdsl_perf.csv`):
+Sweep the live workbench over a set of shapes (best-correct CK DSL
+variant per shape + bucket; writes a JSON to `--output-json`, default
+`/tmp/prefill2d_live.json`):
 
 ```bash
 export AITER_PATH=<path/to/aiter>
@@ -452,6 +489,46 @@ PYTHONPATH="python:${AITER_PATH}" python \
   python/ck_dsl/examples/gfx950/attention/benchmark_prefill2d_live.py \
   --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
+
+Regenerate the joined cohort CSV (`prefill2d_bf16_triton_ckdsl_perf.csv`)
+— this is written by `benchmark_prefill2d_traces.py`, which times the CK
+DSL combo policy over the traced shapes and joins a pre-profiled Triton
+CSV; the joined file is emitted to the path given by `--combined-csv`:
+
+```bash
+export AITER_PATH=<path/to/aiter>
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/ck_dsl/examples/gfx950/attention/benchmark_prefill2d_traces.py \
+  --shapes <path/to/unified_attention_shapes.jsonl> \
+  --combined-csv prefill2d_bf16_triton_ckdsl_perf.csv
+```
+
+## File map
+
+The CK DSL `unified_attention` kernels themselves live in `ck_dsl.instances`
+(`gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`,
+`gfx950/attention_tiled_2d_fastkv_regp.py`, and the dispatcher
+`common/attention_unified.py`). This folder holds the parity + benchmark
+harnesses and their captured data.
+
+| path | purpose |
+|---|---|
+| `README.md` | this document — parity methodology + prefill-2D optimization history + results |
+| `ALGORITHM.md` | the math + kernel strategy (2D vs 3D split-KV, online softmax, bias/mask order, CDNA mapping) |
+| `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and CK DSL in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
+| `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of CK DSL 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |
+| `benchmark_prefill2d_traces.py` | runs the CK DSL 2D combo policy over traced AITER prefill shapes and joins against a pre-profiled Triton CSV by `shape_signature` (the CSV-join workflow; writes `prefill2d_bf16_triton_ckdsl_perf.csv`) |
+| `benchmark_prefill2d_fastkv_regp.py` | benchmarks the experimental `attention_tiled_2d_fastkv_regp` kernel (fast paged-KV + register-resident P) against the R4 / combo 2D baselines; `--smart-dispatch-policy latest` reproduces the measured-best per-shape host policy |
+| `_d128_cktile_bakeoff.py` | per-shape, same-session A/B of CK DSL production `unified_attention` vs CK Tile `tile_example_fmha_fwd` (subprocess) and Triton, over a d128/d256 GQA-8 cohort; reports `cktile_ms / ckdsl_ms` (>1 = CK DSL faster) — requires a built `tile_example_fmha_fwd` binary |
+| `_profile_one.py` | standalone single-shape launcher for `rocprofv3` profiling of the production-dispatched 2D combo kernel (d64/b32/GQA-8/sinks); args `<sw> <num_seqs> <iters>` |
+| `prefill2d_bf16_triton_ckdsl_perf.csv` | captured bf16 prefill-2D cohort (142 deduped shapes; geomean **1.108x** vs Triton-2D at `cap_blocks=65536`, 105/142 wins) |
+| `prefill2d_fp8_triton_ckdsl_perf.csv` | captured bf16-Q + fp8-KV prefill cohort (74 shapes; geomean **0.984x**; SW 1.108x 37/37, full-attention 0.874x) |
+| `aiter_ua_shapes.json`, `aiter_ua_2_shapes.json`, `aiter_ua_prefill2d_allbf16.json` | captured AITER `unified_attention` call records (paged-KV shapes) used as benchmark inputs |
+
+> The `benchmark_prefill2d_*.py` scripts load shapes via the in-tree shape
+> utilities under
+> `python/ck_dsl/dsl_docs/optimization/utilities/tools/stage1_benchmark`
+> (`_ua_shape_utils.py`); pass `--shape-utils-path` to override.
 
 ## JSON report layout
 

@@ -1,18 +1,39 @@
 # CK DSL fused-MoE parity & benchmark harness
 
 This folder hosts the cross-backend parity + benchmark scripts for the
-CK DSL `FusedMoeForward` pipeline. It is the canonical performance
-harness for the CK DSL MoE work.
+CK DSL `FusedMoeForward` pipeline — the **chained-launch** fused-MoE
+forward (router → sort → gather → gate/up GEMM → SiLU → down GEMM →
+weighted reduce, as `5 + 3·E` launches on one HIP stream). It is the
+canonical performance harness for the CK DSL MoE work, and is distinct
+from the single-launch mega-kernel in
+[`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/) (same math,
+opposite kernel structure).
 
-Two scripts live here:
+> **New to fused MoE, or want the kernel strategy?**
+> [`ALGORITHM.md`](ALGORITHM.md) derives the pipeline from the math up —
+> the SwiGLU-FFN + top-k routing spec, the sorted/de-padded bucket
+> layout, the per-stage steps, and why preshuffled-B, active-tile skip,
+> and HIP-graph replay are scheduling/layout levers that never change
+> what is computed. This README is the optimization history and the
+> runnable field guide.
 
-| Script | Role |
+## File map
+
+| path | role |
 |---|---|
-| [`fused_moe_e2e_perf.py`](fused_moe_e2e_perf.py) | End-to-end fused-MoE forward perf comparison: CK DSL vs torch eager vs Triton vs CK Tile C++. The four-way perf harness. |
-| [`tune_gate_up_silu.py`](tune_gate_up_silu.py) | Tile-shape and activation-barrier sweep for the experimental fused gate / up / SiLU GEMM. Picks the best fused-MoE GEMM variant for a given decode / small-batch shape. |
+| [`README.md`](README.md) | this document — field guide + optimization history + results |
+| [`ALGORITHM.md`](ALGORITHM.md) | the math, data layout, and per-stage steps of the chained pipeline |
+| [`fused_moe_e2e_perf.py`](fused_moe_e2e_perf.py) | four-way end-to-end perf + correctness harness: CK DSL vs torch eager vs Triton vs CK Tile C++ |
+| [`tune_gate_up_silu.py`](tune_gate_up_silu.py) | tile-shape × activation-barrier (`packed`/`dual`/`interleaved`) sweep for the fused gate/up/SiLU GEMM |
+| [`test_fused_moe_preshuffle.py`](test_fused_moe_preshuffle.py) | end-to-end parity + perf for the preshuffled-B and active-tile-skip knobs on `FusedMoeForward` (HIP-graph-replayed, 6 scenarios) |
+| [`test_preshuffle_b.py`](test_preshuffle_b.py) | standalone parity + perf for `trait.preshuffle_b=True` on a single `BatchedGemm` |
+| [`test_active_tile_skip.py`](test_active_tile_skip.py) | standalone parity + perf for `trait.active_tile_skip=True` on a single `BatchedGemm` (all-active = zero overhead, all-inactive ≈ 13× faster) |
+| `__init__.py` | package marker |
 
-Both scripts share input generation, scenario definitions, and the
-torch-eager reference from `fused_moe_e2e_perf.py`.
+The two `tune_*` / `fused_moe_e2e_perf.py` scripts share input
+generation, scenario definitions, and the torch-eager reference from
+`fused_moe_e2e_perf.py`. The three `test_*` scripts are self-contained
+parity/perf checks (run directly, no extra args needed).
 
 ---
 
@@ -73,7 +94,9 @@ the standard MoE workloads look like in production):
 
 - `hidden` and `intermediate` must be multiples of the GEMM tile dims
   (default `tile_n=128`, `tile_k=64`) and the streaming kernel
-  `block_size` (64 by default).
+  `block_size` (the `FusedMoeForwardSpec.streaming_block_size` default
+  is 256; the harness caps it at `min(256, hidden)` for the small
+  validation shape, so `hidden` must divide that).
 - `experts ≤ sort_block_size` (= 64) for the single-block scan kernel.
 - `topk ≤ experts`.
 
@@ -192,6 +215,14 @@ happen in production.
 `--attempts 10 --warmup 3 --dtype f16`. Speedup is `(other) / (CK DSL)`,
 so values > 1 mean CK DSL is faster.
 
+> The `ck_dsl` column below is the **baseline** configuration measured
+> in Rounds 1-5 (no preshuffle, active-tile-skip off). The preshuffle-B
+> (Round 10) and active-tile-skip (Round 11) levers — both now shipped
+> as default-on / env-toggleable knobs — improve the `ck_dsl` numbers
+> further; see those rounds for the per-shape post-lever latencies
+> (e.g. `decode_T1` drops from ~0.40 ms to ~0.27 ms with active-tile
+> skip on). Re-run the script to regenerate the table for your build.
+
 | Scenario | ck_dsl | torch | triton | ck_tile_cpp | ck_dsl vs torch | ck_dsl vs triton | ck_dsl vs ck_tile_cpp |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | decode_T1_E8_K2_H4096_I7168     | 0.401 ms | 0.504 ms | 14.960 ms | 0.122 ms | **1.26×** | **37.31×** | 0.30× |
@@ -250,16 +281,22 @@ The two batched GEMMs are 79 % of the time. The streaming kernels
 (gather / silu_mul / reduce) together (~13 %) are the only category
 where launch / scheduling overhead is meaningful relative to compute.
 
-**Round 2: lever sweep on unenabled experimental flags.** The spec
-exposes four experimental flags. Two are already enabled by default
-(`use_experimental_interleaved_gate_up_silu`, the `_default_gemm_tile()`
-32×32×16 atom). The other two were tried:
+**Round 2: lever sweep on the experimental / opt-in flags.** Several
+levers ship enabled by default in `FusedMoeForwardSpec`
+(`use_experimental_interleaved_gate_up_silu=True`,
+`use_experimental_fused_down_reduce=True`,
+`active_tile_skip_gemms=True`, plus the `_default_gemm_tile()`
+32×32×16 atom). Note the e2e harness deliberately pins
+`use_experimental_fused_down_reduce=False` when building its CK DSL
+spec (see `run_ck_dsl()`), so the baseline numbers in the headline
+table are measured with the separate `DownOut` + `topk_reduce` path,
+not the fused down+reduce kernel. The remaining opt-in flag was
+tried:
 
 | Lever | Verdict |
 |---|---|
-| `use_experimental_fused_down_reduce=True` | **revert** — 30-50 % regression on every scenario; the fused down+reduce kernel adds work to the down GEMM that doesn't pay |
+| `use_experimental_fused_down_reduce` (spec default `True`) | per the spec field docstring, the native-FP-atomic fused down+reduce is ~10 % faster than the separate `topk_reduce` launch on the decode shapes and neutral on the compute-bound datacenter shape; the harness pins it `False` only to keep the published baseline on the simpler two-kernel path |
 | `use_experimental_static_scatter_gather=True` | within noise (≤ 2 % on the larger shapes, tied on the small one) |
-| Both combined | dominated by the `fused_down_reduce` regression |
 
 **Round 3: lever sweep on streaming-kernel and GEMM knobs.** Four
 further levers tried:
@@ -662,10 +699,11 @@ on every test scenario in `examples/gfx950/moe/test_fused_moe_preshuffle.py`.
 
 The lever is exposed via:
 
-- Spec: `FusedMoeForwardSpec.active_tile_skip_gemms=True`.
+- Spec: `FusedMoeForwardSpec.active_tile_skip_gemms` (default `True`).
 - Env (in `examples/gfx950/moe/fused_moe_e2e_perf.py`):
-  `CK_DSL_ACTIVE_TILE_SKIP_GEMMS=1`. Composes with
-  `CK_DSL_PRESHUFFLE_W_DOWN=1` and
+  `CK_DSL_ACTIVE_TILE_SKIP_GEMMS` — the harness defaults it **on**
+  (`"1"`); set `CK_DSL_ACTIVE_TILE_SKIP_GEMMS=0` to force the dense
+  GEMM path. Composes with `CK_DSL_PRESHUFFLE_W_DOWN=1` and
   `CK_DSL_PRESHUFFLE_W_GATE_UP_INTERLEAVED=1`.
 
 **Remaining gap (after Round 11).** decode_T1 canonical at 2.18×
@@ -677,24 +715,16 @@ remove the `HiddenPadded` HBM round-trip, plus a CK-Tile-style
 flatmm micro-kernel with wider N tiles than the LDS budget allows
 today.
 
-**Remaining gap (after all 9 rounds).** The CK DSL pipeline is
-2.3× the CK Tile C++ binary on `small` and 3.1× on `decode_T1`,
-driven entirely by the structural difference between an 8-launch
-pipeline of separate kernels and CK Tile's 2-launch pipeline of
-`(sort + mega-kernel)`. The 4-5× wins originally claimed vs torch
-eager were measurement bias (Round 5); the wins vs Triton are real
-(34-42× on H=4096 shapes); the wins vs CK Tile C++ are not present
-on these shapes and are not closeable inside the current authoring
-model. Closing it would require either:
+**Summary of the kept wins and the residual gap.** Across the rounds
+above, the 4-5× wins originally claimed vs torch eager were measurement
+bias (Round 5, corrected to 1.26-2.60×); the wins vs the purpose-written
+Triton baseline are real (36-42× on the H=4096 shapes); and the gap to
+the CK Tile C++ binary, while narrowed by the preshuffle-B (Round 10)
+and active-tile-skip (Round 11) levers, remains. Both real levers are
+now shipped flags — `preshuffle_w_*` and `active_tile_skip_gemms` are
+default-on or env-toggleable knobs, not no-ops. Closing the residual
+gap further would require kernel-authoring work beyond config flips:
 
-- **Implementing the v2 preshuffled-B kernel body in the universal /
-  batched GEMM** so `preshuffle_b=True` actually emits different
-  code (Round 9 confirmed the lever is currently a no-op). With the
-  v2 body in place plus orchestrator support to host-preshuffle the
-  weights at construction time, the GEMM hot loop's per-lane B-load
-  becomes one wide `buffer_load_dwordx4` per K-tile instead of
-  strided scalar loads — the runbook's Case Study 5 cites this as
-  a real GEMM-time saver.
 - A single-kernel re-implementation in CK DSL (significant effort;
   new authoring pattern beyond the current `FusedMoeForward`
   composer) covering gate / up / SiLU / down / weighted-reduce in
@@ -720,11 +750,12 @@ implementations that already solved the problem" applies directly.
   `ck_tile_cpp` field is `null`). The CK DSL row is unaffected.
 - The CK DSL pipeline does **per-expert grouped-GEMM dispatch via a
   Python loop** with a small device-to-host copy of `Counts` and
-  `Offsets` per dispatch; AITER's mega-kernel does in-kernel
-  grouped-GEMM dispatch with no host roundtrip. This is the largest
-  known overhead in the DSL path for shapes where per-expert GEMMs
-  are small. HIP graph capture (used in static-offset mode) hides
-  this on shapes where the routing is shape-stable.
+  `Offsets` per dispatch (in the dynamic path); the CK Tile C++
+  mega-kernel does in-kernel grouped-GEMM dispatch with no host
+  roundtrip. This is the largest known overhead in the DSL path for
+  shapes where per-expert GEMMs are small. HIP graph capture (used in
+  static-offset mode) hides this on shapes where the routing is
+  shape-stable.
 
 ### JSON report layout
 
@@ -762,15 +793,18 @@ MFMA tile candidates** for a given scenario.
 ### Three activation-barrier paths
 
 1. **`packed`** — packed gate + up batched GEMM (`N = 2 × intermediate`)
-   followed by a packed `silu_mul` post-pass. The current production
-   default. One activation barrier (`silu_mul` after the GEMM).
+   followed by a packed `silu_mul` post-pass. Selected when both
+   experimental fused flags are off. One activation barrier (`silu_mul`
+   after the GEMM).
 2. **`dual`** — dual-B MFMA gate + up GEMM with the SiLU epilogue
    folded into the kernel. No separate `silu_mul` pass. Drives the
    `use_experimental_fused_gate_up_silu` spec flag.
 3. **`interleaved`** — interleaved single-B MFMA gate + up GEMM with
    the SiLU epilogue folded into the kernel. The two GEMMs share a
    single B-operand load path. Drives the
-   `use_experimental_interleaved_gate_up_silu` spec flag.
+   `use_experimental_interleaved_gate_up_silu` spec flag, which is
+   **on by default** in `FusedMoeForwardSpec` — so `interleaved` is the
+   production-default activation path, not `packed`.
 
 ### Five tile candidates
 
@@ -846,17 +880,19 @@ iterations); lower is better. The best per scenario is bolded.
   best 16×16 row (`t16n128k64_w1x1_atom16` / `interleaved`) is
   ~50 % slower than the 32×32-atom winner on decode_T1 and
   ~50 % slower on decode_T8.
-- **`packed` (the current production default) is competitive on
-  small shapes** but loses to `interleaved` once the per-expert
-  GEMMs grow beyond the small-validation regime.
+- **`packed` is competitive on small shapes** but loses to
+  `interleaved` (the production default) once the per-expert GEMMs
+  grow beyond the small-validation regime.
 - **Correctness** (`max_abs` vs torch reference) is identical
   across paths on each scenario: 1.9e-6 on small, 4.9e-4 on the two
   decode scenarios — well within f16-with-fp32-accumulator tolerance.
 
-The recommended next step (when promoting `interleaved` past
-experimental) is to wire the 32×32-atom + interleaved variant into
-the `FusedMoeForward` selector for shapes where the per-expert GEMM
-M dim is small enough that the gate / up activation barrier dominates.
+The 32×32-atom + interleaved variant this sweep selects is exactly
+what `FusedMoeForwardSpec` ships as its default
+(`use_experimental_interleaved_gate_up_silu=True` plus the
+`_default_gemm_tile()` 32×32×16 tile), so the tuner's finding is
+already the production configuration. Re-run it after changing the
+per-expert GEMM shapes to confirm the same tile still wins.
 
 ---
 
@@ -886,3 +922,40 @@ PYTHONPATH=python python \
 `run_triton` path to import `aiter`-bundled Triton dependencies. The
 purpose-written Triton kernel itself only needs `triton` to be
 importable in the active environment.
+
+---
+
+## Parity tests
+
+Three self-contained parity + perf checks back the levers discussed in
+the optimization log. Each runs directly (no required flags) and exits
+non-zero on a parity failure; each also accepts optional shape flags
+(see `--help`). All require a gfx950 GPU.
+
+```bash
+cd <composablekernel-checkout>
+
+# End-to-end parity + perf for the preshuffle / active-tile-skip knobs
+# on FusedMoeForward (HIP-graph-replayed, 6 scenarios). Optional:
+# --warmup N (default 10), --iters N (default 50).
+python python/ck_dsl/examples/gfx950/moe/test_fused_moe_preshuffle.py
+
+# Standalone BatchedGemm parity + perf for trait.preshuffle_b=True.
+# Optional: --B --M --N --K --tile_m --tile_n --tile_k
+#           --pipeline --scheduler --epilogue --iters
+python python/ck_dsl/examples/gfx950/moe/test_preshuffle_b.py
+
+# Standalone BatchedGemm parity + perf for trait.active_tile_skip=True
+# (all-active vs all-inactive timing). Optional:
+# --B --M --N --K --tile_m --tile_n --tile_k
+python python/ck_dsl/examples/gfx950/moe/test_active_tile_skip.py
+```
+
+`test_fused_moe_preshuffle.py` gates every variant at `rel ≤ 5e-2` vs
+the no-preshuffle baseline (the levers are bitwise-identical in
+practice — `rel = 0` is reported on every scenario). `test_preshuffle_b.py`
+gates the preshuffled kernel against a torch reference (K-scaled f16
+tolerance) **and** bitwise (`≤ 1e-3`) against the non-preshuffled
+kernel. `test_active_tile_skip.py` gates both the all-active and the
+half-skipped cases bitwise (`≤ 1e-3`), and checks that skipped output
+rows stay zero.
