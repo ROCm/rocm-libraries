@@ -8,16 +8,12 @@
 # build_implicit_gemm_conv(spec, arch=<cfg arch>) and prints
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared
 # with the C emitter conv_implicit_gemm_emit.c.
-import sys
-
 from ck_dsl.instances.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _spec(idx: int):
@@ -179,24 +175,11 @@ def _spec(idx: int):
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: conv_implicit_gemm_emit.py <config_index>\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    spec, arch = _spec(idx)
-    kernel = build_implicit_gemm_conv(spec, arch=arch)
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch=arch)
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    return 0
+    return run_emit(
+        _spec,
+        build_implicit_gemm_conv,
+        usage="usage: conv_implicit_gemm_emit.py <config_index>\n",
+    )
 
 
 if __name__ == "__main__":

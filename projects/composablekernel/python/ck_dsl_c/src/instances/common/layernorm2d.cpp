@@ -97,18 +97,7 @@ ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_
 
 static void ln_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    size_t n;
-    if(reason == NULL || reason_cap == 0)
-    {
-        return;
-    }
-    n = strlen(msg);
-    if(n >= reason_cap)
-    {
-        n = reason_cap - 1;
-    }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 bool ckc_layernorm2d_is_valid_spec(const ckc_layernorm2d_spec_t* spec,

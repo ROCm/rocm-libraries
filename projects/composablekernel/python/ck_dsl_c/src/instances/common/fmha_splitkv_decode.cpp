@@ -122,18 +122,7 @@ ckc_status_t ckc_fmha_splitkv_decode_kernel_name(const ckc_fmha_splitkv_decode_s
 
 static void ckc_splitkv_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    size_t n;
-    if(reason == NULL || reason_cap == 0)
-    {
-        return;
-    }
-    n = strlen(msg);
-    if(n >= reason_cap)
-    {
-        n = reason_cap - 1;
-    }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 bool ckc_fmha_splitkv_decode_is_valid_spec(const ckc_fmha_splitkv_decode_spec_t* spec,

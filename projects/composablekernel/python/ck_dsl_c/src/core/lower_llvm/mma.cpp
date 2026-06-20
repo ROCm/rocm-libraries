@@ -34,26 +34,19 @@ static void _op_tile_wmma_f32_16x16x16_f16(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_wmma_f32_16x16x16_bf16(ckc_lower_t* L, const ckc_op_t* op);
 static void _emit_wmma(ckc_lower_t* L, const ckc_op_t* op, const char* op_id);
 static void _op_tile_mma(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_16x16x16_f16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_16x16x32_f16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_16x16x16_bf16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_16x16x32_bf16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_32x32x8_f16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_32x32x8_bf16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_32x32x16_f16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_32x32x16_bf16(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_16x16x4_f32(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_32x32x2_f32(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_32x32x16_fp8(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_32x32x16_bf8(ckc_lower_t* L, const ckc_op_t* op);
-static void _op_tile_mfma_f32_4x4x4_f16(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp4(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_16x16x96_fp6(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(ckc_lower_t* L, const ckc_op_t* op);
 static void _op_tile_register_p_from_qk_c(ckc_lower_t* L, const ckc_op_t* op);
+
+/* Table-driven dense MFMA dispatch (definition below the spec table). Resolves
+ * the plain / scalar / bf16-bitcast atoms; returns true if op_id matched. */
+static bool _try_emit_mfma_table(ckc_lower_t* L, const ckc_op_t* op, const char* op_id);
 
 /* ------------------------------------------------------------ small helpers */
 
@@ -93,53 +86,15 @@ static void _op_tile_mma(ckc_lower_t* L, const ckc_op_t* op)
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.mma: missing op_id attribute");
     }
 
-    /* f16 / bf16 dense */
-    if(strcmp(op_id, "mfma_f32_16x16x16_f16") == 0)
+    /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
+     * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
+    if(_try_emit_mfma_table(L, op, op_id))
     {
-        _op_tile_mfma_f32_16x16x16_f16(L, op);
+        return;
     }
-    else if(strcmp(op_id, "mfma_f32_16x16x32_f16") == 0)
-    {
-        _op_tile_mfma_f32_16x16x32_f16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x16_bf16") == 0)
-    {
-        _op_tile_mfma_f32_16x16x16_bf16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x32_bf16") == 0)
-    {
-        _op_tile_mfma_f32_16x16x32_bf16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_32x32x8_f16") == 0)
-    {
-        _op_tile_mfma_f32_32x32x8_f16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_32x32x8_bf16") == 0)
-    {
-        _op_tile_mfma_f32_32x32x8_bf16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_32x32x16_f16") == 0)
-    {
-        _op_tile_mfma_f32_32x32x16_f16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_32x32x16_bf16") == 0)
-    {
-        _op_tile_mfma_f32_32x32x16_bf16(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0)
-    {
-        _op_tile_mfma_f32_16x16x4_f32(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
-    {
-        _op_tile_mfma_f32_32x32x2_f32(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_4x4x4_f16") == 0)
-    {
-        _op_tile_mfma_f32_4x4x4_f16(L, op);
-        /* fp8 / bf8 */
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x32_fp8") == 0)
+
+    /* fp8 / bf8 */
+    if(strcmp(op_id, "mfma_f32_16x16x32_fp8") == 0)
     {
         _op_tile_mfma_f32_16x16x32_fp8(L, op);
     }
@@ -439,12 +394,110 @@ static void _emit_wmma(ckc_lower_t* L, const ckc_op_t* op, const char* op_id)
 }
 
 /* ====================================================================== */
-/* f16 / bf16 dense MFMA atoms                                            */
+/* f16 / bf16 / f32 dense MFMA atoms (table-driven)                       */
 /* ====================================================================== */
 
-static void _op_tile_mfma_f32_16x16x16_f16(ckc_lower_t* L, const ckc_op_t* op)
+/* The plain / scalar / bf16-bitcast MFMA atoms are structural twins: each one
+ * guards (live + exactly 3 operands), tracks one intrinsic decl key, optionally
+ * prepends a fixed two-line operand bitcast (the bf16 `_1k` atoms widen
+ * <4 x bfloat> -> <4 x i16>), then emits a single MFMA call. They differ only
+ * by four literal strings (decl key, intrinsic, A/B element-vector spelling,
+ * accumulator/result vector spelling) plus the optional bitcast target. This
+ * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
+typedef struct _mfma_spec
+{
+    const char* op_id;      /* the tile.mma op_id (no "tile." prefix)         */
+    const char* decl_key;   /* _need() key                                    */
+    const char* intrinsic;  /* fully-mangled @llvm.amdgcn.mfma....            */
+    const char* ab_ty;      /* A/B SSA operand type spelling                  */
+    const char* acc_ty;     /* accumulator/result vector spelling             */
+    const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
+} _mfma_spec_t;
+
+static const _mfma_spec_t MFMA_SPECS[] = {
+    {"mfma_f32_16x16x16_f16",
+     "mfma.f32.16x16x16f16",
+     "llvm.amdgcn.mfma.f32.16x16x16f16",
+     "<4 x half>",
+     "<4 x float>",
+     NULL},
+    {"mfma_f32_16x16x32_f16",
+     "mfma.f32.16x16x32.f16",
+     "llvm.amdgcn.mfma.f32.16x16x32.f16",
+     "<8 x half>",
+     "<4 x float>",
+     NULL},
+    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> before the call. */
+    {"mfma_f32_16x16x16_bf16",
+     "mfma.f32.16x16x16bf16.1k",
+     "llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
+     "<4 x bfloat>",
+     "<4 x float>",
+     "<4 x i16>"},
+    {"mfma_f32_16x16x32_bf16",
+     "mfma.f32.16x16x32.bf16",
+     "llvm.amdgcn.mfma.f32.16x16x32.bf16",
+     "<8 x bfloat>",
+     "<4 x float>",
+     NULL},
+    {"mfma_f32_32x32x8_f16",
+     "mfma.f32.32x32x8f16",
+     "llvm.amdgcn.mfma.f32.32x32x8f16",
+     "<4 x half>",
+     "<16 x float>",
+     NULL},
+    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
+    {"mfma_f32_32x32x8_bf16",
+     "mfma.f32.32x32x8bf16.1k",
+     "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
+     "<4 x bfloat>",
+     "<16 x float>",
+     "<4 x i16>"},
+    /* fp32 (TF32-class) scalar atoms: A/B are single floats per lane. */
+    {"mfma_f32_16x16x4_f32",
+     "mfma.f32.16x16x4f32",
+     "llvm.amdgcn.mfma.f32.16x16x4f32",
+     "float",
+     "<4 x float>",
+     NULL},
+    {"mfma_f32_32x32x2_f32",
+     "mfma.f32.32x32x2f32",
+     "llvm.amdgcn.mfma.f32.32x32x2f32",
+     "float",
+     "<16 x float>",
+     NULL},
+    {"mfma_f32_32x32x16_f16",
+     "mfma.f32.32x32x16.f16",
+     "llvm.amdgcn.mfma.f32.32x32x16.f16",
+     "<8 x half>",
+     "<16 x float>",
+     NULL},
+    {"mfma_f32_32x32x16_bf16",
+     "mfma.f32.32x32x16.bf16",
+     "llvm.amdgcn.mfma.f32.32x32x16.bf16",
+     "<8 x bfloat>",
+     "<16 x float>",
+     NULL},
+    {"mfma_f32_4x4x4_f16",
+     "mfma.f32.4x4x4f16",
+     "llvm.amdgcn.mfma.f32.4x4x4f16",
+     "<4 x half>",
+     "<4 x float>",
+     NULL},
+};
+static const int MFMA_SPECS_N = (int)(sizeof(MFMA_SPECS) / sizeof(MFMA_SPECS[0]));
+
+/* Emit one plain/scalar/bf16-bitcast MFMA call from its spec. Reproduces the
+ * exact per-atom fragment order: guard, _need, optional fixed two-line operand
+ * bitcast, then the single MFMA call. Subexpressions are hoisted to temporaries
+ * left-to-right so the emitted text is independent of argument-evaluation order
+ * (the bitcast path allocates fresh SSA names, which is order-sensitive). */
+static void _emit_mfma(ckc_lower_t* L, const ckc_op_t* op, const _mfma_spec_t* spec)
 {
     const ckc_value_t *a, *b, *c;
+    const char *a_arg, *b_arg;
+    const char* call_ty;
+
     if(!ckc_ll_live(L) || op->num_operands != 3)
     {
         if(ckc_ll_live(L))
@@ -456,274 +509,65 @@ static void _op_tile_mfma_f32_16x16x16_f16(ckc_lower_t* L, const ckc_op_t* op)
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.16x16x16f16");
+    ckc_ll_need(L, spec->decl_key);
+
+    if(spec->bitcast_to != NULL)
+    {
+        /* bf16 `_1k`: bitcast the A/B operands to the integer vector the
+         * intrinsic expects. Fresh names are allocated A-then-B, matching the
+         * original per-atom order, before either bitcast line is emitted. */
+        const char* a_cast = ckc_ll_fresh(L, "mfma_a_i16");
+        const char* b_cast = ckc_ll_fresh(L, "mfma_b_i16");
+        ckc_ll_emitf(L,
+                     "  %s = bitcast %s %s to %s",
+                     a_cast,
+                     spec->ab_ty,
+                     ckc_ll_operand(L, a),
+                     spec->bitcast_to);
+        ckc_ll_emitf(L,
+                     "  %s = bitcast %s %s to %s",
+                     b_cast,
+                     spec->ab_ty,
+                     ckc_ll_operand(L, b),
+                     spec->bitcast_to);
+        a_arg   = a_cast;
+        b_arg   = b_cast;
+        call_ty = spec->bitcast_to;
+    }
+    else
+    {
+        a_arg   = ckc_ll_operand(L, a);
+        b_arg   = ckc_ll_operand(L, b);
+        call_ty = spec->ab_ty;
+    }
+
     ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
-                 "<4 x half> %s, <4 x half> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
+                 "  %s = call %s @%s("
+                 "%s %s, %s %s, %s %s, i32 0, i32 0, i32 0)",
                  mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
+                 spec->acc_ty,
+                 spec->intrinsic,
+                 call_ty,
+                 a_arg,
+                 call_ty,
+                 b_arg,
+                 spec->acc_ty,
                  ckc_ll_operand(L, c));
 }
 
-static void _op_tile_mfma_f32_16x16x32_f16(ckc_lower_t* L, const ckc_op_t* op)
+/* Resolve op_id against the dense MFMA table; emit and return true on a hit. */
+static bool _try_emit_mfma_table(ckc_lower_t* L, const ckc_op_t* op, const char* op_id)
 {
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
+    int i;
+    for(i = 0; i < MFMA_SPECS_N; i++)
     {
-        if(ckc_ll_live(L))
+        if(strcmp(MFMA_SPECS[i].op_id, op_id) == 0)
         {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
+            _emit_mfma(L, op, &MFMA_SPECS[i]);
+            return true;
         }
-        return;
     }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.16x16x32.f16");
-    ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.f16("
-                 "<8 x half> %s, <8 x half> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_16x16x16_bf16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    const char *a_cast, *b_cast;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.16x16x16bf16.1k");
-    /* bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic. */
-    a_cast = ckc_ll_fresh(L, "mfma_a_i16");
-    b_cast = ckc_ll_fresh(L, "mfma_b_i16");
-    ckc_ll_emitf(L, "  %s = bitcast <4 x bfloat> %s to <4 x i16>", a_cast, ckc_ll_operand(L, a));
-    ckc_ll_emitf(L, "  %s = bitcast <4 x bfloat> %s to <4 x i16>", b_cast, ckc_ll_operand(L, b));
-    ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k("
-                 "<4 x i16> %s, <4 x i16> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 a_cast,
-                 b_cast,
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_16x16x32_bf16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.16x16x32.bf16");
-    ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.bf16("
-                 "<8 x bfloat> %s, <8 x bfloat> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_32x32x8_f16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.32x32x8f16");
-    ckc_ll_emitf(L,
-                 "  %s = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8f16("
-                 "<4 x half> %s, <4 x half> %s, <16 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-/* bf16 32x32x8 atom (#8348). Uses the `_1k` bf16 intrinsic: operands are
- * bitcast <4 x bfloat> -> <4 x i16> exactly like the 16x16x16 bf16 path
- * (mirrors Python _op_tile_mfma_f32_32x32x8_bf16). */
-static void _op_tile_mfma_f32_32x32x8_bf16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    const char *a_cast, *b_cast;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.32x32x8bf16.1k");
-    a_cast = ckc_ll_fresh(L, "mfma_a_i16");
-    b_cast = ckc_ll_fresh(L, "mfma_b_i16");
-    ckc_ll_emitf(L, "  %s = bitcast <4 x bfloat> %s to <4 x i16>", a_cast, ckc_ll_operand(L, a));
-    ckc_ll_emitf(L, "  %s = bitcast <4 x bfloat> %s to <4 x i16>", b_cast, ckc_ll_operand(L, b));
-    ckc_ll_emitf(L,
-                 "  %s = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
-                 "<4 x i16> %s, <4 x i16> %s, <16 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 a_cast,
-                 b_cast,
-                 ckc_ll_operand(L, c));
-}
-
-/* fp32 (TF32-class) scalar MFMA atoms (#8348). A/B are single floats per lane
- * (a_per_lane=b_per_lane=1); accumulator is <4 x float> (16x16x4) or
- * <16 x float> (32x32x2). No operand bitcast (already scalar float). */
-static void _op_tile_mfma_f32_16x16x4_f32(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.16x16x4f32");
-    ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
-                 "float %s, float %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_32x32x2_f32(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.32x32x2f32");
-    ckc_ll_emitf(L,
-                 "  %s = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
-                 "float %s, float %s, <16 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-/* NOTE: Python defines _op_tile_mfma_f32_32x32x16_f16 twice (the second
- * definition at module scope wins); both bodies are identical, so this single
- * implementation reproduces the effective behaviour byte-for-byte. */
-static void _op_tile_mfma_f32_32x32x16_f16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.32x32x16.f16");
-    ckc_ll_emitf(L,
-                 "  %s = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
-                 "<8 x half> %s, <8 x half> %s, <16 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_32x32x16_bf16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.32x32x16.bf16");
-    ckc_ll_emitf(L,
-                 "  %s = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.bf16("
-                 "<8 x bfloat> %s, <8 x bfloat> %s, <16 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
-}
-
-static void _op_tile_mfma_f32_4x4x4_f16(ckc_lower_t* L, const ckc_op_t* op)
-{
-    const ckc_value_t *a, *b, *c;
-    if(!ckc_ll_live(L) || op->num_operands != 3)
-    {
-        if(ckc_ll_live(L))
-        {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 3 operands", op->name);
-        }
-        return;
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    ckc_ll_need(L, "mfma.f32.4x4x4f16");
-    ckc_ll_emitf(L,
-                 "  %s = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4f16("
-                 "<4 x half> %s, <4 x half> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                 mma_result_name(L, op),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b),
-                 ckc_ll_operand(L, c));
+    return false;
 }
 
 /* ====================================================================== */

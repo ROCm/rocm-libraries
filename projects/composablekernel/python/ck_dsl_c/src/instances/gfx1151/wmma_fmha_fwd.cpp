@@ -35,16 +35,7 @@
 
 static void wmma_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    if(reason != NULL && reason_cap > 0)
-    {
-        size_t n = strlen(msg);
-        if(n >= reason_cap)
-        {
-            n = reason_cap - 1;
-        }
-        memcpy(reason, msg, n);
-        reason[n] = '\0';
-    }
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */

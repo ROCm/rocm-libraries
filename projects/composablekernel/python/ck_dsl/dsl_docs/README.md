@@ -49,11 +49,15 @@ New to the DSL? Read in this order:
 23. `autotune/overview.md`
 24. `development/testing.md`
 25. `development/extending.md`
-26. `reference/file_index.md`
-27. `reference/api_index.md`
-28. `reference/op_vocabulary.md`
-29. `reference/mfma_atom_catalog.md`
-30. `reference/glossary.md`
+26. `development/onboarding.md` — guided learning path for kernel authors
+27. `development/engine_contributing.md` — the dual-backend contract; required reading before editing engine internals
+28. `development/invariants.md` — non-obvious rules (the landmines) for engine contributors
+29. `development/troubleshooting.md` — engine/build failure catalog (stale-artifact class, gate failures)
+30. `reference/file_index.md`
+31. `reference/api_index.md`
+32. `reference/op_vocabulary.md`
+33. `reference/mfma_atom_catalog.md`
+34. `reference/glossary.md`
 
 ## One-Screen Summary
 

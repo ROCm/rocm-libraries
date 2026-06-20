@@ -44,18 +44,7 @@
 
 static void ckc_appendkv_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    size_t n;
-    if(reason == NULL || reason_cap == 0)
-    {
-        return;
-    }
-    n = strlen(msg);
-    if(n >= reason_cap)
-    {
-        n = reason_cap - 1;
-    }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 /* ===================================================================== *

@@ -38,7 +38,7 @@ from ...helpers.distribution import (
     make_static_tile_distribution,
     store_tile_cshuffle,
 )
-from ...helpers.spec import choose_load_vec
+from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import (
     TensorDescriptor,
     TensorView,
@@ -59,6 +59,7 @@ from .gemm_universal import (
     _mfma_atom_widths,
     _storage_dtype,
     is_valid_spec as is_valid_gemm_spec,
+    mono_data_spec,
 )
 
 
@@ -642,7 +643,7 @@ def _emit_moe_prefetch_kloop(
 
 
 @dataclass(frozen=True)
-class FusedGateUpSiluGemmSpec:
+class FusedGateUpSiluGemmSpec(WarpTileBlockSizeMixin):
     """Batched per-expert fused gate+up GEMM + SiLU epilogue.
 
     Layouts match :class:`BatchedGemmSpec` / universal GEMM RCR:
@@ -673,17 +674,10 @@ class FusedGateUpSiluGemmSpec:
     grouped: bool = False
 
     def __post_init__(self) -> None:
-        if self.block_size == 0:
-            t = self.tile
-            object.__setattr__(
-                self,
-                "block_size",
-                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
-            )
+        self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         # Reuse universal GEMM validation / helper conventions. The
@@ -1066,7 +1060,7 @@ def moe_gate_up_silu_gemm_grouped_grid(
 
 
 @dataclass(frozen=True)
-class FusedInterleavedGateUpSiluGemmSpec:
+class FusedInterleavedGateUpSiluGemmSpec(WarpTileBlockSizeMixin):
     """Single-B gate+up GEMM with in-kernel activation.
 
     ``WGateUp`` is interleaved along N:
@@ -1111,17 +1105,10 @@ class FusedInterleavedGateUpSiluGemmSpec:
     grouped: bool = False
 
     def __post_init__(self) -> None:
-        if self.block_size == 0:
-            t = self.tile
-            object.__setattr__(
-                self,
-                "block_size",
-                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
-            )
+        self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -1581,7 +1568,7 @@ def moe_interleaved_gate_up_silu_gemm_grid(
 
 
 @dataclass(frozen=True)
-class FusedDownReduceGemmSpec:
+class FusedDownReduceGemmSpec(WarpTileBlockSizeMixin):
     """Batched down GEMM with top-k weighted reduce as the epilogue.
 
     For every expert batch ``e``, computes ``Hidden_e @ W_down_e.T``.
@@ -1604,17 +1591,10 @@ class FusedDownReduceGemmSpec:
     grouped: bool = False
 
     def __post_init__(self) -> None:
-        if self.block_size == 0:
-            t = self.tile
-            object.__setattr__(
-                self,
-                "block_size",
-                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
-            )
+        self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -1955,7 +1935,7 @@ def moe_down_reduce_gemm_grouped_grid(
 
 
 @dataclass(frozen=True)
-class FusedDownSiluReduceGemmSpec:
+class FusedDownSiluReduceGemmSpec(WarpTileBlockSizeMixin):
     """Single fused down+silu+reduce kernel ("up-kernel") spec (P65).
 
     Reads ``GateOut + UpOut`` activations (the gate / up GEMM
@@ -1976,17 +1956,10 @@ class FusedDownSiluReduceGemmSpec:
     dtype: str = "fp16"
 
     def __post_init__(self) -> None:
-        if self.block_size == 0:
-            t = self.tile
-            object.__setattr__(
-                self,
-                "block_size",
-                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
-            )
+        self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(

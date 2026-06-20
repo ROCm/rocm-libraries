@@ -7,15 +7,11 @@
 # by argv[1], builds the kernel via build_smoothquant and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter smoothquant_emit.c.
-import sys
-
 from ck_dsl.instances.common.smoothquant import (
     SmoothQuantSpec,
     build_smoothquant,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _spec(idx: int) -> SmoothQuantSpec:
@@ -46,25 +42,16 @@ def _spec(idx: int) -> SmoothQuantSpec:
     raise SystemExit(f"unknown config index {idx}")
 
 
+def _build(spec, arch=None):
+    return build_smoothquant(spec)
+
+
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: smoothquant_emit.py <config_index 0..5> [mode]\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    spec = _spec(idx)
-    kernel = build_smoothquant(spec)
-    if mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
-        sys.stdout.write(text)
-    return 0
+    return run_emit(
+        _spec,
+        _build,
+        usage="usage: smoothquant_emit.py <config_index 0..5> [mode]\n",
+    )
 
 
 if __name__ == "__main__":

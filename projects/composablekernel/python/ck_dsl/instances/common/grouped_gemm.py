@@ -86,6 +86,7 @@ from .gemm_universal import (
     UniversalGemmSpec,
     build_universal_gemm,
     is_valid_spec as is_valid_gemm_spec,
+    mono_data_spec,
 )
 
 
@@ -127,8 +128,7 @@ class GroupedGemmSpec(WarpTileBlockSizeMixin):
         self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(

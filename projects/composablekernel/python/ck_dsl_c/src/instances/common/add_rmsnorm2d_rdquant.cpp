@@ -415,16 +415,7 @@ ckc_status_t ckc_add_rmsnorm2d_rdquant_kernel_name(const ckc_add_rmsnorm2d_rdqua
 
 static void ckc_arn_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    if(reason != NULL && reason_cap > 0)
-    {
-        size_t n = strlen(msg);
-        if(n >= reason_cap)
-        {
-            n = reason_cap - 1;
-        }
-        memcpy(reason, msg, n);
-        reason[n] = '\0';
-    }
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 bool ckc_add_rmsnorm2d_rdquant_is_valid_spec(const ckc_add_rmsnorm2d_rdquant_spec_t* spec,

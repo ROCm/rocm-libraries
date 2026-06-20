@@ -27,52 +27,8 @@
 #include "ckc/ir_internal.h"                 /* ckc_i_set_err                     */
 #include "ckc/instance_gemm_internal.h"      /* ckc_gemm_emit_zero_acc            */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom                 */
-
-/* ====================================================================== *
- *  File-local re-derivations of the two gemm_universal MFMA-only helpers.
- *
- *  The Python prologue calls `_storage_dtype(u)` and `_mfma_atom_widths(u)`
- *  (imported from gemm_universal). Their C peers are file-static in
- *  helper_ck_dsl.instances.common.moe_gemm_fused.c and are not exported, so we
- *  re-derive them here EXACTLY as that helper TU does (identical bodies). This
- *  is the same constraint the down/interleaved bodies face. No IR is emitted.
- * ====================================================================== */
-
-/* _storage_dtype(spec): homogeneous A/B/C dtype -> ckc_type_t. */
-static const ckc_type_t* ckc_moe_storage_dtype(const ckc_gemm_universal_spec_t* u)
-{
-    const char* d = u->data.dtype_a;
-    if(d == NULL)
-    {
-        return ckc_f16();
-    }
-    if(strcmp(d, "f16") == 0 || strcmp(d, "fp16") == 0)
-    {
-        return ckc_f16();
-    }
-    if(strcmp(d, "bf16") == 0)
-    {
-        return ckc_bf16();
-    }
-    return ckc_scalar_by_name(d);
-}
-
-/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). */
-static void
-ckc_moe_mfma_atom_widths(const ckc_gemm_universal_spec_t* u, int* a_per, int* b_per, int* c_per)
-{
-    const ckc_gemm_tile_spec_t* t = &u->tile;
-    const ckc_mfma_atom_t* atom =
-        ckc_mfma_atom(u->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
-    int wm   = t->warp_tile_m;
-    int wn   = t->warp_tile_n;
-    int wk   = t->warp_tile_k;
-    int wave = u->wave_size;
-    *a_per   = (wm * wk) / wave;
-    *b_per   = (wn * wk) / wave;
-    *c_per   = (wm * wn) / wave;
-    (void)atom;
-}
+#include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h"
+/* ckc_moe_storage_dtype / ckc_moe_mfma_atom_widths */
 
 /* Build a 2D packed LDS TensorView over `smem` of (d0, d1) elements. Mirrors
  * the Python TensorView(base=smem, desc=TensorDescriptor.packed((d0,d1),

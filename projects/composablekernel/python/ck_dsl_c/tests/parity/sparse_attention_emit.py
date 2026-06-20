@@ -8,8 +8,6 @@
 # or a VsaSparseSpec via build_vsa_sparse_attention (arch="gfx950") and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter sparse_attention_emit.c.
-import sys
-
 from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
 from ck_dsl.instances.common.sparse_attention import (
     JengaSparseSpec,
@@ -17,9 +15,7 @@ from ck_dsl.instances.common.sparse_attention import (
     build_jenga_sparse_attention,
     build_vsa_sparse_attention,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _kernel(idx: int):
@@ -103,24 +99,16 @@ def _kernel(idx: int):
     raise SystemExit(f"unknown config index {idx}")
 
 
+def _emit_build(kernel, arch=None):
+    return kernel
+
+
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: sparse_attention_emit.py <config_index 0..5> [mode]\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    kernel = _kernel(idx)
-    if mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
-        sys.stdout.write(text)
-    return 0
+    return run_emit(
+        _kernel,
+        _emit_build,
+        usage="usage: sparse_attention_emit.py <config_index 0..5> [mode]\n",
+    )
 
 
 if __name__ == "__main__":

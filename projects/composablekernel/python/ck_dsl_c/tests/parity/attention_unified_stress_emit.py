@@ -3,16 +3,12 @@
 # SPDX-License-Identifier: MIT
 #
 # Stress parity emitter for unified attention scalar 2D (Python reference side).
-import sys
-
 from ck_dsl.instances.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
     build_unified_attention_2d,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def C(
@@ -113,26 +109,16 @@ def _kernel(idx):
     return build_unified_attention_2d(spec)
 
 
-def main():
-    if len(sys.argv) < 2:
-        sys.stderr.write(
-            "usage: attention_unified_stress_emit.py <config_index> [ll|ir|verify]\n"
-        )
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    kernel = _kernel(idx)
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    else:  # verify
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    return 0
+def _emit_build(kernel, arch=None):
+    return kernel
+
+
+def main() -> int:
+    return run_emit(
+        _kernel,
+        _emit_build,
+        usage="usage: attention_unified_stress_emit.py <config_index> [ll|ir|verify]\n",
+    )
 
 
 if __name__ == "__main__":

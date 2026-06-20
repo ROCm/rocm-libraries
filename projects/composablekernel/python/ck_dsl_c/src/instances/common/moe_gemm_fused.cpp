@@ -44,9 +44,9 @@ ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multi
 #define CKC_MOE_MAX_ITER_ARGS (2 * CKC_MOE_MAX_MFMAS + CKC_MOE_MAX_OPERANDS * CKC_MOE_MAX_VECS)
 
 /* _storage_dtype(spec): homogeneous A/B/C dtype -> ckc_type_t. Mirrors the
- * gemm_universal helper (the public C build uses an internal static); here we
- * re-derive from the spec's data dtype string. */
-static const ckc_type_t* ckc_moe_storage_dtype(const ckc_gemm_universal_spec_t* u)
+ * gemm_universal helper; re-derived from the spec's data dtype string. Shared
+ * with the gate-up / down / interleaved bodies via the sibling header. */
+const ckc_type_t* ckc_moe_storage_dtype(const ckc_gemm_universal_spec_t* u)
 {
     const char* d = u->data.dtype_a;
     if(d == NULL)
@@ -65,9 +65,12 @@ static const ckc_type_t* ckc_moe_storage_dtype(const ckc_gemm_universal_spec_t* 
 }
 
 /* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). MFMA-only
- * geometry: the warp-tile atom's per-lane fragment widths. */
-static void
-ckc_moe_mfma_atom_widths(const ckc_gemm_universal_spec_t* u, int* a_per, int* b_per, int* c_per)
+ * geometry: the warp-tile atom's per-lane fragment widths. Shared with the
+ * gate-up / down / interleaved bodies via the sibling header. */
+void ckc_moe_mfma_atom_widths(const ckc_gemm_universal_spec_t* u,
+                              int* a_per,
+                              int* b_per,
+                              int* c_per)
 {
     const ckc_gemm_tile_spec_t* t = &u->tile;
     const ckc_mfma_atom_t* atom =

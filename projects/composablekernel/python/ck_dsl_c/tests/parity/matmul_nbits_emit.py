@@ -9,14 +9,10 @@
 # it can be byte-compared with the C emitter matmul_nbits_emit.c. gfx1201 is one
 # of the matmul_nbits SUPPORTED_ARCHES (gfx1151/gfx1201); gfx950 is rejected by
 # the validator on both sides, so it must NOT be used here.
-import sys
-
 from ck_dsl.instances.common.matmul_nbits import build_matmul_nbits
 from ck_dsl.instances.common._matmul_nbits_common import MatMulNBitsSpec
 from ck_dsl.instances.common.gemm_universal import TileSpec
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _spec(idx: int) -> MatMulNBitsSpec:
@@ -150,26 +146,12 @@ def _spec(idx: int) -> MatMulNBitsSpec:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write(
-            "usage: matmul_nbits_emit.py <config_index 0..5> [ll|ir|verify]\n"
-        )
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    spec = _spec(idx)
-    kernel = build_matmul_nbits(spec, arch="gfx1201")
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx1201")
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    else:  # verify
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    return 0
+    return run_emit(
+        _spec,
+        build_matmul_nbits,
+        usage="usage: matmul_nbits_emit.py <config_index 0..5> [ll|ir|verify]\n",
+        arch="gfx1201",
+    )
 
 
 if __name__ == "__main__":

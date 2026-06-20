@@ -230,6 +230,20 @@ class DataSpec:
     layout: str = "RCR"
 
 
+def mono_data_spec(dtype: str) -> DataSpec:
+    """Canonical single-element-type :class:`DataSpec` (A == B == C == ``dtype``).
+
+    The ``f16`` / ``fp16`` aliases collapse to ``fp16``; the accumulator
+    (``fp32``) and layout (``RCR``) keep the :class:`DataSpec` defaults. The
+    GEMM-family wrappers (batched / grouped / fused-MoE) all share this exact
+    mapping, so routing them through one helper keeps the produced
+    :class:`DataSpec` -- and therefore the kernel name and emitted IR --
+    byte-identical to the hand-rolled bodies it replaces.
+    """
+    dt = "fp16" if dtype in ("f16", "fp16") else dtype
+    return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+
+
 @dataclass(frozen=True)
 class UniversalGemmSpec(WarpTileBlockSizeMixin):
     name: str

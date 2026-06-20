@@ -7,16 +7,12 @@
 # configs by argv[1], builds a UnifiedAttention2DSpec via
 # build_unified_attention_2d and prints lower_kernel_to_llvm(arch='gfx950') to
 # stdout so it can be byte-compared with the C emitter attention_unified_emit.c.
-import sys
-
 from ck_dsl.instances.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
     build_unified_attention_2d,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 # num_seqs is a runtime kernel param (not a build-time constant) in the scalar
@@ -112,26 +108,16 @@ def _kernel(idx: int):
     return build_unified_attention_2d(spec)
 
 
+def _emit_build(kernel, arch=None):
+    return kernel
+
+
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write(
-            "usage: attention_unified_emit.py <config_index> [ll|ir|verify]\n"
-        )
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    kernel = _kernel(idx)
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    else:  # verify
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    return 0
+    return run_emit(
+        _kernel,
+        _emit_build,
+        usage="usage: attention_unified_emit.py <config_index> [ll|ir|verify]\n",
+    )
 
 
 if __name__ == "__main__":

@@ -65,6 +65,18 @@ extern "C" {
 
 /* ------------------------------------------------------------------ leaves */
 
+/* _storage_dtype(spec): homogeneous A/B/C dtype -> ckc_type_t. Derived from the
+ * spec's data dtype string ("f16"/"fp16" -> f16, "bf16" -> bf16, else by name;
+ * a NULL dtype defaults to f16). Shared by all three MoE GEMM fusions. */
+const ckc_type_t* ckc_moe_storage_dtype(const ckc_gemm_universal_spec_t* u);
+
+/* _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane). The warp-tile
+ * atom's per-lane fragment widths: (wm*wk)/wave, (wn*wk)/wave, (wm*wn)/wave. */
+void ckc_moe_mfma_atom_widths(const ckc_gemm_universal_spec_t* u,
+                              int* a_per,
+                              int* b_per,
+                              int* c_per);
+
 /* _magic_div_mod(b, dividend, divisor) -> (quot, rem) via CK Tile magic
  * division. divisor==1 short-circuits to (dividend, const_i32(0)). The divisor
  * is a compile-time constant so the magic (multiplier, shift) are baked in. */

@@ -122,18 +122,7 @@ ckc_status_t ckc_mx_gemm_kernel_name(const ckc_mx_gemm_spec_t* spec, char* out, 
  * ===================================================================== */
 static void ckc_mxg_setreason(char* reason, size_t cap, const char* msg)
 {
-    size_t n;
-    if(reason == NULL || cap == 0)
-    {
-        return;
-    }
-    n = strlen(msg);
-    if(n >= cap)
-    {
-        n = cap - 1;
-    }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
+    ckc_spec_set_reason(reason, cap, msg);
 }
 
 bool ckc_mx_gemm_is_valid_spec(const ckc_mx_gemm_spec_t* spec,

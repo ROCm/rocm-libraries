@@ -23,7 +23,6 @@
 #   what the gfx950 factory does internally, minus the non-emittable 32x32 pin.
 #   The v1 "one CTA owns all conv channels" gate (K <= tile_n) is satisfied with
 #   tile_n=16 and K0=K1=16.
-import sys
 from dataclasses import fields
 
 from ck_dsl.instances.gfx950.deep_fused_conv_pool import (
@@ -34,9 +33,7 @@ from ck_dsl.instances.common.deep_fused_conv_pool import (
     DeepFusedConvPoolSpec,
     make_deep_fused_conv_pool_spec as _make_common_spec,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 _ARCH = "gfx950"
 _GFX950_NAME = "ck_dsl_gfx950_deep_fused_conv_pool"
@@ -155,24 +152,11 @@ def _spec(idx: int):
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: gfx950_deep_fused_conv_pool_emit.py <config_index>\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    spec, arch = _spec(idx)
-    kernel = build_deep_fused_conv_pool(spec, arch=arch)
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch=arch)
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    return 0
+    return run_emit(
+        _spec,
+        build_deep_fused_conv_pool,
+        usage="usage: gfx950_deep_fused_conv_pool_emit.py <config_index>\n",
+    )
 
 
 if __name__ == "__main__":

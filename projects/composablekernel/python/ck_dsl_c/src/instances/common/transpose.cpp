@@ -125,18 +125,7 @@ ckc_transpose2d_kernel_name(const ckc_transpose2d_spec_t* spec, char* out, size_
 
 static void tx_copy_msg(char* dst, size_t cap, const char* msg)
 {
-    size_t n;
-    if(dst == NULL || cap == 0)
-    {
-        return;
-    }
-    n = strlen(msg);
-    if(n >= cap)
-    {
-        n = cap - 1;
-    }
-    memcpy(dst, msg, n);
-    dst[n] = '\0';
+    ckc_spec_set_reason(dst, cap, msg);
 }
 
 bool ckc_transpose2d_is_valid_spec(const ckc_transpose2d_spec_t* spec,

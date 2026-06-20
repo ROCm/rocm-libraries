@@ -9,15 +9,11 @@
 # build_deep_fused_conv_pool(spec, arch=<cfg arch>) and prints
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter deep_fused_conv_pool_emit.c.
-import sys
-
 from ck_dsl.instances.common.deep_fused_conv_pool import (
     make_deep_fused_conv_pool_spec,
     build_deep_fused_conv_pool,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _spec(idx: int):
@@ -225,24 +221,11 @@ def _spec(idx: int):
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: deep_fused_conv_pool_emit.py <config_index>\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    spec, arch = _spec(idx)
-    kernel = build_deep_fused_conv_pool(spec, arch=arch)
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch=arch)
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    return 0
+    return run_emit(
+        _spec,
+        build_deep_fused_conv_pool,
+        usage="usage: deep_fused_conv_pool_emit.py <config_index>\n",
+    )
 
 
 if __name__ == "__main__":

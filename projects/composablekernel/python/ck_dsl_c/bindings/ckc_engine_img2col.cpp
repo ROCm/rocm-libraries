@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
@@ -30,6 +32,44 @@ extern "C" {
 namespace py = pybind11;
 
 namespace {
+
+/* Serialize a built kernel to ck.dsl.ir/v1 text (raises on failure). */
+std::string serialize_kernel(ckc_kernel_def_t* kernel, const char* fn)
+{
+    char* text      = nullptr;
+    ckc_status_t st = ckc_ir_serialize(kernel, &text);
+    if(st != CKC_OK || !text)
+    {
+        if(text)
+            free(text);
+        throw std::runtime_error(std::string(fn) +
+                                 " serialize failed (status=" + std::to_string((int)st) + ")");
+    }
+    std::string out(text);
+    free(text);
+    return out;
+}
+
+/* Run the verifier on a built kernel; return the diagnostic strings. */
+std::vector<std::string> verify_kernel(ckc_kernel_def_t* kernel)
+{
+    ckc_diag_t* diags = nullptr;
+    size_t n          = 0;
+    ckc_verify(kernel, &diags, &n);
+    std::vector<std::string> out;
+    out.reserve(n);
+    for(size_t i = 0; i < n; ++i)
+    {
+        char* s = ckc_diag_to_string(&diags[i]);
+        if(s)
+        {
+            out.emplace_back(s);
+            free(s);
+        }
+    }
+    ckc_diags_free(diags, n);
+    return out;
+}
 
 int i2c_dict_int(const py::dict& d, const char* key, int dflt)
 {
@@ -114,63 +154,18 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    ckc_img2col_spec_t s = build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_img2col_new(&b, &s, i2c_arch(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.img2col_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    char* text      = nullptr;
-    ckc_status_t st = ckc_ir_serialize(k, &text);
-    if(st != CKC_OK || !text)
-    {
-        if(text)
-            free(text);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error("ckc_engine.img2col_serialize_ir serialize failed (status=" +
-                                 std::to_string((int)st) + ")");
-    }
-    std::string out(text);
-    free(text);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.img2col_serialize_ir",
+                              ckc_img2col_spec_t,
+                              build_spec,
+                              ckc_build_img2col_new(&b, &s, i2c_arch(arch)));
 }
 
 std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    ckc_img2col_spec_t s = build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_img2col_new(&b, &s, i2c_arch(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.img2col_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
-    ckc_verify(k, &diags, &n);
-    std::vector<std::string> out;
-    out.reserve(n);
-    for(size_t i = 0; i < n; ++i)
-    {
-        char* str = ckc_diag_to_string(&diags[i]);
-        if(str)
-        {
-            out.emplace_back(str);
-            free(str);
-        }
-    }
-    ckc_diags_free(diags, n);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.img2col_verify",
+                           ckc_img2col_spec_t,
+                           build_spec,
+                           ckc_build_img2col_new(&b, &s, i2c_arch(arch)));
 }
 
 } // namespace

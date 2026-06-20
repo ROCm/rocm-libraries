@@ -122,16 +122,7 @@ ckc_topk_softmax_kernel_name(const ckc_topk_softmax_spec_t* spec, char* out, siz
 
 static void ckc_topk_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    if(reason != NULL && reason_cap > 0)
-    {
-        size_t n = strlen(msg);
-        if(n >= reason_cap)
-        {
-            n = reason_cap - 1;
-        }
-        memcpy(reason, msg, n);
-        reason[n] = '\0';
-    }
+    ckc_spec_set_reason(reason, reason_cap, msg);
 }
 
 bool ckc_topk_softmax_is_valid_spec(const ckc_topk_softmax_spec_t* spec,
@@ -617,16 +608,7 @@ ckc_kernel_def_t* ckc_build_topk_softmax_new(ckc_ir_builder_t* b,
 
 static void ckc_topk_set_err(char* err, size_t err_cap, const char* m)
 {
-    if(err != NULL && err_cap > 0)
-    {
-        size_t n = strlen(m);
-        if(n >= err_cap)
-        {
-            n = err_cap - 1;
-        }
-        memcpy(err, m, n);
-        err[n] = '\0';
-    }
+    ckc_spec_set_reason(err, err_cap, m);
 }
 
 ckc_status_t ckc_topk_softmax_lower_to_llvm(const ckc_topk_softmax_spec_t* spec,

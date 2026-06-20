@@ -7,8 +7,6 @@
 # configs by argv[1], builds the kernel via build_gemm_multi_d and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter gemm_multi_d_emit.c.
-import sys
-
 from ck_dsl.instances.common.gemm_multi_d import (
     GemmMultiDSpec,
     build_gemm_multi_d,
@@ -19,9 +17,7 @@ from ck_dsl.instances.common.gemm_universal import (
     TraitSpec,
     UniversalGemmSpec,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from _emit_common import run_emit
 
 
 def _spec(idx: int) -> GemmMultiDSpec:
@@ -101,24 +97,11 @@ def _spec(idx: int) -> GemmMultiDSpec:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        sys.stderr.write("usage: gemm_multi_d_emit.py <config_index 0..5>\n")
-        return 2
-    idx = int(sys.argv[1])
-    mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    spec = _spec(idx)
-    kernel = build_gemm_multi_d(spec, arch="gfx950")
-    if mode == "ll":
-        text = lower_kernel_to_llvm(kernel, arch="gfx950")
-        sys.stdout.write(text)
-    elif mode == "ir":
-        sys.stdout.write(serialize(kernel))
-    elif mode == "verify":
-        sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
-    else:
-        sys.stderr.write(f"unknown mode {mode}\n")
-        return 2
-    return 0
+    return run_emit(
+        _spec,
+        build_gemm_multi_d,
+        usage="usage: gemm_multi_d_emit.py <config_index 0..5>\n",
+    )
 
 
 if __name__ == "__main__":

@@ -796,3 +796,22 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
     out[2] = scratch[2];
     return CKC_OK;
 }
+
+/* ------------------------------------------------------------------ *
+ * spec reason-string copy
+ * ------------------------------------------------------------------ */
+
+void ckc_spec_set_reason(char* reason, size_t cap, const char* msg)
+{
+    if(reason == NULL || cap == 0)
+    {
+        return;
+    }
+    size_t n = strlen(msg);
+    if(n >= cap)
+    {
+        n = cap - 1;
+    }
+    memcpy(reason, msg, n);
+    reason[n] = '\0';
+}

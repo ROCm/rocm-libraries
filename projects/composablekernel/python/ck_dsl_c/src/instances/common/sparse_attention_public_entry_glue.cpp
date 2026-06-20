@@ -42,21 +42,13 @@
 #include "ckc/lower_llvm.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_spec_set_reason */
+#include "ckc/error_boundary.hpp"           /* ckc::guard_builder boundary shim */
 
 /* ----- small helper: best-effort copy of a reason / diagnostic string. ----- */
 static void sparse_set_err(char* err, size_t err_cap, const char* msg)
 {
-    if(err != NULL && err_cap > 0)
-    {
-        size_t n = strlen(msg);
-        if(n >= err_cap)
-        {
-            n = err_cap - 1;
-        }
-        memcpy(err, msg, n);
-        err[n] = '\0';
-    }
+    ckc_spec_set_reason(err, err_cap, msg);
 }
 
 /* --------------------------------------------------------------------------- *

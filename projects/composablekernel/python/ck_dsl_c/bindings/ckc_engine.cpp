@@ -31,6 +31,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
@@ -695,40 +697,18 @@ std::string batched_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string batched_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_batched_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.batched_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.batched_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.batched_gemm_serialize_ir",
+                              ckc_batched_gemm_spec_t,
+                              bg_build_spec,
+                              ckc_build_batched_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> batched_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_batched_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.batched_gemm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.batched_gemm_verify",
+                           ckc_batched_gemm_spec_t,
+                           bg_build_spec,
+                           ckc_build_batched_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 py::tuple batched_gemm_is_valid(const py::dict& d, const std::string& arch)
@@ -783,40 +763,18 @@ std::string grouped_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string grouped_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_grouped_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.grouped_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.grouped_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.grouped_gemm_serialize_ir",
+                              ckc_grouped_gemm_spec_t,
+                              gg_build_spec,
+                              ckc_build_grouped_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> grouped_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_grouped_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.grouped_gemm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.grouped_gemm_verify",
+                           ckc_grouped_gemm_spec_t,
+                           gg_build_spec,
+                           ckc_build_grouped_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 py::tuple grouped_gemm_is_valid(const py::dict& d, const std::string& arch)
@@ -871,40 +829,18 @@ std::string flatmm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string flatmm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_flatmm_spec_t s = fm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_flatmm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.flatmm_serialize_ir build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.flatmm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.flatmm_serialize_ir",
+                              ckc_flatmm_spec_t,
+                              fm_build_spec,
+                              ckc_build_flatmm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> flatmm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_flatmm_spec_t s = fm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_flatmm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.flatmm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.flatmm_verify",
+                           ckc_flatmm_spec_t,
+                           fm_build_spec,
+                           ckc_build_flatmm_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ============================ stream-K GEMM =========================== */
@@ -950,40 +886,18 @@ std::string streamk_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string streamk_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_streamk_gemm_spec_t s = sk_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_streamk_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.streamk_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.streamk_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.streamk_gemm_serialize_ir",
+                              ckc_streamk_gemm_spec_t,
+                              sk_build_spec,
+                              ckc_build_streamk_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> streamk_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_streamk_gemm_spec_t s = sk_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_streamk_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.streamk_gemm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.streamk_gemm_verify",
+                           ckc_streamk_gemm_spec_t,
+                           sk_build_spec,
+                           ckc_build_streamk_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ========================== block-scale GEMM ========================== */
@@ -1032,40 +946,18 @@ std::string block_scale_gemm_lower_llvm(const py::dict& d, const std::string& ar
 
 std::string block_scale_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_block_scale_gemm_spec_t s = bs_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_block_scale_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.block_scale_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.block_scale_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.block_scale_gemm_serialize_ir",
+                              ckc_block_scale_gemm_spec_t,
+                              bs_build_spec,
+                              ckc_build_block_scale_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> block_scale_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_block_scale_gemm_spec_t s = bs_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_block_scale_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.block_scale_gemm_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.block_scale_gemm_verify",
+                           ckc_block_scale_gemm_spec_t,
+                           bs_build_spec,
+                           ckc_build_block_scale_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 /* =============================== mx GEMM ============================== */
@@ -1109,40 +1001,18 @@ std::string mx_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string mx_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_mx_gemm_spec_t s = mx_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_mx_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.mx_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.mx_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.mx_gemm_serialize_ir",
+                              ckc_mx_gemm_spec_t,
+                              mx_build_spec,
+                              ckc_build_mx_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> mx_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_mx_gemm_spec_t s = mx_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_mx_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.mx_gemm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.mx_gemm_verify",
+                           ckc_mx_gemm_spec_t,
+                           mx_build_spec,
+                           ckc_build_mx_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ============================== mfma GEMM ============================= */
@@ -1185,40 +1055,18 @@ std::string mfma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string mfma_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_mfma_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.mfma_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.mfma_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.mfma_gemm_serialize_ir",
+                              ckc_mfma_gemm_spec_t,
+                              mfma_build_spec,
+                              ckc_build_mfma_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> mfma_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_mfma_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.mfma_gemm_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.mfma_gemm_verify",
+                           ckc_mfma_gemm_spec_t,
+                           mfma_build_spec,
+                           ckc_build_mfma_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 py::tuple mfma_gemm_is_valid(const py::dict& d, const std::string& arch)
@@ -1294,40 +1142,18 @@ std::string matmul_nbits_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string matmul_nbits_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_matmul_nbits_spec_t s = mn_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_matmul_nbits_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.matmul_nbits_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.matmul_nbits_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.matmul_nbits_serialize_ir",
+                              ckc_matmul_nbits_spec_t,
+                              mn_build_spec,
+                              ckc_build_matmul_nbits_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> matmul_nbits_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_matmul_nbits_spec_t s = mn_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_matmul_nbits_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.matmul_nbits_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.matmul_nbits_verify",
+                           ckc_matmul_nbits_spec_t,
+                           mn_build_spec,
+                           ckc_build_matmul_nbits_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ============================ gemm_multi_d =========================== */
@@ -1685,40 +1511,20 @@ std::string conv_implicit_gemm_lower_llvm(const py::dict& d, const std::string& 
 
 std::string conv_implicit_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_implicit_gemm_conv_new(&b, &s, arch_or_default(arch), nullptr);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.conv_implicit_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.conv_implicit_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY(
+        "ckc_engine.conv_implicit_gemm_serialize_ir",
+        ckc_implicit_gemm_conv_spec_t,
+        conv_igemm_build_spec,
+        ckc_build_implicit_gemm_conv_new(&b, &s, arch_or_default(arch), nullptr));
 }
 
 std::vector<std::string> conv_implicit_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_implicit_gemm_conv_new(&b, &s, arch_or_default(arch), nullptr);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.conv_implicit_gemm_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY(
+        "ckc_engine.conv_implicit_gemm_verify",
+        ckc_implicit_gemm_conv_spec_t,
+        conv_igemm_build_spec,
+        ckc_build_implicit_gemm_conv_new(&b, &s, arch_or_default(arch), nullptr));
 }
 
 /* ======================= conv_direct_grouped ======================== */
@@ -1929,41 +1735,18 @@ std::string deep_fused_conv_pool_lower_llvm(const py::dict& d, const std::string
 
 std::string deep_fused_conv_pool_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_deep_fused_conv_pool_spec_t s = dfcp_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_deep_fused_conv_pool_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.deep_fused_conv_pool_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.deep_fused_conv_pool_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.deep_fused_conv_pool_serialize_ir",
+                              ckc_deep_fused_conv_pool_spec_t,
+                              dfcp_build_spec,
+                              ckc_build_deep_fused_conv_pool_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> deep_fused_conv_pool_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_deep_fused_conv_pool_spec_t s = dfcp_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_deep_fused_conv_pool_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.deep_fused_conv_pool_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.deep_fused_conv_pool_verify",
+                           ckc_deep_fused_conv_pool_spec_t,
+                           dfcp_build_spec,
+                           ckc_build_deep_fused_conv_pool_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ==================================================================== *
@@ -2020,41 +1803,19 @@ std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
 std::string layernorm2d_serialize_ir(const py::dict& d, const std::string& arch)
 {
     (void)arch;
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_layernorm2d_spec_t s = ln_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_layernorm2d_new(&b, &s);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.layernorm2d_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.layernorm2d_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.layernorm2d_serialize_ir",
+                              ckc_layernorm2d_spec_t,
+                              ln_build_spec,
+                              ckc_build_layernorm2d_new(&b, &s));
 }
 
 std::vector<std::string> layernorm2d_verify(const py::dict& d, const std::string& arch)
 {
     (void)arch;
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_layernorm2d_spec_t s = ln_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_layernorm2d_new(&b, &s);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.layernorm2d_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.layernorm2d_verify",
+                           ckc_layernorm2d_spec_t,
+                           ln_build_spec,
+                           ckc_build_layernorm2d_new(&b, &s));
 }
 
 /* ---- rmsnorm2d (build takes arch) ---- */
@@ -2104,40 +1865,18 @@ std::string rmsnorm2d_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string rmsnorm2d_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_rmsnorm2d_spec_t s = rms_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.rmsnorm2d_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.rmsnorm2d_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.rmsnorm2d_serialize_ir",
+                              ckc_rmsnorm2d_spec_t,
+                              rms_build_spec,
+                              ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> rmsnorm2d_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_rmsnorm2d_spec_t s = rms_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.rmsnorm2d_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.rmsnorm2d_verify",
+                           ckc_rmsnorm2d_spec_t,
+                           rms_build_spec,
+                           ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- add_rmsnorm2d_bf16 (family lower convenience, build takes arch) ---- */
@@ -2178,40 +1917,18 @@ std::string add_rmsnorm2d_bf16_lower_llvm(const py::dict& d, const std::string& 
 
 std::string add_rmsnorm2d_bf16_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_add_rmsnorm2d_bf16_spec_t s = arb_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_bf16_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.add_rmsnorm2d_bf16_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.add_rmsnorm2d_bf16_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.add_rmsnorm2d_bf16_serialize_ir",
+                              ckc_add_rmsnorm2d_bf16_spec_t,
+                              arb_build_spec,
+                              ckc_build_add_rmsnorm2d_bf16_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> add_rmsnorm2d_bf16_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_add_rmsnorm2d_bf16_spec_t s = arb_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_bf16_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.add_rmsnorm2d_bf16_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.add_rmsnorm2d_bf16_verify",
+                           ckc_add_rmsnorm2d_bf16_spec_t,
+                           arb_build_spec,
+                           ckc_build_add_rmsnorm2d_bf16_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- add_rmsnorm2d_rdquant (generic lower, build takes arch) ---- */
@@ -2263,41 +1980,18 @@ std::string add_rmsnorm2d_rdquant_lower_llvm(const py::dict& d, const std::strin
 
 std::string add_rmsnorm2d_rdquant_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_add_rmsnorm2d_rdquant_spec_t s = ard_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.add_rmsnorm2d_rdquant_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.add_rmsnorm2d_rdquant_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.add_rmsnorm2d_rdquant_serialize_ir",
+                              ckc_add_rmsnorm2d_rdquant_spec_t,
+                              ard_build_spec,
+                              ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> add_rmsnorm2d_rdquant_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_add_rmsnorm2d_rdquant_spec_t s = ard_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.add_rmsnorm2d_rdquant_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.add_rmsnorm2d_rdquant_verify",
+                           ckc_add_rmsnorm2d_rdquant_spec_t,
+                           ard_build_spec,
+                           ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- elementwise (family lower convenience, build takes no arch) ---- */
@@ -2338,41 +2032,19 @@ std::string elementwise_lower_llvm(const py::dict& d, const std::string& arch)
 std::string elementwise_serialize_ir(const py::dict& d, const std::string& arch)
 {
     (void)arch;
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_elementwise_spec_t s = ew_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_elementwise_new(&b, &s);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.elementwise_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.elementwise_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.elementwise_serialize_ir",
+                              ckc_elementwise_spec_t,
+                              ew_build_spec,
+                              ckc_build_elementwise_new(&b, &s));
 }
 
 std::vector<std::string> elementwise_verify(const py::dict& d, const std::string& arch)
 {
     (void)arch;
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_elementwise_spec_t s = ew_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_elementwise_new(&b, &s);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.elementwise_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.elementwise_verify",
+                           ckc_elementwise_spec_t,
+                           ew_build_spec,
+                           ckc_build_elementwise_new(&b, &s));
 }
 
 /* ---- reduce (generic lower, build takes arch) ---- */
@@ -2421,40 +2093,18 @@ std::string reduce_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string reduce_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_reduce2d_spec_t s = rd_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_reduce2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.reduce_serialize_ir build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.reduce_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.reduce_serialize_ir",
+                              ckc_reduce2d_spec_t,
+                              rd_build_spec,
+                              ckc_build_reduce2d_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> reduce_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_reduce2d_spec_t s = rd_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_reduce2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.reduce_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.reduce_verify",
+                           ckc_reduce2d_spec_t,
+                           rd_build_spec,
+                           ckc_build_reduce2d_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- pooling (nested problem, generic lower, build takes arch) ---- */
@@ -2517,40 +2167,18 @@ std::string pooling_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string pooling_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_pooling2d_spec_t s = pool_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_pooling2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.pooling_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.pooling_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.pooling_serialize_ir",
+                              ckc_pooling2d_spec_t,
+                              pool_build_spec,
+                              ckc_build_pooling2d_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> pooling_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_pooling2d_spec_t s = pool_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_pooling2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.pooling_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.pooling_verify",
+                           ckc_pooling2d_spec_t,
+                           pool_build_spec,
+                           ckc_build_pooling2d_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- transpose (generic lower, build takes arch) ---- */
@@ -2599,40 +2227,18 @@ std::string transpose_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string transpose_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_transpose2d_spec_t s = tr_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_transpose2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.transpose_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.transpose_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.transpose_serialize_ir",
+                              ckc_transpose2d_spec_t,
+                              tr_build_spec,
+                              ckc_build_transpose2d_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> transpose_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_transpose2d_spec_t s = tr_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_transpose2d_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.transpose_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.transpose_verify",
+                           ckc_transpose2d_spec_t,
+                           tr_build_spec,
+                           ckc_build_transpose2d_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- permute_nd (fixed-rank arrays, generic lower, build takes arch) ---- */
@@ -2697,40 +2303,18 @@ std::string permute_nd_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string permute_nd_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_permute_spec_t s = pm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_permute_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.permute_nd_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.permute_nd_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.permute_nd_serialize_ir",
+                              ckc_permute_spec_t,
+                              pm_build_spec,
+                              ckc_build_permute_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> permute_nd_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_permute_spec_t s = pm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_permute_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.permute_nd_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.permute_nd_verify",
+                           ckc_permute_spec_t,
+                           pm_build_spec,
+                           ckc_build_permute_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- smoothquant (init-by-ptr ctor, generic _ex lower, build takes arch) -- */
@@ -2782,40 +2366,18 @@ std::string smoothquant_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string smoothquant_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_smoothquant_spec_t s = sq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_smoothquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.smoothquant_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.smoothquant_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.smoothquant_serialize_ir",
+                              ckc_smoothquant_spec_t,
+                              sq_build_spec,
+                              ckc_build_smoothquant_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> smoothquant_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_smoothquant_spec_t s = sq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_smoothquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.smoothquant_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.smoothquant_verify",
+                           ckc_smoothquant_spec_t,
+                           sq_build_spec,
+                           ckc_build_smoothquant_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ==================================================================== *
@@ -2867,40 +2429,18 @@ std::string topk_softmax_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string topk_softmax_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_topk_softmax_spec_t s = tk_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.topk_softmax_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.topk_softmax_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.topk_softmax_serialize_ir",
+                              ckc_topk_softmax_spec_t,
+                              tk_build_spec,
+                              ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> topk_softmax_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_topk_softmax_spec_t s = tk_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.topk_softmax_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.topk_softmax_verify",
+                           ckc_topk_softmax_spec_t,
+                           tk_build_spec,
+                           ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- moe_smoothquant ---- */
@@ -2957,40 +2497,18 @@ std::string moe_smoothquant_lower_llvm(const py::dict& d, const std::string& arc
 
 std::string moe_smoothquant_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_smoothquant_spec_t s = msq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.moe_smoothquant_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.moe_smoothquant_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.moe_smoothquant_serialize_ir",
+                              ckc_moe_smoothquant_spec_t,
+                              msq_build_spec,
+                              ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> moe_smoothquant_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_smoothquant_spec_t s = msq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.moe_smoothquant_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.moe_smoothquant_verify",
+                           ckc_moe_smoothquant_spec_t,
+                           msq_build_spec,
+                           ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- moe_fused_mega ---- */
@@ -3039,40 +2557,18 @@ std::string moe_fused_mega_lower_llvm(const py::dict& d, const std::string& arch
 
 std::string moe_fused_mega_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_fused_mega_kernel_spec_t s = mfm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.moe_fused_mega_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.moe_fused_mega_serialize_ir",
+                              ckc_moe_fused_mega_kernel_spec_t,
+                              mfm_build_spec,
+                              ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> moe_fused_mega_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_fused_mega_kernel_spec_t s = mfm_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.moe_fused_mega_verify",
+                           ckc_moe_fused_mega_kernel_spec_t,
+                           mfm_build_spec,
+                           ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
 /* ---- moe_fused_mega_fp8 (build takes persistent + levers; levers=NULL) ---- */
@@ -3238,40 +2734,18 @@ std::string fused_moe_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string fused_moe_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_fused_moe_spec_t s = fmoe_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = fmoe_build_phase(d, &b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.fused_moe_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.fused_moe_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.fused_moe_serialize_ir",
+                              ckc_fused_moe_spec_t,
+                              fmoe_build_spec,
+                              fmoe_build_phase(d, &b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> fused_moe_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_fused_moe_spec_t s = fmoe_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = fmoe_build_phase(d, &b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.fused_moe_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.fused_moe_verify",
+                           ckc_fused_moe_spec_t,
+                           fmoe_build_spec,
+                           fmoe_build_phase(d, &b, &s, arch_or_default(arch)));
 }
 
 /* ---- moe_sorting (phase-selected via "phase") ---- */
@@ -3332,40 +2806,18 @@ std::string moe_sorting_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string moe_sorting_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_sorting_spec_t s = msort_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = msort_build_phase(d, &b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.moe_sorting_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.moe_sorting_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.moe_sorting_serialize_ir",
+                              ckc_moe_sorting_spec_t,
+                              msort_build_spec,
+                              msort_build_phase(d, &b, &s, arch_or_default(arch)));
 }
 
 std::vector<std::string> moe_sorting_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_moe_sorting_spec_t s = msort_build_spec(d, store);
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* k = msort_build_phase(d, &b, &s, arch_or_default(arch));
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.moe_sorting_verify build failed: ") + ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.moe_sorting_verify",
+                           ckc_moe_sorting_spec_t,
+                           msort_build_spec,
+                           msort_build_phase(d, &b, &s, arch_or_default(arch)));
 }
 
 /* ==================================================================== *
@@ -3415,42 +2867,20 @@ std::string gfx1151_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
 
 std::string gfx1151_wmma_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_gfx1151_spec_t s = w1151_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1151_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.gfx1151_wmma_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.gfx1151_wmma_gemm_serialize_ir",
+                              ckc_wmma_gemm_gfx1151_spec_t,
+                              w1151_build_spec,
+                              ckc_build_wmma_gemm_gfx1151_new(&b, &s, a));
 }
 
 std::vector<std::string> gfx1151_wmma_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_gfx1151_spec_t s = w1151_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1151_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.gfx1151_wmma_gemm_verify",
+                           ckc_wmma_gemm_gfx1151_spec_t,
+                           w1151_build_spec,
+                           ckc_build_wmma_gemm_gfx1151_new(&b, &s, a));
 }
 
 /* ---- gfx1151_wmma_gemm_int8 ---- */
@@ -3495,43 +2925,20 @@ std::string gfx1151_wmma_gemm_int8_lower_llvm(const py::dict& d, const std::stri
 
 std::string gfx1151_wmma_gemm_int8_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_int8_spec_t s = w1151i8_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_int8_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_int8_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.gfx1151_wmma_gemm_int8_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.gfx1151_wmma_gemm_int8_serialize_ir",
+                              ckc_wmma_gemm_int8_spec_t,
+                              w1151i8_build_spec,
+                              ckc_build_wmma_gemm_int8_new(&b, &s, a));
 }
 
 std::vector<std::string> gfx1151_wmma_gemm_int8_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_int8_spec_t s = w1151i8_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_int8_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_int8_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.gfx1151_wmma_gemm_int8_verify",
+                           ckc_wmma_gemm_int8_spec_t,
+                           w1151i8_build_spec,
+                           ckc_build_wmma_gemm_int8_new(&b, &s, a));
 }
 
 /* ---- gfx1151_wmma_gemm_iu8 ---- */
@@ -3574,43 +2981,20 @@ std::string gfx1151_wmma_gemm_iu8_lower_llvm(const py::dict& d, const std::strin
 
 std::string gfx1151_wmma_gemm_iu8_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_iu8_spec_t s = w1151iu8_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_iu8_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.gfx1151_wmma_gemm_iu8_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.gfx1151_wmma_gemm_iu8_serialize_ir",
+                              ckc_wmma_gemm_iu8_spec_t,
+                              w1151iu8_build_spec,
+                              ckc_build_wmma_gemm_iu8_new(&b, &s, a));
 }
 
 std::vector<std::string> gfx1151_wmma_gemm_iu8_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_iu8_spec_t s = w1151iu8_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_iu8_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.gfx1151_wmma_gemm_iu8_verify",
+                           ckc_wmma_gemm_iu8_spec_t,
+                           w1151iu8_build_spec,
+                           ckc_build_wmma_gemm_iu8_new(&b, &s, a));
 }
 
 /* ---- gfx1151_wmma_gemm_iu8_dequant ---- */
@@ -3654,45 +3038,21 @@ std::string gfx1151_wmma_gemm_iu8_dequant_lower_llvm(const py::dict& d, const st
 
 std::string gfx1151_wmma_gemm_iu8_dequant_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_iu8_dequant_spec_t s = w1151iu8dq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_dequant_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.gfx1151_wmma_gemm_iu8_dequant_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_serialize_ir",
+                              ckc_wmma_gemm_iu8_dequant_spec_t,
+                              w1151iu8dq_build_spec,
+                              ckc_build_wmma_gemm_iu8_dequant_new(&b, &s, a));
 }
 
 std::vector<std::string> gfx1151_wmma_gemm_iu8_dequant_verify(const py::dict& d,
                                                               const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_iu8_dequant_spec_t s = w1151iu8dq_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_dequant_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_verify build failed: ") +
-            ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_verify",
+                           ckc_wmma_gemm_iu8_dequant_spec_t,
+                           w1151iu8dq_build_spec,
+                           ckc_build_wmma_gemm_iu8_dequant_new(&b, &s, a));
 }
 
 /* ---- gfx1151_wmma_fmha_fwd ---- */
@@ -3847,42 +3207,20 @@ std::string gfx1201_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
 
 std::string gfx1201_wmma_gemm_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_gfx1201_spec_t s = w1201_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1201" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1201_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1201_wmma_gemm_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::string out = serialize_kernel(k, "ckc_engine.gfx1201_wmma_gemm_serialize_ir");
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1201" : arch.c_str();
+    CKC_FAMILY_SERIALIZE_BODY("ckc_engine.gfx1201_wmma_gemm_serialize_ir",
+                              ckc_wmma_gemm_gfx1201_spec_t,
+                              w1201_build_spec,
+                              ckc_build_wmma_gemm_gfx1201_new(&b, &s, a));
 }
 
 std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
-    ckc_wmma_gemm_gfx1201_spec_t s = w1201_build_spec(d, store);
-    ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1201" : arch.c_str();
-    ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1201_new(&b, &s, a);
-    if(!k || !ckc_ir_builder_ok(&b))
-    {
-        std::string msg = std::string("ckc_engine.gfx1201_wmma_gemm_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
-        ckc_ir_builder_free(&b);
-        throw std::runtime_error(msg);
-    }
-    std::vector<std::string> out = verify_kernel(k);
-    ckc_ir_builder_free(&b);
-    return out;
+    const char* a = arch.empty() ? "gfx1201" : arch.c_str();
+    CKC_FAMILY_VERIFY_BODY("ckc_engine.gfx1201_wmma_gemm_verify",
+                           ckc_wmma_gemm_gfx1201_spec_t,
+                           w1201_build_spec,
+                           ckc_build_wmma_gemm_gfx1201_new(&b, &s, a));
 }
 
 } // namespace
