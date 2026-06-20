@@ -37,6 +37,10 @@ if(TENSILELITE_ENABLE_HOST)
     )
     rocm_set_soversion(tensilelite-host "1.0")
 
+    if(TENSILELITE_BUILD_SHARED_LIBS AND NOT WIN32)
+        target_link_options(tensilelite-host PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)
 
     include(GenerateExportHeader)
