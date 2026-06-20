@@ -151,6 +151,9 @@ RUN . /opt/venv/bin/activate && \
         --run-id ${ASAN_ARTIFACTS_RUN_ID} \
         --amdgpu-family ${AMDGPU_FAMILIES} \
         --amdgpu-targets ${AMDGPU_TARGETS} \
+        --blas \
+        --miopen \
+        --rand \
         --tests \
         --output-dir ${ROCM_PATH}
 
