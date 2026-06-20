@@ -47,6 +47,7 @@ extern "C" {
 #include "ckc/instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "ckc/instance_sage_attention.h"
 #include "ckc/instance_sparse_attention.h"
+#include "ckc/instance_sparse_attention_internal.h"
 }
 
 namespace py = pybind11;
@@ -516,55 +517,156 @@ std::vector<std::string> hg_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== sparse_attention (jenga / vsa) ================== */
 
-ckc_kernel_def_t* sparse_build(const py::dict& d, Store& st, const char* arch)
+/* Build the jenga / vsa sparse-attention kernel into a caller-owned context so
+ * the binding holds the FmhaKernelBuilder and can apply the documented teardown
+ * (ckc_fmha_kernel_builder_free) on every exit path. The public
+ * ckc_build_{jenga,vsa}_sparse_attention entries own an internal builder that the
+ * binding has no handle to; replicating the engine's own prologue/stage/emit
+ * sequence here (identical order, byte-identical IR) keeps that builder reachable
+ * so it is reclaimed instead of leaked. Exactly one of jenga_ctx / vsa_ctx is
+ * populated; *is_vsa selects which one's kb the caller must free. */
+ckc_kernel_def_t* sparse_build(const py::dict& d,
+                               Store& st,
+                               const char* arch,
+                               ckc_jenga_sparse_ctx_t* jenga_ctx,
+                               ckc_vsa_sparse_ctx_t* vsa_ctx,
+                               bool* is_vsa)
 {
     std::string kind = "jenga";
     a_str(d, "kind", kind);
     ckc_fmha_common_spec_t c = common_of(d, st);
     if(kind == "vsa")
     {
+        *is_vsa = true;
         ckc_vsa_sparse_spec_t s =
             ckc_vsa_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
         s.block_q                 = a_int(d, "block_q", s.block_q);
         s.block_k                 = a_int(d, "block_k", s.block_k);
         s.max_blocks_per_q        = a_int(d, "max_blocks_per_q", s.max_blocks_per_q);
         s.use_wave_ballot_scatter = a_bool(d, "use_wave_ballot_scatter", s.use_wave_ballot_scatter);
-        return ckc_build_vsa_sparse_attention(nullptr, &s, arch);
+
+        std::memset(vsa_ctx, 0, sizeof *vsa_ctx);
+        vsa_ctx->spec = &s;
+        vsa_ctx->arch = arch;
+        vsa_ctx->s    = s.common;
+        if(!ckc_vsa_prologue(vsa_ctx))
+            return nullptr;
+        ckc_vsa_stage_bitmap(vsa_ctx);
+        ckc_kernel_def_t* k = ckc_vsa_emit_body(vsa_ctx);
+        if(!k || ckc_ir_builder_status(vsa_ctx->b) != CKC_OK)
+            return nullptr;
+        return k;
     }
+    *is_vsa = false;
     ckc_jenga_sparse_spec_t s =
         ckc_jenga_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
     s.block_q = a_int(d, "block_q", s.block_q);
     s.block_k = a_int(d, "block_k", s.block_k);
-    return ckc_build_jenga_sparse_attention(nullptr, &s, arch);
+
+    std::memset(jenga_ctx, 0, sizeof *jenga_ctx);
+    jenga_ctx->spec = &s;
+    jenga_ctx->arch = arch;
+    jenga_ctx->s    = s.common;
+    if(!ckc_jenga_prologue(jenga_ctx))
+        return nullptr;
+    ckc_jenga_stage_mask(jenga_ctx);
+    ckc_kernel_def_t* k = ckc_jenga_emit_body(jenga_ctx);
+    if(!k || ckc_ir_builder_status(jenga_ctx->b) != CKC_OK)
+        return nullptr;
+    return k;
+}
+/* Free whichever context's FmhaKernelBuilder was populated by sparse_build. Safe
+ * to call on the failure path: ckc_fmha_kernel_builder_free tolerates a
+ * partially-initialised (zeroed) builder. */
+void sparse_free(ckc_jenga_sparse_ctx_t* jenga_ctx, ckc_vsa_sparse_ctx_t* vsa_ctx, bool is_vsa)
+{
+    if(is_vsa)
+        ckc_fmha_kernel_builder_free(&vsa_ctx->kb);
+    else
+        ckc_fmha_kernel_builder_free(&jenga_ctx->kb);
 }
 std::string sparse_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    ckc_kernel_def_t* k = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_jenga_sparse_ctx_t jctx;
+    ckc_vsa_sparse_ctx_t vctx;
+    bool is_vsa         = false;
+    const char* arch_c  = arch.empty() ? "gfx950" : arch.c_str();
+    ckc_kernel_def_t* k = sparse_build(d, st, arch_c, &jctx, &vctx, &is_vsa);
     if(!k)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
         throw std::runtime_error("ckc_engine.sparse_attention_lower_llvm build failed");
+    }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
-    ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(
-        k, CKC_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
-    return take_ll(s2, ll, err, "ckc_engine.sparse_attention_lower_llvm");
+    err[0] = '\0';
+    ckc_status_t s2 =
+        ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, arch_c, &ll, err, sizeof err);
+    std::string out;
+    try
+    {
+        out = take_ll(s2, ll, err, "ckc_engine.sparse_attention_lower_llvm");
+    }
+    catch(...)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
+        throw;
+    }
+    sparse_free(&jctx, &vctx, is_vsa);
+    return out;
 }
 std::string sparse_serialize(const py::dict& d, const std::string& arch)
 {
     Store st;
-    ckc_kernel_def_t* k = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_jenga_sparse_ctx_t jctx;
+    ckc_vsa_sparse_ctx_t vctx;
+    bool is_vsa = false;
+    ckc_kernel_def_t* k =
+        sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
         throw std::runtime_error("ckc_engine.sparse_attention_serialize_ir build failed");
-    return ser_kernel(k, "ckc_engine.sparse_attention_serialize_ir");
+    }
+    std::string out;
+    try
+    {
+        out = ser_kernel(k, "ckc_engine.sparse_attention_serialize_ir");
+    }
+    catch(...)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
+        throw;
+    }
+    sparse_free(&jctx, &vctx, is_vsa);
+    return out;
 }
 std::vector<std::string> sparse_verify(const py::dict& d, const std::string& arch)
 {
     Store st;
-    ckc_kernel_def_t* k = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_jenga_sparse_ctx_t jctx;
+    ckc_vsa_sparse_ctx_t vctx;
+    bool is_vsa = false;
+    ckc_kernel_def_t* k =
+        sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
         throw std::runtime_error("ckc_engine.sparse_attention_verify build failed");
-    return ver_kernel(k);
+    }
+    std::vector<std::string> out;
+    try
+    {
+        out = ver_kernel(k);
+    }
+    catch(...)
+    {
+        sparse_free(&jctx, &vctx, is_vsa);
+        throw;
+    }
+    sparse_free(&jctx, &vctx, is_vsa);
+    return out;
 }
 
 /* ===================== sage_attention (kb + convenience lower) ========== */

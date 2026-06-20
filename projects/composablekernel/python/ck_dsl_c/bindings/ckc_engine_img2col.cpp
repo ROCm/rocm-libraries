@@ -16,6 +16,7 @@
 #include <pybind11/stl.h>
 
 #include <cstdlib>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -108,7 +109,7 @@ void fill_problem(ckc_conv_problem_t* p, const py::dict& d)
     p->dW = i2c_dict_int(d, "dW", p->dW);
 }
 
-ckc_img2col_spec_t build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -132,7 +133,7 @@ ckc_img2col_spec_t build_spec(const py::dict& d, std::vector<std::string>& store
 
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
+    std::deque<std::string> store;
     ckc_img2col_spec_t s = build_spec(d, store);
     char* ll             = nullptr;
     char err[CKC_ERR_MSG_CAP];

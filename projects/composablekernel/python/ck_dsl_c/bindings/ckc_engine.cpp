@@ -28,6 +28,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -171,7 +172,7 @@ bool dict_str(const py::dict& d, const char* key, std::string& out)
  * gemm_multi_abd) reuse this to populate their nested `base` field. The dict
  * accepts both a flat key view and nested tile/trait/data sub-dicts. */
 void fill_universal_spec(ckc_gemm_universal_spec_t* spec,
-                         std::vector<std::string>& store,
+                         std::deque<std::string>& store,
                          const py::dict& root)
 {
     auto keep = [&](const std::string& s) -> const char* {
@@ -655,7 +656,7 @@ std::vector<std::string> verify_kernel(ckc_kernel_def_t* kernel)
 
 /* ============================ batched GEMM ============================== */
 
-ckc_batched_gemm_spec_t bg_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_batched_gemm_spec_t bg_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -684,8 +685,7 @@ ckc_batched_gemm_spec_t bg_build_spec(const py::dict& d, std::vector<std::string
 
 std::string batched_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
     char* ll                  = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -713,8 +713,7 @@ std::vector<std::string> batched_gemm_verify(const py::dict& d, const std::strin
 
 py::tuple batched_gemm_is_valid(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
@@ -724,7 +723,7 @@ py::tuple batched_gemm_is_valid(const py::dict& d, const std::string& arch)
 
 /* ============================ grouped GEMM ============================== */
 
-ckc_grouped_gemm_spec_t gg_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_grouped_gemm_spec_t gg_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -750,8 +749,7 @@ ckc_grouped_gemm_spec_t gg_build_spec(const py::dict& d, std::vector<std::string
 
 std::string grouped_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
     char* ll                  = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -779,8 +777,7 @@ std::vector<std::string> grouped_gemm_verify(const py::dict& d, const std::strin
 
 py::tuple grouped_gemm_is_valid(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
@@ -790,7 +787,7 @@ py::tuple grouped_gemm_is_valid(const py::dict& d, const std::string& arch)
 
 /* ================================ flatmm =============================== */
 
-ckc_flatmm_spec_t fm_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_flatmm_spec_t fm_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -816,8 +813,7 @@ ckc_flatmm_spec_t fm_build_spec(const py::dict& d, std::vector<std::string>& sto
 
 std::string flatmm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_flatmm_spec_t s = fm_build_spec(d, store);
     char* ll            = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -845,7 +841,7 @@ std::vector<std::string> flatmm_verify(const py::dict& d, const std::string& arc
 
 /* ============================ stream-K GEMM =========================== */
 
-ckc_streamk_gemm_spec_t sk_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_streamk_gemm_spec_t sk_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -873,8 +869,7 @@ ckc_streamk_gemm_spec_t sk_build_spec(const py::dict& d, std::vector<std::string
 
 std::string streamk_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_streamk_gemm_spec_t s = sk_build_spec(d, store);
     char* ll                  = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -902,7 +897,7 @@ std::vector<std::string> streamk_gemm_verify(const py::dict& d, const std::strin
 
 /* ========================== block-scale GEMM ========================== */
 
-ckc_block_scale_gemm_spec_t bs_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_block_scale_gemm_spec_t bs_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -933,8 +928,7 @@ ckc_block_scale_gemm_spec_t bs_build_spec(const py::dict& d, std::vector<std::st
 
 std::string block_scale_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_block_scale_gemm_spec_t s = bs_build_spec(d, store);
     char* ll                      = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -962,7 +956,7 @@ std::vector<std::string> block_scale_gemm_verify(const py::dict& d, const std::s
 
 /* =============================== mx GEMM ============================== */
 
-ckc_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -988,8 +982,7 @@ ckc_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::vector<std::string>& st
 
 std::string mx_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_mx_gemm_spec_t s = mx_build_spec(d, store);
     char* ll             = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1017,7 +1010,7 @@ std::vector<std::string> mx_gemm_verify(const py::dict& d, const std::string& ar
 
 /* ============================== mfma GEMM ============================= */
 
-ckc_mfma_gemm_spec_t mfma_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_mfma_gemm_spec_t mfma_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1042,8 +1035,7 @@ ckc_mfma_gemm_spec_t mfma_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string mfma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
     char* ll               = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1071,8 +1063,7 @@ std::vector<std::string> mfma_gemm_verify(const py::dict& d, const std::string& 
 
 py::tuple mfma_gemm_is_valid(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
@@ -1082,7 +1073,7 @@ py::tuple mfma_gemm_is_valid(const py::dict& d, const std::string& arch)
 
 /* ============================ matmul_nbits =========================== */
 
-ckc_matmul_nbits_spec_t mn_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_matmul_nbits_spec_t mn_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1129,8 +1120,7 @@ ckc_matmul_nbits_spec_t mn_build_spec(const py::dict& d, std::vector<std::string
 
 std::string matmul_nbits_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_matmul_nbits_spec_t s = mn_build_spec(d, store);
     char* ll                  = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1169,7 +1159,7 @@ ckc_d_load_kind_t parse_d_load_kind(const std::string& s)
     return CKC_D_LOAD_VECTOR; /* "vector" / default */
 }
 
-ckc_gemm_multi_d_spec_t md_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_gemm_multi_d_spec_t md_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1217,8 +1207,7 @@ ckc_gemm_multi_d_spec_t md_build_spec(const py::dict& d, std::vector<std::string
 
 std::string gemm_multi_d_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
     char* ll                  = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1230,26 +1219,42 @@ std::string gemm_multi_d_lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string gemm_multi_d_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
     ckc_kernel_def_t* k       = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
     if(!k)
         throw std::runtime_error("ckc_engine.gemm_multi_d_serialize_ir build failed");
-    std::string out = serialize_kernel(k, "ckc_engine.gemm_multi_d_serialize_ir");
+    std::string out;
+    try
+    {
+        out = serialize_kernel(k, "ckc_engine.gemm_multi_d_serialize_ir");
+    }
+    catch(...)
+    {
+        ckc_gemm_multi_d_kernel_free(k);
+        throw;
+    }
     ckc_gemm_multi_d_kernel_free(k);
     return out;
 }
 
 std::vector<std::string> gemm_multi_d_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
     ckc_kernel_def_t* k       = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
     if(!k)
         throw std::runtime_error("ckc_engine.gemm_multi_d_verify build failed");
-    std::vector<std::string> out = verify_kernel(k);
+    std::vector<std::string> out;
+    try
+    {
+        out = verify_kernel(k);
+    }
+    catch(...)
+    {
+        ckc_gemm_multi_d_kernel_free(k);
+        throw;
+    }
     ckc_gemm_multi_d_kernel_free(k);
     return out;
 }
@@ -1257,7 +1262,7 @@ std::vector<std::string> gemm_multi_d_verify(const py::dict& d, const std::strin
 /* =========================== gemm_multi_abd ========================== */
 
 ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
-                                         std::vector<std::string>& store,
+                                         std::deque<std::string>& store,
                                          std::vector<ckc_gemm_abd_a_operand_t>& a_ops,
                                          std::vector<ckc_gemm_abd_b_operand_t>& b_ops)
 {
@@ -1290,6 +1295,8 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
     {
         for(auto item : d["a_operands"].cast<py::list>())
         {
+            if(a_ops.size() >= CKC_GEMM_ABD_MAX_A)
+                break;
             py::tuple pr = item.cast<py::tuple>();
             ckc_gemm_abd_a_operand_t op;
             op.name  = keep(pr[0].cast<std::string>());
@@ -1301,6 +1308,8 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
     {
         for(auto item : d["b_operands"].cast<py::list>())
         {
+            if(b_ops.size() >= CKC_GEMM_ABD_MAX_B)
+                break;
             py::tuple pr = item.cast<py::tuple>();
             ckc_gemm_abd_b_operand_t op;
             op.name  = keep(pr[0].cast<std::string>());
@@ -1331,8 +1340,7 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
 
 std::string gemm_multi_abd_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     std::vector<ckc_gemm_abd_a_operand_t> a_ops;
     std::vector<ckc_gemm_abd_b_operand_t> b_ops;
     ckc_gemm_multi_abd_spec_t s = abd_build_spec(d, store, a_ops, b_ops);
@@ -1346,8 +1354,7 @@ std::string gemm_multi_abd_lower_llvm(const py::dict& d, const std::string& arch
 
 std::string gemm_multi_abd_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     std::vector<ckc_gemm_abd_a_operand_t> a_ops;
     std::vector<ckc_gemm_abd_b_operand_t> b_ops;
     ckc_gemm_multi_abd_spec_t s = abd_build_spec(d, store, a_ops, b_ops);
@@ -1363,7 +1370,17 @@ std::string gemm_multi_abd_serialize_ir(const py::dict& d, const std::string& ar
         ckc_arena_destroy(&arena);
         throw std::runtime_error(msg);
     }
-    std::string out = serialize_kernel(k, "ckc_engine.gemm_multi_abd_serialize_ir");
+    std::string out;
+    try
+    {
+        out = serialize_kernel(k, "ckc_engine.gemm_multi_abd_serialize_ir");
+    }
+    catch(...)
+    {
+        ckc_ir_builder_free(&b);
+        ckc_arena_destroy(&arena);
+        throw;
+    }
     ckc_ir_builder_free(&b);
     ckc_arena_destroy(&arena);
     return out;
@@ -1371,8 +1388,7 @@ std::string gemm_multi_abd_serialize_ir(const py::dict& d, const std::string& ar
 
 std::vector<std::string> gemm_multi_abd_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     std::vector<ckc_gemm_abd_a_operand_t> a_ops;
     std::vector<ckc_gemm_abd_b_operand_t> b_ops;
     ckc_gemm_multi_abd_spec_t s = abd_build_spec(d, store, a_ops, b_ops);
@@ -1388,7 +1404,17 @@ std::vector<std::string> gemm_multi_abd_verify(const py::dict& d, const std::str
         ckc_arena_destroy(&arena);
         throw std::runtime_error(msg);
     }
-    std::vector<std::string> out = verify_kernel(k);
+    std::vector<std::string> out;
+    try
+    {
+        out = verify_kernel(k);
+    }
+    catch(...)
+    {
+        ckc_ir_builder_free(&b);
+        ckc_arena_destroy(&arena);
+        throw;
+    }
     ckc_ir_builder_free(&b);
     ckc_arena_destroy(&arena);
     return out;
@@ -1424,7 +1450,7 @@ void fill_conv_problem(ckc_conv_problem_t* p, const py::dict& d)
 /* ========================= conv_implicit_gemm ======================= */
 
 ckc_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
-                                                    std::vector<std::string>& store)
+                                                    std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1498,8 +1524,7 @@ ckc_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
 
 std::string conv_implicit_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
     char* ll                        = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1552,7 +1577,7 @@ std::string conv_direct_grouped_kind(const py::dict& d)
     return kind;
 }
 
-ckc_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1574,7 +1599,7 @@ ckc_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::vector<std::s
     return s;
 }
 
-ckc_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1596,8 +1621,7 @@ ckc_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::vector<std::str
 
 std::string conv_direct_grouped_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
     err[0] = '\0';
@@ -1619,8 +1643,7 @@ std::string conv_direct_grouped_lower_llvm(const py::dict& d, const std::string&
 
 std::string conv_direct_grouped_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k;
     if(conv_direct_grouped_kind(d) == "4c")
@@ -1648,8 +1671,7 @@ std::string conv_direct_grouped_serialize_ir(const py::dict& d, const std::strin
 
 std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k;
     if(conv_direct_grouped_kind(d) == "4c")
@@ -1678,7 +1700,7 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
 
 /* This family is constructed through a factory in both reference emitters; the
  * binding mirrors the factory call exactly (tile_m is auto-derived inside). */
-ckc_deep_fused_conv_pool_spec_t dfcp_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_deep_fused_conv_pool_spec_t dfcp_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1722,8 +1744,7 @@ ckc_deep_fused_conv_pool_spec_t dfcp_build_spec(const py::dict& d, std::vector<s
 
 std::string deep_fused_conv_pool_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_deep_fused_conv_pool_spec_t s = dfcp_build_spec(d, store);
     char* ll                          = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1759,7 +1780,7 @@ std::vector<std::string> deep_fused_conv_pool_verify(const py::dict& d, const st
  * ==================================================================== */
 
 /* ---- layernorm2d (build takes no arch) ---- */
-ckc_layernorm2d_spec_t ln_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_layernorm2d_spec_t ln_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1782,8 +1803,7 @@ ckc_layernorm2d_spec_t ln_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_layernorm2d_spec_t s = ln_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_layernorm2d_new(&b, &s);
@@ -1819,7 +1839,7 @@ std::vector<std::string> layernorm2d_verify(const py::dict& d, const std::string
 }
 
 /* ---- rmsnorm2d (build takes arch) ---- */
-ckc_rmsnorm2d_spec_t rms_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_rmsnorm2d_spec_t rms_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1842,8 +1862,7 @@ ckc_rmsnorm2d_spec_t rms_build_spec(const py::dict& d, std::vector<std::string>&
 
 std::string rmsnorm2d_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_rmsnorm2d_spec_t s = rms_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch));
@@ -1880,7 +1899,7 @@ std::vector<std::string> rmsnorm2d_verify(const py::dict& d, const std::string& 
 }
 
 /* ---- add_rmsnorm2d_bf16 (family lower convenience, build takes arch) ---- */
-ckc_add_rmsnorm2d_bf16_spec_t arb_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_add_rmsnorm2d_bf16_spec_t arb_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1904,8 +1923,7 @@ ckc_add_rmsnorm2d_bf16_spec_t arb_build_spec(const py::dict& d, std::vector<std:
 
 std::string add_rmsnorm2d_bf16_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_add_rmsnorm2d_bf16_spec_t s = arb_build_spec(d, store);
     char* ll                        = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -1932,7 +1950,7 @@ std::vector<std::string> add_rmsnorm2d_bf16_verify(const py::dict& d, const std:
 }
 
 /* ---- add_rmsnorm2d_rdquant (generic lower, build takes arch) ---- */
-ckc_add_rmsnorm2d_rdquant_spec_t ard_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_add_rmsnorm2d_rdquant_spec_t ard_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -1959,8 +1977,7 @@ ckc_add_rmsnorm2d_rdquant_spec_t ard_build_spec(const py::dict& d, std::vector<s
 
 std::string add_rmsnorm2d_rdquant_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_add_rmsnorm2d_rdquant_spec_t s = ard_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch));
@@ -1995,7 +2012,7 @@ std::vector<std::string> add_rmsnorm2d_rdquant_verify(const py::dict& d, const s
 }
 
 /* ---- elementwise (family lower convenience, build takes no arch) ---- */
-ckc_elementwise_spec_t ew_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_elementwise_spec_t ew_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2018,8 +2035,7 @@ ckc_elementwise_spec_t ew_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string elementwise_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_elementwise_spec_t s = ew_build_spec(d, store);
     char* ll                 = nullptr;
     char err[CKC_ERR_MSG_CAP];
@@ -2048,7 +2064,7 @@ std::vector<std::string> elementwise_verify(const py::dict& d, const std::string
 }
 
 /* ---- reduce (generic lower, build takes arch) ---- */
-ckc_reduce2d_spec_t rd_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_reduce2d_spec_t rd_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2073,8 +2089,7 @@ ckc_reduce2d_spec_t rd_build_spec(const py::dict& d, std::vector<std::string>& s
 
 std::string reduce_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_reduce2d_spec_t s = rd_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_reduce2d_new(&b, &s, arch_or_default(arch));
@@ -2108,7 +2123,7 @@ std::vector<std::string> reduce_verify(const py::dict& d, const std::string& arc
 }
 
 /* ---- pooling (nested problem, generic lower, build takes arch) ---- */
-ckc_pooling2d_spec_t pool_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_pooling2d_spec_t pool_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2147,8 +2162,7 @@ ckc_pooling2d_spec_t pool_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string pooling_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_pooling2d_spec_t s = pool_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_pooling2d_new(&b, &s, arch_or_default(arch));
@@ -2182,7 +2196,7 @@ std::vector<std::string> pooling_verify(const py::dict& d, const std::string& ar
 }
 
 /* ---- transpose (generic lower, build takes arch) ---- */
-ckc_transpose2d_spec_t tr_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_transpose2d_spec_t tr_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2207,8 +2221,7 @@ ckc_transpose2d_spec_t tr_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string transpose_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_transpose2d_spec_t s = tr_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_transpose2d_new(&b, &s, arch_or_default(arch));
@@ -2242,7 +2255,7 @@ std::vector<std::string> transpose_verify(const py::dict& d, const std::string& 
 }
 
 /* ---- permute_nd (fixed-rank arrays, generic lower, build takes arch) ---- */
-ckc_permute_spec_t pm_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_permute_spec_t pm_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2283,8 +2296,7 @@ ckc_permute_spec_t pm_build_spec(const py::dict& d, std::vector<std::string>& st
 
 std::string permute_nd_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_permute_spec_t s = pm_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_permute_new(&b, &s, arch_or_default(arch));
@@ -2318,7 +2330,7 @@ std::vector<std::string> permute_nd_verify(const py::dict& d, const std::string&
 }
 
 /* ---- smoothquant (init-by-ptr ctor, generic _ex lower, build takes arch) -- */
-ckc_smoothquant_spec_t sq_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_smoothquant_spec_t sq_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2343,8 +2355,7 @@ ckc_smoothquant_spec_t sq_build_spec(const py::dict& d, std::vector<std::string>
 
 std::string smoothquant_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_smoothquant_spec_t s = sq_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_smoothquant_new(&b, &s, arch_or_default(arch));
@@ -2385,7 +2396,7 @@ std::vector<std::string> smoothquant_verify(const py::dict& d, const std::string
  * ==================================================================== */
 
 /* ---- topk_softmax ---- */
-ckc_topk_softmax_spec_t tk_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_topk_softmax_spec_t tk_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2409,8 +2420,7 @@ ckc_topk_softmax_spec_t tk_build_spec(const py::dict& d, std::vector<std::string
 
 std::string topk_softmax_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_topk_softmax_spec_t s = tk_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch));
@@ -2444,7 +2454,7 @@ std::vector<std::string> topk_softmax_verify(const py::dict& d, const std::strin
 }
 
 /* ---- moe_smoothquant ---- */
-ckc_moe_smoothquant_spec_t msq_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_moe_smoothquant_spec_t msq_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2474,8 +2484,7 @@ ckc_moe_smoothquant_spec_t msq_build_spec(const py::dict& d, std::vector<std::st
 
 std::string moe_smoothquant_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_moe_smoothquant_spec_t s = msq_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch));
@@ -2512,7 +2521,7 @@ std::vector<std::string> moe_smoothquant_verify(const py::dict& d, const std::st
 }
 
 /* ---- moe_fused_mega ---- */
-ckc_moe_fused_mega_kernel_spec_t mfm_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_moe_fused_mega_kernel_spec_t mfm_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2537,8 +2546,7 @@ ckc_moe_fused_mega_kernel_spec_t mfm_build_spec(const py::dict& d, std::vector<s
 
 std::string moe_fused_mega_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_moe_fused_mega_kernel_spec_t s = mfm_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch));
@@ -2573,7 +2581,7 @@ std::vector<std::string> moe_fused_mega_verify(const py::dict& d, const std::str
 
 /* ---- moe_fused_mega_fp8 (build takes persistent + levers; levers=NULL) ---- */
 ckc_fused_mega_kernel_spec_fp8_t
-mfp_build_spec(const py::dict& d, std::vector<std::string>& store, bool* persistent)
+mfp_build_spec(const py::dict& d, std::deque<std::string>& store, bool* persistent)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2605,8 +2613,7 @@ mfp_build_spec(const py::dict& d, std::vector<std::string>& store, bool* persist
 
 std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     bool persistent                    = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
@@ -2627,8 +2634,7 @@ std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& 
 
 std::string moe_fused_mega_fp8_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     bool persistent                    = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
@@ -2648,8 +2654,7 @@ std::string moe_fused_mega_fp8_serialize_ir(const py::dict& d, const std::string
 
 std::vector<std::string> moe_fused_mega_fp8_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     bool persistent                    = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
@@ -2668,7 +2673,7 @@ std::vector<std::string> moe_fused_mega_fp8_verify(const py::dict& d, const std:
 }
 
 /* ---- fused_moe (phase-selected via "phase") ---- */
-ckc_fused_moe_spec_t fmoe_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_fused_moe_spec_t fmoe_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2714,8 +2719,7 @@ ckc_kernel_def_t* fmoe_build_phase(const py::dict& d,
 
 std::string fused_moe_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_fused_moe_spec_t s = fmoe_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = fmoe_build_phase(d, &b, &s, arch_or_default(arch));
@@ -2749,7 +2753,7 @@ std::vector<std::string> fused_moe_verify(const py::dict& d, const std::string& 
 }
 
 /* ---- moe_sorting (phase-selected via "phase") ---- */
-ckc_moe_sorting_spec_t msort_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_moe_sorting_spec_t msort_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2786,8 +2790,7 @@ ckc_kernel_def_t* msort_build_phase(const py::dict& d,
 
 std::string moe_sorting_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_moe_sorting_spec_t s = msort_build_spec(d, store);
     ckc_ir_builder_t b;
     ckc_kernel_def_t* k = msort_build_phase(d, &b, &s, arch_or_default(arch));
@@ -2826,7 +2829,7 @@ std::vector<std::string> moe_sorting_verify(const py::dict& d, const std::string
  * ==================================================================== */
 
 /* ---- gfx1151_wmma_gemm ---- */
-ckc_wmma_gemm_gfx1151_spec_t w1151_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_wmma_gemm_gfx1151_spec_t w1151_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2846,8 +2849,7 @@ ckc_wmma_gemm_gfx1151_spec_t w1151_build_spec(const py::dict& d, std::vector<std
 
 std::string gfx1151_wmma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_gemm_gfx1151_spec_t s = w1151_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
@@ -2884,7 +2886,7 @@ std::vector<std::string> gfx1151_wmma_gemm_verify(const py::dict& d, const std::
 }
 
 /* ---- gfx1151_wmma_gemm_int8 ---- */
-ckc_wmma_gemm_int8_spec_t w1151i8_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_wmma_gemm_int8_spec_t w1151i8_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2903,8 +2905,7 @@ ckc_wmma_gemm_int8_spec_t w1151i8_build_spec(const py::dict& d, std::vector<std:
 
 std::string gfx1151_wmma_gemm_int8_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_gemm_int8_spec_t s = w1151i8_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
@@ -2942,7 +2943,7 @@ std::vector<std::string> gfx1151_wmma_gemm_int8_verify(const py::dict& d, const 
 }
 
 /* ---- gfx1151_wmma_gemm_iu8 ---- */
-ckc_wmma_gemm_iu8_spec_t w1151iu8_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_wmma_gemm_iu8_spec_t w1151iu8_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -2959,8 +2960,7 @@ ckc_wmma_gemm_iu8_spec_t w1151iu8_build_spec(const py::dict& d, std::vector<std:
 
 std::string gfx1151_wmma_gemm_iu8_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_gemm_iu8_spec_t s = w1151iu8_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
@@ -2999,7 +2999,7 @@ std::vector<std::string> gfx1151_wmma_gemm_iu8_verify(const py::dict& d, const s
 
 /* ---- gfx1151_wmma_gemm_iu8_dequant ---- */
 ckc_wmma_gemm_iu8_dequant_spec_t w1151iu8dq_build_spec(const py::dict& d,
-                                                       std::vector<std::string>& store)
+                                                       std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -3016,8 +3016,7 @@ ckc_wmma_gemm_iu8_dequant_spec_t w1151iu8dq_build_spec(const py::dict& d,
 
 std::string gfx1151_wmma_gemm_iu8_dequant_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_gemm_iu8_dequant_spec_t s = w1151iu8dq_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
@@ -3069,7 +3068,7 @@ ckc_fmha_mask_mode_t parse_fmha_mask(const std::string& s)
     return CKC_FMHA_MASK_NONE;
 }
 
-ckc_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -3093,8 +3092,7 @@ ckc_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::vector<std
 
 std::string gfx1151_wmma_fmha_fwd_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a = arch.empty() ? "gfx1151" : arch.c_str();
@@ -3119,8 +3117,7 @@ std::string gfx1151_wmma_fmha_fwd_lower_llvm(const py::dict& d, const std::strin
 
 std::string gfx1151_wmma_fmha_fwd_serialize_ir(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a = arch.empty() ? "gfx1151" : arch.c_str();
@@ -3144,8 +3141,7 @@ std::string gfx1151_wmma_fmha_fwd_serialize_ir(const py::dict& d, const std::str
 
 std::vector<std::string> gfx1151_wmma_fmha_fwd_verify(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_fmha_fwd_spec_t s = w1151fmha_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a = arch.empty() ? "gfx1151" : arch.c_str();
@@ -3167,7 +3163,7 @@ std::vector<std::string> gfx1151_wmma_fmha_fwd_verify(const py::dict& d, const s
 }
 
 /* ---- gfx1201_wmma_gemm ---- */
-ckc_wmma_gemm_gfx1201_spec_t w1201_build_spec(const py::dict& d, std::vector<std::string>& store)
+ckc_wmma_gemm_gfx1201_spec_t w1201_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
@@ -3186,8 +3182,7 @@ ckc_wmma_gemm_gfx1201_spec_t w1201_build_spec(const py::dict& d, std::vector<std
 
 std::string gfx1201_wmma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
-    std::vector<std::string> store;
-    store.reserve(32);
+    std::deque<std::string> store;
     ckc_wmma_gemm_gfx1201_spec_t s = w1201_build_spec(d, store);
     ckc_ir_builder_t b;
     const char* a       = arch.empty() ? "gfx1201" : arch.c_str();

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <stdexcept>
 #include <string>
 
 #include "ck_dsl_runtime/dispatcher.hpp"
@@ -18,9 +19,13 @@ struct ParsedConvParams {
     int sH = 1, sW = 1, pH = 0, pW = 0, dH = 1, dW = 1;
     std::string dtype;
     int Ho() const {
+        if (sH <= 0 || dH <= 0)
+            throw std::invalid_argument("CkDslConv: stride/dilation (sH/dH) must be positive");
         return (Hi + 2 * pH - dH * (R - 1) - 1) / sH + 1;
     }
     int Wo() const {
+        if (sW <= 0 || dW <= 0)
+            throw std::invalid_argument("CkDslConv: stride/dilation (sW/dW) must be positive");
         return (Wi + 2 * pW - dW * (S - 1) - 1) / sW + 1;
     }
 };

@@ -25,14 +25,17 @@
 #ifndef CKC_BINDINGS_FAMILY_GLUE_HPP
 #define CKC_BINDINGS_FAMILY_GLUE_HPP
 
+#include <deque>
+#include <stdexcept>
+#include <string>
+
 /* serialize-IR body for a family whose kernel is built with a local IRBuilder
  * `b`. FN is the fully-qualified entry name used in diagnostics, SPECT is the
  * spec struct type, SPECBUILD is the spec-builder symbol called as
  * SPECBUILD(d, store), and the kernel-build expression is the trailing tokens
  * (which may reference &b, &s, arch_or_default(arch), etc.). */
 #define CKC_FAMILY_SERIALIZE_BODY(FN, SPECT, SPECBUILD, ...)                            \
-    std::vector<std::string> store;                                                     \
-    store.reserve(32);                                                                  \
+    std::deque<std::string> store;                                                      \
     SPECT s = SPECBUILD(d, store);                                                      \
     ckc_ir_builder_t b;                                                                 \
     ckc_kernel_def_t* k = __VA_ARGS__;                                                  \
@@ -42,14 +45,22 @@
         ckc_ir_builder_free(&b);                                                        \
         throw std::runtime_error(msg);                                                  \
     }                                                                                   \
-    std::string out = serialize_kernel(k, FN);                                          \
+    std::string out;                                                                    \
+    try                                                                                 \
+    {                                                                                   \
+        out = serialize_kernel(k, FN);                                                  \
+    }                                                                                   \
+    catch(...)                                                                          \
+    {                                                                                   \
+        ckc_ir_builder_free(&b);                                                        \
+        throw;                                                                          \
+    }                                                                                   \
     ckc_ir_builder_free(&b);                                                            \
     return out
 
 /* verify body, mirror of the serialize body above. */
 #define CKC_FAMILY_VERIFY_BODY(FN, SPECT, SPECBUILD, ...)                               \
-    std::vector<std::string> store;                                                     \
-    store.reserve(32);                                                                  \
+    std::deque<std::string> store;                                                      \
     SPECT s = SPECBUILD(d, store);                                                      \
     ckc_ir_builder_t b;                                                                 \
     ckc_kernel_def_t* k = __VA_ARGS__;                                                  \
@@ -59,7 +70,16 @@
         ckc_ir_builder_free(&b);                                                        \
         throw std::runtime_error(msg);                                                  \
     }                                                                                   \
-    std::vector<std::string> out = verify_kernel(k);                                    \
+    std::vector<std::string> out;                                                       \
+    try                                                                                 \
+    {                                                                                   \
+        out = verify_kernel(k);                                                         \
+    }                                                                                   \
+    catch(...)                                                                          \
+    {                                                                                   \
+        ckc_ir_builder_free(&b);                                                        \
+        throw;                                                                          \
+    }                                                                                   \
     ckc_ir_builder_free(&b);                                                            \
     return out
 

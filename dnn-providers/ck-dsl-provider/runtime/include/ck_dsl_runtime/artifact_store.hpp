@@ -105,6 +105,9 @@ class ArtifactStore {
     static std::vector<std::byte> read_bytes(const std::string& p) {
         std::ifstream f(p, std::ios::binary | std::ios::ate);
         std::streamsize n = f.tellg();
+        // A failed open or tellg() returns -1; without this guard the size would
+        // be reinterpreted as an enormous (or negative) allocation.
+        if (!f || n < 0) throw std::runtime_error("artifact_store: cannot read '" + p + "'");
         f.seekg(0);
         std::vector<std::byte> b(n);
         f.read(reinterpret_cast<char*>(b.data()), n);

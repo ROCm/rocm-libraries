@@ -31,6 +31,20 @@ namespace ckc {
  * a result exists for these ops; mirror Python by reading results[0]. */
 static const char* ll_result_name(const ckc_op_t* op) { return op->results[0]->name; }
 
+/* RAII guard for a heap-backed strbuf: frees the buffer on scope exit, so an
+ * exception raised by a nested emit/type helper (ckc_ll_fail -> throw) while a
+ * strbuf is live cannot leak its heap allocation. Codegen-neutral: it only
+ * affects the throw/unwind path, never the bytes emitted on success. */
+struct ll_strbuf_guard
+{
+    ckc_strbuf_t sb;
+    bool ok;
+    explicit ll_strbuf_guard(size_t cap) { ok = (ckc_strbuf_init(&sb, cap) == 0); }
+    ~ll_strbuf_guard() { ckc_strbuf_free(&sb); }
+    ll_strbuf_guard(const ll_strbuf_guard&)            = delete;
+    ll_strbuf_guard& operator=(const ll_strbuf_guard&) = delete;
+};
+
 /* ====================================================================== */
 /* Shared ballot emit (Python _emit_wave_ballot) -- OWNED BY THIS BUCKET  */
 /* ====================================================================== */
@@ -521,9 +535,7 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
     const char* constraints;
     bool sideeffect;
     const char* flag_str;
-    ckc_strbuf_t args;
     const char* arglist;
-    ckc_strbuf_t asm_expr;
     const char* asm_str;
     int i;
 
@@ -542,8 +554,10 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
     sideeffect = ckc_attr_get_bool(&op->attrs, "sideeffect", true);
     flag_str   = sideeffect ? " sideeffect" : "";
 
-    /* Build the typed operand list. */
-    if(ckc_strbuf_init(&args, 64) != 0)
+    /* Build the typed operand list. The strbufs are RAII-guarded so a throw
+     * from any nested emit/type helper unwinds without leaking their heap. */
+    ll_strbuf_guard args(64);
+    if(!args.ok)
     {
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
     }
@@ -551,71 +565,62 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
     {
         if(i != 0)
         {
-            ckc_strbuf_append(&args, ", ");
+            ckc_strbuf_append(&args.sb, ", ");
         }
-        ckc_strbuf_append(&args, ckc_ll_operand_with_type(L, op->operands[i]));
+        ckc_strbuf_append(&args.sb, ckc_ll_operand_with_type(L, op->operands[i]));
     }
-    if(args.oom)
+    if(args.sb.oom)
     {
-        ckc_strbuf_free(&args);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
     }
-    arglist = ckc_strbuf_cstr(&args);
+    arglist = ckc_strbuf_cstr(&args.sb);
 
     /* Build the asm expression: asm<flags> "<tmpl>", "<cons>"(<args>) */
-    if(ckc_strbuf_init(&asm_expr, 64) != 0)
+    ll_strbuf_guard asm_expr(64);
+    if(!asm_expr.ok)
     {
-        ckc_strbuf_free(&args);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
     }
     ckc_strbuf_appendf(
-        &asm_expr, "asm%s \"%s\", \"%s\"(%s)", flag_str, template_esc, constraints, arglist);
-    if(asm_expr.oom)
+        &asm_expr.sb, "asm%s \"%s\", \"%s\"(%s)", flag_str, template_esc, constraints, arglist);
+    if(asm_expr.sb.oom)
     {
-        ckc_strbuf_free(&args);
-        ckc_strbuf_free(&asm_expr);
         ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
     }
-    asm_str = ckc_strbuf_cstr(&asm_expr);
+    asm_str = ckc_strbuf_cstr(&asm_expr.sb);
 
     if(op->num_results > 1)
     {
         /* Multi-output: LLVM returns a literal struct; unpack with
          * extractvalue. */
-        ckc_strbuf_t struct_ty;
         const char* tmp;
         const char* st;
-        if(ckc_strbuf_init(&struct_ty, 32) != 0)
+        ll_strbuf_guard struct_ty(32);
+        if(!struct_ty.ok)
         {
-            ckc_strbuf_free(&args);
-            ckc_strbuf_free(&asm_expr);
             ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
         }
-        ckc_strbuf_append(&struct_ty, "{ ");
+        ckc_strbuf_append(&struct_ty.sb, "{ ");
         for(i = 0; i < op->num_results; ++i)
         {
             if(i != 0)
             {
-                ckc_strbuf_append(&struct_ty, ", ");
+                ckc_strbuf_append(&struct_ty.sb, ", ");
             }
-            ckc_strbuf_append(&struct_ty, ckc_ll_llvm_type(L, op->results[i]->type));
+            ckc_strbuf_append(&struct_ty.sb, ckc_ll_llvm_type(L, op->results[i]->type));
         }
-        ckc_strbuf_append(&struct_ty, " }");
-        if(struct_ty.oom)
+        ckc_strbuf_append(&struct_ty.sb, " }");
+        if(struct_ty.sb.oom)
         {
-            ckc_strbuf_free(&args);
-            ckc_strbuf_free(&asm_expr);
-            ckc_strbuf_free(&struct_ty);
             ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
         }
-        st  = ckc_strbuf_cstr(&struct_ty);
+        st  = ckc_strbuf_cstr(&struct_ty.sb);
         tmp = ckc_ll_fresh(L, "asmcl");
         ckc_ll_emitf(L, "  %s = call %s %s", tmp, st, asm_str);
         for(i = 0; i < op->num_results; ++i)
         {
             ckc_ll_emitf(L, "  %s = extractvalue %s %s, %d", op->results[i]->name, st, tmp, i);
         }
-        ckc_strbuf_free(&struct_ty);
     }
     else if(op->num_results == 1)
     {
@@ -626,9 +631,7 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
     {
         ckc_ll_emitf(L, "  call void %s", asm_str);
     }
-
-    ckc_strbuf_free(&args);
-    ckc_strbuf_free(&asm_expr);
+    /* args / asm_expr freed by their RAII guards on scope exit. */
 }
 
 /* ====================================================================== */

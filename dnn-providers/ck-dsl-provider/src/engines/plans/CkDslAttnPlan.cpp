@@ -24,6 +24,12 @@ CkDslAttnPlan::CkDslAttnPlan(CkDslAttnParamParser::ParsedAttnParams params,
     const auto& cfg = kernel_->manifest().raw.at("attention_config");
     block_size_ = (int)cfg.get_int("block_size", 16);
     block_q_ = (int)cfg.get_int("block_q", 16);
+    // A manifest that carries block_size/block_q <= 0 would divide by zero below
+    // (max_blocks_) and in grid(); reject it cleanly instead of crashing.
+    if (block_size_ <= 0 || block_q_ <= 0)
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "CkDslAttn: manifest block_size/block_q must be positive");
     num_seqs_ = (int)params_.batch;
     const int B = num_seqs_, Sk = (int)params_.seqlen_k, Sq = (int)params_.seqlen_q;
     max_blocks_ = (Sk + block_size_ - 1) / block_size_;
@@ -35,16 +41,27 @@ CkDslAttnPlan::CkDslAttnPlan(CkDslAttnParamParser::ParsedAttnParams params,
         cu[b + 1] = cu[b] + Sq;
         for (int j = 0; j < max_blocks_; ++j) bt[(size_t)b * max_blocks_ + j] = b * max_blocks_ + j;
     }
-    auto up = [](const std::vector<int32_t>& v) {
+    // RAII device allocation: if any later upload fails the earlier ones are
+    // freed automatically (no leak on a partially-constructed plan). Members are
+    // committed only after all three succeed.
+    auto deleter = [](void* p) {
+        if (p) hipFree(p);
+    };
+    using DevPtr = std::unique_ptr<void, decltype(deleter)>;
+    auto up = [&](const std::vector<int32_t>& v) {
         void* p = nullptr;
         ck_dsl::hip_check(hipMalloc(&p, v.size() * 4), "attn meta malloc");
+        DevPtr owned(p, deleter);
         ck_dsl::hip_check(hipMemcpy(p, v.data(), v.size() * 4, hipMemcpyHostToDevice),
                           "attn meta h2d");
-        return p;
+        return owned;
     };
-    d_block_tables_ = up(bt);
-    d_seq_lens_ = up(sl);
-    d_query_start_len_ = up(cu);
+    DevPtr block_tables = up(bt);
+    DevPtr seq_lens = up(sl);
+    DevPtr query_start_len = up(cu);
+    d_block_tables_ = block_tables.release();
+    d_seq_lens_ = seq_lens.release();
+    d_query_start_len_ = query_start_len.release();
 }
 
 CkDslAttnPlan::~CkDslAttnPlan() {
@@ -70,7 +87,8 @@ std::array<unsigned, 3> CkDslAttnPlan::grid() const {
         return {(unsigned)g[0], (unsigned)g[1], (unsigned)g[2]};
     }
     long total_q = (long)params_.batch * params_.seqlen_q;
-    unsigned gy = (unsigned)(total_q / block_q_ + num_seqs_);
+    const int bq = block_q_ > 0 ? block_q_ : 1;  // ctor rejects <=0; defensive guard
+    unsigned gy = (unsigned)(total_q / bq + num_seqs_);
     return {(unsigned)params_.nhead_k, gy, 1};
 }
 

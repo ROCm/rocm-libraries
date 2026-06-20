@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -44,9 +45,11 @@ struct CkDslHandle : HipdnnEnginePluginHandle {
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer) {
+        std::lock_guard<std::mutex> lock(engine_details_mutex_);
         engine_details_buffers_[ptr] = std::move(buffer);
     }
     void removeEngineDetailsDetachedBuffer(const void* ptr) {
+        std::lock_guard<std::mutex> lock(engine_details_mutex_);
         engine_details_buffers_.erase(ptr);
     }
 
@@ -72,4 +75,5 @@ struct CkDslHandle : HipdnnEnginePluginHandle {
     std::unique_ptr<ck_dsl::DslMlHeuristic> ml_heuristic_;  // trained-model ranker (optional)
     std::unordered_map<const void*, std::unique_ptr<flatbuffers::DetachedBuffer>>
         engine_details_buffers_;
+    std::mutex engine_details_mutex_;  // guards engine_details_buffers_ on a shared handle
 };

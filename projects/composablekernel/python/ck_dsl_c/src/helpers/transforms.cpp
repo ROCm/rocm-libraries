@@ -78,7 +78,7 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
 
     /* shift = smallest s with (1 << s) >= divisor */
     shift = 0;
-    while((1 << shift) < divisor)
+    while(((uint64_t)1 << shift) < (uint64_t)divisor)
     {
         shift += 1;
     }
@@ -86,7 +86,7 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
     /* multiplier = (((1 << shift) - divisor) << 32) // divisor + 1.
      * Computed in 64-bit unsigned to match the Python arbitrary-precision int
      * for the documented 31-bit range; the bit pattern is what matters. */
-    multiplier = ((((uint64_t)(1 << shift) - (uint64_t)divisor) << 32) / (uint64_t)divisor) + 1u;
+    multiplier = (((((uint64_t)1 << shift) - (uint64_t)divisor) << 32) / (uint64_t)divisor) + 1u;
 
     if(out_multiplier != NULL)
     {

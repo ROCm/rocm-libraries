@@ -55,11 +55,11 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
     const auto* wd = w->dims();
     if (!xd || !wd || xd->size() < 4 || wd->size() < 4)
         throw std::runtime_error("CkDslConv: expected rank-4 X[N,C,H,W] and W[K,C/G,R,S]");
-    p.N  = xd->Get(0);
-    p.C  = xd->Get(1);
+    p.N = xd->Get(0);
+    p.C = xd->Get(1);
     p.Hi = xd->Get(2);
     p.Wi = xd->Get(3);
-    p.K  = wd->Get(0);
+    p.K = wd->Get(0);
     // W=[K, C/G, R, S]: group count is implicit in the per-group channel dim.
     {
         const auto cpg = wd->Get(1);
@@ -69,14 +69,19 @@ ParsedConvParams parseConvGraph(const hipdnn_flatbuffers_sdk::flatbuffer_utiliti
         if (p.K % p.G != 0)
             throw std::runtime_error("CkDslConv: K must be divisible by G (grouped conv)");
     }
-    p.R  = wd->Get(2);
-    p.S  = wd->Get(3);
+    p.R = wd->Get(2);
+    p.S = wd->Get(3);
     p.sH = v2(a->stride(), 0, 1);
     p.sW = v2(a->stride(), 1, 1);
     p.pH = v2(a->pre_padding(), 0, 0);
     p.pW = v2(a->pre_padding(), 1, 0);
     p.dH = v2(a->dilation(), 0, 1);
     p.dW = v2(a->dilation(), 1, 1);
+    // An explicit 0 (or negative) stride/dilation from an untrusted graph would
+    // make Ho()/Wo() divide by zero (SIGFPE, not catchable by try/catch). Reject
+    // here, before any division consumes these values.
+    if (p.sH <= 0 || p.sW <= 0 || p.dH <= 0 || p.dW <= 0)
+        throw std::runtime_error("CkDslConv: stride and dilation must be positive");
     return p;
 }
 

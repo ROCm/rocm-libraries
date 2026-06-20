@@ -197,12 +197,14 @@ def _extract_first(data_set: _DataSet, kind: int) -> bytes:
         "action_data_get_data",
     )
 
-    size = ctypes.c_size_t(0)
-    _check(_get_data(data, ctypes.byref(size), None), "get_data (size)")
-    buf = ctypes.create_string_buffer(size.value)
-    _check(_get_data(data, ctypes.byref(size), buf), "get_data (read)")
-    out = bytes(buf.raw[: size.value])
-    _release_data(data)
+    try:
+        size = ctypes.c_size_t(0)
+        _check(_get_data(data, ctypes.byref(size), None), "get_data (size)")
+        buf = ctypes.create_string_buffer(size.value)
+        _check(_get_data(data, ctypes.byref(size), buf), "get_data (read)")
+        out = bytes(buf.raw[: size.value])
+    finally:
+        _release_data(data)
     return out
 
 
@@ -219,68 +221,95 @@ def build_hsaco_from_llvm_ir(
     """
     options = list(options or ["-O3"])
 
-    # Input data set (LLVM IR text wrapped as SOURCE).
-    in_set = _DataSet()
-    _check(_create_data_set(ctypes.byref(in_set)), "create_data_set(in)")
-    src = _Data()
-    _check(
-        _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)), "create_data(src)"
-    )
-    payload = ir_text.encode("utf-8")
-    _check(_set_data(src, len(payload), payload), "set_data(src)")
-    _check(_set_data_name(src, b"kernel.ll"), "set_data_name(src)")
-    _check(_data_set_add(in_set, src), "data_set_add(src)")
+    # Handles are created lazily below; declare them up front so the
+    # ``finally`` block can release whatever was successfully created even
+    # when an intermediate ``_check`` raises (the common case during a
+    # validity/heuristics sweep over borderline specs).
+    in_set = None
+    src = None
+    info = None
+    bc_set = None
+    reloc_set = None
+    exe_set = None
 
-    # Action info.
-    info = _ActionInfo()
-    _check(_create_action_info(ctypes.byref(info)), "create_action_info")
-    _check(_action_info_set_isa_name(info, isa.encode("utf-8")), "set_isa")
-    _check(_action_info_set_language(info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang")
-    opt_array = (ctypes.c_char_p * len(options))(*[o.encode("utf-8") for o in options])
-    _check(_action_info_set_options(info, opt_array, len(options)), "set_options")
+    try:
+        # Input data set (LLVM IR text wrapped as SOURCE).
+        in_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(in_set)), "create_data_set(in)")
+        src = _Data()
+        _check(
+            _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)),
+            "create_data(src)",
+        )
+        payload = ir_text.encode("utf-8")
+        _check(_set_data(src, len(payload), payload), "set_data(src)")
+        _check(_set_data_name(src, b"kernel.ll"), "set_data_name(src)")
+        _check(_data_set_add(in_set, src), "data_set_add(src)")
 
-    timings = ComgrTimings()
+        # Action info.
+        info = _ActionInfo()
+        _check(_create_action_info(ctypes.byref(info)), "create_action_info")
+        _check(_action_info_set_isa_name(info, isa.encode("utf-8")), "set_isa")
+        _check(_action_info_set_language(info, AMD_COMGR_LANGUAGE_LLVM_IR), "set_lang")
+        opt_array = (ctypes.c_char_p * len(options))(
+            *[o.encode("utf-8") for o in options]
+        )
+        _check(_action_info_set_options(info, opt_array, len(options)), "set_options")
 
-    # Stage 1: LLVM IR (text/source) -> BC
-    bc_set = _DataSet()
-    _check(_create_data_set(ctypes.byref(bc_set)), "create_data_set(bc)")
-    t0 = time.perf_counter()
-    _check(
-        _do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, info, in_set, bc_set),
-        "do_action(COMPILE_SOURCE_TO_BC)",
-    )
-    timings.bc = time.perf_counter() - t0
+        timings = ComgrTimings()
 
-    # Stage 2: BC -> relocatable ELF
-    reloc_set = _DataSet()
-    _check(_create_data_set(ctypes.byref(reloc_set)), "create_data_set(reloc)")
-    t0 = time.perf_counter()
-    _check(
-        _do_action(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, info, bc_set, reloc_set),
-        "do_action(CODEGEN_BC_TO_RELOCATABLE)",
-    )
-    timings.relocatable = time.perf_counter() - t0
+        # Stage 1: LLVM IR (text/source) -> BC
+        bc_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(bc_set)), "create_data_set(bc)")
+        t0 = time.perf_counter()
+        _check(
+            _do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC, info, in_set, bc_set),
+            "do_action(COMPILE_SOURCE_TO_BC)",
+        )
+        timings.bc = time.perf_counter() - t0
 
-    # Stage 3: relocatable -> executable (HSACO).
-    exe_set = _DataSet()
-    _check(_create_data_set(ctypes.byref(exe_set)), "create_data_set(exe)")
-    t0 = time.perf_counter()
-    _check(
-        _do_action(
-            AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, info, reloc_set, exe_set
-        ),
-        "do_action(LINK_RELOCATABLE_TO_EXECUTABLE)",
-    )
-    timings.executable = time.perf_counter() - t0
+        # Stage 2: BC -> relocatable ELF
+        reloc_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(reloc_set)), "create_data_set(reloc)")
+        t0 = time.perf_counter()
+        _check(
+            _do_action(
+                AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, info, bc_set, reloc_set
+            ),
+            "do_action(CODEGEN_BC_TO_RELOCATABLE)",
+        )
+        timings.relocatable = time.perf_counter() - t0
 
-    hsaco = _extract_first(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE)
+        # Stage 3: relocatable -> executable (HSACO).
+        exe_set = _DataSet()
+        _check(_create_data_set(ctypes.byref(exe_set)), "create_data_set(exe)")
+        t0 = time.perf_counter()
+        _check(
+            _do_action(
+                AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
+                info,
+                reloc_set,
+                exe_set,
+            ),
+            "do_action(LINK_RELOCATABLE_TO_EXECUTABLE)",
+        )
+        timings.executable = time.perf_counter() - t0
 
-    # Cleanup.
-    _release_data(src)
-    _destroy_data_set(in_set)
-    _destroy_data_set(bc_set)
-    _destroy_data_set(reloc_set)
-    _destroy_data_set(exe_set)
-    _destroy_action_info(info)
+        hsaco = _extract_first(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE)
+    finally:
+        # Release every successfully-created handle in reverse order;
+        # guard each so a partially-built pipeline still frees the rest.
+        if exe_set is not None:
+            _destroy_data_set(exe_set)
+        if reloc_set is not None:
+            _destroy_data_set(reloc_set)
+        if bc_set is not None:
+            _destroy_data_set(bc_set)
+        if info is not None:
+            _destroy_action_info(info)
+        if src is not None:
+            _release_data(src)
+        if in_set is not None:
+            _destroy_data_set(in_set)
 
     return hsaco, timings

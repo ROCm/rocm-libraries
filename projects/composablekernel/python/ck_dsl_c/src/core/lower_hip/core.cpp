@@ -41,6 +41,9 @@
 #include "ckc/strbuf.h"
 #include "ckc/vec.h"
 
+#include <exception>
+#include <new>
+
 /* ============================== prologue ============================== */
 
 /* Mirrors Python HIP_PROLOGUE byte-for-byte (see lower_hip.py HIP_PROLOGUE).
@@ -968,6 +971,24 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
         ckc_strbuf_free(&sig);
         h_smem_release(&lw);
         return e.code();
+    }
+    catch(const std::bad_alloc&)
+    {
+        ckc_strbuf_free(&sig);
+        h_smem_release(&lw);
+        return CKC_ERR_OOM;
+    }
+    catch(const std::exception&)
+    {
+        ckc_strbuf_free(&sig);
+        h_smem_release(&lw);
+        return CKC_ERR_VALUE;
+    }
+    catch(...)
+    {
+        ckc_strbuf_free(&sig);
+        h_smem_release(&lw);
+        return CKC_ERR_VALUE;
     }
 
     ckc_strbuf_free(&sig);

@@ -195,6 +195,9 @@ class Dispatcher {
             // dims: M = N*Ho*Wo, N_gemm = K, K_gemm = Y*X*C. block_m/n/k must
             // divide them exactly. (Ho/Wo are derived from the conv geometry.)
             if (m.block_m > 0 && m.block_n > 0 && m.block_k > 0 && !m.raw.has("conv")) {
+                // Non-positive stride/dilation would divide by zero below; treat
+                // such a (malformed) problem as unsupported rather than crash.
+                if (p.stride_h <= 0 || p.stride_w <= 0) return false;
                 long Ho = (p.Hi + 2 * p.pad_h - p.dilation_h * (p.Y - 1) - 1) / p.stride_h + 1;
                 long Wo = (p.Wi + 2 * p.pad_w - p.dilation_w * (p.X - 1) - 1) / p.stride_w + 1;
                 if (Ho <= 0 || Wo <= 0) return false;
@@ -302,15 +305,16 @@ class Dispatcher {
     }
     static long next_pow2(long x) {
         if (x <= 1) return 1;
-        long p = 1;
-        long v = x - 1;
+        // Compute in unsigned to avoid signed-shift UB, and clamp so the shift
+        // amount stays below 63 (a crafted head ratio could otherwise drive
+        // `1 << bits` into signed-overflow territory).
+        unsigned long v = (unsigned long)(x - 1);
         int bits = 0;
-        while (v > 0) {
+        while (v > 0 && bits < 62) {
             v >>= 1;
             ++bits;
         }
-        (void)p;
-        return 1L << bits;
+        return (long)(1UL << bits);
     }
 
     const ArtifactStore& store_;

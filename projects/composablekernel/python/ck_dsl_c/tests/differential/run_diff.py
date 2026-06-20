@@ -22,8 +22,9 @@
 # Classification per (family, config):
 #   IDENTICAL          both non-empty, sha equal
 #   MISMATCH           both non-empty, sha differ              (drift)
-#   BOTH_REJECTED      both empty + nonzero, not end-of-range  (parity-faithful)
+#   BOTH_REJECTED      both empty + positive rc, not end-of-range (parity-faithful)
 #   ASYMMETRIC         one empty / rc disagree                 (drift)
+#   CRASH              either side died on a signal (rc < 0)   (drift)
 #   END                both report "unknown config" (range end; stops the family)
 #
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
@@ -182,13 +183,19 @@ def classify(cr, co, ce, pr, po, pe):
     if co and po:
         return ("IDENTICAL" if sh(co) == sh(po) else "MISMATCH"), (sh(co), sh(po))
     if not co and not po:
+        # A negative returncode means the process died on a signal
+        # (e.g. -11 SIGSEGV, -6 SIGABRT) -- exactly the UB this harness
+        # exists to catch. Never let a crash masquerade as parity:
+        # surface it as a distinct verdict instead of BOTH_REJECTED.
+        if cr < 0 or pr < 0:
+            return "CRASH", None
         # both produced nothing:
         #   rc0/rc0  -> both succeeded with no output (e.g. verify mode, no diags) = IDENTICAL
-        #   !=0/!=0  -> both rejected the spec (parity-faithful)
+        #   >0/>0    -> both cleanly rejected the spec (parity-faithful)
         #   otherwise-> one rejected, one didn't = drift
         if cr == 0 and pr == 0:
             return "IDENTICAL", None
-        if cr != 0 and pr != 0:
+        if cr > 0 and pr > 0:
             return "BOTH_REJECTED", None
         return "ASYMMETRIC", None
     return "ASYMMETRIC", (sh(co) if co else None, sh(po) if po else None)
@@ -258,7 +265,8 @@ def run_family(name, archive, mode, canonical=False):
     nbad = sum(
         1
         for c in configs
-        if c["verdict"] in ("MISMATCH", "ASYMMETRIC", "STRUCT_DRIFT", "CANON_ERROR")
+        if c["verdict"]
+        in ("MISMATCH", "ASYMMETRIC", "STRUCT_DRIFT", "CANON_ERROR", "CRASH")
     )
     ncanon = sum(1 for c in configs if c["verdict"] == "CANON_EQUAL")
     if nbad:
@@ -362,6 +370,7 @@ def main():
                     "ASYMMETRIC",
                     "STRUCT_DRIFT",
                     "CANON_ERROR",
+                    "CRASH",
                 ):
                     print(
                         f"        cfg[{c['idx']}] {c['verdict']} c_rc={c['c_rc']} p_rc={c['p_rc']}"

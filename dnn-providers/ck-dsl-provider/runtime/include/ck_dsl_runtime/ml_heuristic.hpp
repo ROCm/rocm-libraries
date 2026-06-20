@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -467,8 +468,10 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const int Wi = (int)prob.Wi;
     const int Y = (int)prob.Y;
     const int X = (int)prob.X;
-    const int stride_h = prob.stride_h;
-    const int stride_w = prob.stride_w;
+    // Guard the Ho/Wo divisions against a malformed (non-positive) stride; clamp
+    // to 1 so feature extraction cannot divide by zero (SIGFPE).
+    const int stride_h = prob.stride_h > 0 ? prob.stride_h : 1;
+    const int stride_w = prob.stride_w > 0 ? prob.stride_w : 1;
     const int pad_h = prob.pad_h;
     const int pad_w = prob.pad_w;
     const int dilation_h = prob.dilation_h;
@@ -496,8 +499,9 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
     const double bpe = conv_dtype_bytes(prob.dtype);
     const double cpg = (double)C / G;
     const double flops = (double)N * K * output_volume * cpg * filter_volume * 2.0;
-    const double bytes_io =
-        ((double)N * C * spatial_volume + (double)K * cpg * filter_volume + (double)N * K * output_volume) * bpe;
+    const double bytes_io = ((double)N * C * spatial_volume + (double)K * cpg * filter_volume +
+                             (double)N * K * output_volume) *
+                            bpe;
     const double ai = flops / std::max(bytes_io, 1.0);
 
     const double filter_area = filter_volume;
@@ -578,40 +582,112 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
 
     return {{
         // Problem (30)
-        (double)N, (double)C, (double)K, (double)G,
-        (double)Hi, (double)Wi, (double)Y, (double)X,
-        (double)stride_h, (double)stride_w, (double)pad_h, (double)pad_w,
-        (double)Ho, (double)Wo,
-        log2_N, log2_C, log2_K, log2_G, log2_Hi, log2_Wi,
-        log2_spatial, log2_filter, log2_output,
-        ai, filter_area, is_1x1, is_3x3, cpg, aspect_hw, aspect_filt,
+        (double)N,
+        (double)C,
+        (double)K,
+        (double)G,
+        (double)Hi,
+        (double)Wi,
+        (double)Y,
+        (double)X,
+        (double)stride_h,
+        (double)stride_w,
+        (double)pad_h,
+        (double)pad_w,
+        (double)Ho,
+        (double)Wo,
+        log2_N,
+        log2_C,
+        log2_K,
+        log2_G,
+        log2_Hi,
+        log2_Wi,
+        log2_spatial,
+        log2_filter,
+        log2_output,
+        ai,
+        filter_area,
+        is_1x1,
+        is_3x3,
+        cpg,
+        aspect_hw,
+        aspect_filt,
         // 3D-pinned (8)
         is_3d,
-        (double)Di, (double)Z3d, (double)Do,
-        (double)stride_d, (double)pad_d,
-        (double)dilation_h, (double)dilation_w,
+        (double)Di,
+        (double)Z3d,
+        (double)Do,
+        (double)stride_d,
+        (double)pad_d,
+        (double)dilation_h,
+        (double)dilation_w,
         // Group (9)
-        log2_cpg, log2_ocpg, is_depthwise, group_density,
-        is_small_group, cprod, batch_group, is_small_batch_grouped,
+        log2_cpg,
+        log2_ocpg,
+        is_depthwise,
+        group_density,
+        is_small_group,
+        cprod,
+        batch_group,
+        is_small_batch_grouped,
         k_per_c,
         // Kernel (16)
-        (double)block_size, (double)tile_m, (double)tile_n, (double)tile_k,
-        (double)pipeline_code, num_warps, tile_vol, tile_mn,
-        lds_est, lds_ratio, btr_m, btr_n, block_eff,
-        is_compv3, is_compv4, is_compv5,
+        (double)block_size,
+        (double)tile_m,
+        (double)tile_n,
+        (double)tile_k,
+        (double)pipeline_code,
+        num_warps,
+        tile_vol,
+        tile_mn,
+        lds_est,
+        lds_ratio,
+        btr_m,
+        btr_n,
+        block_eff,
+        is_compv3,
+        is_compv4,
+        is_compv5,
         // Suffix (6)
-        is_intrawave, has_dsb, has_si, is_basic, is_compv6, is_mem,
+        is_intrawave,
+        has_dsb,
+        has_si,
+        is_basic,
+        is_compv6,
+        is_mem,
         // Interaction (20)
-        gemm_m, gemm_n, gemm_k,
-        ntm, ntn, ntk, tot_tiles,
-        te_m, te_n, te_k, overall_eff, cu_util,
-        rm, rn, rk, psm, psn, psk,
-        log_gemm_m_n_ratio, log_total_output_tiles,
+        gemm_m,
+        gemm_n,
+        gemm_k,
+        ntm,
+        ntn,
+        ntk,
+        tot_tiles,
+        te_m,
+        te_n,
+        te_k,
+        overall_eff,
+        cu_util,
+        rm,
+        rn,
+        rk,
+        psm,
+        psn,
+        psk,
+        log_gemm_m_n_ratio,
+        log_total_output_tiles,
         // Hardware (12)
-        (double)hw.num_cus, (double)hw.simds_per_cu, (double)hw.total_simds(),
-        (double)hw.shader_engines, (double)hw.max_clock_mhz, (double)hw.max_waves_per_cu,
-        (double)hw.wavefront_size, (double)hw.lds_capacity,
-        (double)hw.l1_cache_kb, (double)hw.l2_cache_kb, (double)hw.l3_cache_kb,
+        (double)hw.num_cus,
+        (double)hw.simds_per_cu,
+        (double)hw.total_simds(),
+        (double)hw.shader_engines,
+        (double)hw.max_clock_mhz,
+        (double)hw.max_waves_per_cu,
+        (double)hw.wavefront_size,
+        (double)hw.lds_capacity,
+        (double)hw.l1_cache_kb,
+        (double)hw.l2_cache_kb,
+        (double)hw.l3_cache_kb,
         (double)hw.num_xcd,
     }};
 }
@@ -666,11 +742,17 @@ class DslMlHeuristic {
         HardwareProfile hw_approx;
         if (prob.arch == "gfx942") {
             // MI300X: match ConvHwProfile::for_arch("gfx942") exactly.
-            hw_approx.num_cus = 228; hw_approx.simds_per_cu = 4; hw_approx.shader_engines = 28;
-            hw_approx.max_clock_mhz = 2100; hw_approx.max_waves_per_cu = 32;
-            hw_approx.wavefront_size = 64; hw_approx.lds_capacity = 65536;
-            hw_approx.l1_cache_kb = 32; hw_approx.l2_cache_kb = 4096;
-            hw_approx.l3_cache_kb = 262144; hw_approx.num_xcd = 8;
+            hw_approx.num_cus = 228;
+            hw_approx.simds_per_cu = 4;
+            hw_approx.shader_engines = 28;
+            hw_approx.max_clock_mhz = 2100;
+            hw_approx.max_waves_per_cu = 32;
+            hw_approx.wavefront_size = 64;
+            hw_approx.lds_capacity = 65536;
+            hw_approx.l1_cache_kb = 32;
+            hw_approx.l2_cache_kb = 4096;
+            hw_approx.l3_cache_kb = 262144;
+            hw_approx.num_xcd = 8;
         }
         auto f = ml_extract_features(prob, MlKernelConfig::from_manifest(m), hw_approx);
         return predict(gemm_booster_, f.data(), CKDSL_NUM_FEATURES);
@@ -681,9 +763,12 @@ class DslMlHeuristic {
                                                std::vector<Dispatcher::Choice> cands) const {
         if (!store_) return cands;
         bool have;
-        if (prob.op == "attention") have = has_fmha();
-        else if (prob.op == "conv") have = has_conv() || has_gemm();
-        else have = has_gemm();
+        if (prob.op == "attention")
+            have = has_fmha();
+        else if (prob.op == "conv")
+            have = has_conv() || has_gemm();
+        else
+            have = has_gemm();
         if (!have) return cands;
         std::stable_sort(cands.begin(), cands.end(),
                          [&](const Dispatcher::Choice& a, const Dispatcher::Choice& b) {
@@ -700,9 +785,13 @@ class DslMlHeuristic {
         if (LGBM_BoosterCreateFromModelfile(path.c_str(), &iters, &b) != 0) return nullptr;
         return b;
     }
-    static double predict(void* booster, const double* feats, int n) {
+    double predict(void* booster, const double* feats, int n) const {
         int64_t ol = 0;
         double pred = 0;
+        // LGBM_BoosterPredictForMat mutates per-booster prediction scratch, so it
+        // is NOT safe to call concurrently on a handle shared across threads.
+        // Serialize all predictions on this (const, shared) heuristic.
+        std::lock_guard<std::mutex> lock(predict_mutex_);
         // data_type=1 == C_API_DTYPE_FLOAT64 (features are double); row-major.
         if (LGBM_BoosterPredictForMat(booster, feats, 1, 1, n, 1, 0, 0, 0, "", &ol, &pred) != 0)
             return 0;
@@ -715,6 +804,7 @@ class DslMlHeuristic {
     void* conv_booster_ = nullptr;
     HardwareProfile ghw_;
     FmhaHardwareProfile fhw_;
+    mutable std::mutex predict_mutex_;  // serializes LGBM_BoosterPredictForMat
 };
 
 }  // namespace ck_dsl

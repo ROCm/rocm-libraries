@@ -241,7 +241,13 @@ class _Verifier:
         # 3) per-opcode arity / type contracts.
         self._check_contract(op, scope)
 
-        # 4) result types sane; results define new (unique) ids in scope.
+        # 4) result types sane; results define new (unique) ids. Snapshot the
+        # set of names that are in scope BEFORE this op's own results so that
+        # nested regions (step 5) are checked without the carrier op's own
+        # results visible -- an scf.for/scf.if result must not be usable inside
+        # its own body. The results are still registered into `scope` here so
+        # that *sibling* ops following this one see them.
+        names_before_results = set(scope)
         for r in op.results:
             self._check_type(r.type, f"result {r.name!r}", op)
             if r.name in scope:
@@ -249,9 +255,13 @@ class _Verifier:
             else:
                 scope[r.name] = r
 
-        # 5) nested regions, with block-defined values registered first.
+        # 5) nested regions, with block-defined values registered first. Use a
+        # scope that excludes this op's own (not-yet-computed) results.
         if op.regions:
-            self._check_op_regions(op, scope)
+            region_scope = {
+                name: val for name, val in scope.items() if name in names_before_results
+            }
+            self._check_op_regions(op, region_scope)
 
     def _check_op_regions(self, op: Op, scope: Dict[str, Value]) -> None:
         if op.name == "scf.for":

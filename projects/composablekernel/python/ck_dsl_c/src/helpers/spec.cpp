@@ -787,8 +787,10 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
         {
             return CKC_ERR_VALUE; /* "tile must be positive" */
         }
-        /* Python floor-division on these non-negative values == truncation. */
-        scratch[i] = (total + tile - 1) / tile;
+        /* Python floor-division on these non-negative values == truncation.
+         * Compute the ceiling without the `total + tile - 1` sum so a total near
+         * INT_MAX cannot overflow signed int (matches arbitrary-precision Python). */
+        scratch[i] = total / tile + ((total % tile != 0) ? 1 : 0);
     }
 
     out[0] = scratch[0];

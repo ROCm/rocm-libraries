@@ -28,6 +28,9 @@
 
 #include "ckc/error.hpp" /* ckc::Error boundary translation */
 
+#include <exception>
+#include <new>
+
 /* ====================================================================== */
 /* Flavor helpers (Python LLVM_FLAVOR_LLVM20 / LLVM_FLAVOR_LLVM22)        */
 /* ====================================================================== */
@@ -1349,7 +1352,18 @@ static void ll_lower_into(ckc_lower_t* L,
     {
         ckc_ll_fail(L, CKC_ERR_OOM, "out buffer");
     }
-    ckc_ll_finalize(L, &sb);
+    /* finalize raises (ckc_ll_fail -> throw) on OOM; free `sb` before the
+     * exception propagates so the throw path does not leak its heap buffer.
+     * Codegen-neutral: the success path is unchanged. */
+    try
+    {
+        ckc_ll_finalize(L, &sb);
+    }
+    catch(...)
+    {
+        ckc_strbuf_free(&sb);
+        throw;
+    }
     if(sb.oom)
     {
         ckc_strbuf_free(&sb);
@@ -1427,6 +1441,33 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
         }
         ckc_arena_destroy(&L.arena);
         return e.code();
+    }
+    catch(const std::bad_alloc& e)
+    {
+        if(err && err_cap > 0)
+        {
+            snprintf(err, err_cap, "%s", e.what());
+        }
+        ckc_arena_destroy(&L.arena);
+        return CKC_ERR_OOM;
+    }
+    catch(const std::exception& e)
+    {
+        if(err && err_cap > 0)
+        {
+            snprintf(err, err_cap, "%s", e.what());
+        }
+        ckc_arena_destroy(&L.arena);
+        return CKC_ERR_VALUE;
+    }
+    catch(...)
+    {
+        if(err && err_cap > 0)
+        {
+            snprintf(err, err_cap, "%s", "unknown C++ exception at extern \"C\" boundary");
+        }
+        ckc_arena_destroy(&L.arena);
+        return CKC_ERR_VALUE;
     }
 }
 
