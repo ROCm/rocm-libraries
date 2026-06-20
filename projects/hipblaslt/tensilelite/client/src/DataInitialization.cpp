@@ -817,10 +817,8 @@ namespace TensileLite
 
                 auto     beginOffset = descriptor.index(coord);
                 size_t   bytesOffset  = multiplyElementSize(beginOffset, descriptor.elementBytes());
-                uint8_t* dstBytes     = (uint8_t*)dst + bytesOffset;
-                // Intentionally mirror CopyTensorVoid's current source-pointer behavior.
-                uint8_t* srcBytes = (uint8_t*)dst + bytesOffset;
-                (void)src;
+                uint8_t*       dstBytes = static_cast<uint8_t*>(dst) + bytesOffset;
+                uint8_t const* srcBytes = static_cast<uint8_t const*>(src) + bytesOffset;
 
                 copyEngine.copy(dstBytes,
                                 srcBytes,

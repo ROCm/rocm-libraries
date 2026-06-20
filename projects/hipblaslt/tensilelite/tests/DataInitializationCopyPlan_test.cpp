@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <any>
+#include <cmath>
+#include <cstring>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -191,6 +193,17 @@ namespace
         }
     }
 
+    void replayRecordedCopies(RecordingCopyEngine const& engine)
+    {
+        for(auto const& call : engine.calls)
+        {
+            if(call.type != RecordingCopyEngine::CallType::Copy)
+                continue;
+
+            std::memmove(call.dst, call.src, call.bytes);
+        }
+    }
+
     ptrdiff_t expectedGuardBackPadding(TensorDescriptor const& desc)
     {
         size_t miKv  = 0;
@@ -276,7 +289,8 @@ TEST(DataInitializationCopyPlan, ExecutorSubmitsCopiesThroughRecordingEngine)
                  RecordingCopyEngine::CopySubmissionMode::Async);
 }
 
-TEST(DataInitializationCopyPlan, BadBoundsPlanSubmitsSentinelFillAndValidCopy)
+TEST(DataInitializationCopyPlan,
+     BadBoundsPlanCopiesValidSourceAndPreservesSentinelPadding)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
@@ -285,7 +299,7 @@ TEST(DataInitializationCopyPlan, BadBoundsPlanSubmitsSentinelFillAndValidCopy)
     }
 
     auto problem = makeBatchProblem(17, 19, 23, 4);
-    auto args    = makeBaseArgs({{17, 19, 4, 23}});
+    auto args    = makeBaseArgs({{33, 35, 4, 37}});
     TensileLite::testing::detail::setDataInitArg(args,
                                                  "bounds-check",
                                                  std::any(BoundsCheckMode::NaN));
@@ -296,32 +310,83 @@ TEST(DataInitializationCopyPlan, BadBoundsPlanSubmitsSentinelFillAndValidCopy)
     CopyPlanDataInitialization dataInit(args, factory, engine);
     engine->clear();
 
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyHostToDevice);
-    dataInit.executeTensorCopyPlan(plan, nullptr);
+    auto const plan = dataInit.planInputCopies(problem, hipMemcpyHostToHost);
+    auto const results = dataInit.executeTensorCopyPlan(plan, nullptr);
 
+    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
+    ASSERT_EQ(results.size(), plan.opsByTensor.size());
+
+    auto const& aUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem);
+    auto const& aDesc = problem.tensors().at(ContractionProblemGemm::TENSOR::A);
+
+    ASSERT_NE(aUnit.cpuInput.current.get(), nullptr);
+    ASSERT_NE(aUnit.cpuInput.valid.get(), nullptr);
+    ASSERT_NE(aUnit.cpuInput.bad.get(), nullptr);
     bool sawSentinelFill = false;
-    bool sawValidRegion  = false;
+    ASSERT_GT(aUnit.maxElements, aDesc.totalAllocatedElements());
+
+    auto const paddingElements = aUnit.maxElements - aDesc.totalAllocatedElements();
+    auto const rawPaddingBytes  = multiplyElementSize(paddingElements, aDesc.elementBytes());
+    auto const alignmentBytes
+        = 2 * static_cast<size_t>(std::ceil(aDesc.elementBytes() < 1.0f ? 1.0f
+                                                                         : aDesc.elementBytes()));
+    auto const paddingBytes    = (rawPaddingBytes / alignmentBytes) * alignmentBytes;
+    auto const bytesBeforeData = paddingBytes / 2;
+    ASSERT_GT(bytesBeforeData, 0u);
+
+    auto const allocationBytes
+        = multiplyElementSize(aUnit.maxElements, aDesc.elementBytes());
+    auto const validBytes
+        = multiplyElementSize(aDesc.totalAllocatedElements(), aDesc.elementBytes());
+    ASSERT_GE(allocationBytes, bytesBeforeData + validBytes);
+    auto const bytesAfterData = allocationBytes - bytesBeforeData - validBytes;
+
+    auto* const       currentBase = static_cast<uint8_t*>(aUnit.cpuInput.current.get());
+    auto const* const validBase   = static_cast<uint8_t const*>(aUnit.cpuInput.valid.get());
+    auto const* const badBase     = static_cast<uint8_t const*>(aUnit.cpuInput.bad.get());
+    auto* const       validDst    = currentBase + bytesBeforeData;
+
+    bool sawValidCopy = false;
     for(auto const& call : engine->calls)
     {
         if(call.type != RecordingCopyEngine::CallType::Copy)
             continue;
 
-        EXPECT_EQ(call.copyKind, hipMemcpyHostToDevice);
+        EXPECT_EQ(call.copyKind, hipMemcpyHostToHost);
         EXPECT_EQ(call.stream, nullptr);
-        if(call.dst == call.src)
+
+        if(call.dst == aUnit.cpuInput.current.get())
         {
-            sawValidRegion = true;
-            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
-        }
-        else
-        {
+            ASSERT_FALSE(sawSentinelFill);
             sawSentinelFill = true;
+            EXPECT_EQ(call.src, aUnit.cpuInput.bad.get());
+            EXPECT_EQ(call.bytes, allocationBytes);
             EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Sync);
+            continue;
+        }
+
+        if(call.dst == static_cast<void*>(validDst))
+        {
+            ASSERT_FALSE(sawValidCopy);
+            sawValidCopy = true;
+            EXPECT_EQ(call.src, aUnit.cpuInput.valid.get());
+            EXPECT_EQ(call.bytes, validBytes);
+            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
         }
     }
 
     EXPECT_TRUE(sawSentinelFill);
-    EXPECT_TRUE(sawValidRegion);
+    EXPECT_TRUE(sawValidCopy);
+
+    replayRecordedCopies(*engine);
+
+    EXPECT_EQ(results.at(ContractionProblemGemm::TENSOR::A), static_cast<void*>(validDst));
+    EXPECT_EQ(std::memcmp(currentBase, badBase, bytesBeforeData), 0);
+    EXPECT_EQ(std::memcmp(validDst, validBase, validBytes), 0);
+    EXPECT_EQ(std::memcmp(validDst + validBytes,
+                          badBase + bytesBeforeData + validBytes,
+                          bytesAfterData),
+              0);
 }
 
 TEST(DataInitializationCopyPlan, ExecutorReturnsTensorIndexedResults)
