@@ -35,11 +35,22 @@
 #
 # where TENSILE_OUT is the relative path to the tensile output directory.
 #
-# The Makefile will set the target based on the name of the co files in
-# the library directory and sets a default wavefront flag but each of
-# these can be customized as follows:
+# The Makefile auto-detects .co and .s files anywhere under the problem's
+# 00_Final directory, so it is not sensitive to changes in intermediate
+# path structure (e.g. whether a caches/<hash>/ level is present or not).
+#
+# To target a specific set of assembly files instead of auto-detecting,
+# pass SRCFILES explicitly:
+#
+# make co TENSILE_OUT=tensile-out \
+#         SRCFILES="tensile-out/1_BenchmarkProblems/Cijk_.../00_Final/source/build_tmp/SOURCE/assembly/*.s"
+#
+# ARCH and WAVEFRONTSIZE can also be overridden:
 #
 # make co TENSILE_OUT=tensile-out ARCH="gfx942:xnack-" WAVEFRONTSIZE="-mno-wavefrontsize64"
+#
+# For 64-wavefront systems:   make co TENSILE_OUT=tensile-out ARCH="gfx942"  WAVE=64
+# For 32-wavefront systems:   make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32
 #
 # In addition, we provide AS and ASM_ARGS, and LD and LINK_ARGS as customization
 # points for the assemble and link step respectively.
@@ -57,19 +68,19 @@ ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
 endif
 
 .SECONDEXPANSION:
-co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final/caches/*/source/library -name '*.co')
+co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final -name '*.co' -path '*/library/*')
 co: $$(COFILES)
 
 .SECONDEXPANSION:
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: PROBLEM  = $(firstword $(subst /, ,$*))
-                                        SRCFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/build_tmp/SOURCE/assembly -name '*.s')
+                                        SRCFILES ?= $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final -path '*/assembly/*.s')
                                         OBJFILES = $(patsubst %.s,%.o,$(SRCFILES))
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: $$(OBJFILES)
 	@echo relinking $(PROBLEM) $(lastword $(subst /, ,$@))
 	@$(LDD) -target amdgcn-amd-amdhsa -Xlinker --build-id=sha1 ${TRUE16_FEATURE} ${LINK_ARGS} -o $@ $^
 
 %.o: PROBLEM = $(word 3, $(subst /, ,$*))
-     COFILE = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/library -name '*.co')
+     COFILE = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final -name '*.co' -path '*/library/*' | head -1)
      ARCH ?= $(subst .co,,$(subst TensileLibrary_,,$(lastword $(subst /, ,$(COFILE)))))
 %.o: %.s
 	@echo rebuilding $(lastword $(subst /, ,$@)) for $(ARCH)

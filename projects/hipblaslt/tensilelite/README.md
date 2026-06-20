@@ -178,57 +178,130 @@ and use it as the compiler launcher. No additional configuration is needed.
 
 ## How to Rebuild Object Codes Directly from Assembly
 
-During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow.
+During tuning it is often useful to edit one or more assembly kernels and rebuild the `.co` without re-running the full Tensile pipeline. The `Makefile` in this directory handles that incremental rebuild.
 
-A new `Makefile` is added that manages rebuilding a co file during iterative development when tuning. One modifies an assembly file of interest, then runs `make` and make will detect what file/s changed and rebuild accordingly.
+### Directory layout
 
-Assumptions:
-
-- Each problem directory contains a library directory with one co file corresponding to one architecture
-
-**Edit**(2025/3/31) ``rocisa`` use the CMake build system instead of the ``virtualenv``. The behavior of the TensileLite changed a bit with only one extra line.
-
-Example:
-
-```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S <path-to-tensilelite-root> -B <tensile-out>```
-
-The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
-
-> **Deprecated:** `Tensile.sh` / `Tensile.bat` will be removed in a future release.
-> Run `Tensile/bin/Tensile` directly instead.
+Running `Tensile/bin/Tensile <yaml> <output-dir>` produces the following structure under `<output-dir>` (referred to as `TENSILE_OUT` below):
 
 ```
-Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
+<TENSILE_OUT>/                                  ← the root; pass this as TENSILE_OUT
+└── 1_BenchmarkProblems/
+    └── Cijk_Ailk_Bjlk_DB_UserArgs_00/         ← one directory per problem
+        └── 00_Final/
+            ├── source/
+            │   ├── build_tmp/
+            │   │   └── SOURCE/
+            │   │       └── assembly/           ← .s files live here
+            │   │           ├── kernel_0.s
+            │   │           └── kernel_1.s
+            │   └── ClientParameters.ini        ← read by the benchmark client
+            └── caches/<hash>/source/
+                └── library/
+                    └── TensileLibrary_gfx942.co  ← rebuilt .co goes here
 ```
 
-or
+> **Note:** `TENSILE_OUT` is whatever name you gave the output directory.
+> The default when running via `invoke build-client` is `build_tmp`, so in
+> that case pass `TENSILE_OUT=build_tmp`.
 
-```
-Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
-```
+**You do not need to rerun CMake unless you delete `TENSILE_OUT`.**
 
-**You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
+### How file discovery works
 
-To build asm only:
+The Makefile searches for `.s` and `.co` files anywhere under `00_Final/` using `find`. This means it handles both the `caches/<hash>/source/` layout and a flat `source/` layout without any path hardcoding.
 
-```
-# modify an assembly file in tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
+### Basic usage (auto-detect everything)
+
+```bash
+# 1. Edit an assembly file, for example:
+#    tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly/kernel_0.s
+
+# 2. Reassemble and relink — make detects changed .s files automatically
 make co TENSILE_OUT=tensile-out
-# re-run the client
+
+# The rebuilt .co is written back to its original location:
+#   tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/caches/<hash>/source/library/TensileLibrary_gfx942.co
+#
+# ClientParameters.ini already points at this path, so you can re-run the
+# benchmark client immediately without any extra steps.
 ```
 
-The Makefile will set the target based on the name of the co file and sets a default wavefront flag but each of these can be customized as follows:
+### Wavefront size
 
-For 64 wavefront size systems,
+The default wavefront size is 64. Override with `WAVE`:
 
-```
+```bash
+# gfx942 / gfx950 (64-wide)
 make co TENSILE_OUT=tensile-out ARCH="gfx942" WAVE=64
-```
 
-For 32 wavefront size systems,
-
-```
+# gfx1100 (32-wide)
 make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32
 ```
 
-In addition, we provide `ASM_ARGS` and `LINK_ARGS` as additional customization points for the assemble and link step respectively. If the architecture cannot be detect corectly, you may need to manually add ``ARCH="gfx942:xnack-"`` to the ``make`` command.
+### Targeting a specific assembly file (SRCFILES override)
+
+If auto-detection picks up the wrong files, or the assembly lives outside the standard tree, pass `SRCFILES` explicitly.
+
+**Scenario:** you have a kernel at a custom path and want to rebuild just that file.
+
+`SRCFILES` is shell-expanded before Make sees it, so wildcards work normally:
+
+```bash
+ASM_DIR=tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
+
+# Rebuild all kernels in the directory
+make co TENSILE_OUT=tensile-out SRCFILES="$ASM_DIR/*.s"
+
+# Rebuild a single kernel
+make co TENSILE_OUT=tensile-out SRCFILES="$ASM_DIR/kernel_0.s"
+
+# Rebuild a specific subset
+make co TENSILE_OUT=tensile-out SRCFILES="$ASM_DIR/kernel_0.s $ASM_DIR/kernel_1.s"
+```
+
+The resulting `.co` is written to the `library/` directory alongside the existing `.co` file — the same location `ClientParameters.ini` already references. No copy is needed.
+
+**If the `.co` ends up in an unexpected location** (e.g. you changed `TENSILE_OUT` to point at a scratch directory), the client will not find it automatically. You have two options:
+
+1. **Copy the `.co`** to the `library/` directory the client expects:
+   ```bash
+   cp my-scratch/TensileLibrary_gfx942.co \
+     tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/caches/<hash>/source/library/
+   ```
+
+2. **Edit `ClientParameters.ini`** to point `code-object` at the new path:
+   ```
+   # tensile-out/1_BenchmarkProblems/Cijk_.../00_Final/source/ClientParameters.ini
+   code-object=/absolute/path/to/my-scratch/TensileLibrary_gfx942.co
+   ```
+   `ClientParameters.ini` is generated by `Tensile/ClientWriter.py` and is plain text — editing it directly is safe for local iteration.
+
+### Architecture detection
+
+`ARCH` is auto-detected from the `.co` filename (e.g. `TensileLibrary_gfx942.co` → `gfx942`). If detection fails, set it manually:
+
+```bash
+make co TENSILE_OUT=tensile-out ARCH="gfx942:xnack-"
+```
+
+### Extra assembler / linker flags
+
+```bash
+make co TENSILE_OUT=tensile-out ASM_ARGS="-g" LINK_ARGS="--some-linker-flag"
+```
+
+### Reference: all variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TENSILE_OUT` | *(required)* | Root Tensile output directory (e.g. `tensile-out` or `build_tmp`) |
+| `ARCH` | auto-detected from `.co` name | GPU target, e.g. `gfx942` or `gfx942:xnack-` |
+| `WAVE` | `64` | Wavefront size (`32` or `64`) |
+| `WAVEFRONTSIZE` | derived from `WAVE` | Raw clang flag, e.g. `-mwavefrontsize64` |
+| `SRCFILES` | auto-detected under `00_Final/` | Space-separated list of `.s` files to assemble |
+| `AS` | `$(ROCM_PATH)/bin/amdclang++` | Assembler binary |
+| `LDD` | `$(ROCM_PATH)/bin/amdclang++` | Linker binary |
+| `ASM_ARGS` | *(empty)* | Extra flags for the assemble step |
+| `LINK_ARGS` | *(empty)* | Extra flags for the link step |
+| `ROCM_PATH` | `/opt/rocm` | ROCm installation root |
