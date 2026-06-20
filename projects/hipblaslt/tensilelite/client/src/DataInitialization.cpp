@@ -926,226 +926,139 @@ namespace TensileLite
             return dst;
         }
 
-        hipStream_t DataInitialization::effectiveStreamForOp(TensorCopyOp const& op,
-                                                              hipStream_t        d2dStream)
+        detail::TensorCopyBoundsMode toTensorCopyBoundsMode(BoundsCheckMode mode)
         {
-            return op.kind == hipMemcpyDeviceToDevice ? d2dStream : nullptr;
+            switch(mode)
+            {
+            case BoundsCheckMode::NaN:
+                return detail::TensorCopyBoundsMode::NaN;
+            case BoundsCheckMode::GuardPageBack:
+                return detail::TensorCopyBoundsMode::GuardPageBack;
+            default:
+                return detail::TensorCopyBoundsMode::Disable;
+            }
         }
 
-        DataInitialization::TensorCopyPlan
-            DataInitialization::planInputCopies(ContractionProblemGemm const& problem,
-                                                hipMemcpyKind                 kind,
-                                                std::optional<size_t>         gpuTargetSlot) const
+        void* DataInitialization::executeTensorCopyInstruction(
+            detail::TensorCopyInstruction const&  instruction,
+            TensorCopyResolvedPointers const&     pointers,
+            TensorDescriptor const&               descriptor,
+            hipStream_t                           d2dStream) const
         {
-            TensorCopyPlan plan;
-            plan.replaceDestinationViews = true;
-            plan.opsByTensor.resize(m_vdata.size());
+            auto const stream = instruction.copyKind == hipMemcpyDeviceToDevice ? d2dStream : nullptr;
 
+            switch(instruction.operationKind)
+            {
+            case detail::TensorCopyOperationKind::Plain:
+                return copyInputBuffers(*m_copyEngine,
+                                        descriptor,
+                                        pointers.dst,
+                                        pointers.src,
+                                        instruction.maxElements,
+                                        instruction.copyKind,
+                                        stream);
+            case detail::TensorCopyOperationKind::BadBounds:
+                return copyBadInputBuffers(*m_copyEngine,
+                                           descriptor,
+                                           pointers.dst,
+                                           pointers.src,
+                                           pointers.bad,
+                                           instruction.maxElements,
+                                           instruction.copyKind,
+                                           stream);
+            case detail::TensorCopyOperationKind::GuardBack:
+                return copyNaNInputBuffers(*m_copyEngine,
+                                           descriptor,
+                                           pointers.dst,
+                                           pointers.src,
+                                           instruction.maxElements,
+                                           instruction.copyKind,
+                                           instruction.customPadding,
+                                           stream);
+            }
+
+            throw std::runtime_error("Unsupported tensor copy operation kind.");
+        }
+
+        std::vector<detail::TensorCopyView>
+            DataInitialization::makeTensorCopyViews(ContractionProblemGemm const& problem) const
+        {
             auto const& tensors = problem.tensors();
             if(tensors.size() != m_vdata.size())
             {
                 throw std::runtime_error(
-                    "Tensor count mismatch while planning input copies.");
+                    "Tensor count mismatch while building tensor copy views.");
             }
 
-            auto selectGpuData = [&](PristineUnit const& p) -> std::shared_ptr<void> const& {
-                if(gpuTargetSlot)
-                    return p.gpuInput.dataBufferForSlot(*gpuTargetSlot);
-                return p.gpuInput.current;
-            };
-
-            auto selectGpuBatch = [&](PristineUnit const& p) -> std::shared_ptr<void*> const& {
-                if(gpuTargetSlot)
-                    return p.gpuInput.batchBufferForSlot(*gpuTargetSlot);
-                return p.gpuInput.batch;
-            };
-
-            auto selectPointers = [&](TensorCopyOp& op, PristineUnit const& p, bool useBad) {
-                switch(kind)
-                {
-                case hipMemcpyHostToHost:
-                    op.dst = p.cpuInput.current.get();
-                    op.src = p.cpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.cpuInput.bad.get();
-                    return;
-                case hipMemcpyHostToDevice:
-                    op.dst = selectGpuData(p).get();
-                    op.src = p.cpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.cpuInput.bad.get();
-                    return;
-                case hipMemcpyDeviceToDevice:
-                    op.dst = selectGpuData(p).get();
-                    op.src = p.gpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.gpuInput.bad.get();
-                    return;
-                default:
-                    throw std::runtime_error("Unsupported hipMemcpyKind in planInputCopies.");
-                }
-            };
-
-            InputLayoutPolicy const layoutPolicy;
-
-            for(size_t i = 0; i < m_vdata.size(); ++i)
+            std::vector<detail::TensorCopyView> views(tensors.size());
+            for(size_t i = 0; i < tensors.size(); ++i)
             {
-                auto const& desc = tensors[i];
-                auto const   it   = m_vdata[i].pristine.find(desc.dataType());
-                if(it == m_vdata[i].pristine.end())
+                auto const it = m_vdata.at(i).pristine.find(tensors[i].dataType());
+                if(it == m_vdata.at(i).pristine.end())
                     continue;
 
-                auto const& p = it->second;
-                TensorCopyOp op;
-                op.tensorIndex    = i;
-                op.descriptor     = &desc;
-                op.kind           = kind;
-                op.maxElements    = p.maxElements;
-                op.groupedOffsets = p.groupedGemmOffsets;
-
-                if(m_curBoundsCheck == BoundsCheckMode::NaN)
-                {
-                    op.planKind = TensorCopyPlanKind::BadBounds;
-                    selectPointers(op, p, /*useBad=*/true);
-                }
-                else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
-                {
-                    op.planKind = TensorCopyPlanKind::GuardBack;
-                    selectPointers(op, p, /*useBad=*/false);
-                    auto const swizzlePlan = layoutPolicy.planTensorSwizzle(problem, i);
-                    if(swizzlePlan.enabled)
-                    {
-                        op.customPadding = static_cast<ptrdiff_t>(
-                            swizzlePlan.allocatedElements - desc.totalAllocatedElements());
-                    }
-                }
-                else
-                {
-                    op.planKind = TensorCopyPlanKind::Plain;
-                    selectPointers(op, p, /*useBad=*/false);
-                }
-
-                switch(kind)
-                {
-                case hipMemcpyHostToHost:
-                    op.batchPtr = p.cpuInput.batch.get();
-                    break;
-                case hipMemcpyHostToDevice:
-                case hipMemcpyDeviceToDevice:
-                    op.batchPtr = selectGpuBatch(p).get();
-                    break;
-                default:
-                    throw std::runtime_error("Unsupported hipMemcpyKind in planInputCopies.");
-                }
-
-                plan.opsByTensor[i] = std::move(op);
+                views[i].hasPristine    = true;
+                views[i].maxElements    = it->second.maxElements;
+                views[i].groupedOffsets = it->second.groupedGemmOffsets;
             }
 
-            return plan;
+            return views;
         }
 
-        DataInitialization::TensorCopyPlan DataInitialization::planOutputResetCopyOps(
-            ContractionProblemGemm const& problem,
-            hipMemcpyKind                 kind,
-            std::optional<size_t>         gpuTargetSlot) const
+        DataInitialization::TensorCopyResolvedPointers
+        DataInitialization::resolveTensorCopyPointers(
+            detail::TensorCopyInstruction const& instruction,
+            PristineUnit const&                  pristine) const
         {
-            TensorCopyPlan plan;
-            plan.replaceDestinationViews = false;
-            plan.opsByTensor.resize(m_vdata.size());
+            TensorCopyResolvedPointers pointers;
+            auto const resolveBuffer = [&](detail::TensorBufferRole role) -> void* {
+                switch(role)
+                {
+                case detail::TensorBufferRole::CpuCurrent:
+                    return pristine.cpuInput.current.get();
+                case detail::TensorBufferRole::CpuValid:
+                    return pristine.cpuInput.valid.get();
+                case detail::TensorBufferRole::CpuBad:
+                    return pristine.cpuInput.bad.get();
+                case detail::TensorBufferRole::GpuCurrent:
+                    return pristine.gpuInput.current.get();
+                case detail::TensorBufferRole::GpuValid:
+                    return pristine.gpuInput.valid.get();
+                case detail::TensorBufferRole::GpuBad:
+                    return pristine.gpuInput.bad.get();
+                case detail::TensorBufferRole::GpuSlotData:
+                    if(!instruction.gpuTargetSlot)
+                        throw std::runtime_error(
+                            "GPU slot data requested without a target slot.");
+                    return pristine.gpuInput.dataBufferForSlot(*instruction.gpuTargetSlot).get();
+                }
 
-            auto const& tensors = problem.tensors();
-            if(tensors.size() != m_vdata.size())
-            {
-                throw std::runtime_error(
-                    "Tensor count mismatch while planning output reset copies.");
-            }
-
-            auto selectGpuData = [&](PristineUnit const& p) -> std::shared_ptr<void> const& {
-                if(gpuTargetSlot)
-                    return p.gpuInput.dataBufferForSlot(*gpuTargetSlot);
-                return p.gpuInput.current;
+                throw std::runtime_error("Unsupported tensor buffer role.");
             };
 
-            auto selectGpuBatch = [&](PristineUnit const& p) -> std::shared_ptr<void*> const& {
-                if(gpuTargetSlot)
-                    return p.gpuInput.batchBufferForSlot(*gpuTargetSlot);
-                return p.gpuInput.batch;
+            auto const resolveBatch = [&](detail::TensorBatchRole role) -> void** {
+                switch(role)
+                {
+                case detail::TensorBatchRole::CpuCurrent:
+                    return pristine.cpuInput.batch.get();
+                case detail::TensorBatchRole::GpuCurrent:
+                    return pristine.gpuInput.batch.get();
+                case detail::TensorBatchRole::GpuSlot:
+                    if(!instruction.gpuTargetSlot)
+                        throw std::runtime_error(
+                            "GPU slot batch requested without a target slot.");
+                    return pristine.gpuInput.batchBufferForSlot(*instruction.gpuTargetSlot).get();
+                }
+
+                throw std::runtime_error("Unsupported tensor batch role.");
             };
 
-            auto selectPointers = [&](TensorCopyOp& op, PristineUnit const& p, bool useBad) {
-                switch(kind)
-                {
-                case hipMemcpyHostToHost:
-                    op.dst = p.cpuInput.current.get();
-                    op.src = p.cpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.cpuInput.bad.get();
-                    return;
-                case hipMemcpyHostToDevice:
-                    op.dst = selectGpuData(p).get();
-                    op.src = p.cpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.cpuInput.bad.get();
-                    return;
-                case hipMemcpyDeviceToDevice:
-                    op.dst = selectGpuData(p).get();
-                    op.src = p.gpuInput.valid.get();
-                    if(useBad)
-                        op.bad = p.gpuInput.bad.get();
-                    return;
-                default:
-                    throw std::runtime_error(
-                        "Unsupported hipMemcpyKind in planOutputResetCopyOps.");
-                }
-            };
-
-            for(size_t i = 0; i < m_vdata.size(); ++i)
-            {
-                auto const& desc = tensors[i];
-                if(!desc.isOutput())
-                    continue;
-
-                auto const it = m_vdata[i].pristine.find(desc.dataType());
-                if(it == m_vdata[i].pristine.end())
-                    continue;
-
-                auto const& p = it->second;
-                TensorCopyOp op;
-                op.tensorIndex    = i;
-                op.descriptor     = &desc;
-                op.kind           = kind;
-                op.maxElements    = p.maxElements;
-                op.groupedOffsets = p.groupedGemmOffsets;
-
-                if(m_curBoundsCheck == BoundsCheckMode::NaN)
-                {
-                    op.planKind = TensorCopyPlanKind::BadBounds;
-                    selectPointers(op, p, /*useBad=*/true);
-                }
-                else
-                {
-                    op.planKind = TensorCopyPlanKind::Plain;
-                    selectPointers(op, p, /*useBad=*/false);
-                }
-
-                switch(kind)
-                {
-                case hipMemcpyHostToHost:
-                    op.batchPtr = p.cpuInput.batch.get();
-                    break;
-                case hipMemcpyHostToDevice:
-                case hipMemcpyDeviceToDevice:
-                    op.batchPtr = selectGpuBatch(p).get();
-                    break;
-                default:
-                    throw std::runtime_error(
-                        "Unsupported hipMemcpyKind in planOutputResetCopyOps.");
-                }
-
-                plan.opsByTensor[i] = std::move(op);
-            }
-
-            return plan;
+            pointers.dst = resolveBuffer(instruction.dstRole);
+            pointers.src = resolveBuffer(instruction.srcRole);
+            if(instruction.badRole)
+                pointers.bad = resolveBuffer(*instruction.badRole);
+            pointers.batch = resolveBatch(instruction.batchRole);
+            return pointers;
         }
 
         DataInitialization::OutputResetPlan DataInitialization::planNormalWarmOutputReset(
@@ -1212,68 +1125,33 @@ namespace TensileLite
             return plan;
         }
 
-        std::vector<void*> DataInitialization::executeTensorCopyPlan(TensorCopyPlan const& plan,
-                                                                     hipStream_t d2dStream) const
+        std::vector<void*> DataInitialization::executeTensorCopyInstructions(
+            std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+            ContractionProblemGemm const&                                   problem,
+            hipStream_t                                                     d2dStream) const
         {
-            std::vector<void*> resultPtrs(plan.opsByTensor.size(), nullptr);
-
-            for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+            auto const& tensors = problem.tensors();
+            if(plan.size() != tensors.size())
             {
-                auto const& maybeOp = plan.opsByTensor[i];
-                if(!maybeOp)
+                throw std::runtime_error(
+                    "Tensor count mismatch while executing tensor copies.");
+            }
+
+            std::vector<void*> resultPtrs(plan.size(), nullptr);
+            for(size_t i = 0; i < plan.size(); ++i)
+            {
+                auto const& maybeInstruction = plan[i];
+                if(!maybeInstruction)
                     continue;
 
-                auto const& op     = *maybeOp;
-                auto const   stream = effectiveStreamForOp(op, d2dStream);
-                void*        result = nullptr;
+                auto const& instruction = *maybeInstruction;
+                auto const  it          = m_vdata.at(i).pristine.find(tensors.at(i).dataType());
+                if(it == m_vdata.at(i).pristine.end())
+                    continue;
 
-                switch(op.planKind)
-                {
-                case TensorCopyPlanKind::Plain:
-                    result = copyInputBuffers(*m_copyEngine,
-                                              *op.descriptor,
-                                              op.dst,
-                                              op.src,
-                                              op.maxElements,
-                                              op.kind,
-                                              stream);
-                    break;
-                case TensorCopyPlanKind::BadBounds:
-                    result = copyBadInputBuffers(*m_copyEngine,
-                                                 *op.descriptor,
-                                                 op.dst,
-                                                 op.src,
-                                                 op.bad,
-                                                 op.maxElements,
-                                                 op.kind,
-                                                 stream);
-                    break;
-                case TensorCopyPlanKind::GuardBack:
-                    if(op.customPadding != -1)
-                    {
-                        result = copyNaNInputBuffers(*m_copyEngine,
-                                                     *op.descriptor,
-                                                     op.dst,
-                                                     op.src,
-                                                     op.maxElements,
-                                                     op.kind,
-                                                     op.customPadding,
-                                                     stream);
-                    }
-                    else
-                    {
-                        result = copyNaNInputBuffers(*m_copyEngine,
-                                                     *op.descriptor,
-                                                     op.dst,
-                                                     op.src,
-                                                     op.maxElements,
-                                                     op.kind,
-                                                     -1,
-                                                     stream);
-                    }
-                    break;
-                }
-
+                auto const pointers = resolveTensorCopyPointers(instruction, it->second);
+                auto const result = executeTensorCopyInstruction(
+                    instruction, pointers, tensors.at(i), d2dStream);
                 if(result == nullptr)
                 {
                     throw std::runtime_error("output ptr is null when copy input");
@@ -1285,18 +1163,20 @@ namespace TensileLite
             return resultPtrs;
         }
 
-        void DataInitialization::applyInputCopyPlanResults(
-            TensorCopyPlan const&             plan,
-            std::vector<void*> const&         resultPtrs,
-            std::vector<void*>&               ptrs,
-            std::vector<void**>&              batchPtrs,
-            std::vector<size_t>&              maxElements,
-            std::vector<std::vector<size_t>>& offsets) const
+        void DataInitialization::applyInputTensorCopyResults(
+            std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+            ContractionProblemGemm const&                                   problem,
+            std::vector<void*> const&                                       resultPtrs,
+            std::vector<void*>&                                             ptrs,
+            std::vector<void**>&                                            batchPtrs,
+            std::vector<size_t>&                                            maxElements,
+            std::vector<std::vector<size_t>>&                               offsets) const
         {
-            if(resultPtrs.size() != plan.opsByTensor.size())
+            auto const& tensors = problem.tensors();
+            if(resultPtrs.size() != plan.size() || tensors.size() != plan.size())
             {
                 throw std::runtime_error(
-                    "Tensor copy plan results are not tensor-indexed.");
+                    "Tensor copy results are not tensor-indexed.");
             }
 
             ptrs.clear();
@@ -1304,48 +1184,59 @@ namespace TensileLite
             maxElements.clear();
             offsets.clear();
 
-            ptrs.reserve(resultPtrs.size());
-            batchPtrs.reserve(resultPtrs.size());
-            maxElements.reserve(resultPtrs.size());
-            offsets.reserve(resultPtrs.size());
+            ptrs.reserve(plan.size());
+            batchPtrs.reserve(plan.size());
+            maxElements.reserve(plan.size());
+            offsets.reserve(plan.size());
 
-            for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+            for(size_t i = 0; i < plan.size(); ++i)
             {
-                auto const& maybeOp = plan.opsByTensor[i];
-                if(maybeOp)
-                {
-                    auto const& op = *maybeOp;
-                    ptrs.push_back(resultPtrs[i]);
-                    batchPtrs.push_back(op.batchPtr);
-                    maxElements.push_back(op.maxElements);
-                    offsets.push_back(op.groupedOffsets);
-                }
-                else
+                auto const& maybeInstruction = plan[i];
+                if(!maybeInstruction)
                 {
                     ptrs.push_back(nullptr);
                     batchPtrs.push_back(nullptr);
                     maxElements.push_back(0);
                     offsets.emplace_back();
+                    continue;
                 }
+
+                auto const& instruction = *maybeInstruction;
+                auto const  it          = m_vdata.at(i).pristine.find(tensors.at(i).dataType());
+                if(it == m_vdata.at(i).pristine.end())
+                {
+                    ptrs.push_back(nullptr);
+                    batchPtrs.push_back(nullptr);
+                    maxElements.push_back(0);
+                    offsets.emplace_back();
+                    continue;
+                }
+
+                auto const pointers = resolveTensorCopyPointers(instruction, it->second);
+                ptrs.push_back(resultPtrs[i]);
+                batchPtrs.push_back(pointers.batch);
+                maxElements.push_back(instruction.maxElements);
+                offsets.push_back(instruction.groupedOffsets);
             }
         }
 
-        void DataInitialization::applyOutputResetPlanResults(
-            TensorCopyPlan const&             plan,
-            ContractionProblemGemm const&     problem,
-            std::vector<void*> const&         resultPtrs,
-            std::vector<void*>&               ptrs,
-            std::vector<void**>&              batchPtrs,
-            std::vector<size_t>&              maxElements,
-            std::vector<std::vector<size_t>>& offsets) const
+        void DataInitialization::applyOutputTensorCopyResults(
+            std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+            ContractionProblemGemm const&                                   problem,
+            std::vector<void*> const&                                       resultPtrs,
+            std::vector<void*>&                                             ptrs,
+            std::vector<void**>&                                            batchPtrs,
+            std::vector<size_t>&                                            maxElements,
+            std::vector<std::vector<size_t>>&                               offsets) const
         {
-            if(resultPtrs.size() != plan.opsByTensor.size())
+            auto const& tensors = problem.tensors();
+            if(resultPtrs.size() != plan.size() || tensors.size() != plan.size())
             {
                 throw std::runtime_error(
-                    "Tensor copy plan results are not tensor-indexed.");
+                    "Tensor copy results are not tensor-indexed.");
             }
 
-            auto const tensorCount = plan.opsByTensor.size();
+            auto const tensorCount = plan.size();
             if(ptrs.size() < tensorCount)
                 ptrs.resize(tensorCount, nullptr);
             if(batchPtrs.size() < tensorCount)
@@ -1355,20 +1246,13 @@ namespace TensileLite
             if(offsets.size() < tensorCount)
                 offsets.resize(tensorCount);
 
-            auto const& tensors = problem.tensors();
-            if(tensors.size() != tensorCount)
-            {
-                throw std::runtime_error(
-                    "Tensor count mismatch while applying output reset copies.");
-            }
-
             for(size_t i = 0; i < tensorCount; ++i)
             {
                 if(!tensors[i].isOutput())
                     continue;
 
-                auto const& maybeOp = plan.opsByTensor[i];
-                if(!maybeOp)
+                auto const& maybeInstruction = plan[i];
+                if(!maybeInstruction)
                 {
                     ptrs[i]        = nullptr;
                     batchPtrs[i]   = nullptr;
@@ -1377,11 +1261,22 @@ namespace TensileLite
                     continue;
                 }
 
-                auto const& op = *maybeOp;
-                ptrs[i]        = resultPtrs[i];
-                batchPtrs[i]   = op.batchPtr;
-                maxElements[i] = op.maxElements;
-                offsets[i]     = op.groupedOffsets;
+                auto const& instruction = *maybeInstruction;
+                auto const  it          = m_vdata.at(i).pristine.find(tensors.at(i).dataType());
+                if(it == m_vdata.at(i).pristine.end())
+                {
+                    ptrs[i]        = nullptr;
+                    batchPtrs[i]   = nullptr;
+                    maxElements[i] = 0;
+                    offsets[i].clear();
+                    continue;
+                }
+
+                auto const pointers = resolveTensorCopyPointers(instruction, it->second);
+                ptrs[i]             = resultPtrs[i];
+                batchPtrs[i]        = pointers.batch;
+                maxElements[i]      = instruction.maxElements;
+                offsets[i]          = instruction.groupedOffsets;
             }
         }
 
@@ -1393,9 +1288,14 @@ namespace TensileLite
                                             hipMemcpyKind                     kind,
                                             hipStream_t                       targetStream)
         {
-            auto plan   = planInputCopies(problem, kind);
-            auto results = executeTensorCopyPlan(plan, targetStream);
-            applyInputCopyPlanResults(plan, results, ptrs, batchPtrs, maxElements, offsets);
+            auto const views = makeTensorCopyViews(problem);
+            auto const plan  = detail::planTensorCopies(problem,
+                                                        views,
+                                                        detail::TensorCopyIntent::InputCopy,
+                                                        toTensorCopyBoundsMode(m_curBoundsCheck),
+                                                        kind);
+            auto const results = executeTensorCopyInstructions(plan, problem, targetStream);
+            applyInputTensorCopyResults(plan, problem, results, ptrs, batchPtrs, maxElements, offsets);
         }
 
         void DataInitialization::copyInputsForSlot(
@@ -1408,9 +1308,15 @@ namespace TensileLite
             size_t                            gpuTargetSlot,
             hipStream_t                       targetStream)
         {
-            auto plan   = planInputCopies(problem, kind, gpuTargetSlot);
-            auto results = executeTensorCopyPlan(plan, targetStream);
-            applyInputCopyPlanResults(plan, results, ptrs, batchPtrs, maxElements, offsets);
+            auto const views = makeTensorCopyViews(problem);
+            auto const plan  = detail::planTensorCopies(problem,
+                                                        views,
+                                                        detail::TensorCopyIntent::InputCopy,
+                                                        toTensorCopyBoundsMode(m_curBoundsCheck),
+                                                        kind,
+                                                        gpuTargetSlot);
+            auto const results = executeTensorCopyInstructions(plan, problem, targetStream);
+            applyInputTensorCopyResults(plan, problem, results, ptrs, batchPtrs, maxElements, offsets);
         }
 
         std::ostream& operator<<(std::ostream& stream, PruneSparseMode const& mode)
@@ -3240,9 +3146,15 @@ namespace TensileLite
         {
             hipStream_t copyStream = targetStream ? targetStream : this->copyStream();
             bool        useAsync   = (kind == hipMemcpyDeviceToDevice) && copyStream;
-            auto plan   = planOutputResetCopyOps(problem, kind);
-            auto result = executeTensorCopyPlan(plan, useAsync ? copyStream : nullptr);
-            applyOutputResetPlanResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
+            auto const  views      = makeTensorCopyViews(problem);
+            auto const  plan
+                = detail::planTensorCopies(problem,
+                                           views,
+                                           detail::TensorCopyIntent::OutputReset,
+                                           toTensorCopyBoundsMode(m_curBoundsCheck),
+                                           kind);
+            auto const result = executeTensorCopyInstructions(plan, problem, useAsync ? copyStream : nullptr);
+            applyOutputTensorCopyResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
             if(useAsync && !targetStream)
                 m_copyEngine->synchronize(copyStream);
         }
@@ -3258,9 +3170,16 @@ namespace TensileLite
         {
             hipStream_t copyStream = targetStream ? targetStream : this->copyStream();
             bool        useAsync   = (kind == hipMemcpyDeviceToDevice) && copyStream;
-            auto plan = planOutputResetCopyOps(problem, kind, gpuTargetSlot);
-            auto result = executeTensorCopyPlan(plan, useAsync ? copyStream : nullptr);
-            applyOutputResetPlanResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
+            auto const  views      = makeTensorCopyViews(problem);
+            auto const  plan
+                = detail::planTensorCopies(problem,
+                                           views,
+                                           detail::TensorCopyIntent::OutputReset,
+                                           toTensorCopyBoundsMode(m_curBoundsCheck),
+                                           kind,
+                                           gpuTargetSlot);
+            auto const result = executeTensorCopyInstructions(plan, problem, useAsync ? copyStream : nullptr);
+            applyOutputTensorCopyResults(plan, problem, result, ptrs, batchPtrs, maxElements, offsets);
             if(useAsync && !targetStream)
                 m_copyEngine->synchronize(copyStream);
         }

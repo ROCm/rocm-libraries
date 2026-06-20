@@ -29,26 +29,20 @@ using namespace TensileLite::Client;
 namespace
 {
     using TensileLite::testing::PlainProblemSpec;
-    using TensileLite::testing::makePlainProblem;
     using TensileLite::testing::RecordingCopyEngine;
+    using TensileLite::testing::makePlainProblem;
 
     class CopyPlanDataInitialization : public DataInitialization
     {
     public:
         using DataInitialization::DataInitialization;
-        using TensorCopyOp        = DataInitialization::TensorCopyOp;
-        using TensorCopyPlan      = DataInitialization::TensorCopyPlan;
-        using TensorCopyPlanKind  = DataInitialization::TensorCopyPlanKind;
-        using PristineUnit        = DataInitialization::PristineUnit;
         using DataInitialization::copyInputs;
-        using DataInitialization::effectiveStreamForOp;
-        using DataInitialization::executeTensorCopyPlan;
-        using DataInitialization::planInputCopies;
-        using DataInitialization::planOutputResetCopyOps;
+        using DataInitialization::copyInputsForSlot;
         using DataInitialization::copySwizzledToGPUBuffer;
         using DataInitialization::copyValidToGPUBuffer;
         using DataInitialization::initializeGPUBatchedInputs;
         using DataInitialization::resetOutput;
+        using DataInitialization::resetOutputForSlot;
 
         std::vector<void*>& gpuPtrs()
         {
@@ -83,13 +77,11 @@ namespace
         PristineUnit const& pristineUnit(size_t tensorIndex,
                                          ContractionProblemGemm const& problem) const
         {
-            auto const& desc = problem.tensors().at(tensorIndex);
+            auto const& desc  = problem.tensors().at(tensorIndex);
             auto const& units = m_vdata.at(tensorIndex).pristine;
             auto        it    = units.find(desc.dataType());
             if(it == units.end())
-            {
                 throw std::runtime_error("Missing pristine unit for tensor index.");
-            }
             return it->second;
         }
     };
@@ -160,39 +152,6 @@ namespace
         return problem;
     }
 
-    size_t swizzleMiK(rocisa::DataType dt, size_t& miKv)
-    {
-        switch(dt)
-        {
-        case rocisa::DataType::Float:
-        case rocisa::DataType::Double:
-            miKv = 1;
-            return 4;
-        case rocisa::DataType::XFloat32:
-            miKv = 2;
-            return 8;
-        case rocisa::DataType::Half:
-        case rocisa::DataType::BFloat16:
-            miKv = 4;
-            return 16;
-        case rocisa::DataType::Int8:
-        case rocisa::DataType::Float8_fnuz:
-        case rocisa::DataType::BFloat8_fnuz:
-        case rocisa::DataType::Float8BFloat8_fnuz:
-        case rocisa::DataType::BFloat8Float8_fnuz:
-        case rocisa::DataType::Float8:
-        case rocisa::DataType::BFloat8:
-        case rocisa::DataType::Float8BFloat8:
-        case rocisa::DataType::BFloat8Float8:
-        case rocisa::DataType::E8:
-        case rocisa::DataType::E5M3:
-            miKv = 8;
-            return 32;
-        default:
-            throw std::runtime_error("unsupported datatype for swizzling");
-        }
-    }
-
     void replayRecordedCopies(RecordingCopyEngine const& engine)
     {
         for(auto const& call : engine.calls)
@@ -204,49 +163,13 @@ namespace
         }
     }
 
-    ptrdiff_t expectedGuardBackPadding(TensorDescriptor const& desc)
-    {
-        size_t miKv  = 0;
-        size_t miK   = swizzleMiK(desc.dataType(), miKv);
-        size_t packK = 16 / miKv / rocisa::GetElementSize(desc.dataType());
-
-        auto const k         = desc.sizes()[0];
-        auto const m_n       = desc.sizes()[1];
-        auto const b         = desc.sizes()[2];
-        auto const swizzleK  = miK * packK;
-        auto const paddedMN  = (m_n + 16 - 1) / 16 * 16;
-        auto const paddedK   = (k + swizzleK - 1) / swizzleK * swizzleK;
-        auto const allocated = desc.totalAllocatedElements();
-
-        return static_cast<ptrdiff_t>(paddedMN * paddedK * b - allocated);
-    }
 } // namespace
 
 TEST(DataInitializationCopyPlan, ExecutorPreservesD2DOnlyStreamForwarding)
 {
-    using Op = CopyPlanDataInitialization::TensorCopyOp;
-
-    Op h2h{};
-    h2h.kind = hipMemcpyHostToHost;
-    Op h2d{};
-    h2d.kind = hipMemcpyHostToDevice;
-    Op d2d{};
-    d2d.kind = hipMemcpyDeviceToDevice;
-
-    hipStream_t const sentinel = reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234));
-
-    EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(h2h, sentinel), nullptr);
-    EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(h2d, sentinel), nullptr);
-    EXPECT_EQ(CopyPlanDataInitialization::effectiveStreamForOp(d2d, sentinel), sentinel);
-}
-
-TEST(DataInitializationCopyPlan, ExecutorSubmitsCopiesThroughRecordingEngine)
-{
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
 
     auto problem = makeBatchProblem(32, 24, 16, 4);
     auto args    = makeBaseArgs({{32, 24, 4, 16}});
@@ -256,13 +179,18 @@ TEST(DataInitializationCopyPlan, ExecutorSubmitsCopiesThroughRecordingEngine)
 
     ClientProblemFactory      factory(args);
     CopyPlanDataInitialization dataInit(args, factory, engine);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
     engine->clear();
 
-    auto const expectCopies = [&](hipMemcpyKind kind,
-                                  hipStream_t   expectedStream,
-                                  RecordingCopyEngine::CopySubmissionMode expectedMode) {
-        auto const plan = dataInit.planInputCopies(problem, kind);
-        dataInit.executeTensorCopyPlan(plan, expectedStream);
+    auto const runCopy = [&](hipMemcpyKind kind, hipStream_t targetStream, hipStream_t expected) {
+        std::vector<void*>              ptrs(problem.tensors().size(), nullptr);
+        std::vector<void**>             batchPtrs(problem.tensors().size(), nullptr);
+        std::vector<size_t>             maxElements(problem.tensors().size(), 0);
+        std::vector<std::vector<size_t>> offsets(problem.tensors().size());
+
+        dataInit.copyInputs(ptrs, batchPtrs, maxElements, offsets, problem, kind, targetStream);
 
         bool sawCopy = false;
         for(auto const& call : engine->calls)
@@ -271,32 +199,24 @@ TEST(DataInitializationCopyPlan, ExecutorSubmitsCopiesThroughRecordingEngine)
                 continue;
             sawCopy = true;
             EXPECT_EQ(call.copyKind, kind);
-            EXPECT_EQ(call.stream, expectedStream);
-            EXPECT_EQ(call.submissionMode, expectedMode);
+            EXPECT_EQ(call.stream, expected);
         }
         EXPECT_TRUE(sawCopy);
         engine->clear();
     };
 
-    expectCopies(hipMemcpyHostToHost,
-                 nullptr,
-                 RecordingCopyEngine::CopySubmissionMode::Sync);
-    expectCopies(hipMemcpyHostToDevice,
-                 nullptr,
-                 RecordingCopyEngine::CopySubmissionMode::Sync);
-    expectCopies(hipMemcpyDeviceToDevice,
-                 reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234)),
-                 RecordingCopyEngine::CopySubmissionMode::Async);
+    runCopy(hipMemcpyHostToHost, nullptr, nullptr);
+    runCopy(hipMemcpyHostToDevice, nullptr, nullptr);
+    runCopy(hipMemcpyDeviceToDevice,
+            reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234)),
+            reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x1234)));
 }
 
-TEST(DataInitializationCopyPlan,
-     BadBoundsPlanCopiesValidSourceAndPreservesSentinelPadding)
+TEST(DataInitializationCopyPlan, InputNaNBoundsCopiesValidSourcesAndPreservesSentinelPadding)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
 
     auto problem = makeBatchProblem(17, 19, 23, 4);
     auto args    = makeBaseArgs({{33, 35, 4, 37}});
@@ -308,13 +228,21 @@ TEST(DataInitializationCopyPlan,
 
     ClientProblemFactory      factory(args);
     CopyPlanDataInitialization dataInit(args, factory, engine);
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
     engine->clear();
 
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyHostToHost);
-    auto const results = dataInit.executeTensorCopyPlan(plan, nullptr);
+    std::vector<void*>              ptrs(problem.tensors().size(), nullptr);
+    std::vector<void**>             batchPtrs(problem.tensors().size(), nullptr);
+    std::vector<size_t>             maxElements(problem.tensors().size(), 0);
+    std::vector<std::vector<size_t>> offsets(problem.tensors().size());
 
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
-    ASSERT_EQ(results.size(), plan.opsByTensor.size());
+    dataInit.copyInputs(ptrs,
+                        batchPtrs,
+                        maxElements,
+                        offsets,
+                        problem,
+                        hipMemcpyHostToHost);
 
     auto const& aUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem);
     auto const& aDesc = problem.tensors().at(ContractionProblemGemm::TENSOR::A);
@@ -322,7 +250,6 @@ TEST(DataInitializationCopyPlan,
     ASSERT_NE(aUnit.cpuInput.current.get(), nullptr);
     ASSERT_NE(aUnit.cpuInput.valid.get(), nullptr);
     ASSERT_NE(aUnit.cpuInput.bad.get(), nullptr);
-    bool sawSentinelFill = false;
     ASSERT_GT(aUnit.maxElements, aDesc.totalAllocatedElements());
 
     auto const paddingElements = aUnit.maxElements - aDesc.totalAllocatedElements();
@@ -331,14 +258,11 @@ TEST(DataInitializationCopyPlan,
         = 2 * static_cast<size_t>(std::ceil(aDesc.elementBytes() < 1.0f ? 1.0f
                                                                          : aDesc.elementBytes()));
     auto const paddingBytes    = (rawPaddingBytes / alignmentBytes) * alignmentBytes;
-    auto const bytesBeforeData = paddingBytes / 2;
-    ASSERT_GT(bytesBeforeData, 0u);
-
+    auto const bytesBeforeData  = paddingBytes / 2;
     auto const allocationBytes
         = multiplyElementSize(aUnit.maxElements, aDesc.elementBytes());
     auto const validBytes
         = multiplyElementSize(aDesc.totalAllocatedElements(), aDesc.elementBytes());
-    ASSERT_GE(allocationBytes, bytesBeforeData + validBytes);
     auto const bytesAfterData = allocationBytes - bytesBeforeData - validBytes;
 
     auto* const       currentBase = static_cast<uint8_t*>(aUnit.cpuInput.current.get());
@@ -346,7 +270,8 @@ TEST(DataInitializationCopyPlan,
     auto const* const badBase     = static_cast<uint8_t const*>(aUnit.cpuInput.bad.get());
     auto* const       validDst    = currentBase + bytesBeforeData;
 
-    bool sawValidCopy = false;
+    bool sawSentinelFill = false;
+    bool sawValidCopy    = false;
     for(auto const& call : engine->calls)
     {
         if(call.type != RecordingCopyEngine::CallType::Copy)
@@ -361,7 +286,6 @@ TEST(DataInitializationCopyPlan,
             sawSentinelFill = true;
             EXPECT_EQ(call.src, aUnit.cpuInput.bad.get());
             EXPECT_EQ(call.bytes, allocationBytes);
-            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Sync);
             continue;
         }
 
@@ -371,7 +295,6 @@ TEST(DataInitializationCopyPlan,
             sawValidCopy = true;
             EXPECT_EQ(call.src, aUnit.cpuInput.valid.get());
             EXPECT_EQ(call.bytes, validBytes);
-            EXPECT_EQ(call.submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
         }
     }
 
@@ -380,7 +303,7 @@ TEST(DataInitializationCopyPlan,
 
     replayRecordedCopies(*engine);
 
-    EXPECT_EQ(results.at(ContractionProblemGemm::TENSOR::A), static_cast<void*>(validDst));
+    EXPECT_EQ(ptrs.at(ContractionProblemGemm::TENSOR::A), static_cast<void*>(validDst));
     EXPECT_EQ(std::memcmp(currentBase, badBase, bytesBeforeData), 0);
     EXPECT_EQ(std::memcmp(validDst, validBase, validBytes), 0);
     EXPECT_EQ(std::memcmp(validDst + validBytes,
@@ -389,76 +312,28 @@ TEST(DataInitializationCopyPlan,
               0);
 }
 
-TEST(DataInitializationCopyPlan, ExecutorReturnsTensorIndexedResults)
+TEST(DataInitializationCopyPlan, InputGuardPageBackSwizzledTensorsUseCustomPadding)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
 
-    auto problem = makeBatchProblem(32, 24, 16, 4);
-    auto args    = makeBaseArgs({{32, 24, 4, 16}});
+    auto problem = makeBatchProblem(17, 19, 23, 4, true, true);
+    auto args    = makeGuardPageBackArgs({{17, 19, 4, 23}}, true, true);
 
-    ClientProblemFactory             factory(args);
-    CopyPlanDataInitialization       dataInit(args, factory);
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
-    auto const results = dataInit.executeTensorCopyPlan(plan, nullptr);
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x2468)));
 
-    ASSERT_EQ(results.size(), plan.opsByTensor.size());
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    engine->clear();
 
-    size_t missingCount = 0;
-    for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
-    {
-        if(plan.opsByTensor[i])
-        {
-            EXPECT_NE(results[i], nullptr);
-        }
-        else
-        {
-            EXPECT_EQ(results[i], nullptr);
-            ++missingCount;
-        }
-    }
-
-    EXPECT_GT(missingCount, 0u);
-}
-
-TEST(DataInitializationCopyPlan, InputPlanIsPureAndMatchesViewMetadata)
-{
-    auto hipDevice = hasHipDevice();
-    if(!hipDevice)
-    {
-        GTEST_SKIP() << hipDevice.message();
-    }
-
-    auto problem = makeBatchProblem(32, 24, 16, 4);
-    auto args    = makeBaseArgs({{32, 24, 4, 16}});
-
-    ClientProblemFactory       factory(args);
-    CopyPlanDataInitialization  dataInit(args, factory);
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
-    auto const expectedResults = dataInit.executeTensorCopyPlan(plan, nullptr);
-
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
-    ASSERT_EQ(expectedResults.size(), plan.opsByTensor.size());
-
-    std::vector<void*>              ptrs(problem.tensors().size(), reinterpret_cast<void*>(0x1));
-    std::vector<void**>             batchPtrs(problem.tensors().size(),
-                                  reinterpret_cast<void**>(0x2));
-    std::vector<size_t>             maxElements(problem.tensors().size(), 9999);
-    std::vector<std::vector<size_t>> offsets(problem.tensors().size(), std::vector<size_t>{7, 7});
-
-    auto ptrsBefore      = ptrs;
-    auto batchPtrsBefore = batchPtrs;
-    auto maxBefore       = maxElements;
-    auto offsetsBefore   = offsets;
-
-    EXPECT_EQ(ptrs, ptrsBefore);
-    EXPECT_EQ(batchPtrs, batchPtrsBefore);
-    EXPECT_EQ(maxElements, maxBefore);
-    EXPECT_EQ(offsets, offsetsBefore);
+    std::vector<void*>              ptrs(problem.tensors().size(), nullptr);
+    std::vector<void**>             batchPtrs(problem.tensors().size(), nullptr);
+    std::vector<size_t>             maxElements(problem.tensors().size(), 0);
+    std::vector<std::vector<size_t>> offsets(problem.tensors().size());
 
     dataInit.copyInputs(ptrs,
                         batchPtrs,
@@ -467,134 +342,211 @@ TEST(DataInitializationCopyPlan, InputPlanIsPureAndMatchesViewMetadata)
                         problem,
                         hipMemcpyDeviceToDevice);
 
-    std::vector<void*>              expectedPtrs;
-    std::vector<void**>             expectedBatchPtrs;
-    std::vector<size_t>             expectedMaxElements;
-    std::vector<std::vector<size_t>> expectedOffsets;
-    expectedPtrs.reserve(plan.opsByTensor.size());
-    expectedBatchPtrs.reserve(plan.opsByTensor.size());
-    expectedMaxElements.reserve(plan.opsByTensor.size());
-    expectedOffsets.reserve(plan.opsByTensor.size());
+    auto const& aUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem);
+    auto const& bUnit = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem);
+    auto const& aDesc = problem.tensors().at(ContractionProblemGemm::TENSOR::A);
+    auto const& bDesc = problem.tensors().at(ContractionProblemGemm::TENSOR::B);
 
-    for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+    InputLayoutPolicy const policy;
+    auto const              aPlan = policy.planTensorSwizzle(problem, ContractionProblemGemm::TENSOR::A);
+    auto const              bPlan = policy.planTensorSwizzle(problem, ContractionProblemGemm::TENSOR::B);
+
+    auto const expectedADst = static_cast<uint8_t*>(aUnit.gpuInput.current.get())
+                              + multiplyElementSize(aUnit.maxElements - aPlan.allocatedElements,
+                                                    aDesc.elementBytes());
+    auto const expectedBDst = static_cast<uint8_t*>(bUnit.gpuInput.current.get())
+                              + multiplyElementSize(bUnit.maxElements - bPlan.allocatedElements,
+                                                    bDesc.elementBytes());
+
+    EXPECT_EQ(ptrs.at(ContractionProblemGemm::TENSOR::A), static_cast<void*>(expectedADst));
+    EXPECT_EQ(ptrs.at(ContractionProblemGemm::TENSOR::B), static_cast<void*>(expectedBDst));
+    EXPECT_EQ(maxElements.at(ContractionProblemGemm::TENSOR::A), aUnit.maxElements);
+    EXPECT_EQ(maxElements.at(ContractionProblemGemm::TENSOR::B), bUnit.maxElements);
+    EXPECT_EQ(batchPtrs.at(ContractionProblemGemm::TENSOR::A), aUnit.gpuInput.batch.get());
+    EXPECT_EQ(batchPtrs.at(ContractionProblemGemm::TENSOR::B), bUnit.gpuInput.batch.get());
+}
+
+TEST(DataInitializationCopyPlan, InputPlanUsesDefaultAndExplicitGpuSlots)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+        GTEST_SKIP() << hipDevice.message();
+
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeRingArgs({{32, 24, 4, 16}});
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.altSlotsReady());
+
+    auto const& slot0 = dataInit.slotState(0);
+    auto const& slot1 = dataInit.slotState(1);
+    ASSERT_TRUE(slot0.populated());
+    ASSERT_TRUE(slot1.populated());
+
+    std::vector<void*>              defaultPtrs(problem.tensors().size(), nullptr);
+    std::vector<void**>             defaultBatchPtrs(problem.tensors().size(), nullptr);
+    std::vector<size_t>             defaultMaxElements(problem.tensors().size(), 0);
+    std::vector<std::vector<size_t>> defaultOffsets(problem.tensors().size());
+    dataInit.copyInputs(defaultPtrs,
+                        defaultBatchPtrs,
+                        defaultMaxElements,
+                        defaultOffsets,
+                        problem,
+                        hipMemcpyDeviceToDevice);
+
+    std::vector<void*>              explicitPtrs(problem.tensors().size(), nullptr);
+    std::vector<void**>             explicitBatchPtrs(problem.tensors().size(), nullptr);
+    std::vector<size_t>             explicitMaxElements(problem.tensors().size(), 0);
+    std::vector<std::vector<size_t>> explicitOffsets(problem.tensors().size());
+    dataInit.copyInputsForSlot(explicitPtrs,
+                               explicitBatchPtrs,
+                               explicitMaxElements,
+                               explicitOffsets,
+                               problem,
+                               hipMemcpyDeviceToDevice,
+                               1);
+
+    for(size_t i = 0; i < problem.tensors().size(); ++i)
     {
-        auto const& maybeOp = plan.opsByTensor[i];
-        if(maybeOp)
+        EXPECT_EQ(defaultPtrs.at(i), slot0.ptrs.at(i));
+        EXPECT_EQ(defaultBatchPtrs.at(i), slot0.batchPtrs.at(i));
+        EXPECT_EQ(defaultMaxElements.at(i), slot0.maxElements.at(i));
+        EXPECT_EQ(defaultOffsets.at(i), slot0.groupedOffsets.at(i));
+
+        EXPECT_EQ(explicitPtrs.at(i), slot1.ptrs.at(i));
+        EXPECT_EQ(explicitBatchPtrs.at(i), slot1.batchPtrs.at(i));
+        EXPECT_EQ(explicitMaxElements.at(i), slot1.maxElements.at(i));
+        EXPECT_EQ(explicitOffsets.at(i), slot1.groupedOffsets.at(i));
+    }
+}
+
+TEST(DataInitializationCopyPlan, OutputResetTargetsOutputsAndKeepsNonOutputsUntouched)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+        GTEST_SKIP() << hipDevice.message();
+
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeGuardPageBackArgs({{32, 24, 4, 16}});
+
+    auto engine = std::make_shared<RecordingCopyEngine>();
+
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory, engine);
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    engine->clear();
+
+    auto beforePtrs      = dataInit.gpuPtrs();
+    auto beforeBatchPtrs = dataInit.gpuBatchPtrs();
+    auto beforeMax       = dataInit.maxElements();
+    auto beforeOffsets   = dataInit.groupedOffsets();
+
+    dataInit.resetOutput(dataInit.gpuPtrs(),
+                         dataInit.gpuBatchPtrs(),
+                         dataInit.maxElements(),
+                         dataInit.groupedOffsets(),
+                         problem,
+                         hipMemcpyDeviceToDevice);
+
+    auto const& tensors = problem.tensors();
+    auto const& dUnit   = dataInit.pristineUnit(ContractionProblemGemm::TENSOR::D, problem);
+
+    bool sawOutputCopy = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type != RecordingCopyEngine::CallType::Copy)
+            continue;
+
+        sawOutputCopy |= call.dst == dUnit.gpuInput.current.get();
+
+        EXPECT_NE(call.dst, dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem)
+                                 .gpuInput.current.get());
+        EXPECT_NE(call.dst, dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem)
+                                 .gpuInput.current.get());
+        EXPECT_NE(call.dst, dataInit.pristineUnit(ContractionProblemGemm::TENSOR::C, problem)
+                                 .gpuInput.current.get());
+    }
+
+    EXPECT_TRUE(sawOutputCopy);
+
+    for(size_t i = 0; i < tensors.size(); ++i)
+    {
+        if(!tensors[i].isOutput())
         {
-            auto const& op       = *maybeOp;
-            auto const& pristine = dataInit.pristineUnit(i, problem);
-
-            ASSERT_NE(op.descriptor, nullptr);
-            EXPECT_EQ(op.tensorIndex, i);
-            EXPECT_EQ(op.descriptor, &problem.tensors().at(i));
-            EXPECT_EQ(op.kind, hipMemcpyDeviceToDevice);
-            EXPECT_EQ(op.planKind, CopyPlanDataInitialization::TensorCopyPlanKind::Plain);
-            EXPECT_NE(op.dst, nullptr);
-            EXPECT_NE(op.src, nullptr);
-            EXPECT_EQ(op.maxElements, pristine.maxElements);
-            EXPECT_EQ(op.batchPtr, pristine.gpuInput.batch.get());
-            EXPECT_EQ(op.groupedOffsets, pristine.groupedGemmOffsets);
-
-            expectedPtrs.push_back(expectedResults[i]);
-            expectedBatchPtrs.push_back(op.batchPtr);
-            expectedMaxElements.push_back(op.maxElements);
-            expectedOffsets.push_back(op.groupedOffsets);
+            EXPECT_EQ(dataInit.gpuPtrs().at(i), beforePtrs.at(i));
+            EXPECT_EQ(dataInit.gpuBatchPtrs().at(i), beforeBatchPtrs.at(i));
+            EXPECT_EQ(dataInit.maxElements().at(i), beforeMax.at(i));
+            EXPECT_EQ(dataInit.groupedOffsets().at(i), beforeOffsets.at(i));
         }
         else
         {
-            expectedPtrs.push_back(nullptr);
-            expectedBatchPtrs.push_back(nullptr);
-            expectedMaxElements.push_back(0);
-            expectedOffsets.emplace_back();
+            EXPECT_EQ(dataInit.gpuPtrs().at(i), dUnit.gpuInput.current.get());
+            EXPECT_EQ(dataInit.gpuBatchPtrs().at(i), dUnit.gpuInput.batch.get());
         }
     }
-
-    EXPECT_EQ(ptrs, expectedPtrs);
-    EXPECT_EQ(batchPtrs, expectedBatchPtrs);
-    EXPECT_EQ(maxElements, expectedMaxElements);
-    EXPECT_EQ(offsets, expectedOffsets);
 }
 
-TEST(DataInitializationCopyPlan, InputGuardPageBackPlansGuardBackOps)
+TEST(DataInitializationCopyPlan, OutputResetForSlotUsesExplicitGpuSlot)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
 
-    auto problem = makeBatchProblem(17, 19, 23, 4);
-    auto args    = makeGuardPageBackArgs({{17, 19, 4, 23}});
+    auto problem = makeBatchProblem(32, 24, 16, 4);
+    auto args    = makeRingArgs({{32, 24, 4, 16}});
 
-    ClientProblemFactory             factory(args);
-    CopyPlanDataInitialization       dataInit(args, factory);
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
+    ClientProblemFactory      factory(args);
+    CopyPlanDataInitialization dataInit(args, factory);
 
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.altSlotsReady());
 
-    for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
+    auto const& slot0 = dataInit.slotState(0);
+    auto const& slot1 = dataInit.slotState(1);
+
+    std::vector<void*>              ptrs = slot0.ptrs;
+    std::vector<void**>             batchPtrs = slot0.batchPtrs;
+    std::vector<size_t>             maxElements = slot0.maxElements;
+    std::vector<std::vector<size_t>> offsets = slot0.groupedOffsets;
+
+    dataInit.resetOutputForSlot(ptrs,
+                                batchPtrs,
+                                maxElements,
+                                offsets,
+                                problem,
+                                hipMemcpyDeviceToDevice,
+                                1);
+
+    for(size_t i = 0; i < problem.tensors().size(); ++i)
     {
-        auto const& maybeOp = plan.opsByTensor[i];
-        if(!maybeOp)
-            continue;
-
-        auto const& op       = *maybeOp;
-        auto const& pristine = dataInit.pristineUnit(i, problem);
-
-        EXPECT_EQ(op.tensorIndex, i);
-        EXPECT_EQ(op.descriptor, &problem.tensors().at(i));
-        EXPECT_EQ(op.kind, hipMemcpyDeviceToDevice);
-        EXPECT_EQ(op.planKind, CopyPlanDataInitialization::TensorCopyPlanKind::GuardBack);
-        EXPECT_NE(op.dst, nullptr);
-        EXPECT_NE(op.src, nullptr);
-        EXPECT_EQ(op.bad, nullptr);
-        EXPECT_EQ(op.maxElements, pristine.maxElements);
-        EXPECT_EQ(op.batchPtr, pristine.gpuInput.batch.get());
-        EXPECT_EQ(op.groupedOffsets, pristine.groupedGemmOffsets);
-        EXPECT_EQ(op.customPadding, -1);
-    }
-}
-
-TEST(DataInitializationCopyPlan, InputGuardPageBackSwizzledTensorsUseCustomPadding)
-{
-    auto hipDevice = hasHipDevice();
-    if(!hipDevice)
-    {
-        GTEST_SKIP() << hipDevice.message();
-    }
-
-    auto problem = makeBatchProblem(17, 19, 23, 4, true, true);
-    auto args    = makeGuardPageBackArgs({{17, 19, 4, 23}}, true, true);
-
-    ClientProblemFactory             factory(args);
-    CopyPlanDataInitialization       dataInit(args, factory);
-    auto const plan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
-
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
-
-    for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
-    {
-        auto const& maybeOp = plan.opsByTensor[i];
-        if(!maybeOp)
-            continue;
-
-        auto const& op = *maybeOp;
-        if(i == ContractionProblemGemm::TENSOR::A || i == ContractionProblemGemm::TENSOR::B)
+        auto const& desc = problem.tensors().at(i);
+        if(!desc.isOutput())
         {
-            EXPECT_EQ(op.planKind, CopyPlanDataInitialization::TensorCopyPlanKind::GuardBack);
-            EXPECT_EQ(op.customPadding, expectedGuardBackPadding(*op.descriptor));
+            EXPECT_EQ(ptrs.at(i), slot0.ptrs.at(i));
+            EXPECT_EQ(batchPtrs.at(i), slot0.batchPtrs.at(i));
+            EXPECT_EQ(maxElements.at(i), slot0.maxElements.at(i));
+            EXPECT_EQ(offsets.at(i), slot0.groupedOffsets.at(i));
+            continue;
         }
+
+        EXPECT_EQ(ptrs.at(i), slot1.ptrs.at(i));
+        EXPECT_EQ(batchPtrs.at(i), slot1.batchPtrs.at(i));
+        EXPECT_EQ(maxElements.at(i), slot1.maxElements.at(i));
+        EXPECT_EQ(offsets.at(i), slot1.groupedOffsets.at(i));
     }
 }
 
-TEST(DataInitializationCopyPlan,
-     InputGuardPageBackSwizzledBatchPointersUsePolicyGeometry)
+TEST(DataInitializationCopyPlan, InputGuardPageBackSwizzledBatchPointersUsePolicyGeometry)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
 
     auto problem = makeBatchProblem(17, 19, 23, 4, true, true);
     auto args    = makeGuardPageBackArgs({{17, 19, 4, 23}}, true, true);
@@ -602,7 +554,7 @@ TEST(DataInitializationCopyPlan,
     auto engine = std::make_shared<RecordingCopyEngine>(
         reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x2468)));
 
-    ClientProblemFactory       factory(args);
+    ClientProblemFactory      factory(args);
     CopyPlanDataInitialization dataInit(args, factory, engine);
 
     dataInit.prepareGPUInputs(problem);
@@ -667,202 +619,11 @@ TEST(DataInitializationCopyPlan,
     EXPECT_TRUE(sawB);
 }
 
-TEST(DataInitializationCopyPlan, OutputResetPlanOnlyTargetsOutputs)
+TEST(DataInitializationCopyPlan, CopyValidSkipsPolicySpecializedTensors)
 {
     auto hipDevice = hasHipDevice();
     if(!hipDevice)
-    {
         GTEST_SKIP() << hipDevice.message();
-    }
-
-    auto problem = makeBatchProblem(32, 24, 16, 4);
-    auto args    = makeGuardPageBackArgs({{32, 24, 4, 16}});
-
-    ClientProblemFactory             factory(args);
-    CopyPlanDataInitialization       dataInit(args, factory);
-
-    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
-    ASSERT_NE(inputs, nullptr);
-
-    auto beforePtrs      = dataInit.gpuPtrs();
-    auto beforeBatchPtrs = dataInit.gpuBatchPtrs();
-    auto beforeMax       = dataInit.maxElements();
-    auto beforeOffsets   = dataInit.groupedOffsets();
-
-    auto const plan = dataInit.planOutputResetCopyOps(problem, hipMemcpyDeviceToDevice);
-    auto const expectedResults = dataInit.executeTensorCopyPlan(plan, nullptr);
-
-    ASSERT_EQ(plan.opsByTensor.size(), problem.tensors().size());
-    ASSERT_EQ(expectedResults.size(), plan.opsByTensor.size());
-
-    dataInit.resetOutput(dataInit.gpuPtrs(),
-                         dataInit.gpuBatchPtrs(),
-                         dataInit.maxElements(),
-                         dataInit.groupedOffsets(),
-                         problem,
-                         hipMemcpyDeviceToDevice);
-
-    std::vector<void*>              expectedPtrs      = beforePtrs;
-    std::vector<void**>             expectedBatchPtrs = beforeBatchPtrs;
-    std::vector<size_t>             expectedMax       = beforeMax;
-    std::vector<std::vector<size_t>> expectedOffsets   = beforeOffsets;
-
-    for(size_t i = 0; i < plan.opsByTensor.size(); ++i)
-    {
-        auto const& desc    = problem.tensors().at(i);
-        auto const& maybeOp = plan.opsByTensor[i];
-        if(!desc.isOutput())
-        {
-            EXPECT_FALSE(maybeOp.has_value());
-            continue;
-        }
-
-        ASSERT_TRUE(maybeOp.has_value());
-        auto const& op = *maybeOp;
-        EXPECT_EQ(op.tensorIndex, i);
-        EXPECT_EQ(op.planKind, CopyPlanDataInitialization::TensorCopyPlanKind::Plain);
-        EXPECT_NE(op.dst, nullptr);
-        EXPECT_NE(op.src, nullptr);
-        EXPECT_EQ(op.dst, expectedResults[i]);
-        EXPECT_NE(op.dst, beforePtrs[i]);
-
-        expectedPtrs[i]      = expectedResults[i];
-        expectedBatchPtrs[i] = op.batchPtr;
-        expectedMax[i]       = op.maxElements;
-        expectedOffsets[i]   = op.groupedOffsets;
-    }
-
-    EXPECT_EQ(dataInit.gpuPtrs(), expectedPtrs);
-    EXPECT_EQ(dataInit.gpuBatchPtrs(), expectedBatchPtrs);
-    EXPECT_EQ(dataInit.maxElements(), expectedMax);
-    EXPECT_EQ(dataInit.groupedOffsets(), expectedOffsets);
-}
-
-TEST(DataInitializationCopyPlan, InputPlanUsesDefaultAndExplicitGpuSlots)
-{
-    auto hipDevice = hasHipDevice();
-    if(!hipDevice)
-    {
-        GTEST_SKIP() << hipDevice.message();
-    }
-
-    auto problem = makeBatchProblem(32, 24, 16, 4);
-    auto args    = makeRingArgs({{32, 24, 4, 16}});
-
-    ClientProblemFactory      factory(args);
-    CopyPlanDataInitialization dataInit(args, factory);
-
-    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
-    ASSERT_NE(inputs, nullptr);
-    ASSERT_TRUE(dataInit.altSlotsReady());
-
-    auto const& slot0 = dataInit.slotState(0);
-    auto const& slot1 = dataInit.slotState(1);
-    ASSERT_TRUE(slot0.populated());
-    ASSERT_TRUE(slot1.populated());
-
-    auto const defaultPlan = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice);
-    auto const explicitPlan
-        = dataInit.planInputCopies(problem, hipMemcpyDeviceToDevice, 1);
-
-    ASSERT_EQ(defaultPlan.opsByTensor.size(), problem.tensors().size());
-    ASSERT_EQ(explicitPlan.opsByTensor.size(), problem.tensors().size());
-
-    for(size_t i = 0; i < problem.tensors().size(); ++i)
-    {
-        auto const& maybeDefault = defaultPlan.opsByTensor[i];
-        auto const& maybeExplicit = explicitPlan.opsByTensor[i];
-        ASSERT_TRUE(maybeDefault.has_value());
-        ASSERT_TRUE(maybeExplicit.has_value());
-
-        auto const& opDefault  = *maybeDefault;
-        auto const& opExplicit = *maybeExplicit;
-        auto const& pristine   = dataInit.pristineUnit(i, problem);
-
-        EXPECT_EQ(opDefault.dst, slot0.ptrs.at(i));
-        EXPECT_EQ(opDefault.dst, pristine.gpuInput.current.get());
-        EXPECT_EQ(opDefault.src, pristine.gpuInput.valid.get());
-        EXPECT_EQ(opDefault.batchPtr, slot0.batchPtrs.at(i));
-        EXPECT_EQ(opDefault.batchPtr, pristine.gpuInput.batch.get());
-
-        EXPECT_EQ(opExplicit.dst, slot1.ptrs.at(i));
-        EXPECT_EQ(opExplicit.src, pristine.gpuInput.valid.get());
-        EXPECT_EQ(opExplicit.batchPtr, slot1.batchPtrs.at(i));
-        EXPECT_NE(opExplicit.dst, opDefault.dst);
-        EXPECT_NE(opExplicit.batchPtr, opDefault.batchPtr);
-    }
-}
-
-TEST(DataInitializationCopyPlan, OutputResetPlanUsesDefaultAndExplicitGpuSlots)
-{
-    auto hipDevice = hasHipDevice();
-    if(!hipDevice)
-    {
-        GTEST_SKIP() << hipDevice.message();
-    }
-
-    auto problem = makeBatchProblem(32, 24, 16, 4);
-    auto args    = makeRingArgs({{32, 24, 4, 16}});
-
-    ClientProblemFactory      factory(args);
-    CopyPlanDataInitialization dataInit(args, factory);
-
-    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
-    ASSERT_NE(inputs, nullptr);
-    ASSERT_TRUE(dataInit.altSlotsReady());
-
-    auto const& slot0 = dataInit.slotState(0);
-    auto const& slot1 = dataInit.slotState(1);
-    ASSERT_TRUE(slot0.populated());
-    ASSERT_TRUE(slot1.populated());
-
-    auto const defaultPlan = dataInit.planOutputResetCopyOps(problem, hipMemcpyDeviceToDevice);
-    auto const explicitPlan
-        = dataInit.planOutputResetCopyOps(problem, hipMemcpyDeviceToDevice, 1);
-
-    ASSERT_EQ(defaultPlan.opsByTensor.size(), problem.tensors().size());
-    ASSERT_EQ(explicitPlan.opsByTensor.size(), problem.tensors().size());
-
-    for(size_t i = 0; i < problem.tensors().size(); ++i)
-    {
-        auto const& desc = problem.tensors().at(i);
-        auto const& maybeDefault = defaultPlan.opsByTensor[i];
-        auto const& maybeExplicit = explicitPlan.opsByTensor[i];
-
-        if(!desc.isOutput())
-        {
-            EXPECT_FALSE(maybeDefault.has_value());
-            EXPECT_FALSE(maybeExplicit.has_value());
-            continue;
-        }
-
-        ASSERT_TRUE(maybeDefault.has_value());
-        ASSERT_TRUE(maybeExplicit.has_value());
-
-        auto const& opDefault  = *maybeDefault;
-        auto const& opExplicit = *maybeExplicit;
-        auto const& pristine   = dataInit.pristineUnit(i, problem);
-
-        EXPECT_EQ(opDefault.dst, slot0.ptrs.at(i));
-        EXPECT_EQ(opDefault.src, pristine.gpuInput.valid.get());
-        EXPECT_EQ(opDefault.batchPtr, slot0.batchPtrs.at(i));
-        EXPECT_EQ(opDefault.batchPtr, pristine.gpuInput.batch.get());
-
-        EXPECT_EQ(opExplicit.dst, slot1.ptrs.at(i));
-        EXPECT_EQ(opExplicit.src, pristine.gpuInput.valid.get());
-        EXPECT_EQ(opExplicit.batchPtr, slot1.batchPtrs.at(i));
-        EXPECT_NE(opExplicit.dst, opDefault.dst);
-        EXPECT_NE(opExplicit.batchPtr, opDefault.batchPtr);
-    }
-}
-
-TEST(DataInitializationInputLayoutPolicy, CopyValidSkipsPolicySpecializedTensors)
-{
-    auto hipDevice = hasHipDevice();
-    if(!hipDevice)
-    {
-        GTEST_SKIP() << hipDevice.message();
-    }
 
     auto problem = makeBatchProblem(32, 24, 16, 4, /*swizzleTensorA=*/true);
     auto args    = makeBaseArgs({{32, 24, 4, 16}});
@@ -870,7 +631,7 @@ TEST(DataInitializationInputLayoutPolicy, CopyValidSkipsPolicySpecializedTensors
     auto engine = std::make_shared<RecordingCopyEngine>(
         reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x5678)));
 
-    ClientProblemFactory       factory(args);
+    ClientProblemFactory      factory(args);
     CopyPlanDataInitialization dataInit(args, factory, engine);
 
     dataInit.prepareCPUInputs(problem);

@@ -17,6 +17,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/HipCopyEngine.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GpuInputSlotSet.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationCopyPlanner.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunSchedulerAdapters.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/InputLayoutPolicy.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"

@@ -31,6 +31,7 @@
 #include "RingPolicy.hpp"
 #include "RingSlotController.hpp"
 #include "GpuInputSlotSet.hpp"
+#include "DataInitializationCopyPlanner.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include "InputLayoutPolicy.hpp"
@@ -1031,34 +1032,6 @@ namespace TensileLite
                 }
             };
 
-            enum class TensorCopyPlanKind
-            {
-                Plain,
-                BadBounds,
-                GuardBack
-            };
-
-            struct TensorCopyOp
-            {
-                size_t                    tensorIndex = 0;
-                TensorDescriptor const*    descriptor  = nullptr;
-                void*                      dst         = nullptr;
-                void*                      src         = nullptr;
-                void*                      bad         = nullptr;
-                size_t                     maxElements = 0;
-                hipMemcpyKind              kind        = hipMemcpyHostToHost;
-                TensorCopyPlanKind         planKind    = TensorCopyPlanKind::Plain;
-                ptrdiff_t                  customPadding = -1;
-                void**                     batchPtr      = nullptr;
-                std::vector<size_t>        groupedOffsets;
-            };
-
-            struct TensorCopyPlan
-            {
-                std::vector<std::optional<TensorCopyOp>> opsByTensor;
-                bool                                     replaceDestinationViews = false;
-            };
-
             enum class OutputResetAction
             {
                 NoReset,
@@ -1224,29 +1197,47 @@ namespace TensileLite
             bool shouldRefreshMXForSolution(ContractionSolution const*     solution,
                                             ContractionProblemGemm const& problem) const;
 
-            TensorCopyPlan planInputCopies(ContractionProblemGemm const& problem,
-                                           hipMemcpyKind                 kind,
-                                           std::optional<size_t>         gpuTargetSlot = std::nullopt) const;
-            TensorCopyPlan planOutputResetCopyOps(ContractionProblemGemm const& problem,
-                                                  hipMemcpyKind                 kind,
-                                                  std::optional<size_t>         gpuTargetSlot = std::nullopt) const;
-            std::vector<void*> executeTensorCopyPlan(TensorCopyPlan const& plan,
-                                                     hipStream_t           d2dStream) const;
-            void applyInputCopyPlanResults(TensorCopyPlan const&               plan,
-                                           std::vector<void*> const&           resultPtrs,
-                                           std::vector<void*>&                 ptrs,
-                                           std::vector<void**>&                batchPtrs,
-                                           std::vector<size_t>&                maxElements,
-                                           std::vector<std::vector<size_t>>&   offsets) const;
-            void applyOutputResetPlanResults(TensorCopyPlan const&             plan,
-                                             ContractionProblemGemm const&     problem,
-                                             std::vector<void*> const&         resultPtrs,
-                                             std::vector<void*>&               ptrs,
-                                             std::vector<void**>&              batchPtrs,
-                                             std::vector<size_t>&              maxElements,
-                                             std::vector<std::vector<size_t>>& offsets) const;
-            static hipStream_t effectiveStreamForOp(TensorCopyOp const& op, hipStream_t d2dStream);
+        private:
+            struct TensorCopyResolvedPointers
+            {
+                void*  dst   = nullptr;
+                void*  src   = nullptr;
+                void*  bad   = nullptr;
+                void** batch = nullptr;
+            };
 
+            std::vector<detail::TensorCopyView> makeTensorCopyViews(
+                ContractionProblemGemm const& problem) const;
+            TensorCopyResolvedPointers resolveTensorCopyPointers(
+                detail::TensorCopyInstruction const& instruction,
+                PristineUnit const&                  pristine) const;
+            void* executeTensorCopyInstruction(
+                detail::TensorCopyInstruction const& instruction,
+                TensorCopyResolvedPointers const&    pointers,
+                TensorDescriptor const&              descriptor,
+                hipStream_t                          d2dStream) const;
+            std::vector<void*> executeTensorCopyInstructions(
+                std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+                ContractionProblemGemm const& problem,
+                hipStream_t                  d2dStream) const;
+            void applyInputTensorCopyResults(
+                std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+                ContractionProblemGemm const& problem,
+                std::vector<void*> const&         resultPtrs,
+                std::vector<void*>&               ptrs,
+                std::vector<void**>&              batchPtrs,
+                std::vector<size_t>&              maxElements,
+                std::vector<std::vector<size_t>>& offsets) const;
+            void applyOutputTensorCopyResults(
+                std::vector<std::optional<detail::TensorCopyInstruction>> const& plan,
+                ContractionProblemGemm const& problem,
+                std::vector<void*> const&         resultPtrs,
+                std::vector<void*>&               ptrs,
+                std::vector<void**>&              batchPtrs,
+                std::vector<size_t>&              maxElements,
+                std::vector<std::vector<size_t>>& offsets) const;
+
+        protected:
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
