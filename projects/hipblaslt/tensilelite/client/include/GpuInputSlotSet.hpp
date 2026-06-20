@@ -17,6 +17,8 @@ namespace TensileLite::Client
     {
         std::vector<void*>                    ptrs;
         std::vector<void**>                   batchPtrs;
+        std::vector<size_t>                   maxElements;
+        std::vector<std::vector<size_t>>      groupedOffsets;
         std::shared_ptr<TensileLite::ProblemInputs> cachedInputs;
 
         bool populated() const noexcept
@@ -28,6 +30,8 @@ namespace TensileLite::Client
         {
             ptrs.clear();
             batchPtrs.clear();
+            maxElements.clear();
+            groupedOffsets.clear();
             cachedInputs.reset();
         }
     };

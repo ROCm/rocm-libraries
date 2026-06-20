@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <hip/hip_runtime.h>
 
@@ -177,6 +178,11 @@ namespace
             return m_gpuInputSlots.at(slot);
         }
 
+        auto& slotState(size_t slot)
+        {
+            return m_gpuInputSlots.at(slot);
+        }
+
         auto nextPrimeSlot() const
         {
             return m_ring.nextPrimeSlot();
@@ -200,6 +206,7 @@ namespace
             {
                 auto const& slotState = m_gpuInputSlots.at(slot);
                 if(slotState.populated() || !slotState.batchPtrs.empty()
+                   || !slotState.maxElements.empty() || !slotState.groupedOffsets.empty()
                    || slotState.cachedInputs)
                     return false;
             }
@@ -442,6 +449,64 @@ TEST(DataInitializationSlotStorage, PrimingAltSlotDoesNotMutateActiveAliases)
 
     HipStreamGuard computeStream(hipStreamNonBlocking);
     dataInit.waitForPreparedSlot(computeStream.get());
+}
+
+TEST(DataInitializationSlotStorage, FastPathPublicationRejectsStaleGroupedMetadata)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto args = makeGroupedRingArgs({{32, 24, 16}, {48, 20, 8}});
+
+    ClientProblemFactory factory(args);
+    ASSERT_EQ(factory.problems().size(), 1u);
+
+    auto const* groupedProblem
+        = dynamic_cast<ContractionProblemGroupedGemm const*>(factory.problems().front().get());
+    ASSERT_NE(groupedProblem, nullptr);
+
+    SlotStorageDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(groupedProblem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.ringEligible());
+    ASSERT_TRUE(dataInit.altSlotsReady());
+
+    auto const targetSlot = dataInit.nextPrimeSlot();
+    ASSERT_TRUE(targetSlot.has_value());
+
+    auto& targetState = dataInit.slotState(*targetSlot);
+    ASSERT_TRUE(targetState.populated());
+    ASSERT_FALSE(targetState.groupedOffsets.empty());
+
+    dataInit.primeNextInputSlot(static_cast<ContractionProblem const*>(groupedProblem));
+    ASSERT_TRUE(dataInit.ringHasAvailableSlot());
+
+    targetState.groupedOffsets.clear();
+    EXPECT_TRUE(targetState.populated());
+
+    bool sawExpectedFailure = false;
+    try
+    {
+        (void)dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(groupedProblem));
+        FAIL() << "Expected prepareGPUInputs() to reject the stale grouped slot.";
+    }
+    catch(std::runtime_error const& ex)
+    {
+        sawExpectedFailure = true;
+        std::string const message = ex.what();
+        EXPECT_NE(message.find("slot 1"), std::string::npos);
+        EXPECT_NE(message.find("groupedOffsets"), std::string::npos);
+    }
+    catch(...)
+    {
+        FAIL() << "Expected std::runtime_error from stale slot publication.";
+    }
+
+    EXPECT_TRUE(sawExpectedFailure);
 }
 
 TEST(DataInitializationSlotStorage, PristineOnGpuFalseDisablesWarmD2DReset)

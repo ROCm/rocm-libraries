@@ -24,6 +24,9 @@ namespace
     {
         slot.ptrs.push_back(reinterpret_cast<void*>(ptrValue));
         slot.batchPtrs.push_back(reinterpret_cast<void**>(batchValue));
+        slot.maxElements.push_back(static_cast<size_t>(ptrValue + 1));
+        slot.groupedOffsets.push_back({static_cast<size_t>(ptrValue + 2),
+                                       static_cast<size_t>(ptrValue + 3)});
         slot.cachedInputs = makeSentinelInputs(inputsValue);
     }
 } // namespace
@@ -56,6 +59,15 @@ TEST(GpuInputSlotSet, SlotsAreIndependentAndClearFromKeepsSlot0)
     EXPECT_FALSE(slots.at(2).cachedInputs);
     EXPECT_EQ(slots.at(0).batchPtrs.size(), 1u);
     EXPECT_EQ(slots.at(0).ptrs.size(), 1u);
+    EXPECT_EQ(slots.at(0).maxElements.size(), 1u);
+    EXPECT_EQ(slots.at(0).maxElements.front(), static_cast<size_t>(0x11));
+    ASSERT_EQ(slots.at(0).groupedOffsets.size(), 1u);
+    EXPECT_EQ(slots.at(0).groupedOffsets.front(),
+              (std::vector<size_t>{static_cast<size_t>(0x12), static_cast<size_t>(0x13)}));
+    EXPECT_TRUE(slots.at(1).maxElements.empty());
+    EXPECT_TRUE(slots.at(1).groupedOffsets.empty());
+    EXPECT_TRUE(slots.at(2).maxElements.empty());
+    EXPECT_TRUE(slots.at(2).groupedOffsets.empty());
 }
 
 TEST(GpuInputSlotSet, OutOfRangeAccessThrows)

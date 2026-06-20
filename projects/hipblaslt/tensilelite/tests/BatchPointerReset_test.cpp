@@ -58,6 +58,11 @@ namespace
             return m_altSlotsReady;
         }
 
+        size_t activeRingSlot() const
+        {
+            return m_ring.activeSlot();
+        }
+
         auto const& slotState(size_t slot) const
         {
             return m_gpuInputSlots.at(slot);
@@ -317,8 +322,8 @@ TEST(BatchPointerReset, StalePointersAcrossProblems)
     // Use M=64, N=64, batch=4, K=64 — index order is {i, j, l, k}.
     auto args = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
 
-    ClientProblemFactory factory(args);
-    DataInitialization   dataInit(args, factory);
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization dataInit(args, factory);
 
     // --- Call 1: slow path (m_gpuInit = false -> true) ---
     auto inputs1 = dataInit.prepareGPUInputs(p1);
@@ -386,8 +391,8 @@ TEST(BatchPointerReset, SameObjectMutationReinitializesBatchPointers)
     auto problem = makeBatchedProblem(32, 32, 32, BATCH);
     auto args    = makeBatchPointerResetArgs({{64, 64, BATCH, 64}});
 
-    ClientProblemFactory factory(args);
-    DataInitialization   dataInit(args, factory);
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization dataInit(args, factory);
 
     auto inputs1 = dataInit.prepareGPUInputs(problem);
     auto* ci1    = dynamic_cast<ContractionInputs*>(inputs1.get());
@@ -480,8 +485,8 @@ TEST(BatchPointerReset, GPUPrepareCachesFreshConstantInputsOnFirstSlowPath)
 
     auto args = makeConstantCachingArgs();
 
-    ClientProblemFactory factory(args);
-    DataInitialization   dataInit(args, factory);
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization dataInit(args, factory);
 
     auto inputs = dataInit.prepareGPUInputs(problem);
     auto* ci    = dynamic_cast<ContractionInputs*>(inputs.get());
@@ -630,10 +635,27 @@ TEST(BatchPointerReset,
               dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSB, problem)
                   .gpuInput.current.get());
 
+    auto const activeSlot = dataInit.activeRingSlot();
+    ASSERT_EQ(activeSlot, 0u);
+    auto const slot0CachedBefore = dataInit.slotState(activeSlot).cachedInputs;
+    EXPECT_EQ(slot0CachedBefore, gpuInputs);
+
     engine->clear();
     dataInit.preSolution(&solution);
 
     auto const expectedStream = engine->stream();
+    auto const activeSlotAfter = dataInit.activeRingSlot();
+    ASSERT_EQ(activeSlotAfter, activeSlot);
+    auto const& activeSlotState = dataInit.slotState(activeSlotAfter);
+    EXPECT_EQ(activeSlotState.cachedInputs, slot0CachedBefore);
+    EXPECT_EQ(activeSlotState.ptrs.at(ContractionProblemGemm::TENSOR::A), gpu->a);
+    EXPECT_EQ(activeSlotState.ptrs.at(ContractionProblemGemm::TENSOR::B), gpu->b);
+    EXPECT_EQ(activeSlotState.ptrs.at(ContractionProblemGemm::TENSOR::MXSA), gpu->mxsa);
+    EXPECT_EQ(activeSlotState.ptrs.at(ContractionProblemGemm::TENSOR::MXSB), gpu->mxsb);
+    EXPECT_EQ(activeSlotState.batchPtrs.at(ContractionProblemGemm::TENSOR::A), gpu->batchA);
+    EXPECT_EQ(activeSlotState.batchPtrs.at(ContractionProblemGemm::TENSOR::B), gpu->batchB);
+    EXPECT_EQ(activeSlotState.batchPtrs.at(ContractionProblemGemm::TENSOR::MXSA), nullptr);
+    EXPECT_EQ(activeSlotState.batchPtrs.at(ContractionProblemGemm::TENSOR::MXSB), nullptr);
 
     for(size_t tensorIndex : {ContractionProblemGemm::TENSOR::A,
                               ContractionProblemGemm::TENSOR::B})
@@ -735,6 +757,13 @@ TEST(BatchPointerReset, StaleAltSlotRefreshAfterProblemSwitch)
 
     dataInit.beginProblem(&p2);
     dataInit.resetPreparedSlotsForProblem();
+
+    auto const& clearedSlot1 = dataInit.slotState(1);
+    EXPECT_TRUE(clearedSlot1.ptrs.empty());
+    EXPECT_TRUE(clearedSlot1.batchPtrs.empty());
+    EXPECT_TRUE(clearedSlot1.maxElements.empty());
+    EXPECT_TRUE(clearedSlot1.groupedOffsets.empty());
+    EXPECT_FALSE(clearedSlot1.cachedInputs);
 
     auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
     auto* ci2    = dynamic_cast<ContractionInputs*>(inputs2.get());
@@ -862,8 +891,8 @@ TEST(BatchPointerReset, ResetPreparedSlotsForProblemClearsWarmRingBeforeProblemS
 
     auto args = makeRingBatchPointerArgs({{64, 64, BATCH, 64}}, 1);
 
-    ClientProblemFactory factory(args);
-    DataInitialization   dataInit(args, factory);
+    ClientProblemFactory        factory(args);
+    PredicateDataInitialization dataInit(args, factory);
 
     auto inputs1 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p1));
 
@@ -895,6 +924,13 @@ TEST(BatchPointerReset, ResetPreparedSlotsForProblemClearsWarmRingBeforeProblemS
 
     dataInit.beginProblem(&p2);
     dataInit.resetPreparedSlotsForProblem();
+
+    auto const& clearedSlot1 = dataInit.slotState(1);
+    EXPECT_TRUE(clearedSlot1.ptrs.empty());
+    EXPECT_TRUE(clearedSlot1.batchPtrs.empty());
+    EXPECT_TRUE(clearedSlot1.maxElements.empty());
+    EXPECT_TRUE(clearedSlot1.groupedOffsets.empty());
+    EXPECT_FALSE(clearedSlot1.cachedInputs);
 
     auto inputs2 = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&p2));
 

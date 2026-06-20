@@ -48,6 +48,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <sstream>
 #include <tuple>
 
 #ifdef TENSILELITE_DATAINIT_TEST_HOOKS
@@ -2167,15 +2168,13 @@ namespace TensileLite
                             s << "[input gpu]" << ss.str();
                             throw std::runtime_error(s.str().c_str());
                         }
-                        pUnit.gpuInput.current    = ptr;
-                        pUnit.gpuInput.buffers[0] = ptr;
                         std::string n             = "batch" + it.name;
                         auto        batch_ptr
                             = allocNewGPUBuffer<void*>(n.c_str(), sizeof(uint8_t*) * m_maxBatch);
                         if(batch_ptr == nullptr)
                             throw std::runtime_error("out of batch gpu memory");
-                        pUnit.gpuInput.batch       = batch_ptr;
-                        pUnit.gpuInput.batchBufs[0] = batch_ptr;
+                        MemoryInput::bootstrapGpuInputSlot0Aliases(
+                            pUnit.gpuInput, ptr, batch_ptr);
 
                         // Allocate alternate buffers for multi-buffering
                         for(size_t slot = 1; m_hasAltBuffers && slot < m_ring.activeBufferCount();
@@ -2315,23 +2314,30 @@ namespace TensileLite
                 && m_preparedProblemSignature == makePreparedProblemSignature(problem);
         }
 
+        ContractionProblemGemm const*
+            DataInitialization::representativeGemmProblemForFastPath(
+                ContractionProblem const* problem) const
+        {
+            if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
+                return gemmProblem;
+
+            if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
+            {
+                assertGroupedRingFastPathInvariant(*groupedProblem);
+                return &groupedProblem->gemms[0];
+            }
+
+            return nullptr;
+        }
+
         bool DataInitialization::ringFastPathPreparedFor(ContractionProblem const* problem) const
         {
             if(!ringEligible())
                 return false;
 
-            if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
-            {
-                return gpuInputsPreparedFor(*gemmProblem);
-            }
-
-            if(auto groupedProblem = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
-            {
-                assertGroupedRingFastPathInvariant(*groupedProblem);
-                return gpuInputsPreparedFor(groupedProblem->gemms[0]);
-            }
-
-            return false;
+            auto const representativeProblem = representativeGemmProblemForFastPath(problem);
+            return representativeProblem != nullptr
+                && gpuInputsPreparedFor(*representativeProblem);
         }
 
         void DataInitialization::markGpuInputsPrepared(
@@ -4228,27 +4234,27 @@ namespace TensileLite
                 markBatchPointersCurrent(problem);
             }
 
+            auto&      slot0      = m_gpuInputSlots.at(0);
             auto const outputPlan = planNormalWarmOutputReset(problem);
             if(outputPlan.action != OutputResetAction::FullFill)
             {
                 if(outputPlan.action == OutputResetAction::ResetFromValid)
                 {
                     ScopedTimer t("async_reset_resetoutput");
-                    resetOutput(m_gpuPtrs,
-                                m_gpuBatchPtrs,
-                                m_maxElements,
-                                m_groupedOffsets,
-                                problem,
-                                kind,
-                                targetStream);
+                    auto const beforeSlot = slot0;
+                    resetOutputForSlot(slot0.ptrs,
+                                       slot0.batchPtrs,
+                                       slot0.maxElements,
+                                       slot0.groupedOffsets,
+                                       problem,
+                                       kind,
+                                       /*gpuTargetSlot=*/0,
+                                       targetStream);
+                    refreshGpuInputSlotCachedInputsIfNeeded(0, problem, beforeSlot);
                 }
+                publishConsumableGpuInputSlot(0, problem);
                 if(!targetStream)
                 {
-                    auto& slot0 = m_gpuInputSlots.at(0);
-                    slot0.ptrs         = m_gpuPtrs;
-                    slot0.batchPtrs    = m_gpuBatchPtrs;
-                    slot0.cachedInputs = m_cachedGPUInputs;
-
                     initializeAltBufferSets(problem, cpuInputsAlreadyCurrent);
                 }
                 markGpuInputsPrepared(problem);
@@ -4258,28 +4264,19 @@ namespace TensileLite
             // refresh constants before the helper snapshots ProblemInputs.
             initializeConstantInputs(problem);
 
-            m_cachedGPUInputs = populateTensorSlot(problem,
-                                                   m_gpuPtrs,
-                                                   m_gpuBatchPtrs,
-                                                   m_maxElements,
-                                                   m_groupedOffsets,
-                                                   hipMemcpyDeviceToDevice,
-                                                   targetStream,
-                                                   nullptr,
-                                                   /*refreshRotatingMode1=*/true);
+            slot0.cachedInputs = populateTensorSlot(problem,
+                                                    slot0.ptrs,
+                                                    slot0.batchPtrs,
+                                                    slot0.maxElements,
+                                                    slot0.groupedOffsets,
+                                                    hipMemcpyDeviceToDevice,
+                                                    targetStream,
+                                                    nullptr,
+                                                    /*refreshRotatingMode1=*/true);
             m_gpuInit = true;
-
-            // Store the active slot state in ring slot 0 only on the initial
-            // preparation path.
+            publishConsumableGpuInputSlot(0, problem);
             if(!targetStream)
-            {
-                auto& slot0 = m_gpuInputSlots.at(0);
-                slot0.ptrs         = m_gpuPtrs;
-                slot0.batchPtrs    = m_gpuBatchPtrs;
-                slot0.cachedInputs = m_cachedGPUInputs;
-
                 initializeAltBufferSets(problem, cpuInputsAlreadyCurrent);
-            }
             markGpuInputsPrepared(problem);
             return m_cachedGPUInputs;
         }
@@ -4302,12 +4299,6 @@ namespace TensileLite
                 swizzleStaging->clear();
             }
 
-            // Local copies — populateTensorSlot rebuilds the vectors in place,
-            // so reusing m_groupedOffsets across repeated fillSlot calls would
-            // cause unbounded growth.
-            auto localMaxElements = m_maxElements;
-            auto localOffsets     = m_groupedOffsets;
-
             // Full path: initialize all tensors into target slot
             if(!cpuInputsAlreadyCurrent)
                 ensureCPUInputsCurrent(problem);
@@ -4321,8 +4312,8 @@ namespace TensileLite
             slotState.cachedInputs = populateTensorSlot(problem,
                                                         slotState.ptrs,
                                                         slotState.batchPtrs,
-                                                        localMaxElements,
-                                                        localOffsets,
+                                                        slotState.maxElements,
+                                                        slotState.groupedOffsets,
                                                         kind,
                                                         targetStream,
                                                         swizzleStaging,
@@ -4352,6 +4343,88 @@ namespace TensileLite
                 m_copyEngine->synchronizeDefaultStream();
         }
 
+        bool DataInitialization::gpuInputSlotReadyForPublish(
+            size_t                        slot,
+            ContractionProblemGemm const& problem) const
+        {
+            try
+            {
+                requireGpuInputSlotReadyForPublish(slot, problem);
+                return true;
+            }
+            catch(...)
+            {
+                return false;
+            }
+        }
+
+        void DataInitialization::requireGpuInputSlotReadyForPublish(
+            size_t                        slot,
+            ContractionProblemGemm const& problem) const
+        {
+            auto const& slotState   = m_gpuInputSlots.at(slot);
+            auto const   tensorCount = problem.tensors().size();
+
+            auto failSize = [&](char const* field, size_t actual, size_t expected) {
+                std::ostringstream message;
+                message << "[DataInitialization] GPU input slot " << slot << " field " << field
+                        << " has " << actual << " entries, expected " << expected << '.';
+                throw std::runtime_error(message.str());
+            };
+
+            if(!slotState.cachedInputs)
+            {
+                std::ostringstream message;
+                message << "[DataInitialization] GPU input slot " << slot
+                        << " field cachedInputs is null.";
+                throw std::runtime_error(message.str());
+            }
+
+            if(slotState.ptrs.size() != tensorCount)
+                failSize("ptrs", slotState.ptrs.size(), tensorCount);
+            if(slotState.batchPtrs.size() != tensorCount)
+                failSize("batchPtrs", slotState.batchPtrs.size(), tensorCount);
+            if(slotState.maxElements.size() != tensorCount)
+                failSize("maxElements", slotState.maxElements.size(), tensorCount);
+            if(slotState.groupedOffsets.size() != tensorCount)
+                failSize("groupedOffsets", slotState.groupedOffsets.size(), tensorCount);
+
+            if(!slotState.groupedOffsets.empty())
+            {
+                auto const groupedCount = slotState.groupedOffsets.front().size();
+                for(size_t tensor = 1; tensor < slotState.groupedOffsets.size(); ++tensor)
+                {
+                    if(slotState.groupedOffsets[tensor].size() != groupedCount)
+                    {
+                        std::ostringstream message;
+                        message << "[DataInitialization] GPU input slot " << slot
+                                << " field groupedOffsets[" << tensor << "] has "
+                                << slotState.groupedOffsets[tensor].size()
+                                << " entries, expected " << groupedCount << '.';
+                        throw std::runtime_error(message.str());
+                    }
+                }
+            }
+        }
+
+        void DataInitialization::refreshGpuInputSlotCachedInputsIfNeeded(
+            size_t                        slot,
+            ContractionProblemGemm const& problem,
+            GpuInputSlot const&           beforeSlot)
+        {
+            auto& slotState = m_gpuInputSlots.at(slot);
+            if(beforeSlot.ptrs != slotState.ptrs || beforeSlot.batchPtrs != slotState.batchPtrs
+               || beforeSlot.maxElements != slotState.maxElements
+               || beforeSlot.groupedOffsets != slotState.groupedOffsets || !slotState.cachedInputs)
+            {
+                slotState.cachedInputs = buildGPUProblemInputs(slotState.ptrs,
+                                                               slotState.batchPtrs,
+                                                               slotState.maxElements,
+                                                               slotState.groupedOffsets,
+                                                               problem);
+            }
+        }
+
         void DataInitialization::activateRingSlot(size_t slot)
         {
             auto& slotState = m_gpuInputSlots.at(slot);
@@ -4363,16 +4436,49 @@ namespace TensileLite
                 }
             m_gpuPtrs         = slotState.ptrs;
             m_gpuBatchPtrs    = slotState.batchPtrs;
+            m_maxElements     = slotState.maxElements;
+            m_groupedOffsets  = slotState.groupedOffsets;
             m_cachedGPUInputs = slotState.cachedInputs;
         }
 
-        void DataInitialization::advanceBuffer()
+        void DataInitialization::publishConsumableGpuInputSlot(
+            size_t                        slot,
+            ContractionProblemGemm const& problem)
+        {
+            if(slot != m_ring.activeSlot())
+            {
+                std::ostringstream message;
+                message << "[DataInitialization] Consumable GPU slot publication must target the"
+                        << " active ring slot. slot=" << slot
+                        << " activeSlot=" << m_ring.activeSlot() << '.';
+                throw std::runtime_error(message.str());
+            }
+
+            requireGpuInputSlotReadyForPublish(slot, problem);
+
+            activateRingSlot(slot);
+        }
+
+        void DataInitialization::restoreGpuInputSlotAliases(size_t slot)
+        {
+            auto const& slotState = m_gpuInputSlots.at(slot);
+            if(!slotState.populated() || !slotState.cachedInputs)
+            {
+                std::ostringstream message;
+                message << "[DataInitialization] GPU input slot " << slot
+                        << " is not ready for alias restore.";
+                throw std::runtime_error(message.str());
+            }
+            activateRingSlot(slot);
+        }
+
+        size_t DataInitialization::advanceBuffer()
         {
             auto newActiveSlot = m_ring.advance();
             assert(newActiveSlot.has_value());
-            activateRingSlot(*newActiveSlot);
             // The new active slot may have an outstanding DMA on the copy engine stream;
             // require waitForPreparedSlot before the compute stream reads it.
+            return *newActiveSlot;
         }
 
         // Insert a GPU-side dependency between the copy engine stream and computeStream
@@ -4390,24 +4496,19 @@ namespace TensileLite
             ContractionProblem const*     problem)
         {
             auto& slotState = m_gpuInputSlots.at(targetSlot);
-
-            auto localMaxElements = m_maxElements;
-            auto localOffsets     = m_groupedOffsets;
-            if(localMaxElements.size() < m_vdata.size())
-                localMaxElements.resize(m_vdata.size());
-            if(localOffsets.size() < m_vdata.size())
-                localOffsets.resize(m_vdata.size());
+            auto const beforeSlot = slotState;
 
             if(auto gemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem))
             {
                 resetOutputForSlot(slotState.ptrs,
                                    slotState.batchPtrs,
-                                   localMaxElements,
-                                   localOffsets,
+                                   slotState.maxElements,
+                                   slotState.groupedOffsets,
                                    *gemmProblem,
                                    hipMemcpyDeviceToDevice,
                                    targetSlot,
                                    copyStream());
+                refreshGpuInputSlotCachedInputsIfNeeded(targetSlot, *gemmProblem, beforeSlot);
             }
             else if(auto groupedProblem
                     = dynamic_cast<ContractionProblemGroupedGemm const*>(problem))
@@ -4415,12 +4516,14 @@ namespace TensileLite
                 assertGroupedRingFastPathInvariant(*groupedProblem);
                 resetOutputForSlot(slotState.ptrs,
                                    slotState.batchPtrs,
-                                   localMaxElements,
-                                   localOffsets,
+                                   slotState.maxElements,
+                                   slotState.groupedOffsets,
                                    groupedProblem->gemms[0],
                                    hipMemcpyDeviceToDevice,
                                    targetSlot,
                                    copyStream());
+                refreshGpuInputSlotCachedInputsIfNeeded(
+                    targetSlot, groupedProblem->gemms[0], beforeSlot);
             }
         }
 
@@ -4441,7 +4544,7 @@ namespace TensileLite
             // happens even when no sync was needed.
             if(oldActiveSlot != 0)
             {
-                activateRingSlot(0);
+                restoreGpuInputSlotAliases(0);
             }
             // Clear alt slot storage so initializeAltBufferSets re-runs for the
             // new problem.  Without this, the populated(1) guard would

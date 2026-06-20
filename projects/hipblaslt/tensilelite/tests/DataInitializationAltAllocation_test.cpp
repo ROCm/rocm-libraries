@@ -54,6 +54,7 @@ namespace
             {
                 auto const& slotState = m_gpuInputSlots.at(slot);
                 if(slotState.populated() || !slotState.batchPtrs.empty()
+                   || !slotState.maxElements.empty() || !slotState.groupedOffsets.empty()
                    || slotState.cachedInputs)
                     return false;
             }

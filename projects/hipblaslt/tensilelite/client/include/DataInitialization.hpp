@@ -224,13 +224,13 @@ namespace TensileLite
             {
                 if(m_ringPolicy.allowed && m_ring.hasAvailableSlot())
                 {
-                    // A ready ring slot is only consumable when it still matches the
-                    // current problem.  If the slot is stale, clear the ring before
-                    // falling back so a later direct call cannot consume the old slot
-                    // after typed preparation marks the new problem prepared.
-                    if(ringFastPathPreparedFor(problem))
+                    auto const representativeProblem
+                        = representativeGemmProblemForFastPath(problem);
+                    if(representativeProblem != nullptr && ringEligible()
+                       && gpuInputsPreparedFor(*representativeProblem))
                     {
-                        advanceBuffer();
+                        auto const activeSlot = advanceBuffer();
+                        publishConsumableGpuInputSlot(activeSlot, *representativeProblem);
                         return m_cachedGPUInputs;
                     }
 
@@ -284,14 +284,29 @@ namespace TensileLite
                         auto const        mxPlan
                             = layoutPolicy.planMxInitialization(*m_currentGemmProblem,
                                                                 inputLayoutContext());
+                        auto& activeSlot = m_gpuInputSlots.at(m_ring.activeSlot());
+                        auto  beforeSlot = activeSlot;
                         initializeMXData(*m_currentGemmProblem, mxPlan);
                         copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
+                        copyInputs(activeSlot.ptrs,
+                                   activeSlot.batchPtrs,
+                                   activeSlot.maxElements,
+                                   activeSlot.groupedOffsets,
                                    *m_currentGemmProblem,
                                    hipMemcpyDeviceToDevice);
+                        if(beforeSlot.ptrs != activeSlot.ptrs
+                           || beforeSlot.batchPtrs != activeSlot.batchPtrs
+                           || beforeSlot.maxElements != activeSlot.maxElements
+                           || beforeSlot.groupedOffsets != activeSlot.groupedOffsets
+                           || !activeSlot.cachedInputs)
+                        {
+                            activeSlot.cachedInputs = buildGPUProblemInputs(
+                                activeSlot.ptrs,
+                                activeSlot.batchPtrs,
+                                activeSlot.maxElements,
+                                activeSlot.groupedOffsets,
+                                *m_currentGemmProblem);
+                        }
                         // Sync cpuInput.current from cpuInput.valid for MX
                         // tensors so the CPU reference reads the regenerated
                         // data that matches what the GPU received.
@@ -314,6 +329,7 @@ namespace TensileLite
                                             bytes);
                             }
                         }
+                        publishConsumableGpuInputSlot(m_ring.activeSlot(), *m_currentGemmProblem);
                     }
                 }
             }
@@ -962,6 +978,19 @@ namespace TensileLite
                     batch   = batchBufferForSlot(slot);
                 }
 
+                static void bootstrapGpuInputSlot0Aliases(
+                    MemoryInput&                 input,
+                    std::shared_ptr<void> const&  dataBuffer,
+                    std::shared_ptr<void*> const& batchBuffer)
+                {
+                    // Allocation/bootstrap only: establish slot-0 aliases for the
+                    // physical buffers that were just allocated.
+                    input.current      = dataBuffer;
+                    input.buffers[0]   = dataBuffer;
+                    input.batch        = batchBuffer;
+                    input.batchBufs[0] = batchBuffer;
+                }
+
                 void clearAltSlots(size_t firstSlot = 1)
                 {
                     if(firstSlot == 0)
@@ -1169,6 +1198,19 @@ namespace TensileLite
             bool gpuInputsPreparedFor(ContractionProblemGemm const& problem) const;
             bool ringFastPathPreparedFor(ContractionProblem const* problem) const;
             void markGpuInputsPrepared(ContractionProblemGemm const& problem);
+            ContractionProblemGemm const* representativeGemmProblemForFastPath(
+                ContractionProblem const* problem) const;
+            bool gpuInputSlotReadyForPublish(size_t slot,
+                                             ContractionProblemGemm const& problem) const;
+            void requireGpuInputSlotReadyForPublish(size_t slot,
+                                                    ContractionProblemGemm const& problem) const;
+            void refreshGpuInputSlotCachedInputsIfNeeded(
+                size_t                        slot,
+                ContractionProblemGemm const& problem,
+                GpuInputSlot const&           beforeSlot);
+            void publishConsumableGpuInputSlot(size_t slot,
+                                               ContractionProblemGemm const& problem);
+            void restoreGpuInputSlotAliases(size_t slot);
 
             bool cpuInputsNeedRefresh(ContractionProblemGroupedGemm const& problem) const;
             bool cpuInputsNeedRefresh(ContractionProblemGemm const& problem) const;
@@ -1383,8 +1425,8 @@ namespace TensileLite
 
             void activateRingSlot(size_t slot);
 
-            // Advance to the next buffer in the ring.
-            void advanceBuffer();
+            // Advance to the next buffer in the ring and return the new active slot.
+            size_t advanceBuffer();
 
             std::shared_ptr<ProblemInputs>
                 prepareGPUInputsInternal(ContractionProblemGemm const& problem,
