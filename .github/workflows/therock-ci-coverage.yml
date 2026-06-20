@@ -213,7 +213,16 @@ jobs:
     # compatible base environment.
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+    env:
+      REPORT_ARTIFACT: coverage-report-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # Check out the sources so llvm-cov can annotate the HTML report. The build
+      # embeds absolute source paths under the workspace, so checking out here (at
+      # the workspace root) makes those paths resolve.
+      - name: Checkout rocm-libraries (for source annotation)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Download coverage objects and llvm tools
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -229,6 +238,17 @@ jobs:
 
       - name: Merge profraw and generate coverage report
         shell: bash
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          CMAKE_TARGET: ${{ inputs.cmake_target }}
+          PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
+          BUILD_DIR: ${{ inputs.build_dir }}
+          BUILD_THEROCK_REF: ${{ inputs.therock_ref }}
+          TEST_THEROCK_REF: ${{ inputs.test_therock_ref }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           OBJECTS_DIR="${GITHUB_WORKSPACE}/coverage-objects"
@@ -241,7 +261,7 @@ jobs:
           export LD_LIBRARY_PATH="${OBJECTS_DIR}/bin:${LD_LIBRARY_PATH:-}"
           LLVM_PROFDATA="${OBJECTS_DIR}/bin/llvm-profdata"
           LLVM_COV="${OBJECTS_DIR}/bin/llvm-cov"
-          LIB_NAME="lib$(echo '${{ inputs.cmake_target }}' | tr '[:upper:]' '[:lower:]')"
+          LIB_NAME="lib$(echo "${CMAKE_TARGET}" | tr '[:upper:]' '[:lower:]')"
 
           echo "llvm-profdata dependencies:"; ldd "${LLVM_PROFDATA}" || true
 
@@ -267,10 +287,102 @@ jobs:
           "${LLVM_COV}" show "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=html -output-dir="${REPORT_DIR}"
           "${LLVM_COV}" export "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=lcov > "${REPORT_DIR}/coverage.info"
 
+          # Make lcov paths repo-relative so Codecov can map them to the source tree.
+          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+
+          # Source files referenced by the coverage data (repo-relative).
+          mapfile -t SOURCES < <("${LLVM_COV}" export "${OBJ_ARGS[@]}" \
+            -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=lcov \
+            | sed -n 's|^SF:||p' | sed "s|${GITHUB_WORKSPACE}/||g" | sort -u)
+
+          # Generate the reference text file with all relevant paths and links.
+          LINKS_FILE="${REPORT_DIR}/coverage-report-links.txt"
+          {
+            echo "${PROJECT_NAME} Code Coverage - Paths and Links"
+            echo "=================================================="
+            echo "Generated:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Repository:       ${REPO}"
+            echo "Commit:           ${COMMIT_SHA}"
+            echo "Pull request:     ${GITHUB_SERVER_URL}/${REPO}/pull/${PR_NUMBER:-N/A}"
+            echo "Workflow run:     ${RUN_URL}"
+            echo "GPU family:       ${AMDGPU_FAMILIES}"
+            echo
+            echo "[TheRock - where ${PROJECT_NAME} was packed for coverage]"
+            echo "  Build TheRock ref: ${BUILD_THEROCK_REF}"
+            echo "  Test  TheRock ref: ${TEST_THEROCK_REF}"
+            echo "  Build dir:         ${BUILD_DIR}"
+            echo
+            echo "[Instrumented code - source file(s)]"
+            for s in "${SOURCES[@]}"; do echo "  ${s}"; done
+            echo
+            echo "[Instrumented code - library object(s) used by llvm-cov]"
+            for o in "${OBJECTS[@]}"; do echo "  ${o#${GITHUB_WORKSPACE}/}"; done
+            echo
+            echo "[Libraries used by the coverage tooling]"
+            for f in $(find "${OBJECTS_DIR}/bin" -maxdepth 1 -type f | sort); do echo "  ${f#${GITHUB_WORKSPACE}/}"; done
+            echo
+            echo "[Tests executed against the instrumented build]"
+            echo "  projects_to_test: ${PROJECTS_TO_TEST}"
+            echo "  Test driver:      ctest (via .github/workflows/therock-test-component.yml)"
+            echo "  profraw merged:   ${#PROFRAW[@]} file(s)"
+            echo "  Test stage:       ${RUN_URL} (job 'Test Coverage (${PROJECT_NAME} | ${AMDGPU_FAMILIES})')"
+            echo
+            echo "[Coverage report outputs]"
+            echo "  HTML report:    coverage-report/index.html"
+            echo "  Text summary:   coverage-report/coverage.report"
+            echo "  LCOV:           coverage-report/coverage.info"
+            echo "  Merged profile: coverage-report/${LIB_NAME}.profdata"
+            echo
+            echo "[Report upload / download]"
+            echo "  Artifact name:  ${REPORT_ARTIFACT}"
+            echo "  Download from:   ${RUN_URL} (Artifacts section)"
+            echo "  Codecov:         https://app.codecov.io/gh/${REPO}/pull/${PR_NUMBER:-} (flag: ${CMAKE_TARGET})"
+          } > "${LINKS_FILE}"
+
+          echo "----- ${LINKS_FILE} -----"
+          cat "${LINKS_FILE}"
+
       - name: Upload coverage report
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-report-${{ inputs.project_name }}-${{ inputs.amdgpu_families }}
+          name: ${{ env.REPORT_ARTIFACT }}
           path: coverage-report
           if-no-files-found: warn
+
+      - name: Upload coverage to Codecov
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          set -x
+          if ! curl -Os https://cli.codecov.io/latest/linux/codecov; then
+            echo "Could not download the Codecov CLI; skipping upload."
+            exit 0
+          fi
+          chmod +x codecov
+          ./codecov upload-process \
+            --disable-search \
+            --file coverage-report/coverage.info \
+            --flag "${{ inputs.cmake_target }}" \
+            --name "${{ inputs.cmake_target }}-${{ inputs.amdgpu_families }}" \
+            --slug "${{ github.repository }}" \
+            || echo "Codecov upload failed (non-fatal)."
+
+      - name: Coverage report summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "### ${{ inputs.project_name }} coverage (${{ inputs.amdgpu_families }})"
+            echo ""
+            if [[ -f coverage-report/coverage.report ]]; then
+              echo '```'
+              tail -n 3 coverage-report/coverage.report
+              echo '```'
+            fi
+            echo "- Report artifact: \`${REPORT_ARTIFACT}\` (download from [run artifacts](${RUN_URL}))"
+            echo "- Codecov: https://app.codecov.io/gh/${{ github.repository }}/pull/${{ github.event.pull_request.number }} (flag: ${{ inputs.cmake_target }})"
+          } >> "${GITHUB_STEP_SUMMARY}"
