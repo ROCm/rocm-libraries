@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-target_sources(stinkytofu PRIVATE
+target_sources(stinkytofu_objs PRIVATE
     InstructionSizeCosting.cpp
     AccumulateInstructionSizePass.cpp
     SwPrefetchInsertionPass.cpp
@@ -9,20 +9,28 @@ target_sources(stinkytofu PRIVATE
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp
+    LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
-    ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
-    StinkyConfigurableWaitCntPass.cpp
-    ScheduleFirstLRsPass.cpp
+    SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
+    waitcnt/WaitDataflow.cpp
+    waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
+    StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    InsertClusterBarrierPass.cpp
+    RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     InsertDelayAluPass.cpp
+    LoopRegionRemarkPass.cpp
+    RemoveWaitAluPass.cpp
+    InsertWaitAluPass.cpp
+    RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
 )

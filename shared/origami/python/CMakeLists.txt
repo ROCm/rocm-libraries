@@ -31,15 +31,17 @@ endif()
 
 find_package(hip REQUIRED)
 
-include(FetchContent)
-FetchContent_Declare(
-    nanobind
-    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-    GIT_TAG        v2.0.0
-)
-FetchContent_MakeAvailable(nanobind)
-
-find_package(nanobind CONFIG REQUIRED)
+find_package(nanobind CONFIG QUIET)
+if(NOT nanobind_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        nanobind
+        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+        GIT_TAG        v2.0.0
+    )
+    FetchContent_MakeAvailable(nanobind)
+    find_package(nanobind CONFIG REQUIRED)
+endif()
 
 if(SKBUILD)
   # When building a wheel via pip/scikit-build-core
@@ -127,6 +129,37 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 
     set_tests_properties(
         "Python: test_selector"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
+    )
+
+    # Run core origami binding tests (no torch required)
+    add_test(
+        NAME "Python: test_attention_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_bindings"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run selector tests (requires torch)
+    add_test(
+        NAME "Python: test_attention_selector"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention_selector.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_selector"
         PROPERTIES
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"

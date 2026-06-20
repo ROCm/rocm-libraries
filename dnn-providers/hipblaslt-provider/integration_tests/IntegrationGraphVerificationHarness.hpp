@@ -70,12 +70,30 @@ protected:
     virtual void runGraphTest(float tolerance) = 0;
 
 protected:
+    /// Predicate hook for derived fixtures to inspect errors returned from
+    /// engine-config-querying frontend calls (`Graph::build()`) and request a
+    /// skip. Returning a non-empty optional causes `verifyGraph()` to
+    /// `GTEST_SKIP()` with that string as the message prefix; the default is
+    /// `std::nullopt` so the subsequent `ASSERT_EQ(..., OK)` fires on any
+    /// error. The base harness intentionally has no knowledge of any specific
+    /// workaround -- subclasses own that mapping.
+    virtual std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& /*result*/)
+    {
+        return std::nullopt;
+    }
+
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
         auto result = graph.build(_handle);
+        if(auto skipReason = shouldSkipOnEngineConfigResult(result))
+        {
+            GTEST_SKIP() << *skipReason << " (graph.build): " << result.err_msg;
+        }
+        // Non-skip errors must still surface -- the next assertion is intentional.
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);

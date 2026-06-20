@@ -5,8 +5,15 @@ Documentation for hipBLAS is available at
 
 ## hipBLAS 3.5.0
 
+### Added
+
+* Added `hipblasSetBatchAlphaStride()` and `hipblasGetBatchAlphaStride()` APIs.
+* Added `hipblasSetBatchBetaStride()` and `hipblasGetBatchBetaStride()` APIs.
+* Added the `hipblasGetVersion()` API.
+* Added the `hipblasGetProperty()` API.
+
 ## hipBLAS 3.4.0
- 
+
 ### Added
 
 * gfx1250 and gfx90c support to clients.

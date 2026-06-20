@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-04-10T20:07:11.666441
+ * Generated at: 2026-06-01T10:50:15.322672
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -111,8 +111,18 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch)
     {
     case GpuArch::GFX_908: return {{1, 4, 1}, {2, 2, 1}, {4, 1, 1}};
     case GpuArch::GFX_90A: return {{1, 4, 1}, {2, 2, 1}, {4, 1, 1}};
-    case GpuArch::GFX_942: return {{1, 4, 1}, {2, 2, 1}, {4, 1, 1}};
-    case GpuArch::GFX_950: return {{1, 4, 1}, {2, 2, 1}, {4, 1, 1}, {8, 2, 1}, {4, 4, 1}};
+    case GpuArch::GFX_942:
+        return {{1, 1, 1}, {1, 2, 1}, {1, 4, 1}, {2, 1, 1}, {2, 1, 2}, {2, 2, 1}, {4, 1, 1}};
+    case GpuArch::GFX_950:
+        return {{1, 1, 1},
+                {1, 2, 1},
+                {1, 4, 1},
+                {2, 1, 1},
+                {2, 1, 2},
+                {2, 2, 1},
+                {4, 1, 1},
+                {8, 2, 1},
+                {4, 4, 1}};
     case GpuArch::GFX_1100: return {{2, 4, 1}, {1, 8, 1}, {8, 1, 1}, {4, 2, 1}};
     case GpuArch::GFX_1200: return {{2, 4, 1}, {1, 8, 1}, {8, 1, 1}, {4, 2, 1}};
     case GpuArch::GFX_1201: return {{2, 4, 1}, {1, 8, 1}, {8, 1, 1}, {4, 2, 1}};
@@ -138,6 +148,8 @@ inline std::size_t get_lds_capacity(Pipeline pipeline)
         return 32768;
     if(pipeline == Pipeline::CompV5)
         return 65536;
+    if(pipeline == Pipeline::CompV6)
+        return 32768;
     if(pipeline == Pipeline::PreShuffleV1)
         return 32768;
     if(pipeline == Pipeline::PreShuffleV2)

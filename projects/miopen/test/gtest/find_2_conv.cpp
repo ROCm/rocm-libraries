@@ -102,26 +102,33 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
         Workspace wspace{}; // This GPU buffer may be used by miopenFindSolutions
         if(test_case.preallocate)
         {
-            std::size_t workspace_max = 0;
-            switch(test_case.direction)
-            {
-            case miopenProblemDirectionForward:
-                EXPECT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
-                              handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max),
-                          miopenStatusSuccess);
-                break;
-            case miopenProblemDirectionBackward:
-                EXPECT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
-                              handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max),
-                          miopenStatusSuccess);
-                break;
-            case miopenProblemDirectionBackwardWeights:
-                EXPECT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-                              handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max),
-                          miopenStatusSuccess);
-                break;
-            default: MIOPEN_THROW(miopenStatusNotImplemented);
-            }
+            std::size_t workspace_max = [&]() {
+                std::size_t workspace_max_ = 0;
+                switch(test_case.direction)
+                {
+                case miopenProblemDirectionForward:
+                    EXPECT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
+                                  handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max_),
+                              miopenStatusSuccess);
+                    return workspace_max_;
+                case miopenProblemDirectionBackward:
+                    EXPECT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
+                                  handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max_),
+                              miopenStatusSuccess);
+                    return workspace_max_;
+                case miopenProblemDirectionBackwardWeights:
+                    EXPECT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
+                                  handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max_),
+                              miopenStatusSuccess);
+                    return workspace_max_;
+
+#ifdef MIOPEN_BETA_API
+                case miopenProblemDirectionInference: break;
+#endif
+                }
+
+                MIOPEN_THROW(miopenStatusNotImplemented);
+            }();
 
             const auto workspace_size = std::min(test_case.workspace_limit, workspace_max);
             wspace.resize(workspace_size);

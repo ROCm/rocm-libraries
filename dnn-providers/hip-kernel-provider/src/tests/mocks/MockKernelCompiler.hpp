@@ -5,15 +5,15 @@
 
 #include <gmock/gmock.h>
 
-#include "hip/IKernelCompiler.hpp"
+#include "compilation/IKernelCompiler.hpp"
 
 namespace hip_kernel_provider
 {
 
-class MockKernelCompiler : public IKernelCompiler
+class MockKernelCompiler : public compilation::IKernelCompiler
 {
 public:
-    MOCK_METHOD(std::unique_ptr<ICompiledProgram>,
+    MOCK_METHOD(std::unique_ptr<compilation::ICompiledProgram>,
                 compile,
                 (const std::string& kernelFileName, const std::vector<std::string>& options),
                 (const, override));
