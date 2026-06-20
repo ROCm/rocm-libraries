@@ -34,6 +34,36 @@ namespace
         using DataInitialization::ringEligible;
         using DataInitialization::waitForPreparedSlot;
 
+        bool ringPolicyAllowed() const
+        {
+            return m_ringPolicy.allowed;
+        }
+
+        size_t activeBufferCount() const
+        {
+            return m_ring.activeBufferCount();
+        }
+
+        bool hasAltBuffers() const
+        {
+            return m_hasAltBuffers;
+        }
+
+        bool warmOutputResetRequired() const
+        {
+            return m_warmOutputResetRequired;
+        }
+
+        bool ringHasAvailableSlot() const
+        {
+            return m_ring.hasAvailableSlot();
+        }
+
+        size_t activeRingSlot() const
+        {
+            return m_ring.activeSlot();
+        }
+
         bool altSlotsReady() const
         {
             return m_altSlotsReady;
@@ -142,6 +172,42 @@ TEST(DataInitializationSlotStorage, PrimingAltSlotDoesNotMutateActiveAliases)
 
     HipStreamGuard computeStream(hipStreamNonBlocking);
     dataInit.waitForPreparedSlot(computeStream.get());
+}
+
+TEST(DataInitializationSlotStorage, PristineOnGpuFalseDisablesWarmD2DReset)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+    TensileLite::testing::detail::setDataInitArg(args, "pristine-on-gpu", std::any(false));
+
+    auto engine = std::make_shared<RecordingCopyEngine>(
+        reinterpret_cast<hipStream_t>(static_cast<uintptr_t>(0x2468)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+    ASSERT_TRUE(dataInit.ringPolicyAllowed());
+    ASSERT_EQ(dataInit.activeBufferCount(), 3u);
+    ASSERT_TRUE(dataInit.warmOutputResetRequired());
+    EXPECT_TRUE(dataInit.hasAltBuffers());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+
+    engine->clear();
+
+    dataInit.primeNextInputSlot(&problem);
+
+    EXPECT_TRUE(engine->calls.empty());
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
 }
 
 TEST(DataInitializationSlotStorage, FastPathReturnsDistinctValidAltSlot)
