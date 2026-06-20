@@ -15,11 +15,18 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
+
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/TensorDescriptor.hpp>
+#include <Tensile/Utils.hpp>
 
 #include <variant>
 #include <vector>
@@ -27,6 +34,7 @@
 #include "DataInitializationTestUtils.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
+#include "RecordingCopyEngine.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -35,6 +43,7 @@ namespace
 {
     using TensileLite::testing::makeBatchedProblem;
     using TensileLite::testing::makePlainProblem;
+    using TensileLite::testing::RecordingCopyEngine;
 
     class PredicateDataInitialization : public DataInitialization
     {
@@ -200,6 +209,70 @@ namespace
                                                      "init-b",
                                                      std::any(Client::InitMode::SerialDim0));
         return args;
+    }
+
+    class MXLifecycleDataInitialization : public PredicateDataInitialization
+    {
+    public:
+        using PredicateDataInitialization::PredicateDataInitialization;
+        using PristineUnit = DataInitialization::PristineUnit;
+
+        PristineUnit const& pristineUnit(size_t tensorIndex,
+                                         ContractionProblemGemm const& problem) const
+        {
+            auto const& desc  = problem.tensors().at(tensorIndex);
+            auto const& units = m_vdata.at(tensorIndex).pristine;
+            auto        it    = units.find(desc.dataType());
+            if(it == units.end())
+            {
+                throw std::runtime_error("Missing pristine unit for tensor index.");
+            }
+            return it->second;
+        }
+    };
+
+    size_t tensorBytes(MXLifecycleDataInitialization const& dataInit,
+                       ContractionProblemGemm const&         problem,
+                       size_t                               tensorIndex)
+    {
+        auto const& unit = dataInit.pristineUnit(tensorIndex, problem);
+        auto const& desc = problem.tensors().at(tensorIndex);
+        return multiplyElementSize(unit.maxElements, desc.elementBytes());
+    }
+
+    bool bytesEqual(void const* lhs, void const* rhs, size_t bytes)
+    {
+        return std::memcmp(lhs, rhs, bytes) == 0;
+    }
+
+    bool allBytesEqual(void const* ptr, size_t bytes, std::uint8_t value)
+    {
+        auto const* begin = static_cast<std::uint8_t const*>(ptr);
+        return std::all_of(begin, begin + bytes, [value](std::uint8_t byte) {
+            return byte == value;
+        });
+    }
+
+    RecordingCopyEngine::Call const*
+        findCopy(RecordingCopyEngine const& engine,
+                 void const*                 dst,
+                 void const*                 src,
+                 size_t                      bytes,
+                 hipMemcpyKind               kind)
+    {
+        auto const it = std::find_if(engine.calls.begin(),
+                                     engine.calls.end(),
+                                     [&](RecordingCopyEngine::Call const& call) {
+                                         return call.type == RecordingCopyEngine::CallType::Copy
+                                                && call.dst == dst && call.src == src
+                                                && call.bytes == bytes
+                                                && call.copyKind == kind;
+                                     });
+        if(it == engine.calls.end())
+        {
+            return nullptr;
+        }
+        return &*it;
     }
 #endif
 } // anonymous namespace
@@ -471,6 +544,154 @@ TEST(BatchPointerReset, MXPreparedInputsAreEligibleForSolutionRefresh)
 
     ContractionSolution solution;
     EXPECT_TRUE(dataInit.shouldRefreshMXForSolution(&solution, problem));
+}
+
+TEST(BatchPointerReset,
+     MXPreSolutionRefreshesThroughListenerPathAndSyncsReferenceInputs)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    constexpr size_t M       = 128;
+    constexpr size_t N       = 128;
+    constexpr size_t K       = 256;
+    constexpr size_t BATCH   = 4;
+    constexpr int    MXBLOCK = 32;
+
+    auto problem = makeMXBatchedProblem(M, N, K, BATCH, MXBLOCK);
+    auto args    = makeMXPredicateArgs({{M, N, BATCH, K}}, MXBLOCK);
+
+    auto engine = std::make_shared<RecordingCopyEngine>();
+    ClientProblemFactory          factory(args);
+    MXLifecycleDataInitialization dataInit(args, factory, engine);
+
+    dataInit.preProblem(&problem);
+
+    auto referenceInputs = dataInit.prepareCPUInputs(problem);
+    auto* reference      = dynamic_cast<ContractionInputs*>(referenceInputs.get());
+    ASSERT_NE(reference, nullptr);
+
+    auto gpuInputs = dataInit.prepareGPUInputs(problem);
+    ASSERT_NE(gpuInputs, nullptr);
+    auto* gpu = dynamic_cast<ContractionInputs*>(gpuInputs.get());
+    ASSERT_NE(gpu, nullptr);
+    ASSERT_TRUE(dataInit.gpuInputsPreparedFor(problem));
+
+    ContractionSolution solution;
+    solution.problemType.mxScaleFormat = 1;
+    solution.sizeMapping.matrixInstruction = {16, 16, 128, 1};
+    ASSERT_TRUE(dataInit.shouldRefreshMXForSolution(&solution, problem));
+
+    constexpr std::array<size_t, 4> kRefreshTensors{
+        ContractionProblemGemm::TENSOR::A,
+        ContractionProblemGemm::TENSOR::B,
+        ContractionProblemGemm::TENSOR::MXSA,
+        ContractionProblemGemm::TENSOR::MXSB,
+    };
+
+    for(size_t tensorIndex : kRefreshTensors)
+    {
+        auto const& unit  = dataInit.pristineUnit(tensorIndex, problem);
+        auto const  bytes = tensorBytes(dataInit, problem, tensorIndex);
+        ASSERT_NE(unit.cpuInput.valid.get(), nullptr);
+        ASSERT_NE(unit.cpuInput.current.get(), nullptr);
+        std::memset(unit.cpuInput.valid.get(), 0x5A, bytes);
+        std::memset(unit.cpuInput.current.get(), 0xA5, bytes);
+        EXPECT_TRUE(allBytesEqual(unit.cpuInput.valid.get(), bytes, 0x5A));
+        EXPECT_TRUE(allBytesEqual(unit.cpuInput.current.get(), bytes, 0xA5));
+    }
+
+    EXPECT_EQ(reference->a,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->b,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->mxsa,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSA, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->mxsb,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSB, problem)
+                  .cpuInput.current.get());
+
+    EXPECT_EQ(gpu->a,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem)
+                  .gpuInput.current.get());
+    EXPECT_EQ(gpu->b,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem)
+                  .gpuInput.current.get());
+    EXPECT_EQ(gpu->mxsa,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSA, problem)
+                  .gpuInput.current.get());
+    EXPECT_EQ(gpu->mxsb,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSB, problem)
+                  .gpuInput.current.get());
+
+    engine->clear();
+    dataInit.preSolution(&solution);
+
+    auto const expectedStream = engine->stream();
+
+    for(size_t tensorIndex : {ContractionProblemGemm::TENSOR::A,
+                              ContractionProblemGemm::TENSOR::B})
+    {
+        auto const& unit  = dataInit.pristineUnit(tensorIndex, problem);
+        auto const  bytes = tensorBytes(dataInit, problem, tensorIndex);
+        auto const  call  = findCopy(*engine,
+                                    unit.gpuInput.valid.get(),
+                                    unit.cpuInput.valid.get(),
+                                    bytes,
+                                    hipMemcpyHostToDevice);
+        ASSERT_NE(call, nullptr) << "Missing H2D refresh copy for tensor index "
+                                 << tensorIndex;
+        EXPECT_EQ(call->stream, expectedStream);
+        EXPECT_EQ(call->submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
+    }
+
+    for(size_t tensorIndex : kRefreshTensors)
+    {
+        auto const& unit  = dataInit.pristineUnit(tensorIndex, problem);
+        auto const  bytes = tensorBytes(dataInit, problem, tensorIndex);
+        auto const  call  = findCopy(*engine,
+                                    unit.gpuInput.current.get(),
+                                    unit.gpuInput.valid.get(),
+                                    bytes,
+                                    hipMemcpyDeviceToDevice);
+        ASSERT_NE(call, nullptr) << "Missing D2D refresh copy for tensor index "
+                                 << tensorIndex;
+        EXPECT_EQ(call->stream, expectedStream);
+        EXPECT_EQ(call->submissionMode, RecordingCopyEngine::CopySubmissionMode::Async);
+    }
+
+    for(size_t tensorIndex : kRefreshTensors)
+    {
+        auto const& unit  = dataInit.pristineUnit(tensorIndex, problem);
+        auto const  bytes = tensorBytes(dataInit, problem, tensorIndex);
+
+        EXPECT_FALSE(allBytesEqual(unit.cpuInput.valid.get(), bytes, 0x5A))
+            << "Tensor " << tensorIndex << " valid buffer was not regenerated.";
+        EXPECT_FALSE(allBytesEqual(unit.cpuInput.current.get(), bytes, 0xA5))
+            << "Tensor " << tensorIndex << " current buffer was not resynced.";
+        EXPECT_TRUE(bytesEqual(unit.cpuInput.current.get(), unit.cpuInput.valid.get(), bytes))
+            << "Tensor " << tensorIndex
+            << " current and valid buffers diverged after preSolution.";
+    }
+
+    EXPECT_EQ(reference->a,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::A, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->b,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::B, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->mxsa,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSA, problem)
+                  .cpuInput.current.get());
+    EXPECT_EQ(reference->mxsb,
+              dataInit.pristineUnit(ContractionProblemGemm::TENSOR::MXSB, problem)
+                  .cpuInput.current.get());
 }
 #endif
 
