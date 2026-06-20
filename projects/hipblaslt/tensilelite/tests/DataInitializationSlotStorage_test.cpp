@@ -131,6 +131,14 @@ namespace
             }
             return it->second;
         }
+
+        bool gpuInputSlotAllocated(size_t tensorIndex,
+                                   ContractionProblemGemm const& problem,
+                                   size_t slot) const
+        {
+            auto const& gpuInput = pristineUnit(tensorIndex, problem).gpuInput;
+            return gpuInput.buffers[slot] || gpuInput.batchBufs[slot];
+        }
     };
 
     ::testing::AssertionResult hasHipDevice()
@@ -357,6 +365,70 @@ TEST(DataInitializationSlotStorage,
 
     EXPECT_FALSE(sawRecordCopyDone);
     EXPECT_FALSE(sawWaitForCopyDone);
+}
+
+TEST(DataInitializationSlotStorage, Slot2NotAllocatedWhenActiveRingSizeIsOne)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+    TensileLite::testing::detail::setDataInitArg(args, "num-benchmarks", std::any(int(1)));
+    TensileLite::testing::detail::setDataInitArg(
+        args, "num-enqueues-per-sync", std::any(int(1)));
+    TensileLite::testing::detail::setDataInitArg(
+        args, "num-syncs-per-benchmark", std::any(int(1)));
+    TensileLite::testing::detail::setDataInitArg(args,
+                                                 "max-enqueues-per-sync",
+                                                 std::any(int(-1)));
+    TensileLite::testing::detail::setDataInitArg(args,
+                                                 "min-flops-per-sync",
+                                                 std::any(size_t(0)));
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+
+    EXPECT_FALSE(dataInit.ringPolicyAllowed());
+    EXPECT_FALSE(dataInit.ringPolicyAllocatesAltBuffers());
+    EXPECT_EQ(dataInit.activeBufferCount(), 1u);
+    EXPECT_FALSE(dataInit.hasAltBuffers());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_TRUE(dataInit.allAltGpuInputsCleared());
+
+    auto const& slot0State = dataInit.slotState(0);
+    ASSERT_TRUE(slot0State.populated());
+    ASSERT_NE(slot0State.cachedInputs, nullptr);
+
+    auto const& slot2State = dataInit.slotState(2);
+    EXPECT_FALSE(slot2State.populated());
+    EXPECT_TRUE(slot2State.batchPtrs.empty());
+    EXPECT_EQ(slot2State.cachedInputs, nullptr);
+
+    for(size_t tensorIndex = 0; tensorIndex < problem.tensors().size(); ++tensorIndex)
+    {
+        EXPECT_FALSE(dataInit.gpuInputSlotAllocated(tensorIndex, problem, 2))
+            << "tensor index " << tensorIndex;
+    }
+
+    dataInit.primeNextInputSlot(&problem);
+
+    EXPECT_TRUE(dataInit.allAltGpuInputsCleared());
+    EXPECT_FALSE(dataInit.slotState(2).populated());
+    EXPECT_TRUE(dataInit.slotState(2).batchPtrs.empty());
+    EXPECT_EQ(dataInit.slotState(2).cachedInputs, nullptr);
+
+    for(size_t tensorIndex = 0; tensorIndex < problem.tensors().size(); ++tensorIndex)
+    {
+        EXPECT_FALSE(dataInit.gpuInputSlotAllocated(tensorIndex, problem, 2))
+            << "tensor index " << tensorIndex;
+    }
 }
 
 TEST(DataInitializationSlotStorage,
