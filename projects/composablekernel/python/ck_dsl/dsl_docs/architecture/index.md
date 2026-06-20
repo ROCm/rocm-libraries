@@ -40,12 +40,12 @@ fused prototype with per-arch variants under `instances/{common,gfx950,gfx1151,g
 
 ABI: `(A, B, D, A_bytes, B_bytes, D_bytes)` for implicit-GEMM / direct grouped conv. Img2col writes `Y`. Pooling reads `X` and writes `Y`.
 
-Layouts: NHWC input, KRSC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
+Layouts: NHWC input, KYXC weight, NHWK output for conv. Grouping via `cpg`/`kpg`.
 
 Bake-off results (per `runbook_compliance.md`):
 
 ```text
-Implicit-GEMM conv (N=8 H=W=56 C=K=64 R=S=3):
+Implicit-GEMM conv (N=8 H=W=56 C=K=64 Y=X=3):
  111 TFLOPS -> 280 TFLOPS by applying 5 runbook levers in series.
 
 Direct grouped 16c (N=32 H=W=200 R=S=3 pad=1):
@@ -80,6 +80,14 @@ Path selection: `select_2d_config` / `select_3d_config` / `use_2d_kernel`. The r
 Coverage: fp16 / bf16, head_size in `{128, 256}`, block_size in `{16, 64}`, causal / sliding window / softcap / sinks / ALiBi / QQ-bias.
 
 FP8 K/V cache + output scale/clamp is the next coverage step (see attention parity README).
+
+Planned work: `examples/gfx1250/attention/gfx1250_universal_attention_plan.md` tracks the
+gfx1250 universal-attention port, **scoped to the 2D (prefill) path for now**
+(3D split-KV decode deferred). gfx1250 is a CDNA multi-chip (gfx1250-class)
+device using the GFX12 programming model (wave32/WMMA) — distinct from the RDNA4
+gfx1201 family. The plan spans three phases (functional correctness, gfx950 perf parity
+on prefill `seq_len 64/128` + the `aiter_ua_2_shapes.json` trace cohort, then
+roofline), split into parallel core/helpers/instances/examples legs.
 
 ## Small Ops
 

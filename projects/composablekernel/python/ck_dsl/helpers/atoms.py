@@ -297,6 +297,55 @@ class MfmaAtom:
     # element dtype — both surface through ``MfmaAtom.emit`` dispatch
     # and the ``dtype_in="bf16"`` tag.
 
+    # ---- FP32 atoms (all CDNA gfx9xx) ----
+    #
+    # mfma_f32_16x16x4f32 / mfma_f32_32x32x2f32: TF32-class scalar MFMA.
+    # Each lane presents a single float scalar for A and B (a_per_lane=1,
+    # b_per_lane=1); the accumulator layout is identical to the fp16
+    # counterparts (c_per_lane=4 / 16 respectively).
+
+    @classmethod
+    def f32_16x16x4(cls) -> "MfmaAtom":
+        """FP32 MFMA, 16x16 output, K=4 per atom.
+
+        Per-lane layout on wave64:
+        A: scalar float, B: scalar float, C: <4 x float>
+        lane = k_blk * 16 + m_in_atom  (k_blk ∈ {0,1,2,3}, m_in_atom ∈ {0..15})
+        Output layout: same as f16_16x16x16 -- row = m_blk*4 + i, col = lane%16.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=4,
+            a_per_lane=1,
+            b_per_lane=1,
+            c_per_lane=4,
+            dtype_in="fp32",
+            dtype_out="f32",
+            name="mfma_f32_16x16x4_f32",
+        )
+
+    @classmethod
+    def f32_32x32x2(cls) -> "MfmaAtom":
+        """FP32 MFMA, 32x32 output, K=2 per atom.
+
+        Per-lane layout on wave64:
+        A: scalar float, B: scalar float, C: <16 x float>
+        lane = k_blk * 32 + m_in_atom  (k_blk ∈ {0,1}, m_in_atom ∈ {0..31})
+        Output layout: same as f16_32x32x8 -- 16 floats per lane.
+        """
+        return cls(
+            m=32,
+            n=32,
+            k=2,
+            a_per_lane=1,
+            b_per_lane=1,
+            c_per_lane=16,
+            dtype_in="fp32",
+            dtype_out="f32",
+            name="mfma_f32_32x32x2_f32",
+        )
+
     @classmethod
     def bf16_16x16x16(cls) -> "MfmaAtom":
         """BF16 sibling of :meth:`f16_16x16x16` (legacy CDNA atom)."""
@@ -325,6 +374,26 @@ class MfmaAtom:
             dtype_in="bf16",
             dtype_out="f32",
             name="mfma_f32_16x16x32_bf16",
+        )
+
+    @classmethod
+    def bf16_32x32x8(cls) -> "MfmaAtom":
+        """BF16 32x32 atom, K=8 per atom (all CDNA gfx9xx).
+
+        Per-lane layout on wave64:
+        A: <4 x bfloat>, B: <4 x bfloat>, C: <16 x float>
+        Output layout: same as f16_32x32x8.
+        """
+        return cls(
+            m=32,
+            n=32,
+            k=8,
+            a_per_lane=4,
+            b_per_lane=4,
+            c_per_lane=16,
+            dtype_in="bf16",
+            dtype_out="f32",
+            name="mfma_f32_32x32x8_bf16",
         )
 
     @classmethod
@@ -826,9 +895,15 @@ MFMA_F16_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.f16_32x32x16(),
 )
 
+MFMA_F32_ATOMS: Tuple[MfmaAtom, ...] = (
+    MfmaAtom.f32_16x16x4(),
+    MfmaAtom.f32_32x32x2(),
+)
+
 MFMA_BF16_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.bf16_16x16x16(),
     MfmaAtom.bf16_16x16x32(),
+    MfmaAtom.bf16_32x32x8(),
     MfmaAtom.bf16_32x32x16(),
 )
 
@@ -852,7 +927,7 @@ MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,
@@ -865,6 +940,9 @@ _DTYPE_ALIAS = {
     "bf8e5m2": "bf8e5m2",
     "f16": "f16",
     "fp16": "f16",
+    "f32": "fp32",
+    "fp32": "fp32",
+    "float": "fp32",
     "bf16": "bf16",
     "bfloat16": "bf16",
 }

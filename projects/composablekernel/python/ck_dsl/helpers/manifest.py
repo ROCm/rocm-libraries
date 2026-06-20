@@ -13,7 +13,7 @@ Schema (version `ck.dsl.example.manifest/v1`):
 
     {
       "schema": "ck.dsl.example.manifest/v1",
-      "kind": "gemm_fp16" | "conv_fp16",
+      "kind": "gemm_fp16" | "conv_fp16" | "conv_bf16" | "conv_fp32",
       "kernel_name": <str>,
       "hsaco": <basename of the .hsaco file next to this manifest>,
       "block_m": <int>, "block_n": <int>, "block_k": <int>,
@@ -150,12 +150,15 @@ def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
     return sig
 
 
-def conv_args_signature() -> List[Dict[str, Any]]:
+def conv_args_signature(dtype: str = "fp16") -> List[Dict[str, Any]]:
     """Conv kernel args signature: A, B, D ptrs + A_bytes/B_bytes/D_bytes."""
+    _dtype_map = {"fp16": "f16", "bf16": "bf16", "fp32": "f32"}
+    ir_type = _dtype_map.get(dtype, dtype)
+    ptr_type = f"ptr<{ir_type}, global>"
     return [
-        {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "B", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "A", "type": ptr_type, "size_bytes": 8},
+        {"name": "B", "type": ptr_type, "size_bytes": 8},
+        {"name": "D", "type": ptr_type, "size_bytes": 8},
         {"name": "A_bytes", "type": "i32", "size_bytes": 4},
         {"name": "B_bytes", "type": "i32", "size_bytes": 4},
         {"name": "D_bytes", "type": "i32", "size_bytes": 4},
@@ -349,6 +352,7 @@ def make_conv_manifest(
     groups: int,
     cpg: int,
     kpg: int,
+    dtype: str = "fp16",
     grid_explicit: Optional[Sequence[int]] = None,
     grid_order: Optional[str] = None,
     conv_layout: str = "implicit_gemm",
@@ -364,16 +368,24 @@ def make_conv_manifest(
     ints). `groups` / `cpg` / `kpg` describe the grouping; for dense
     conv pass `groups=1, cpg=C, kpg=K`.
 
+    `dtype` is `"fp16"` (default), `"bf16"`, or `"fp32"`. It sets the
+    manifest `kind` (e.g. `"conv_bf16"`) and the pointer types in the
+    args signature so the runner allocates tensors of the right dtype.
+
     Pass `grid_explicit=[gx, gy, gz]` to bypass the runner's automatic
     grid derivation (this is what the direct conv kernels use; the
     Q-tile axis isn't simply `ceil(K/block_n)`).
     """
+    _valid_dtypes = {"fp16", "bf16", "fp32"}
+    if dtype not in _valid_dtypes:
+        raise ValueError(f"dtype must be one of {_valid_dtypes}, got {dtype!r}")
     if len(list(conv)) != 13:
         raise ValueError(f"conv expects 13 ints (got {len(list(conv))})")
 
     manifest: Dict[str, Any] = {
         "schema": MANIFEST_SCHEMA,
-        "kind": "conv_fp16",
+        "kind": f"conv_{dtype}",
+        "dtype": dtype,
         "conv_layout": conv_layout,
         "kernel_name": artifact.kernel_name,
         "hsaco": f"{artifact.kernel_name}.hsaco",
@@ -387,7 +399,7 @@ def make_conv_manifest(
         "groups": int(groups),
         "cpg": int(cpg),
         "kpg": int(kpg),
-        "args_signature": conv_args_signature(),
+        "args_signature": conv_args_signature(dtype),
         "sig_has_bytes": 1,
         "timing_ms": dict(artifact.timings),
         "hsaco_bytes": artifact.hsaco_bytes,

@@ -51,11 +51,34 @@ from .ir import (
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
-# -emit-llvm -S. If you change ROCm version, regenerate this string.
-_DATALAYOUT = (
+# -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
+# wired arch shares one datalayout, but the buffer-fat-pointer address
+# space (``p8``) gained an index-width field between LLVM 20 (ROCm
+# 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
+#
+#   LLVM 20:  ...-p8:128:128-...
+#   LLVM 22:  ...-p8:128:128:128:48-...
+#
+# On the textual-IR (comgr SOURCE) path the parser is lenient: it
+# overrides the module datalayout with the target's canonical one, so a
+# stale-but-well-formed ``p8`` compiles to byte-identical HSACO and the
+# drift is invisible at runtime. That leniency is not a contract -- it is
+# one field on one ingestion path (bitcode input or a stricter verifier
+# can reject a mismatch), so we emit the correct ``p8`` up front. The two
+# strings are otherwise identical; pick by :data:`LLVM_FLAVOR_*` via
+# :func:`_datalayout_for_flavor`. A drift guard
+# (``test_datalayout_matches_hipcc_emitted_ir``) re-derives both from the
+# installed toolchain; if it fails, regenerate with the clang command above.
+_DATALAYOUT_LLVM20 = (
     "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
     "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+    "-n32:64-S32-A5-G1-ni:7:8:9"
+)
+_DATALAYOUT_LLVM22 = (
+    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
 _TRIPLE = "amdgcn-amd-amdhsa"
@@ -81,6 +104,18 @@ LLVM_FLAVOR_LLVM22 = "llvm22"
 def _flavor_for_rocm(major: int, minor: int) -> str:
     """ROCm release -> LLVM flavor expected by the bundled comgr."""
     return LLVM_FLAVOR_LLVM22 if (major, minor) >= (7, 2) else LLVM_FLAVOR_LLVM20
+
+
+def _datalayout_for_flavor(flavor: str) -> str:
+    """Module ``target datalayout`` string for an LLVM flavor.
+
+    The only field that drifts between flavors is the buffer-fat-pointer
+    address space ``p8`` (see :data:`_DATALAYOUT_LLVM20` /
+    :data:`_DATALAYOUT_LLVM22`). LLVM22 is the default for unknown values
+    so a typo'd override degrades to the modern layout rather than the
+    legacy one.
+    """
+    return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
 
 
 def _torch_hip_version() -> Optional[Tuple[int, int]]:
@@ -177,6 +212,25 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.y": "declare i32 @llvm.amdgcn.workgroup.id.y()",
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
+    # gfx1250 (gfx1250) split wait counters used to drain LDS / VMEM before an
+    # LDS barrier (the monolithic s_waitcnt is not selectable there).
+    "s.wait.dscnt": "declare void @llvm.amdgcn.s.wait.dscnt(i16)",
+    "s.wait.loadcnt": "declare void @llvm.amdgcn.s.wait.loadcnt(i16)",
+    # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
+    # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
+    "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16)",
+    "global.load.async.to.lds.b32": (
+        "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.load.async.to.lds.b64": (
+        "declare void @llvm.amdgcn.global.load.async.to.lds.b64("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.load.async.to.lds.b128": (
+        "declare void @llvm.amdgcn.global.load.async.to.lds.b128("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
@@ -272,6 +326,43 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16("
         "<8 x i16>, <8 x i16>, <8 x float>)"
     ),
+    # gfx1250 (gfx1250) WMMA — wave32 16x16x32 (K=32). A/B are <16 x half> per lane
+    # and the intrinsic carries the gfx1250 8-operand form (i1 neg flags, i16
+    # format modifier, i1 reuse flags). bf16 uses <16 x bfloat> directly (v16bf16,
+    # not the <16 x i16> bitcast gfx11/gfx12 use). Emission goes through
+    # Gfx1250Backend.emit_wmma. ABI confirmed on ROCm 7.13 clang 23.
+    "wmma.gfx1250.f32.16x16x32.f16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16("
+        "i1 immarg, <16 x half>, i1 immarg, <16 x half>, i16 immarg, "
+        "<8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x32.bf16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16("
+        "i1 immarg, <16 x bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, "
+        "<8 x float>, i1 immarg, i1 immarg)"
+    ),
+    # gfx1250 (gfx1250) FP8/BF8 WMMA — wave32 16x16x64 (K=64, NOT the gfx12
+    # 16x16x16 FP8 form, which is not selectable on gfx1250). A/B are 32 fp8/bf8
+    # bytes per lane, presented to the intrinsic as <8 x i32>; the accumulator /
+    # result is <8 x float>. 6-operand form: (A, B, i16 fmt, C, i1, i1).
+    # Signature confirmed on a gfx1250 device (ROCm 7.13 clang 23) via
+    # __builtin_amdgcn_wmma_f32_16x16x64_{fp8,bf8}_{fp8,bf8}.
+    "wmma.gfx1250.f32.16x16x64.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.fp8.bf8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.bf8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.gfx1250.f32.16x16x64.bf8.bf8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
+        "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -303,9 +394,24 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<4 x half>, <4 x half>, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
+    "mfma.f32.32x32x8bf16.1k": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+        "<4 x i16>, <4 x i16>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.32x32x16.f16": (
         "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x16.f16("
         "<8 x half>, <8 x half>, <16 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.16x16x4f32": (
+        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+        "float, float, <4 x float>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f32.32x32x2f32": (
+        "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+        "float, float, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
     "mfma.f32.4x4x4f16": (
@@ -372,6 +478,19 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # 16x16x32 / 32x32x16 atoms; one LDS op vs two paired b64 reads).
     "ds.read.tr16.b128": (
         "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
+    ),
+    # gfx1250 (gfx1250) wave32 transpose-LDS read: ``ds_load_tr16_b128`` returns
+    # ``<8 x bfloat>`` per lane (the WMMA 16x16x32 B-operand layout). This is the
+    # gfx1250 counterpart of gfx950's ``ds_read_tr16_b128`` (different opcode +
+    # wave32 lane distribution).
+    "ds.load.tr16.b128.v8bf16": (
+        "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"
+    ),
+    # f16 sibling of the above: ``ds_load_tr16_b128`` is overloaded on its
+    # result element type, so an f16 transpose-read selects the ``.v8f16`` form
+    # (returns ``<8 x half>``) rather than reinterpreting a bf16 payload.
+    "ds.load.tr16.b128.v8f16": (
+        "declare <8 x half> @llvm.amdgcn.ds.load.tr16.b128.v8f16(ptr addrspace(3))"
     ),
     "iglp.opt": ("declare void @llvm.amdgcn.iglp.opt(i32 immarg)"),
     "sched.barrier": ("declare void @llvm.amdgcn.sched.barrier(i32 immarg)"),
@@ -1932,6 +2051,28 @@ class _Lowerer:
             f"i32 0, i32 0, i32 0)"
         )
 
+    def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.16x16x4f32")
+        self._current().emit(
+            f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<4 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x2f32")
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x2f32("
+            f"float {self._operand(a)}, "
+            f"float {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
@@ -1939,6 +2080,25 @@ class _Lowerer:
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8f16("
             f"<4 x half> {self._operand(a)}, "
             f"<4 x half> {self._operand(b)}, "
+            f"<16 x float> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f32.32x32x8bf16.1k")
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
+            f"<4 x i16> {a_cast}, "
+            f"<4 x i16> {b_cast}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -2471,6 +2631,27 @@ class _Lowerer:
             f"{'true' if bound_ctrl else 'false'})"
         )
 
+    def _op_tile_dpp_xor(self, op: Op) -> None:
+        """``v_mov_b32_dpp`` ``row_xmask`` XOR butterfly (VALU, not LDS).
+
+        ``dpp_ctrl = 0x160 | mask`` is the AMDGPU ``DPP_ROW_XMASK``
+        encoding: within each 16-lane DPP row, lane ``L`` reads from lane
+        ``(L & 0xF) ^ mask``. ``row_mask``/``bank_mask`` are 0xF (all
+        rows/banks). ``bound_ctrl=true`` so every lane writes (the partner
+        is always in-row for mask 1..15, so no out-of-row fill happens).
+        Passing ``src`` as ``old`` makes single-use results fusable into
+        ``v_max_f32_dpp`` / ``v_add_f32_dpp`` by the DPP-combine pass.
+        """
+        (data,) = op.operands
+        self._need("update.dpp.i32")
+        mask = int(op.attrs["xor_mask"])
+        dpp_ctrl = 0x160 | (mask & 0xF)
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {dpp_ctrl}, i32 15, i32 15, i1 true)"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
@@ -2595,16 +2776,27 @@ class _Lowerer:
             f"  {base} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
             f"{', '.join(idx_strs)}"
         )
-        self._need("ds.read.tr16.b128")
-        raw = self._fresh("trw.raw")
-        self._current().emit(
-            f"  {raw} = call <8 x i16> @llvm.amdgcn.ds.read.tr16.b128("
-            f"ptr addrspace(3) {base})"
-        )
+        elem_name = op.attrs.get("elem_type", "f16")
+        need_key, intrinsic, ret_ty = self._backend.ds_tr16_b128_spec(elem_name)
+        self._need(need_key)
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
-        self._current().emit(
-            f"  {op.result.name} = bitcast <8 x i16> {raw} to <8 x {elem_ty}>"
-        )
+        want_ty = f"<8 x {elem_ty}>"
+        if ret_ty == want_ty:
+            # Element-type-specific intrinsic (gfx1250 selects ``.v8f16`` /
+            # ``.v8bf16`` to match the op): no reinterpret needed.
+            self._current().emit(
+                f"  {op.result.name} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+            )
+        else:
+            # gfx950 returns a type-agnostic ``<8 x i16>``; reinterpret the raw
+            # 16-bit lanes as the requested half/bfloat element.
+            raw = self._fresh("trw.raw")
+            self._current().emit(
+                f"  {raw} = call {ret_ty} @{intrinsic}(ptr addrspace(3) {base})"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast {ret_ty} {raw} to {want_ty}"
+            )
 
     def _op_tile_inline_asm(self, op: Op) -> None:
         """General AMDGPU inline-asm lowering (ADDITIVE).
@@ -2798,6 +2990,48 @@ class _Lowerer:
             f"i32 0, i32 {aux})"
         )
 
+    def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
+        # gfx1250 dedicated async-DMA counter. No-op on backends without it
+        # (they have no async global<->LDS instructions to track).
+        if not getattr(self._backend, "has_async_lds_counter", False):
+            return
+        n = int(op.attrs.get("n", 0))
+        self._need("s.wait.asynccnt")
+        self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
+
+    def _op_tile_global_load_async_to_lds(self, op: Op) -> None:
+        src_ptr = op.operands[0]
+        src_index = op.operands[1]
+        lds_smem = op.operands[2]
+        lds_indices = op.operands[3:]
+        width = int(op.attrs["width_bytes"])
+        cpol = int(op.attrs.get("cpol", 0))
+        ioff = int(op.attrs.get("offset_bytes", 0))
+        suffix = {4: "b32", 8: "b64", 16: "b128"}[width]
+        # Per-lane global source address (element GEP; i32/i64 index width).
+        src_elem_ty = _llvm_type(src_ptr.type.pointee)  # type: ignore[attr-defined]
+        idx_ty = _llvm_type(src_index.type)
+        gep_s = self._fresh("async_src")
+        self._current().emit(
+            f"  {gep_s} = getelementptr inbounds {src_elem_ty}, ptr addrspace(1) "
+            f"{self._operand(src_ptr)}, {idx_ty} {self._operand(src_index)}"
+        )
+        # Per-lane LDS destination address (typed aggregate GEP).
+        gname, stype = self._smem_global_name(lds_smem)
+        agg_ty = _smem_storage_type(stype)
+        gidx = ["i32 0"] + [f"i32 {self._operand(i)}" for i in lds_indices]
+        gep_l = self._fresh("async_dst")
+        self._current().emit(
+            f"  {gep_l} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
+            f"{', '.join(gidx)}"
+        )
+        self._need(f"global.load.async.to.lds.{suffix}")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.global.load.async.to.lds.{suffix}("
+            f"ptr addrspace(1) {gep_s}, ptr addrspace(3) {gep_l}, "
+            f"i32 {ioff}, i32 {cpol})"
+        )
+
     def _op_tile_sync(self, op: Op) -> None:
         # Phase 4a: Check if this is the trailing sync to elide
         elide_info = getattr(self, "_unroll_elide_sync_op", None)
@@ -2815,10 +3049,14 @@ class _Lowerer:
         # barrier; that matches what CK Tile's ``block_sync_lds`` does.
         # ``_encode_waitcnt_gfx9_10(vmcnt=0, lgkmcnt=0)`` evaluates to
         # ``0x70`` (= 112) -- ``vmcnt(0) lgkmcnt(0) expcnt(<max>)``.
-        mask = self._backend.encode_waitcnt(vmcnt=0, expcnt=-1, lgkmcnt=0)
-        self._need("s.waitcnt")
+        # Drain outstanding LDS (and the VMEM->LDS chain) before the barrier.
+        # The backend picks the right wait: gfx9/10/11 emit the monolithic
+        # s_waitcnt(vmcnt=0, lgkmcnt=0); gfx1250 (gfx1250) emits split
+        # s_wait_loadcnt/dscnt (the monolithic s_waitcnt is not selectable, and
+        # the raw s_barrier does NOT auto-drain LDS, so an explicit wait is
+        # required or the same-wave LDS write->read races -> stale LDS / NaN).
+        self._backend.emit_lds_barrier_drain(self, drain_vmem=True)
         self._need("s.barrier")
-        self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_barrier_bare(self, op: Op) -> None:
@@ -2868,13 +3106,16 @@ class _Lowerer:
         # streaming while we wait on the *previous* iter's ds_reads.
         # Draining vmcnt here would defeat the whole point of the
         # overlap. Matches CK Tile's ``block_sync_lds``.
-        mask = self._backend.encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
-        self._need("s.waitcnt")
+        # LDS-only drain (keep VMEM in flight for the async-DMA ping-pong).
+        self._backend.emit_lds_barrier_drain(self, drain_vmem=False)
         self._need("s.barrier")
-        self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
     def _op_tile_s_waitcnt(self, op: Op) -> None:
+        # gfx1250 (gfx1250): the split wait counters are inserted by the backend;
+        # the legacy s_waitcnt intrinsic is not selectable, so skip emission.
+        if not self._backend.emits_legacy_s_waitcnt:
+            return
         # See ck_dsl/_ir.py:s_waitcnt for the encoding contract.
         self._need("s.waitcnt")
         vm = int(op.attrs.get("vmcnt", -1))
@@ -3019,6 +3260,84 @@ class _Lowerer:
             f"i32 0)"
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
+
+    def _op_tile_buffer_load_vN(self, op: Op) -> None:
+        """Dtype-generic vectorised buffer load.
+
+        Loads `<dwords x i32>` via the matching intrinsic and bitcasts
+        to `<n x elem_type>`.  Handles f16/bf16 (2-byte) and f32/i32
+        (4-byte) elements.
+        """
+        rsrc, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        elem_type = op.attrs["elem_type"]
+        n = op.result.type.count  # elements in the result vector
+        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        llvm_elem = _LLVM_ELEM[elem_type]
+        if dwords == 1:
+            self._need("raw.ptr.buffer.load.i32")
+            tmp = self._fresh("bli32")
+            self._current().emit(
+                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i32 {tmp} to <{n} x {llvm_elem}>"
+            )
+        else:
+            intr = f"raw.ptr.buffer.load.v{dwords}i32"
+            self._need(intr)
+            tmp = self._fresh(f"blv{dwords}")
+            self._current().emit(
+                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{n} x {llvm_elem}>"
+            )
+
+    def _op_tile_buffer_load(self, op: Op) -> None:
+        """Dtype-generic scalar buffer load (single element, OOB-clamped).
+
+        2-byte types (f16, bf16) use the i16 intrinsic; 4-byte types
+        (f32, i32) use the i32 intrinsic.
+        """
+        rsrc, voffset, soffset = op.operands
+        elem_type = op.attrs["elem_type"]
+        _LLVM_ELEM = {"f16": "half", "bf16": "bfloat", "f32": "float", "i32": "i32"}
+        llvm_elem = _LLVM_ELEM[elem_type]
+        if elem_type in ("f16", "bf16"):
+            self._need("raw.ptr.buffer.load.i16")
+            tmp = self._fresh("blu16")
+            self._current().emit(
+                f"  {tmp} = call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i16 {tmp} to {llvm_elem}"
+            )
+        else:
+            self._need("raw.ptr.buffer.load.i32")
+            tmp = self._fresh("bli32")
+            self._current().emit(
+                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i32 {tmp} to {llvm_elem}"
+            )
 
     def _op_tile_buffer_store_vN_f16(self, op: Op) -> None:
         """raw_ptr_buffer_store of <2*dwords x half> via bitcast to
@@ -3821,7 +4140,7 @@ class _Lowerer:
             self._current().terminated = True
 
         out: List[str] = []
-        out.append(f'target datalayout = "{self._backend.datalayout}"')
+        out.append(f'target datalayout = "{self._backend.datalayout(self._flavor)}"')
         out.append(f'target triple = "{self._backend.triple}"')
         out.append("")
 

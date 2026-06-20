@@ -49,15 +49,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
-from ..core.ir import I64, IRBuilder, Value
+from ..core.ir import F16, I64, IRBuilder, Type, Value
 
 
 # A descriptor callback maps (row, col) in the tile-local coordinate
 # system to (element_offset_in_global_array, valid_predicate). The
-# returned offset is in *fp16 elements*; the loader scales by 2 (sizeof
-# half) when feeding it to a buffer_load voffset. `valid` is an i1
-# Value (or `None` to mean "always in-bounds").
+# returned offset is in *elements*; the loader scales by the element
+# size in bytes when feeding it to a buffer_load voffset. `valid` is an
+# i1 Value (or `None` to mean "always in-bounds").
 DescriptorFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]]
+
+# Bytes per element for the dtypes CoalescedTileLoader / AsyncTileLoader support.
+_ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 
 
 @dataclass(frozen=True)
@@ -65,11 +68,15 @@ class CoalescedTileLoader:
     """Sync coalesced global -> LDS load plan for a 2D tile.
 
     The kernel calls `load(b, ...)` per K-iteration. The loader picks a
-    `load_vec` (halves per thread per chunk) that distributes the tile
+    `load_vec` (elements per thread per chunk) that distributes the tile
     evenly across `block_size` threads with the widest possible
     natural alignment, then emits the per-thread for-loop that issues
     `vecs_per_thread = (tile_rows * tile_cols) / load_vec / block_size`
     chunks per thread.
+
+    `elem_dtype` controls the element type used for both the buffer load
+    (byte-offset scaling) and the smem store (IR type).  Defaults to
+    F16 for backward compatibility.
 
     The `descriptor` callback is the only place addressing changes
     across kernels. The same loader handles plain GEMM (`row * K +
@@ -79,7 +86,8 @@ class CoalescedTileLoader:
     tile_rows: int
     tile_cols: int
     block_size: int
-    load_vec: int  # halves per thread per chunk
+    load_vec: int  # elements per thread per chunk
+    elem_dtype: Type = F16
     use_buffer_rsrc: bool = (
         True  # use buffer_load_vN (bounds-checked); False uses raw ptr
     )
@@ -135,6 +143,7 @@ class CoalescedTileLoader:
         tile_cols: int,
         block_size: int,
         max_vec: int = 8,
+        elem_dtype: Type = F16,
         use_buffer_rsrc: bool = True,
     ) -> "CoalescedTileLoader":
         vec = cls.choose_vec(
@@ -148,6 +157,7 @@ class CoalescedTileLoader:
             tile_cols=tile_cols,
             block_size=block_size,
             load_vec=vec,
+            elem_dtype=elem_dtype,
             use_buffer_rsrc=use_buffer_rsrc,
         )
 
@@ -190,10 +200,17 @@ class CoalescedTileLoader:
         if not self.use_buffer_rsrc and ptr is None:
             raise ValueError("CoalescedTileLoader: use_buffer_rsrc=False requires ptr")
 
+        dtype = self.elem_dtype
+        elem_bytes = _ELEM_BYTES.get(dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
+            )
+
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_cols_per_vec = b.const_i32(self.cols_per_vec)
-        c_half_bytes = b.const_i32(2)
+        c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
 
@@ -206,25 +223,24 @@ class CoalescedTileLoader:
             off_elems, valid = descriptor(b, row, col)
 
             if self.use_buffer_rsrc:
-                off_bytes = b.mul(off_elems, c_half_bytes)
+                off_bytes = b.mul(off_elems, c_elem_bytes)
                 if valid is not None:
                     safe = b.select(valid, off_bytes, c_oob)
                 else:
                     safe = off_bytes
                 if self.load_vec == 1:
-                    v = b.buffer_load_f16(rsrc, safe, c0)
-                    b.smem_store_f16(smem_dst, [row, col], v)
+                    v = b.buffer_load(rsrc, safe, c0, dtype)
+                    b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
-                    dwords = self.load_vec // 2
-                    v = b.buffer_load_vN_f16(rsrc, safe, c0, dwords)
-                    b.smem_store_vN_f16(smem_dst, [row, col], v, self.load_vec)
+                    v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
+                    b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
             else:
                 if self.load_vec == 1:
-                    v = b.global_load_f16(ptr, off_elems)
-                    b.smem_store_f16(smem_dst, [row, col], v)
+                    v = b.global_load(ptr, off_elems, dtype)
+                    b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
-                    v = b.global_load_vN_f16(ptr, off_elems, self.load_vec)
-                    b.smem_store_vN_f16(smem_dst, [row, col], v, self.load_vec)
+                    v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
+                    b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
 
 
 # ---------------------------------------------------------------------
@@ -288,10 +304,11 @@ class AsyncTileLoader:
     tile_cols: int
     block_size: int
     wave_size: int
-    dwords: int  # 1, 3, or 4
-    chunks_total: int  # tile_rows * tile_cols / (dwords * 2)
-    chunks_per_pass: int  # = block_size
-    passes: int  # ceil(chunks_total / block_size)
+    elem_dtype: Type = F16
+    dwords: int = 1  # 1, 3, or 4
+    chunks_total: int = 0  # tile_rows * tile_cols / elems_per_chunk
+    chunks_per_pass: int = 0  # = block_size
+    passes: int = 0  # ceil(chunks_total / block_size)
 
     @classmethod
     def choose_dwords(
@@ -300,24 +317,31 @@ class AsyncTileLoader:
         tile_rows: int,
         tile_cols: int,
         block_size: int,
+        elem_bytes: int = 2,
         max_dwords: int = 4,
     ) -> int:
-        """Pick the widest `dwords` value that divides the tile evenly."""
+        """Pick the widest `dwords` value that divides the tile evenly.
+
+        `elem_bytes` is the byte width of each element (2 for f16/bf16,
+        4 for f32/i32).  Each chunk carries ``dwords * 4 // elem_bytes``
+        elements; ``tile_cols`` must be a multiple of that count and the
+        tile must have at least ``block_size`` chunks.
+        """
         if max_dwords > 4:
             max_dwords = 4
         for d in (4, 3, 1):
             if d > max_dwords:
                 continue
-            halves = d * 2
-            if tile_cols % halves != 0:
+            elems = (d * 4) // elem_bytes
+            if tile_cols % elems != 0:
                 continue
-            chunks = (tile_rows * tile_cols) // halves
+            chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
                 continue
             return d
         raise ValueError(
             f"no usable dwords value for tile {tile_rows}x{tile_cols} "
-            f"with block_size {block_size}"
+            f"with block_size {block_size} elem_bytes={elem_bytes}"
         )
 
     @classmethod
@@ -328,22 +352,30 @@ class AsyncTileLoader:
         tile_cols: int,
         block_size: int,
         wave_size: int = 64,
+        elem_dtype: Type = F16,
         max_dwords: int = 4,
     ) -> "AsyncTileLoader":
+        eb = _ELEM_BYTES.get(elem_dtype.name)
+        if eb is None:
+            raise ValueError(
+                f"AsyncTileLoader: unsupported elem_dtype {elem_dtype.name!r}"
+            )
         d = cls.choose_dwords(
             tile_rows=tile_rows,
             tile_cols=tile_cols,
             block_size=block_size,
+            elem_bytes=eb,
             max_dwords=max_dwords,
         )
-        halves = d * 2
-        chunks = (tile_rows * tile_cols) // halves
+        elems = (d * 4) // eb
+        chunks = (tile_rows * tile_cols) // elems
         passes = (chunks + block_size - 1) // block_size
         return cls(
             tile_rows=tile_rows,
             tile_cols=tile_cols,
             block_size=block_size,
             wave_size=wave_size,
+            elem_dtype=elem_dtype,
             dwords=d,
             chunks_total=chunks,
             chunks_per_pass=block_size,
@@ -351,8 +383,13 @@ class AsyncTileLoader:
         )
 
     @property
+    def elems_per_chunk(self) -> int:
+        """Elements per lane per pass (= dwords * 4 / elem_bytes)."""
+        return (self.dwords * 4) // _ELEM_BYTES[self.elem_dtype.name]
+
+    @property
     def halves_per_chunk(self) -> int:
-        return self.dwords * 2
+        return self.elems_per_chunk
 
     @property
     def bytes_per_chunk(self) -> int:
@@ -360,7 +397,7 @@ class AsyncTileLoader:
 
     @property
     def cols_per_chunk(self) -> int:
-        return self.halves_per_chunk
+        return self.elems_per_chunk
 
     @property
     def wave_bytes(self) -> int:
@@ -430,7 +467,12 @@ class AsyncTileLoaderSlot:
         tile is consumed in the next iter and never re-read.
         """
         L = self.loader
-        c_half_bytes = b.const_i32(2)
+        elem_bytes = _ELEM_BYTES.get(L.elem_dtype.name)
+        if elem_bytes is None:
+            raise ValueError(
+                f"AsyncTileLoader: unsupported elem_dtype {L.elem_dtype.name!r}"
+            )
+        c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(oob_sentinel)
         c0 = b.const_i32(0)
         c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
@@ -453,10 +495,10 @@ class AsyncTileLoaderSlot:
             chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
             row = b.div(chunk_idx, c_cols_per_chunk)
             col_v = b.mod(chunk_idx, c_cols_per_chunk)
-            col = b.mul(col_v, b.const_i32(L.halves_per_chunk))
+            col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
 
             off_elems, valid = descriptor(b, row, col)
-            off_bytes = b.mul(off_elems, c_half_bytes)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
             # Threads whose chunk_idx >= chunks_total still issue an
             # async load, but the descriptor *must* return valid=0 (or
             # an out-of-range offset) for them so the intrinsic writes

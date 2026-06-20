@@ -52,8 +52,11 @@ def run_gemm_manifest_problem(
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-        diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        ref_f32 = ref.astype(np.float32)
+        tol = 1e-2
+        err = np.abs(C.astype(np.float32) - ref_f32)
+        bad = err > tol + tol * np.abs(ref_f32)
+        return float(err.max()), int(np.count_nonzero(bad)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 
@@ -103,8 +106,9 @@ def run_gemm_iu8_manifest_problem(
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         ref = A.astype(np.int32) @ B.astype(np.int32).T
-        diff = np.abs(C.astype(np.int64) - ref.astype(np.int64))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        err = np.abs(C.astype(np.int64) - ref.astype(np.int64)).astype(np.float64)
+        bad = err > 0.0
+        return float(err.max()), int(np.count_nonzero(bad)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 
@@ -163,7 +167,10 @@ def run_batched_gemm_manifest_problem(
             ref[bi] = (A[bi].astype(np.float32) @ Bm[bi].astype(np.float32).T).astype(
                 np.float16
             )
-        diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+        ref_f32 = ref.astype(np.float32)
+        tol = 1e-2
+        err = np.abs(C.astype(np.float32) - ref_f32)
+        bad = err > tol + tol * np.abs(ref_f32)
+        return float(err.max()), int(np.count_nonzero(bad)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check

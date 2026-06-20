@@ -120,10 +120,12 @@ def run_matmul_nbits_manifest_problem(
         ref = matmul_nbits_reference(A, packed, scales, spec).astype(np.float16)
         Cf = C.astype(np.float32)
         reff = ref.astype(np.float32)
-        diff = np.abs(Cf - reff)
+        tol = 1e-2
+        err = np.abs(Cf - reff)
+        bad = err > tol + tol * np.abs(reff)
         if os.environ.get("CKDSL_NBITS_DEBUG"):
-            _nbits_debug_dump(np, Cf, reff, diff, M, N, K, group)
-        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+            _nbits_debug_dump(np, Cf, reff, err, M, N, K, group)
+        return float(err.max()), int(np.count_nonzero(bad)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
 

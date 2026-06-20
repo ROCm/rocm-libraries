@@ -140,7 +140,7 @@ def run_manifest(
         make_args, grid, block, flop, bytes_xfer, check = (
             run_batched_gemm_manifest_problem(manifest, shape, verify)
         )
-    elif kind == "conv_fp16":
+    elif kind in ("conv_fp16", "conv_bf16", "conv_fp32"):
         make_args, grid, block, flop, bytes_xfer, check = run_conv_manifest_problem(
             manifest, shape, verify
         )
@@ -173,7 +173,7 @@ def run_manifest(
     warmup = int(manifest.get("warmup_iters", 5))
     iters = int(manifest.get("timed_iters", 100))
     ms = _launch_timed(rt, fn, grid, block, args, warmup, iters)
-    max_abs, bad, total = check(rt, ptrs)
+    max_abs_diff, bad_count, total = check(rt, ptrs)
     for ptr in ptrs:
         rt.free(ptr)
     module.unload()
@@ -181,8 +181,8 @@ def run_manifest(
         ms=ms,
         tflops=flop / 1e9 / ms,
         gbps=bytes_xfer / 1e6 / ms,
-        max_abs_diff=max_abs,
-        bad_count=bad,
+        max_abs_diff=max_abs_diff,
+        bad_count=bad_count,
         total=total,
     )
 
@@ -205,8 +205,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"verify max_abs_diff={summary.max_abs_diff:.8g} "
             f"bad={summary.bad_count}/{summary.total}"
         )
-        if summary.bad_count:
-            return 1
     print(
         f"Perf: {summary.ms:.6g} ms, {summary.tflops:.6g} TFlops, {summary.gbps:.6g} GB/s"
     )
@@ -226,6 +224,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             }
         )
     )
+    if ns.verify and summary.bad_count:
+        return 1
     return 0
 
 

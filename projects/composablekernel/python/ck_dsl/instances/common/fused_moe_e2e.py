@@ -236,6 +236,20 @@ def _default_bf16_gemm_tile_gfx942() -> TileSpec:
     )
 
 
+def _default_gfx1250_wmma_gemm_tile() -> TileSpec:
+    """Minimal gfx1250 WMMA tile for day-0 BF16/FP16 MoE expert GEMMs."""
+    return TileSpec(
+        tile_m=16,
+        tile_n=16,
+        tile_k=32,
+        warp_m=1,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+    )
+
+
 def _large_batch_gemm_tile() -> TileSpec:
     """Measured winner for large hidden + T>=32 shapes.
 
@@ -336,6 +350,12 @@ def _resolve_launch_arch(arch: "str | None") -> str:
     return "gfx950"
 
 
+def _wave_size_for_arch(arch: "str | None") -> int:
+    from ...core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(_resolve_launch_arch(arch)).wave_size
+
+
 def _gemm_dtype_to_universal(dtype: str) -> str:
     if dtype in ("f16", "fp16"):
         return "fp16"
@@ -392,6 +412,20 @@ class FusedMoeForwardSpec:
     # 64 or 128).
     sort_block_size: int = 64
     router_block_size: int = 64
+    use_static_offsets: Optional[bool] = None
+    """Override static-offset routing selection.
+
+    ``None`` keeps the measured auto heuristic. ``True`` forces the
+    decode-oriented static route that skips histogram / scan / dynamic
+    scatter, while ``False`` forces the dynamic sorting path.
+    """
+    static_slot_size: Optional[int] = None
+    """Override rows reserved per expert in static-offset mode.
+
+    ``None`` uses the conservative tile-aligned worst-case slot. Callers
+    may set this to a smaller value only when that value still bounds the
+    maximum routed pairs any one expert can receive.
+    """
 
     gemm_tile: TileSpec = field(default_factory=_default_gemm_tile)
     arch: "str | None" = None
@@ -605,11 +639,17 @@ class FusedMoeForwardSpec:
         # comparison; the production path uses
         # :meth:`to_batched_gemm_spec` for a single-launch dispatch
         # over E batches.
-        trait = TraitSpec(pad_m=True)
+        wave_size = _wave_size_for_arch(self.arch)
+        trait = (
+            TraitSpec(pipeline="mem", epilogue="default", pad_m=True)
+            if wave_size == 32
+            else TraitSpec(pad_m=True)
+        )
         return GroupedGemmSpec(
             name=f"{self.name}_{name_suffix}",
             tile=self.gemm_tile,
             trait=trait,
+            wave_size=wave_size,
             dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
@@ -623,11 +663,16 @@ class FusedMoeForwardSpec:
         non-preshuffle launcher remains intact for any stage that
         does not have host-shuffled weights.
         """
-        trait = TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True)
+        wave_size = _wave_size_for_arch(self.arch)
+        if wave_size == 32:
+            trait = TraitSpec(pipeline="mem", epilogue="default", pad_m=True, pad_n=True)
+        else:
+            trait = TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True)
         return BatchedGemmSpec(
             name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
+            wave_size=wave_size,
             dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
@@ -664,11 +709,17 @@ class FusedMoeForwardSpec:
         and the spec readable. Future tuning can re-enable per
         scenario if measurements support it.
         """
-        trait = TraitSpec(pad_m=True, pad_n=True)
+        wave_size = _wave_size_for_arch(self.arch)
+        trait = (
+            TraitSpec(pipeline="mem", epilogue="default", pad_m=True, pad_n=True)
+            if wave_size == 32
+            else TraitSpec(pad_m=True, pad_n=True)
+        )
         return BatchedGemmSpec(
             name=f"{self.name}_batched_gemm",
             tile=self.gemm_tile,
             trait=trait,
+            wave_size=wave_size,
             dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
@@ -695,6 +746,21 @@ class FusedMoeForward:
         # atoms the gfx950 default tiles use).
         self.arch = _resolve_launch_arch(spec.arch)
         is_gfx942 = self.arch == "gfx942"
+        is_gfx1250 = self.arch == "gfx1250"
+        if is_gfx1250:
+            if spec.gemm_tile == _default_gemm_tile():
+                spec.gemm_tile = _default_gfx1250_wmma_gemm_tile()
+            # Day-0 gfx1250 MoE uses the universal-GEMM WMMA-safe path.
+            # The fused/interleaved/down-reduce kernels below are still
+            # MFMA-specific.
+            spec.use_experimental_fused_gate_up_silu = False
+            spec.use_experimental_interleaved_gate_up_silu = False
+            spec.use_experimental_fused_down_reduce = False
+            spec.preshuffle_w_down = False
+            spec.preshuffle_w_gate_up_packed = False
+            spec.preshuffle_w_gate_up_interleaved = False
+            spec.active_tile_skip_gemms = False
+            spec.use_grouped_gemm = False
         # Shape-aware tile policy from the tuning sweep. Only override
         # the auto/default tile; caller-supplied tiles are respected.
         is_bf16 = spec.dtype in ("bf16",)
@@ -814,8 +880,12 @@ class FusedMoeForward:
         # * batch32 (T*K*E=512): static wins (0.5356 ms vs 0.8268 ms)
         # * prefill128 (T*K*E=2048): dynamic wins (0.9074 ms vs 1.3656 ms)
         # So 512 is the measured cutoff on MI355X for the current tile
-        # family.
-        self._use_static_offsets = spec.tokens * spec.topk * spec.experts <= 512
+        # family. ``spec.use_static_offsets`` lets decode shapes with a
+        # tighter fixed-slot contract opt in explicitly.
+        if spec.use_static_offsets is None:
+            self._use_static_offsets = spec.tokens * spec.topk * spec.experts <= 512
+        else:
+            self._use_static_offsets = bool(spec.use_static_offsets)
         # When in static-offset mode, the slot_size is the smallest
         # ``tile_m``-aligned size that fits the worst-case
         # ``count[e] = T*K`` (all tokens routed to one expert). For
@@ -823,11 +893,19 @@ class FusedMoeForward:
         # but the GEMM only does meaningful work for the rows
         # corresponding to actual tokens (the rest are zero-init).
         tile_m = spec.gemm_tile.tile_m
-        self._static_slot_size = (
+        default_static_slot_size = (
             (spec.tokens * spec.topk + tile_m - 1) // tile_m
         ) * tile_m
-        if self._static_slot_size < tile_m:
-            self._static_slot_size = tile_m
+        if default_static_slot_size < tile_m:
+            default_static_slot_size = tile_m
+        if spec.static_slot_size is None:
+            self._static_slot_size = default_static_slot_size
+        else:
+            if spec.static_slot_size <= 0:
+                raise ValueError(
+                    f"static_slot_size must be > 0 (got {spec.static_slot_size})"
+                )
+            self._static_slot_size = int(spec.static_slot_size)
 
     # ------------------------------------------------------------------
     # Lazy compile
@@ -960,16 +1038,20 @@ class FusedMoeForward:
         cached = self._moe_gemm_launcher_cache.get(key)
         if cached is not None:
             return cached
+        wave_size = _wave_size_for_arch(self.spec.arch)
         trait = TraitSpec(
+            pipeline="mem" if wave_size == 32 else "compv3",
+            epilogue="default" if wave_size == 32 else "cshuffle",
             pad_m=True,
             pad_n=True,
-            preshuffle_b=preshuffle_b,
-            active_tile_skip=active_tile_skip,
+            preshuffle_b=False if wave_size == 32 else preshuffle_b,
+            active_tile_skip=False if wave_size == 32 else active_tile_skip,
         )
         spec = BatchedGemmSpec(
             name=f"{self.spec.name}_batched_gemm",
             tile=self.spec.gemm_tile,
             trait=trait,
+            wave_size=wave_size,
             dtype=_gemm_dtype_to_universal(self.spec.dtype),
         )
         artifact = compile_kernel(
@@ -1344,12 +1426,19 @@ class FusedMoeForward:
         self._ensure_batched_gemm_launcher()
         if self.spec.preshuffle_w_down or self.spec.preshuffle_w_gate_up_packed:
             self._ensure_batched_gemm_preshuffle_b_launcher()
-        if self.spec.preshuffle_w_gate_up_interleaved:
-            self._ensure_interleaved_gate_up_silu_preshuffle_launcher()
-        self._ensure_silu_mul_packed_launcher()
-        self._ensure_gate_up_silu_launcher()
-        self._ensure_interleaved_gate_up_silu_launcher()
-        self._ensure_down_reduce_launcher()
+        use_fused = bool(self.spec.use_experimental_fused_gate_up_silu)
+        use_interleaved = bool(self.spec.use_experimental_interleaved_gate_up_silu)
+        if use_fused:
+            self._ensure_gate_up_silu_launcher()
+        elif use_interleaved:
+            if self.spec.preshuffle_w_gate_up_interleaved:
+                self._ensure_interleaved_gate_up_silu_preshuffle_launcher()
+            else:
+                self._ensure_interleaved_gate_up_silu_launcher()
+        else:
+            self._ensure_silu_mul_packed_launcher()
+        if self.spec.use_experimental_fused_down_reduce:
+            self._ensure_down_reduce_launcher()
         self._ensure_static_scatter_gather_launcher()
 
     # ------------------------------------------------------------------
@@ -1715,7 +1804,8 @@ class FusedMoeForward:
         # currently uses the batched single-launch dispatch instead,
         # but we keep the warm-up so a future toggle back to the
         # grouped launcher pays no compile penalty mid-loop).
-        self._ensure_gemm_launcher()
+        if self.spec.use_grouped_gemm:
+            self._ensure_gemm_launcher()
 
         # ---------------- Stage 1 + 2: router + sort ----------------
         # 1 launch (topk-softmax) + 3 launches (sort) chained on ``stream``

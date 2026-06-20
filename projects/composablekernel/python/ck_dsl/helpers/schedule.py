@@ -29,6 +29,7 @@ both wave-level prio bookends and intrawave group barriers.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -70,6 +71,13 @@ VMEM_WRITE = 0x040
 DS_READ = 0x100  # LDS load
 DS_WRITE = 0x200  # LDS store
 TRANS = 0x400  # transcendentals (v_exp_f32, v_log_f32, v_rcp_f32, ...)
+
+# WMMA matrix ops reuse the MFMA sched-group class. The AMDGPU
+# ``sched_group_barrier`` MFMA mask (0x008) matches both MFMA *and* WMMA
+# instructions on the GFX12 programming model (LLVM ``SIInstrInfo::isMFMAorWMMA``
+# backs ``SchedGroupMask::MFMA``), so the same 0x008 bit groups the WMMA pipe on
+# RDNA3/4 (gfx11/gfx12) and gfx1250-class gfx1250. Aliased for call-site clarity.
+WMMA = MFMA
 
 
 @dataclass(frozen=True)
@@ -292,6 +300,93 @@ class HotLoopInstList:
 
 
 @dataclass(frozen=True)
+class WmmaHotLoopInstList:
+    """Per-K-tile instruction counts for a WMMA-class GEMM hot loop (wave32).
+
+    The RDNA / GFX12 sibling of :class:`HotLoopInstList`, usable by any WMMA
+    matmul (universal GEMM WMMA path, block-scaled GEMM, the fused-MoE WMMA
+    mega, WMMA attention). WMMA's per-lane operand fragments are wider than
+    MFMA's (A/B carry the full atom-K, e.g. ``<16 x half>`` for the gfx1250
+    16x16x32 atom) and fp16/bf16 LDS reads cap at 8 lanes (16 B), so one operand
+    fragment lowers to ``ceil(frag_bytes / 16)`` ``ds_read`` instructions. These
+    are the concrete per-K-tile tallies the WMMA emitters actually produce, so
+    the scheduler groups line up with the real instruction stream rather than a
+    wave64 MFMA-cycle model (WMMA has no ``C_MFMA_Inst_Cycle`` table).
+
+    Counts are split by region so a caller can schedule the *compute* region
+    (``ds_read`` + ``wmma``, the common single-LDS-buffer / prefetch layout where
+    the LDS stores + global loads sit in a different barrier region) or a fused
+    single region (all four classes).
+    """
+
+    n_wmma: int  # WMMA ops per K-tile (all warp atoms x k_atoms x B-operands)
+    n_ds_read: int  # ds_read insts (operand fragment LDS loads)
+    n_ds_write: int  # ds_write insts (operand LDS stores; 0 if separate region)
+    n_vmem_read: int  # global/buffer loads (0 if separate region)
+
+    @classmethod
+    def from_geometry(
+        cls,
+        *,
+        block_size: int,
+        m_per_block: int,
+        n_per_block: int,
+        k_per_block: int,
+        m_repeat: int,
+        n_repeat: int,
+        m_per_wmma: int,
+        n_per_wmma: int,
+        k_per_wmma: int,
+        a_frag_len: int,
+        b_frag_len: int,
+        num_b_operands: int = 1,
+        a_buffer_load_width: int = 0,
+        b_buffer_load_width: int = 0,
+        a_dtype_bytes: int = 2,
+        b_dtype_bytes: int = 2,
+        lds_read_bytes: int = 16,
+        include_loads: bool = False,
+    ) -> "WmmaHotLoopInstList":
+        """Build the WMMA inst list from tile geometry + fragment widths.
+
+        ``m_repeat`` / ``n_repeat`` are the per-warp WMMA-atom counts along M / N
+        (``mfmas_per_warp_m`` / ``_n``); ``num_b_operands`` is the number of B
+        matrices fed from one shared A read (1 for a plain GEMM, 2 for the fused
+        gate+up). ``a_frag_len`` / ``b_frag_len`` are the per-lane operand vector
+        widths (16 for the gfx1250 16x16x32 fp16/bf16 atom). With
+        ``include_loads=True`` the LDS-store + global-load counts are filled (for
+        a fused single-region schedule); otherwise they are 0 (compute-only
+        region, the default for prefetch / single-buffer loops).
+        """
+        k_atoms = k_per_block // k_per_wmma
+        n_wmma = m_repeat * n_repeat * num_b_operands * k_atoms
+
+        a_reads_per_frag = max(1, math.ceil(a_frag_len * a_dtype_bytes / lds_read_bytes))
+        b_reads_per_frag = max(1, math.ceil(b_frag_len * b_dtype_bytes / lds_read_bytes))
+        # A fragment is loaded once per (m-atom, k-atom) and shared across the B
+        # operands; each B operand loads its own (n-atom, k-atom) fragments.
+        n_ds_read = (
+            m_repeat * k_atoms * a_reads_per_frag
+            + num_b_operands * n_repeat * k_atoms * b_reads_per_frag
+        )
+
+        n_ds_write = 0
+        n_vmem_read = 0
+        if include_loads and a_buffer_load_width and b_buffer_load_width:
+            a_vecs = m_per_block * k_per_block // (block_size * a_buffer_load_width)
+            b_vecs = n_per_block * k_per_block // (block_size * b_buffer_load_width)
+            n_vmem_read = a_vecs + num_b_operands * b_vecs
+            n_ds_write = n_vmem_read
+
+        return cls(
+            n_wmma=int(n_wmma),
+            n_ds_read=int(n_ds_read),
+            n_ds_write=int(n_ds_write),
+            n_vmem_read=int(n_vmem_read),
+        )
+
+
+@dataclass(frozen=True)
 class SchedulePolicy:
     """Named scheduler hint policy for an MFMA hot loop.
 
@@ -347,6 +442,10 @@ class SchedulePolicy:
                 setprio_level=1,
                 mode="intrawave",
             )
+        if pipeline in ("wmma_v1", "wmma"):
+            # WMMA intrawave schedule: ds_read/wmma interleave in the compute
+            # region (no MFMA-cycle model; see :class:`WmmaHotLoopInstList`).
+            return cls(name="wmma_v1", emit_hints=True, mode="intrawave")
         raise ValueError(f"unknown schedule policy {pipeline!r}")
 
     def emit_prologue(self, b: IRBuilder) -> None:
@@ -579,6 +678,85 @@ class SchedulePolicy:
             b.sched_group_barrier(MFMA, 1, 0)
             b.sched_group_barrier(VMEM_READ, 1, 0)
             b.sched_group_barrier(MFMA, il.c_mfma_inst_num // num_issue - 3, 0)
+        b.sched_barrier(0)
+
+    # ---- WMMA-class schedules (wave32; GFX11/GFX12/gfx1250) ----
+
+    def emit_wmma_compute_schedule(
+        self,
+        b: IRBuilder,
+        inst_list: WmmaHotLoopInstList,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Intrawave ``ds_read`` -> ``wmma`` interleave for the compute region.
+
+        The WMMA-class analog of the MFMA intrawave hint, for the common loop
+        layout where the operand LDS stores + global loads sit in a *separate*
+        barrier region (single-LDS-buffer / software-prefetch k-loops) so the
+        compute region between syncs holds only the operand ``ds_read`` fragment
+        loads and the ``wmma`` ops. The hints spread the ds_reads evenly across
+        the WMMA groups (one read group then its dependent WMMA), so the post-RA
+        scheduler keeps the matrix pipe fed instead of stalling on LDS latency,
+        then a trailing ``sched_barrier(0)`` fences the cluster so surrounding
+        VMEM / ds_write of the next tile cannot float into it. Issued once per
+        K-tile. No-op unless ``emit_hints`` (or ``force``); a no-op also when the
+        tile has no reads or no WMMAs.
+
+        Uses the WMMA (== MFMA, 0x008) sched-group mask, which the GFX12 LLVM
+        backend matches against WMMA via ``isMFMAorWMMA``.
+        """
+        if not (self.emit_hints or force):
+            return
+        n_read = int(inst_list.n_ds_read)
+        n_wmma = int(inst_list.n_wmma)
+        if n_read <= 0 or n_wmma <= 0:
+            return
+        per = (n_read + n_wmma - 1) // n_wmma  # ceil: reads spread over wmma groups
+        remaining = n_read
+        for _ in range(n_wmma):
+            if remaining > 0:
+                r = min(per, remaining)
+                b.sched_group_barrier(DS_READ, r, 0)
+                remaining -= r
+            b.sched_group_barrier(WMMA, 1, 0)
+        if remaining > 0:
+            b.sched_group_barrier(DS_READ, remaining, 0)
+        b.sched_barrier(0)
+
+    def emit_wmma_hotloop(
+        self,
+        b: IRBuilder,
+        inst_list: WmmaHotLoopInstList,
+        *,
+        force: bool = False,
+    ) -> None:
+        """v4-style single-region WMMA schedule (loads + stores + compute fused).
+
+        For WMMA loops that keep the global load, LDS store, ds_read and WMMA of
+        one K-tile in a *single* barrier region. Issues one combined group per
+        buffer-load (``WMMA / DS_READ / WMMA / DS_WRITE / WMMA / VMEM / WMMA``),
+        mirroring :meth:`emit_compv4_hotloop`, then a ``sched_barrier(0)`` fence.
+        Falls back to :meth:`emit_wmma_compute_schedule` for WMMA-light tiles
+        whose ``n_wmma // num_issue`` would make the trailing group negative
+        (numerically identical -- both are pure scheduling hints). No-op unless
+        ``emit_hints`` (or ``force``).
+        """
+        if not (self.emit_hints or force):
+            return
+        il = inst_list
+        num_issue = il.n_vmem_read
+        if num_issue <= 0 or il.n_wmma // num_issue < 3:
+            self.emit_wmma_compute_schedule(b, il, force=force)
+            return
+        for _ in range(num_issue):
+            b.sched_group_barrier(WMMA, 1, 0)
+            b.sched_group_barrier(DS_READ, il.n_ds_read // num_issue, 0)
+            b.sched_group_barrier(WMMA, 1, 0)
+            b.sched_group_barrier(DS_WRITE, il.n_ds_write // num_issue, 0)
+            b.sched_group_barrier(WMMA, 1, 0)
+            b.sched_group_barrier(VMEM_READ, 1, 0)
+            b.sched_group_barrier(WMMA, il.n_wmma // num_issue - 3, 0)
         b.sched_barrier(0)
 
     def assert_expected_ir(self, stats: LlvmIrStats) -> None:

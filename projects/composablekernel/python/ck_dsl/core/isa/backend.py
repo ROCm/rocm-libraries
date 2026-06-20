@@ -12,10 +12,13 @@ Status (first milestone): for the CDNA targets wired up today (gfx942 / gfx950)
 the datalayout, triple, and the ``s_waitcnt`` *layout* are identical — this is
 hardware-verified for the base f16 GEMM path on both MI300X and MI350X. The
 backend therefore selects the same shared constants for both, while exposing
-distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``) and the
-``arch.vmcnt_bits`` fact so genuinely divergent codegen (e.g. gfx908, or a
-gfx942 ``compv4`` partial-waitcnt that needs the 4-bit VMCNT field) plugs in
-here without touching ``_Lowerer``. See
+distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
+``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
+asserts it against the encoder's representable field width
+(:data:`ISABackend._VMCNT_ENCODER_BITS`), so genuinely divergent codegen (e.g.
+gfx908, or a future target whose VMCNT field is wider than the current 6-bit
+encoders emit) fails loudly here instead of silently truncating a partial wait
+into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
 This module imports only from ``core/arch`` at module load; the shared LLVM
@@ -25,7 +28,7 @@ import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Union
+from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 
@@ -44,16 +47,23 @@ class ISABackend:
 
         return _TRIPLE
 
-    @property
-    def datalayout(self) -> str:
-        from ..lower_llvm import _DATALAYOUT
+    def datalayout(self, llvm_flavor: str) -> str:
+        """Module ``target datalayout`` for this target under ``llvm_flavor``.
 
-        return _DATALAYOUT
+        The string is LLVM-version-keyed, not gfx-keyed (every wired arch
+        shares one datalayout; only the ``p8`` field drifts between LLVM
+        20 and 22), so the backend defers to
+        :func:`~ck_dsl.core.lower_llvm._datalayout_for_flavor`.
+        """
+        from ..lower_llvm import _datalayout_for_flavor
 
-    def module_preamble(self) -> str:
+        return _datalayout_for_flavor(llvm_flavor)
+
+    def module_preamble(self, llvm_flavor: str) -> str:
         """The two leading IR lines: ``target datalayout`` + ``target triple``."""
         return (
-            f'target datalayout = "{self.datalayout}"\ntarget triple = "{self.triple}"'
+            f'target datalayout = "{self.datalayout(llvm_flavor)}"\n'
+            f'target triple = "{self.triple}"'
         )
 
     # --- buffer resource descriptor --------------------------------------
@@ -72,14 +82,40 @@ class ISABackend:
         return 0x00027000
 
     # --- s_waitcnt -------------------------------------------------------
+    #
+    # Widest VMCNT field this backend's encoder can physically represent. The
+    # gfx9/10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) emits a
+    # 6-bit value; the RDNA contiguous layout (``[15:10]``) is also 6-bit. This
+    # is the *encoder capability*, distinct from any one arch's declared
+    # ``vmcnt_bits`` -- e.g. gfx942 declares a 4-bit field but is lowered
+    # through this 6-bit-capable encoder (HW-verified on MI300X). The guard in
+    # :meth:`encode_waitcnt` consults ``arch.vmcnt_bits`` so a future target
+    # whose field is *wider* than the encoder can emit fails loudly instead of
+    # silently truncating a wait into a full VMEM drain.
+    _VMCNT_ENCODER_BITS: int = 6
+
     def encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
-        """Encode an ``s_waitcnt`` immediate. The gfx9/gfx10 split layout
-        (VMCNT across ``[3:0]`` and ``[15:14]``) is shared across the CDNA
-        targets we lower today; ``arch.vmcnt_bits`` records the field width
-        for future divergence."""
+        """Encode an ``s_waitcnt`` immediate.
+
+        The gfx9/gfx10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) is
+        shared across the CDNA targets we lower today. ``arch.vmcnt_bits`` is
+        asserted against :data:`_VMCNT_ENCODER_BITS` (the field width this
+        encoder produces) so divergence -- a target declaring a wider VMCNT than
+        the encoder emits -- is caught here rather than miscompiled.
+        """
+        self._check_vmcnt_width()
         from ..lower_llvm import _encode_waitcnt_gfx9_10
 
         return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)
+
+    def _check_vmcnt_width(self) -> None:
+        if self.arch.vmcnt_bits > self._VMCNT_ENCODER_BITS:
+            raise NotImplementedError(
+                f"{self.arch.gfx} declares a {self.arch.vmcnt_bits}-bit VMCNT "
+                f"field but {type(self).__name__}.encode_waitcnt emits only "
+                f"{self._VMCNT_ENCODER_BITS} bits; a wider s_waitcnt encoder is "
+                f"needed before this target can lower correctly"
+            )
 
     # --- matrix ops ------------------------------------------------------
     def emit_mma(self, lowerer, op) -> None:
@@ -106,6 +142,58 @@ class ISABackend:
             loc=op.loc,
         )
         lowerer.lower_op(legacy)
+
+    @property
+    def emits_legacy_s_waitcnt(self) -> bool:
+        """Whether ``llvm.amdgcn.s.waitcnt`` is selectable on this target.
+
+        gfx9 / gfx10 / gfx11 support the monolithic ``s_waitcnt`` intrinsic, so
+        the lowerer emits an explicit ``s_waitcnt`` before LDS barriers. gfx1250
+        (gfx1250) removed it in favour of split wait counters and overrides this
+        to ``False`` (see :class:`Gfx1250Backend`)."""
+        return True
+
+    @property
+    def has_async_lds_counter(self) -> bool:
+        """Whether the target has the gfx1250 dedicated async-DMA counter
+        (``s_wait_asynccnt`` + ``global_load_async_to_lds``). Only gfx1250
+        (gfx1250) overrides this to ``True``; elsewhere the async-to-LDS
+        instructions do not exist, so ``s_wait_asynccnt`` lowers to nothing."""
+        return False
+
+    def ds_tr16_b128_spec(self, elem_type: str = "f16"):
+        """``(need_key, intrinsic, llvm_ret_ty)`` for the wide 16-bit
+        transpose-LDS read (logical element ``elem_type``) used to feed the
+        MFMA/WMMA B operand.
+
+        Default is the gfx950 ``ds_read_b128_tr_b16`` whose intrinsic returns a
+        type-agnostic ``<8 x i16>``; the lowerer bitcasts those raw 16-bit lanes
+        to the requested ``half`` / ``bfloat`` element, so a single spec serves
+        both f16 and bf16. gfx1250 (gfx1250) overrides with an
+        element-type-specific ``ds_load_tr16_b128`` intrinsic (its wave32
+        per-lane data distribution also differs — kernels must use the layout
+        appropriate to the target). Fail fast for any unsupported element."""
+        if elem_type not in ("f16", "fp16", "bf16"):
+            raise NotImplementedError(
+                f"ds_read_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
+                f"got elem_type={elem_type!r}"
+            )
+        return ("ds.read.tr16.b128", "llvm.amdgcn.ds.read.tr16.b128", "<8 x i16>")
+
+    def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
+        """Emit the memory wait that must precede an LDS workgroup barrier.
+
+        An ``s_barrier`` only synchronises waves; it does not drain outstanding
+        LDS (and, when ``drain_vmem``, VMEM->LDS) traffic. Without this wait a
+        post-barrier reader can observe stale LDS — and on a single-wave
+        workgroup (where the barrier is a NOP) the same-wave LDS write->read is
+        unordered entirely. gfx9/10/11 use the monolithic ``s_waitcnt``
+        (lgkmcnt[, vmcnt]); gfx1250 (gfx1250) overrides this with split counters."""
+        mask = self.encode_waitcnt(
+            vmcnt=0 if drain_vmem else -1, expcnt=-1, lgkmcnt=0
+        )
+        lowerer._need("s.waitcnt")
+        lowerer._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
     def emit_wmma(self, lowerer, op) -> None:
         """Emit an RDNA WMMA matrix op. Only RDNA backends implement this;
@@ -198,6 +286,50 @@ _RDNA_GFX12_WMMA = {
         "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
         "bfloat",
         "i16",
+    ),
+}
+
+
+# gfx1250 (gfx1250) WMMA. CDNA multi-chip on the GFX12 programming model. The
+# primary fp16/bf16 atom is K=32 (not gfx1201's K=16): A/B are <16 x ...> per
+# lane and the intrinsic takes the gfx1250 8-operand form
+# (i1 negA, A, i1 negB, B, i16 fmt, C, i1 reuseA, i1 reuseB). Unlike gfx11/gfx12,
+# bf16 lowers to <16 x bfloat> directly (v16bf16), so there is no i16 bitcast.
+# op.name -> (decl key, fully-mangled intrinsic, SSA/call operand element type).
+_GFX1250_WMMA = {
+    "tile.wmma_gfx1250_f32_16x16x32_f16": (
+        "wmma.gfx1250.f32.16x16x32.f16",
+        "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
+        "half",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x32_bf16": (
+        "wmma.gfx1250.f32.16x16x32.bf16",
+        "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
+        "bfloat",
+    ),
+}
+
+
+# gfx1250 (gfx1250) FP8/BF8 WMMA, K=64. A/B are 32 low-bit bytes per lane carried
+# as <8 x i32> at the intrinsic boundary; the 6-operand form is
+# (A, B, i16 fmt, C, i1, i1) -- no leading neg flags, unlike the K=32 f16/bf16
+# form. op.name -> (decl key, fully-mangled intrinsic).
+_GFX1250_WMMA_FP8 = {
+    "tile.wmma_gfx1250_f32_16x16x64_fp8_fp8": (
+        "wmma.gfx1250.f32.16x16x64.fp8.fp8",
+        "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_fp8_bf8": (
+        "wmma.gfx1250.f32.16x16x64.fp8.bf8",
+        "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_bf8_fp8": (
+        "wmma.gfx1250.f32.16x16x64.bf8.fp8",
+        "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
+    ),
+    "tile.wmma_gfx1250_f32_16x16x64_bf8_bf8": (
+        "wmma.gfx1250.f32.16x16x64.bf8.bf8",
+        "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
     ),
 }
 
@@ -306,7 +438,9 @@ class Gfx11RdnaBackend(ISABackend):
         # split the base encodes: contiguous expcnt[2:0] / lgkmcnt[9:4] /
         # vmcnt[15:10] (no split VMCNT, 6-bit LGKMCNT). The layout was read
         # off the ROCm 7.0.2 AMDGPU assembler on a gfx1151 node; see
-        # _encode_waitcnt_gfx11 for the empirical encodings.
+        # _encode_waitcnt_gfx11 for the empirical encodings. Also a 6-bit VMCNT
+        # field, so the base _VMCNT_ENCODER_BITS guard applies unchanged.
+        self._check_vmcnt_width()
         from ..lower_llvm import _encode_waitcnt_gfx11
 
         return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
@@ -352,8 +486,123 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
         )
 
 
+class Gfx1250Backend(Gfx12RdnaBackend):
+    """gfx1250-class (gfx1250) CDNA device on the GFX12 programming model.
+    **wave32**, **WMMA** (no MFMA), with the K=32 fp16/bf16 atom. Datalayout /
+    triple are byte-identical to gfx950/gfx1201 (verified on ROCm 7.13), so they
+    are inherited. Only :meth:`emit_wmma` diverges: the gfx1250 16x16x32 form has
+    16-wide operands and the 8-operand intrinsic signature, and bf16 lowers to
+    ``<16 x bfloat>`` directly (no i16 bitcast).
+
+    NOTE (gfx1250 model): the inherited buffer SRD word3 and gfx11
+    ``s_waitcnt`` layout are placeholders adequate for flat-global WMMA GEMM
+    bring-up; the gfx1250 57-bit SRD and split wait-counter model are deferred
+    (see gfx1250_universal_attention_plan.md, Leg A Phase 2/3)."""
+
+    @property
+    def emits_legacy_s_waitcnt(self) -> bool:
+        # gfx1250 (gfx1250) replaced the monolithic ``s_waitcnt`` with split wait
+        # counters (``s_wait_dscnt`` / ``s_wait_loadcnt`` / ...). The
+        # ``llvm.amdgcn.s.waitcnt`` intrinsic is NOT selectable on gfx1250.
+        return False
+
+    @property
+    def has_async_lds_counter(self) -> bool:
+        # gfx1250 (gfx1250) has ``global_load_async_to_lds`` tracked by a
+        # dedicated ``ASYNCcnt`` drained via ``s_wait_asynccnt``.
+        return True
+
+    def ds_tr16_b128_spec(self, elem_type: str = "f16"):
+        # gfx1250 (gfx1250) wave32 ``ds_load_tr16_b128`` is overloaded on the
+        # result element type. Select the intrinsic matching the op's element
+        # type so an f16 read does not reinterpret a bf16 payload (and vice
+        # versa); fail fast for anything the opcode cannot carry.
+        if elem_type == "bf16":
+            return (
+                "ds.load.tr16.b128.v8bf16",
+                "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
+                "<8 x bfloat>",
+            )
+        if elem_type in ("f16", "fp16"):
+            return (
+                "ds.load.tr16.b128.v8f16",
+                "llvm.amdgcn.ds.load.tr16.b128.v8f16",
+                "<8 x half>",
+            )
+        raise NotImplementedError(
+            f"ds_load_tr16_b128 on {self.arch.gfx} supports f16/bf16 only, "
+            f"got elem_type={elem_type!r}"
+        )
+
+    def emit_lds_barrier_drain(self, lowerer, *, drain_vmem: bool) -> None:
+        # gfx1250 split counters. The raw ``llvm.amdgcn.s.barrier`` does NOT get
+        # an auto-inserted pre-barrier ``s_wait_dscnt``, so the LDS write->read
+        # (e.g. P-staging -> PV read) would race and read stale LDS -> NaN. Emit
+        # the explicit drain: dscnt for LDS, plus loadcnt for the VMEM->LDS chain.
+        # clang fuses these into ``s_wait_loadcnt_dscnt 0`` before the barrier.
+        if drain_vmem:
+            lowerer._need("s.wait.loadcnt")
+            lowerer._current().emit(
+                "  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)"
+            )
+        lowerer._need("s.wait.dscnt")
+        lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
+
+    def emit_wmma(self, lowerer, op) -> None:
+        fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
+        if fp8_spec is not None:
+            self._emit_wmma_fp8(lowerer, op, fp8_spec)
+            return
+        spec = _GFX1250_WMMA.get(op.name)
+        if spec is None:
+            raise NotImplementedError(
+                f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
+                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8)}"
+            )
+        decl_key, intrinsic, elt = spec
+        a, b, c = op.operands
+        lowerer._need(decl_key)
+        a_arg = lowerer._operand(a)
+        b_arg = lowerer._operand(b)
+        # gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C, i1, i1).
+        # bf16 operands are <16 x bfloat> directly (no i16 bitcast).
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i1 false, <16 x {elt}> {a_arg}, "
+            f"i1 false, <16 x {elt}> {b_arg}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+    def _emit_wmma_fp8(self, lowerer, op, spec) -> None:
+        """Emit a gfx1250 K=64 FP8/BF8 WMMA call.
+
+        The A/B fragments arrive in SSA as ``<8 x i32>`` (32 low-bit bytes per
+        lane). The 6-operand form is ``(A, B, i16 fmt, C, i1, i1)`` with the
+        format / reuse immediates pinned to 0 (plain unscaled MMA).
+        """
+        decl_key, intrinsic = spec
+        a, b, c = op.operands
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"<8 x i32> {lowerer._operand(a)}, "
+            f"<8 x i32> {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+
 # gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
 # actually diverges, a new subclass.
+#
+# Some rows are forward-declarations: the backend class is wired here before the
+# matching ``core/arch/data/arch_specs.json`` row exists (gfx908 / gfx90a reuse
+# ``Gfx9MfmaBackend`` and are kept for upcoming enablement). ``backend_for``
+# resolves the :class:`ArchTarget` first, so such a row reports a clean
+# "metadata not yet present" error from this layer rather than a raw arch-layer
+# ``KeyError``. ``wired_arches()`` returns only the rows that have arch metadata
+# and can actually build a backend today.
 BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx908": Gfx9MfmaBackend,
     "gfx90a": Gfx9MfmaBackend,
@@ -361,13 +610,47 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx950": Gfx950Backend,
     "gfx1151": Gfx11RdnaBackend,
     "gfx1201": Gfx12RdnaBackend,
+    "gfx1250": Gfx1250Backend,
     "gfx11-generic": Gfx11RdnaBackend,
 }
 
 
+def wired_arches() -> Tuple[str, ...]:
+    """gfx targets that have BOTH a backend row and arch metadata today.
+
+    A backend row may be a forward-declaration (registered before its
+    ``arch_specs.json`` row lands); those are excluded here because
+    :func:`backend_for` cannot construct them yet.
+    """
+    from ..arch import known_arches
+
+    known = set(known_arches())
+    return tuple(sorted(g for g in BACKEND_REGISTRY if g in known))
+
+
 def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
     """Resolve a gfx string or :class:`ArchTarget` to its ISA backend."""
-    target = arch if isinstance(arch, ArchTarget) else ArchTarget.from_gfx(arch)
+    if isinstance(arch, ArchTarget):
+        target = arch
+    else:
+        cls = BACKEND_REGISTRY.get(arch)
+        if cls is None:
+            raise KeyError(
+                f"no ISA backend registered for {arch!r}; "
+                f"known: {sorted(BACKEND_REGISTRY)}"
+            )
+        try:
+            target = ArchTarget.from_gfx(arch)
+        except KeyError as exc:
+            # Backend row exists but the arch metadata does not: a
+            # forward-declared target (e.g. gfx908 / gfx90a) that is not yet
+            # buildable. Report it as such instead of leaking the arch-layer
+            # "unknown gfx target" message.
+            raise KeyError(
+                f"ISA backend for {arch!r} is forward-declared but has no "
+                f"arch_specs.json metadata yet; buildable now: "
+                f"{list(wired_arches())}"
+            ) from exc
     cls = BACKEND_REGISTRY.get(target.gfx)
     if cls is None:
         raise KeyError(

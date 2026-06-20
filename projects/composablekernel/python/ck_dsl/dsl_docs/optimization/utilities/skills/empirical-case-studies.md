@@ -149,6 +149,15 @@ else:  # 96KB ≤ LDS < 128KB
 
 This is why XOR swizzle's ALU overhead is more severe on gfx950 than architectures where scheduling barriers are respected.
 
+**UPDATE — the directives the kernel ALREADY emits can be net-negative.** The point
+above ("you cannot *rely on* added scheduling barriers") has a stronger corollary
+measured on square GEMM: the `sched_group_barrier` HotLoop + per-cluster
+`s_setprio`/`sched_barrier(0)` that the compv4 pipeline emits *over-constrain* comgr's
+backend on gfx950, and **removing them is a +1.9–2.5% uplift** (MfmaUtil 63%→68%). So
+the guidance is not merely "manual hints don't help" — on gfx950 the hints a kernel
+transcribes from a reference can actively hurt. See **Case Study 7**. Lever:
+`TraitSpec.emit_sched_hints` (default `None` = arch-resolved, hints OFF on gfx950).
+
 ### Opcode-Specific Conflict Behavior (gfx950/MI350X)
 
 From empirical LDS studies on MI350X:
@@ -269,6 +278,63 @@ From empirical LDS studies on MI350X:
 - Pure GEMM: 75-85% of theoretical peak
 
 This is an **algorithmic constraint**, not an implementation quality issue.
+
+---
+
+## Case Study 7: Schedule Directives Are Net-Negative on gfx950 GEMM (+2%)
+
+**Context**: Square fp16/bf16 GEMM (8192³, 256×256×64 tile, compv4 "rung F"), chasing
+the ~15% gap to rocBLAS. The compv4 path emits a full schedule — a two-stage
+`sched_group_barrier` HotLoop plus per-MFMA-cluster `s_setprio(1/0)` + `sched_barrier(0)`
+fences — transcribed from the CK Tile C++ reference.
+
+### Finding
+
+Removing ALL of those directives and letting comgr schedule freely is a real,
+correctness-preserving uplift — the first positive lever after exhausting AGPR form,
+grid/chiplet swizzle, comgr scheduler flags, `iglp_opt`, tile/warp/K sweeps,
+hipcc-vs-comgr, MFMA atom shape, `waves_per_eu`, and register read-ahead (all
+neutral/negative on this kernel).
+
+| variant (square fp16 8192³)     | /rocBLAS | MfmaUtil |
+|---------------------------------|---------:|---------:|
+| compv4 with schedule directives | 0.834    | 63.0%    |
+| compv4 directives removed       | 0.854    | 67.8%    |
+
+Generality: +2.3% fp16, +2.1% bf16 (0.846→0.864), +1.9–2.5% on rectangular shapes.
+Works on the default comgr path (no hipcc).
+
+### Why (measured mechanism)
+
+The kernel is MFMA+LDS **latency-bound**, not memory-bound (`MemUnitStalled` ≈ 0). The
+`sched_barrier(0)` (mask 0) is a *full* fence the compiler cannot move loads across, so
+the directives simultaneously *describe* a load/compute interleave
+(`sched_group_barrier`) and *forbid* it. On gfx950 the hardware scheduler does better
+unconstrained; the +5 pt MFMA-utilization IS the +2% wall-clock.
+
+### Proof (statistically definitive)
+
+GPU-event (kernel-only) paired timing, 200 cycles × 80 launches: faster in **200/200**
+cycles, median ratio **1.019**, 95% CI [1.0189, 1.0198], worst cycle still +1.1%,
+Wilcoxon p = 1.4×10⁻³⁴. `relerr=0` on full 8192³ AND the K-sweep {1,2,3,5,16} race
+detector — NOT a racy-fast artifact (an earlier "+4%" warp-group ping-pong WAS such an
+artifact and was discarded). Builds are deterministic; the hinted and un-hinted kernels
+are distinct code objects.
+
+### Lever
+
+`TraitSpec.emit_sched_hints`: `None` (default) is arch-resolved — hints OFF on gfx950
+(takes the uplift), ON elsewhere (preserves the historical emission). `True`/`False`
+forces the choice. Keep the directives for the older CDNA the CK Tile reference was
+tuned for — this is a gfx950 finding.
+
+### Lesson
+
+Faithfully transcribing a reference kernel's *schedule* can REGRESS on a backend whose
+hardware scheduler is already strong. When MfmaUtil is the binding metric and the kernel
+is latency-bound, try REMOVING scheduling directives, not adding them. Extends Case
+Study 2: it's not just that manual hints can't be relied on — the hints you already emit
+can hurt.
 
 ---
 

@@ -41,7 +41,7 @@ GEMM family
  follow-up list.
 
 Convolution family
- - `build_implicit_gemm_conv` : NHWC × KRSC -> NHWK implicit-GEMM conv.
+ - `build_implicit_gemm_conv` : NHWC × KYXC -> NHWK implicit-GEMM conv.
  - `build_direct_conv_16c` : `cpg=kpg=16` grouped direct conv with
  K=32 folding.
  - `build_direct_conv_4c` : `cpg=kpg=4` grouped direct conv via

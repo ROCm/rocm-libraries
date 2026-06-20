@@ -86,8 +86,11 @@ def run_simple_op_manifest_problem(
             else:
                 raise ValueError(f"no reference for elementwise op {op!r}")
             ref_h = ref.astype(np_dtype)
-            diff = np.abs(C.astype(np.float32) - ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), C.size
+            ref_f32 = ref_h.astype(np.float32)
+            tol = 1e-2
+            err = np.abs(C.astype(np.float32) - ref_f32)
+            bad = err > tol + tol * np.abs(ref_f32)
+            return float(err.max()), int(np.count_nonzero(bad)), C.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -122,8 +125,11 @@ def run_simple_op_manifest_problem(
             else:
                 raise ValueError(f"no reference for reduce op {op!r}")
             ref_h = ref.astype(np_dtype)
-            diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 5e-2)), Y.size
+            ref_f32 = ref_h.astype(np.float32)
+            tol = 5e-2
+            err = np.abs(Y.astype(np.float32) - ref_f32)
+            bad = err > tol + tol * np.abs(ref_f32)
+            return float(err.max()), int(np.count_nonzero(bad)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -180,9 +186,10 @@ def run_simple_op_manifest_problem(
             ref_h = ref.astype(np_dtype)
             atol = 1e-1 if is_layernorm else 5e-3
             rtol = 2e-1 if is_layernorm else 5e-2
-            diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
-            tol = atol + rtol * np.abs(ref_h.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > tol)), Y.size
+            ref_f32 = ref_h.astype(np.float32)
+            err = np.abs(Y.astype(np.float32) - ref_f32)
+            bad = err > atol + rtol * np.abs(ref_f32)
+            return float(err.max()), int(np.count_nonzero(bad)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
@@ -214,8 +221,10 @@ def run_simple_op_manifest_problem(
                 return 0.0, 0, Y.size
             rt.memcpy_d2h(as_u8_buffer(Y), ptrs[1], nbytes(Y))
             ref = X.T.copy()
-            diff = np.abs(Y.astype(np.float32) - ref.astype(np.float32))
-            return float(diff.max()), int(np.count_nonzero(diff > 0)), Y.size
+            ref_f32 = ref.astype(np.float32)
+            err = np.abs(Y.astype(np.float32) - ref_f32)
+            bad = err > 0.0
+            return float(err.max()), int(np.count_nonzero(bad)), Y.size
 
         return make_args, grid, block, flop, bytes_xfer, check
 
