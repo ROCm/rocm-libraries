@@ -1448,6 +1448,54 @@ split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, 
     return cnt;
 }
 
+/* Count top-level fields (separated by `sep` at depth 0, ignoring quoted strings
+ * and bracketed groups), mirroring split_top's scan. Used to size result/operand
+ * buffers to the actual arity instead of a fixed cap. Returns >= 1. */
+static int count_top(const char* s, size_t n, char sep)
+{
+    int cnt    = 1;
+    int depth  = 0;
+    int in_str = 0;
+    size_t i   = 0;
+    while(i < n)
+    {
+        char ch = s[i];
+        if(in_str)
+        {
+            if(ch == '\\')
+            {
+                i += 2;
+                continue;
+            }
+            if(ch == '"')
+            {
+                in_str = 0;
+            }
+        }
+        else
+        {
+            if(ch == '"')
+            {
+                in_str = 1;
+            }
+            else if(ch == '<' || ch == '[' || ch == '{' || ch == '(')
+            {
+                ++depth;
+            }
+            else if(ch == '>' || ch == ']' || ch == '}' || ch == ')')
+            {
+                --depth;
+            }
+            else if(ch == sep && depth == 0)
+            {
+                ++cnt;
+            }
+        }
+        ++i;
+    }
+    return cnt;
+}
+
 static ckc_region_t* parse_region(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* vt);
 
 /* Register block-defined SSA values for an scf.for op (iv + iter-args), so the
@@ -1462,8 +1510,17 @@ static void register_block_values(
     {
         return;
     }
-    const char* added[64];
+    /* Capacity = the induction var (at most 1) + every iter-arg; an scf.for can
+     * carry dozens, so size to the actual count rather than a fixed cap. */
+    const ckc_attr_value_t* ia = ckc_attr_get(&op->attrs, "iter_args");
+    int added_cap              = 1 + ((ia && ia->kind == CKC_ATTR_LIST) ? ia->u.list.count : 0);
+    const char** added =
+        (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)added_cap);
     int na = 0;
+    if(!added)
+    {
+        return;
+    }
 
     const char* iv      = ckc_attr_get_str(&op->attrs, "iv");
     const char* iv_type = ckc_attr_get_str(&op->attrs, "iv_type");
@@ -1477,14 +1534,10 @@ static void register_block_values(
             {
                 v->op = op;
                 vt_put(vt, v->name, v);
-                if(na < 64)
-                {
-                    added[na++] = v->name;
-                }
+                added[na++] = v->name;
             }
         }
     }
-    const ckc_attr_value_t* ia = ckc_attr_get(&op->attrs, "iter_args");
     if(ia && ia->kind == CKC_ATTR_LIST && ia->u.list.count > 0)
     {
         for(int i = 0; i < ia->u.list.count; ++i)
@@ -1502,10 +1555,7 @@ static void register_block_values(
                     {
                         v->op = op;
                         vt_put(vt, v->name, v);
-                        if(na < 64)
-                        {
-                            added[na++] = v->name;
-                        }
+                        added[na++] = v->name;
                     }
                 }
             }
@@ -1539,17 +1589,29 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
     const char* eq    = strstr(ln, " = ");
     const char* rest  = ln;
 
-    /* result Values, collected before op build */
-    const ckc_type_t* result_types[32];
-    const char* result_names[32];
-    int num_results = 0;
+    /* result Values, collected before op build. Sized to the actual arity:
+     * scf.for loops can yield dozens of results (online-softmax / multi-
+     * accumulator MoE), so a fixed cap would silently drop the overflow. */
+    const ckc_type_t** result_types = NULL;
+    const char** result_names       = NULL;
+    int num_results                 = 0;
 
     if(eq && (!paren || eq < paren))
     {
         size_t reslen = (size_t)(eq - ln);
-        const char* fstart[32];
-        size_t flen[32];
-        int nf = split_top(ln, reslen, ',', fstart, flen, 32);
+        int maxf      = count_top(ln, reslen, ',');
+        const char** fstart =
+            (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
+        size_t* flen = (size_t*)ckc_arena_alloc(&b->arena, sizeof(size_t) * (size_t)maxf);
+        result_types = (const ckc_type_t**)ckc_arena_alloc(
+            &b->arena, sizeof(const ckc_type_t*) * (size_t)maxf);
+        result_names = (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
+        if(!fstart || !flen || !result_types || !result_names)
+        {
+            ckc_i_set_err(b, CKC_ERR_OOM, "result buffer OOM");
+            return NULL;
+        }
+        int nf = split_top(ln, reslen, ',', fstart, flen, maxf);
         for(int i = 0; i < nf; ++i)
         {
             const char* fs = fstart[i];
@@ -1595,12 +1657,9 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
             {
                 return NULL;
             }
-            if(num_results < 32)
-            {
-                result_names[num_results] = rname;
-                result_types[num_results] = rt;
-                num_results++;
-            }
+            result_names[num_results] = rname;
+            result_types[num_results] = rt;
+            num_results++;
         }
         rest = eq + 3;
     }
@@ -1648,13 +1707,21 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         --op_str_len;
     }
 
-    ckc_value_t* operands[64];
-    int num_operands = 0;
+    ckc_value_t** operands = NULL;
+    int num_operands       = 0;
     if(op_str_len > 0)
     {
-        const char* fstart[64];
-        size_t flen[64];
-        int nf = split_top(after, op_str_len, ',', fstart, flen, 64);
+        int maxf = count_top(after, op_str_len, ',');
+        const char** fstart =
+            (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
+        size_t* flen = (size_t*)ckc_arena_alloc(&b->arena, sizeof(size_t) * (size_t)maxf);
+        operands = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)maxf);
+        if(!fstart || !flen || !operands)
+        {
+            ckc_i_set_err(b, CKC_ERR_OOM, "operand buffer OOM");
+            return NULL;
+        }
+        int nf = split_top(after, op_str_len, ',', fstart, flen, maxf);
         for(int i = 0; i < nf; ++i)
         {
             const char* fs = fstart[i];
@@ -1690,10 +1757,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
                               opname);
                 return NULL;
             }
-            if(num_operands < 64)
-            {
-                operands[num_operands++] = ov;
-            }
+            operands[num_operands++] = ov;
         }
     }
 

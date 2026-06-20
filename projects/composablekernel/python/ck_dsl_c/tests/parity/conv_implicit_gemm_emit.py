@@ -15,11 +15,26 @@ from ck_dsl.instances.common.conv_implicit_gemm import (
 )
 from _emit_common import run_emit
 
+import inspect as _inspect
+
+# The filter-window dimensions are spelled R/S in some trees and Y/X in others
+# (same dimensions: filter height/width). Build against whichever this tree's
+# ConvProblem exposes so the emitter is not tied to one spelling.
+_CONV_PARAMS = set(_inspect.signature(ConvProblem.__init__).parameters)
+
+
+def _cp(*, fy: int, fx: int, **kw):
+    if "Y" in _CONV_PARAMS:
+        kw["Y"], kw["X"] = fy, fx
+    else:
+        kw["R"], kw["S"] = fy, fx
+    return ConvProblem(**kw)
+
 
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`."""
     if idx == 0:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -37,7 +52,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 1:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -55,7 +70,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 2:
-        p = ConvProblem(N=16, Hi=112, Wi=112, C=128, K=128, Y=3, X=3)
+        p = _cp(N=16, Hi=112, Wi=112, C=128, K=128, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -73,7 +88,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 3:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -92,7 +107,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 4:
-        p = ConvProblem(N=1, Hi=224, Wi=224, C=3, K=64, Y=7, X=7)
+        p = _cp(N=1, Hi=224, Wi=224, C=3, K=64, fy=7, fx=7)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -110,7 +125,7 @@ def _spec(idx: int):
             "gfx950",
         )
     if idx == 5:
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=1, X=1)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=1, fx=1)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -130,7 +145,7 @@ def _spec(idx: int):
     if idx in (6, 7, 8):
         # WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32.
         arch = {6: "gfx1151", 7: "gfx1201", 8: "gfx11-generic"}[idx]
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,
@@ -150,7 +165,7 @@ def _spec(idx: int):
         )
     if idx == 9:
         # chiplet_swizzle gfx950.
-        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, fy=3, fx=3)
         return (
             ImplicitGemmConvSpec(
                 problem=p,

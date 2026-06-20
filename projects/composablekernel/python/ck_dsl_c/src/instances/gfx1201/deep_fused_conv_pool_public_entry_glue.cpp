@@ -43,7 +43,8 @@
 #include <string.h>
 
 #include "ckc/ir.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/ir_internal.h"      /* ckc_i_set_err */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/lower_llvm.h"
 
 /* ===================================================================== *
@@ -435,21 +436,26 @@ ckc_build_gfx1201_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
 ckc_kernel_def_t* ckc_build_gfx1201_deep_fused_conv_pool_new(
     ckc_ir_builder_t* b, const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec, const char* arch)
 {
-    char name[256];
+    /* Catch validity/build raises at this boundary so an invalid spec is
+     * reported as a clean NULL+error (matching the sibling instances) rather
+     * than escaping to std::terminate. */
+    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+        char name[256];
 
-    if(b == NULL || spec == NULL)
-    {
-        return NULL;
-    }
-    if(ckc_gfx1201_deep_fused_conv_pool_kernel_name(spec, name, sizeof(name)) != CKC_OK)
-    {
-        return NULL;
-    }
-    if(ckc_ir_builder_init(b, name) != CKC_OK)
-    {
-        return NULL;
-    }
-    return ckc_build_gfx1201_deep_fused_conv_pool(b, spec, arch);
+        if(b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if(ckc_gfx1201_deep_fused_conv_pool_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        {
+            return NULL;
+        }
+        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        {
+            return NULL;
+        }
+        return ckc_build_gfx1201_deep_fused_conv_pool(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *
