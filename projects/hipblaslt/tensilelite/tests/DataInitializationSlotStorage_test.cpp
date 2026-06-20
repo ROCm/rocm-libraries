@@ -344,6 +344,95 @@ TEST(DataInitializationSlotStorage, PristineOnGpuFalseDisablesWarmD2DReset)
     EXPECT_EQ(dataInit.activeRingSlot(), 0u);
 }
 
+TEST(DataInitializationSlotStorage, ProblemDependentDataDoesNotFastPath)
+{
+    auto hipDevice = hasHipDevice();
+    if(!hipDevice)
+    {
+        GTEST_SKIP() << hipDevice.message();
+    }
+
+    auto problem = makePlainProblem(32, 32, 32);
+    auto args    = makeRingArgs({{32, 32, 32}});
+    TensileLite::testing::detail::setDataInitArg(
+        args, "init-a", std::any(Client::InitMode::SerialDim0));
+
+    auto engine = std::make_shared<RecordingCopyEngine>();
+
+    ClientProblemFactory         factory(args);
+    SlotStorageDataInitialization dataInit(args, factory, engine);
+
+    auto inputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(inputs, nullptr);
+
+    EXPECT_TRUE(dataInit.ringPolicyAllowed());
+    EXPECT_TRUE(dataInit.ringPolicyAllocatesAltBuffers());
+    EXPECT_EQ(dataInit.activeBufferCount(), 3u);
+    EXPECT_TRUE(dataInit.hasAltBuffers());
+    EXPECT_TRUE(dataInit.warmOutputResetRequired());
+    EXPECT_EQ(dataInit.getCurBoundsCheck(), BoundsCheckMode::Disable);
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_TRUE(dataInit.altSlotsReady());
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+    auto const& slot0State = dataInit.slotState(0);
+    ASSERT_TRUE(slot0State.populated());
+    ASSERT_NE(slot0State.cachedInputs, nullptr);
+    auto const slot0Inputs = slot0State.cachedInputs;
+
+    auto const candidateSlot = dataInit.nextPrimeSlot();
+    ASSERT_TRUE(candidateSlot.has_value());
+    EXPECT_EQ(*candidateSlot, 1u);
+
+    auto const& candidateState = dataInit.slotState(*candidateSlot);
+    ASSERT_TRUE(candidateState.populated());
+    ASSERT_NE(candidateState.cachedInputs, nullptr);
+    auto const candidateInputs = candidateState.cachedInputs;
+    EXPECT_NE(candidateInputs, slot0Inputs);
+    EXPECT_EQ(inputs, slot0Inputs);
+
+    engine->clear();
+
+    dataInit.beginAsyncReset(&problem);
+
+    EXPECT_TRUE(engine->calls.empty());
+    EXPECT_FALSE(dataInit.ringEligible());
+    EXPECT_EQ(dataInit.slotState(*candidateSlot).cachedInputs, candidateInputs);
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+
+    auto secondInputs = dataInit.prepareGPUInputs(static_cast<ContractionProblem const*>(&problem));
+    ASSERT_NE(secondInputs, nullptr);
+    EXPECT_EQ(secondInputs, slot0Inputs);
+    EXPECT_NE(secondInputs, candidateInputs);
+    EXPECT_EQ(dataInit.slotState(*candidateSlot).cachedInputs, candidateInputs);
+    EXPECT_EQ(dataInit.activeRingSlot(), 0u);
+    EXPECT_EQ(dataInit.ringAvailableSlots(), 0u);
+    EXPECT_FALSE(dataInit.ringHasAvailableSlot());
+    EXPECT_FALSE(dataInit.ringNeedsCopyBarrier());
+    EXPECT_FALSE(dataInit.ringEligible());
+
+    dataInit.waitForPreparedSlot(nullptr);
+
+    bool sawRecordCopyDone = false;
+    bool sawWaitForCopyDone = false;
+    for(auto const& call : engine->calls)
+    {
+        if(call.type == RecordingCopyEngine::CallType::RecordCopyDone)
+            sawRecordCopyDone = true;
+        else if(call.type == RecordingCopyEngine::CallType::WaitForCopyDone)
+            sawWaitForCopyDone = true;
+    }
+
+    EXPECT_FALSE(sawRecordCopyDone);
+    EXPECT_FALSE(sawWaitForCopyDone);
+}
+
 TEST(DataInitializationSlotStorage, BoundsCheckDoesNotPrimeRing)
 {
     auto hipDevice = hasHipDevice();
