@@ -154,6 +154,11 @@ if(TARGET tensilelite::client-common)
     add_executable(client-run-scheduler-test
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunPolicies_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunScheduler_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientRunSchedulerProductionComposition_test.cpp"
+    )
+
+    target_include_directories(client-run-scheduler-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
 
     target_link_libraries(client-run-scheduler-test

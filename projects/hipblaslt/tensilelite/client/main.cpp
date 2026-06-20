@@ -35,6 +35,7 @@
 
 #include "BenchmarkTimer.hpp"
 #include "ClientRunScheduler.hpp"
+#include "ClientRunSchedulerAdapters.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
@@ -921,48 +922,6 @@ namespace TensileLite
 
         private:
             std::shared_ptr<MetaResultReporter> m_reporters;
-        };
-
-        class SchedulerDataCoordinatorAdapter final : public RunDataCoordinator
-        {
-        public:
-            explicit SchedulerDataCoordinatorAdapter(std::shared_ptr<DataInitialization> dataInit)
-                : m_dataInit(std::move(dataInit))
-            {
-            }
-
-            void resetPreparedSlotsForProblem() override
-            {
-                m_dataInit->resetPreparedSlotsForProblem();
-            }
-
-            std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblem const* problem) override
-            {
-                return m_dataInit->prepareGPUInputs(problem);
-            }
-
-            std::vector<std::shared_ptr<ProblemInputs>> prepareRotatingGPUOutput(
-                int32_t                        maxRotatingBufferNum,
-                ContractionProblem const*      problem,
-                std::shared_ptr<ProblemInputs> inputs,
-                hipStream_t                   stream) override
-            {
-                return m_dataInit->prepareRotatingGPUOutput(
-                    maxRotatingBufferNum, problem, std::move(inputs), stream);
-            }
-
-            void waitForPreparedSlot(hipStream_t stream) override
-            {
-                m_dataInit->waitForPreparedSlot(stream);
-            }
-
-            void primeNextInputSlot(ContractionProblem const* problem) override
-            {
-                m_dataInit->primeNextInputSlot(problem);
-            }
-
-        private:
-            std::shared_ptr<DataInitialization> m_dataInit;
         };
 
         class SchedulerSolutionSourceAdapter final : public RunSolutionSource
