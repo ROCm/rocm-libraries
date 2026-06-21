@@ -5202,14 +5202,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
 
-    # Route the subtile body through StinkyTofu when ScheduleIterAlg=4
-    # (remapped to _StinkyTofuOptLevel) selects it and the arch supports it.
-    # Subtile supplies its own neutral pass-through options.
+    # Always route the subtile body through StinkyTofu on supported arch.
+    # Subtile supplies its own options: a basic level (no wait-count insertion)
+    # by default, or the ScheduleIterAlg=4 level with wait-count insertion.
     st_asm = None
-    stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if rocisa.isSupportedByStinkyTofu(self.states.version):
       from .Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
-      stinky_module_options = buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, self)
+      stinky_module_options = buildSubtileStinkyTofuOptions(kernel, self)
       st_asm = self._maybeRunStinkyTofu(kernel, moduleKernelBody, fs,
                                         stinky_module_options=stinky_module_options)
 
@@ -6626,7 +6625,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
+    # The subtile path supplies its own options (and its own OptLevel), so it
+    # runs whenever the arch is supported. The classic path runs only when
+    # ScheduleIterAlg=4 selected an opt level.
+    runStinkyTofu = rocisa.isSupportedByStinkyTofu(self.states.version) and \
+        (stinky_module_options is not None or stinky_opt_level is not None)
+    if runStinkyTofu:
       print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()

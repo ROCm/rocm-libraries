@@ -324,22 +324,38 @@ def _build_minimal_kernel_body():
 
 
 class TestSubtileStinkyTofu:
-    """StinkyTofu wiring for the gfx1250 subtile path (Phase 0 + Phase 1)."""
+    """StinkyTofu wiring for the gfx1250 subtile path."""
 
-    # -- Phase 1: subtile options are a neutral pass-through --
+    # -- non-SIA4 subtile: basic options, no wait-count insertion --
 
-    def test_subtile_options_are_neutral_passthrough(self):
-        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+    def test_non_sia4_builds_basic_options(self):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            buildSubtileStinkyTofuOptions, SUBTILE_STINKYTOFU_BASIC_OPTLEVEL)
         kernel = _stinky_kernel()
-        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
-                                             _stinky_mock_writer())
-        # Pass-through: StinkyTofu must not insert/strip waits or barriers yet.
+        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
+        # Basic level: no wait-count insertion, but the kernel-scope passes
+        # (InsertVgprMsbPass) still run at OptLevel=0.
         assert opts["EnableWaitCntInsertion"] is False
+        assert opts["OptLevel"] == SUBTILE_STINKYTOFU_BASIC_OPTLEVEL == 0
+        # Barriers stay Python-owned.
         assert opts["ClusterBarrier"] is False
         # Subtile forces unit vector widths regardless of the kernel values.
         assert opts["VectorWidthA"] == 1
         assert opts["VectorWidthB"] == 1
+
+    # -- SIA=4 safe kernel: wait-count insertion at the SIA opt level --
+
+    def test_sia4_safe_kernel_enables_waitcnt(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()  # _StinkyTofuOptLevel=3, pure-TDM (safe)
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is True
         assert opts["OptLevel"] == 3
+        # Barriers remain Python-owned even with StinkyTofu waits on.
+        assert opts["ClusterBarrier"] is False
+        assert opts["VectorWidthA"] == 1
+        assert opts["VectorWidthB"] == 1
 
     def test_subtile_options_mirror_classic_keys(self):
         from Tensile.KernelWriter import KernelWriter
@@ -348,15 +364,13 @@ class TestSubtileStinkyTofu:
         writer = _stinky_mock_writer()
         classic = KernelWriter._classicStinkyTofuOptions(writer, kernel,
                                                          kernel["_StinkyTofuOptLevel"])
-        subtile = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
-                                                writer)
-        # Same option surface; only the neutral/forced values differ.
+        subtile = buildSubtileStinkyTofuOptions(kernel, writer)
+        # Same option surface; only the forced values differ.
         assert set(subtile.keys()) == set(classic.keys())
         differing = {k for k in classic if classic[k] != subtile[k]}
-        assert differing <= {"EnableWaitCntInsertion", "ClusterBarrier",
-                             "VectorWidthA", "VectorWidthB"}
+        assert differing <= {"ClusterBarrier", "VectorWidthA", "VectorWidthB"}
 
-    # -- Phase 1: subtile drives the helper and emits parseable asm --
+    # -- subtile drives the helper and emits parseable asm --
 
     def test_helper_emits_assembly_for_subtile(self):
         _init_rocisa_gfx1250()
@@ -365,7 +379,7 @@ class TestSubtileStinkyTofu:
         kernel = _stinky_kernel()
         writer = _stinky_mock_writer()
         kb, sig = _build_minimal_kernel_body()
-        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"], writer)
+        opts = buildSubtileStinkyTofuOptions(kernel, writer)
         asm = KernelWriter._maybeRunStinkyTofu(writer, kernel, kb, sig,
                                                stinky_module_options=opts)
         assert asm is not None
@@ -373,7 +387,23 @@ class TestSubtileStinkyTofu:
         assert 'amdgcn-amd-amdhsa--gfx1250' in asm
         assert 'kernel_name' in asm
 
-    # -- Phase 0: helper falls back (returns None) when StinkyTofu is off --
+    # -- subtile runs StinkyTofu even when ScheduleIterAlg != 4 (basic level) --
+
+    def test_helper_runs_for_basic_subtile(self):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()
+        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        writer = _stinky_mock_writer()
+        kb, sig = _build_minimal_kernel_body()
+        opts = buildSubtileStinkyTofuOptions(kernel, writer)
+        asm = KernelWriter._maybeRunStinkyTofu(writer, kernel, kb, sig,
+                                               stinky_module_options=opts)
+        assert asm is not None
+        assert 'amdgcn-amd-amdhsa--gfx1250' in asm
+
+    # -- classic path (no options) still gates on _StinkyTofuOptLevel --
 
     def test_helper_returns_none_when_disabled(self):
         _init_rocisa_gfx1250()
@@ -696,8 +726,7 @@ class TestSubtileMemToken:
         kb.addBody(body)
 
         kernel = _stinky_kernel()
-        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
-                                             _stinky_mock_writer())
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         # MemTokenConsistencyCheck runs at kernel scope; consistent tags must
         # not abort and must yield assembly.
         asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
@@ -743,73 +772,55 @@ def _build_tagged_wait_body():
 
 
 class TestSubtileStinkyTofuWaitCnt:
-    """Phase 3: subtile wait-count toggle + wait-placement comparison."""
+    """Wait-count insertion selection driven by ScheduleIterAlg (opt level)."""
 
-    # -- the toggle defaults off (Phase 2 pass-through) --
+    # -- non-SIA4 (basic): wait-count insertion off --
 
-    def test_waitcnt_flag_default_off(self, monkeypatch):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled,
-            buildSubtileStinkyTofuOptions)
-        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
-        assert subtileStinkyTofuWaitCntEnabled() is False
-        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
-                                             _stinky_mock_writer())
+    def test_basic_level_waitcnt_off(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()
+        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is False
-        # Barriers stay Python-owned regardless of the wait toggle.
+        assert opts["OptLevel"] == 0
+        # Barriers stay Python-owned regardless.
         assert opts["ClusterBarrier"] is False
 
-    # -- the toggle, when on, hands wait counts to StinkyTofu --
+    # -- SIA=4: wait-count insertion on, at the SIA opt level --
 
-    @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on"])
-    def test_waitcnt_flag_on_enables_insertion(self, monkeypatch, val):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled,
-            buildSubtileStinkyTofuOptions)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, val)
-        assert subtileStinkyTofuWaitCntEnabled() is True
-        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
-                                             _stinky_mock_writer())
+    def test_sia4_level_waitcnt_on(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()  # _StinkyTofuOptLevel=3
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is True
+        assert opts["OptLevel"] == 3
         # Barriers remain Python-owned even with StinkyTofu waits on.
         assert opts["ClusterBarrier"] is False
 
-    @pytest.mark.parametrize("val", ["0", "false", "no", "off", "", "  "])
-    def test_waitcnt_flag_off_for_non_truthy(self, monkeypatch, val):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, val)
-        assert subtileStinkyTofuWaitCntEnabled() is False
+    # -- SIA=4 emission stays parseable gfx1250 asm --
 
-    # -- flag-ON emission stays parseable gfx1250 asm --
-
-    def test_flag_on_emits_parseable_gfx1250_asm(self, monkeypatch):
+    def test_sia4_emits_parseable_gfx1250_asm(self):
         _init_rocisa_gfx1250()
         from Tensile.KernelWriter import KernelWriter
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         kb, sig = _build_tagged_wait_body()
         kernel = _stinky_kernel()
-        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
-                                             _stinky_mock_writer())
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is True
         asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
                                                sig, stinky_module_options=opts)
         assert asm is not None and 'amdgcn-amd-amdhsa--gfx1250' in asm
 
-    # -- flag-OFF emission stays parseable gfx1250 asm --
+    # -- basic-level emission stays parseable gfx1250 asm --
 
-    def test_flag_off_emits_parseable_gfx1250_asm(self, monkeypatch):
+    def test_basic_level_emits_parseable_gfx1250_asm(self):
         _init_rocisa_gfx1250()
         from Tensile.KernelWriter import KernelWriter
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         kb, sig = _build_tagged_wait_body()
         kernel = _stinky_kernel()
-        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
-                                             _stinky_mock_writer())
+        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is False
         asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
                                                sig, stinky_module_options=opts)
@@ -832,10 +843,11 @@ def _mx_scale_kernel():
 
 
 class TestSubtileStinkyTofuWaitInsertionGuard:
-    """Subtile-side safety guard for the StinkyTofu wait-insertion toggle.
+    """Subtile-side safety guard for StinkyTofu wait-count insertion.
 
     Kernels with buffer_load...lds (DTL) producers -- non-TDM A/B or MX scale --
-    must never let StinkyTofu strip/re-insert waits, even with the flag on.
+    must never let StinkyTofu strip/re-insert waits, even at ScheduleIterAlg=4;
+    they are forced back to the basic level.
     """
 
     # -- the safe/unsafe predicate, tested directly --
@@ -862,42 +874,36 @@ class TestSubtileStinkyTofuWaitInsertionGuard:
         only_mxb["ProblemType"] = {"MXBlockA": 0, "MXBlockB": 32}
         assert subtileKernelIsWaitInsertionSafe(only_mxb) is False
 
-    # -- guard: flag ON keeps insertion on only for the safe (pure-TDM) kernel --
+    # -- guard: SIA=4 keeps insertion on only for the safe (pure-TDM) kernel --
 
-    def test_guard_flag_on_pure_tdm_keeps_insertion(self, monkeypatch):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
-        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
-                                             _stinky_mock_writer())
+    def test_guard_sia4_pure_tdm_keeps_insertion(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is True
+        assert opts["OptLevel"] == 3
 
-    # -- guard: flag ON is forced off for DTL-producer kernels --
+    # -- guard: SIA=4 is forced back to basic for DTL-producer kernels --
 
-    def test_guard_flag_on_non_tdm_forced_off(self, monkeypatch):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
-        opts = buildSubtileStinkyTofuOptions(_non_tdm_kernel(), 3,
-                                             _stinky_mock_writer())
-        # Guard wins over the flag: StinkyTofu must not strip Python waits.
+    def test_guard_sia4_non_tdm_forced_basic(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        opts = buildSubtileStinkyTofuOptions(_non_tdm_kernel(), _stinky_mock_writer())
+        # Guard wins: StinkyTofu must not strip Python waits; stay basic.
         assert opts["EnableWaitCntInsertion"] is False
+        assert opts["OptLevel"] == 0
         assert opts["ClusterBarrier"] is False
 
-    def test_guard_flag_on_mx_scale_forced_off(self, monkeypatch):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
-        opts = buildSubtileStinkyTofuOptions(_mx_scale_kernel(), 3,
-                                             _stinky_mock_writer())
+    def test_guard_sia4_mx_scale_forced_basic(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        opts = buildSubtileStinkyTofuOptions(_mx_scale_kernel(), _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is False
+        assert opts["OptLevel"] == 0
 
-    # -- guard: flag OFF stays off for every kernel shape --
+    # -- guard: non-SIA4 (basic) stays off for every kernel shape --
 
-    def test_guard_flag_off_unsafe_stays_off(self, monkeypatch):
-        from Tensile.Components.Subtile.StinkyTofu import (
-            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
-        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
+    def test_guard_basic_level_stays_off(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         for kernel in (_stinky_kernel(), _non_tdm_kernel(), _mx_scale_kernel()):
-            opts = buildSubtileStinkyTofuOptions(kernel, 3, _stinky_mock_writer())
+            kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+            opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
             assert opts["EnableWaitCntInsertion"] is False
+            assert opts["OptLevel"] == 0

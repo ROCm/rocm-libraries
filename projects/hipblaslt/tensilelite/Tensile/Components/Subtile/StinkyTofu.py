@@ -3,46 +3,31 @@
 
 """StinkyTofu module options for the subtile kernel path.
 
-The subtile body emits its own waits and barriers. By default this option set
-keeps StinkyTofu as a neutral pass-through: wait-count insertion and the
-cluster-barrier handshake are disabled. The remaining keys mirror the classic
-option set but use subtile-correct values (subtile forces VectorWidthA/B=1).
+Every supported gfx1250 subtile kernel is emitted through StinkyTofu. The opt
+level mirrors the classic protocol: ScheduleIterAlg=4 sets ``_StinkyTofuOptLevel``
+(=3), which selects that opt level and turns wait-count insertion on; otherwise
+the body runs at a basic level (OptLevel=0) with wait-count insertion off. The
+basic level still runs the required kernel-scope passes (notably VGPR MSB
+handling), so default subtile kernels keep that coverage.
 
-The ``SUBTILE_STINKYTOFU_WAITCNT`` environment variable opts the subtile path
-into StinkyTofu-owned wait counts. When enabled, StinkyTofu strips the
-subtile-emitted split waits (``StinkyRemoveWaitCntPass``) and re-inserts its own
-(``StinkyWaitCntInsertionPass``). The subtile wait emission itself is left in
-place untouched; this flag only chooses whether StinkyTofu replaces them.
-Barriers stay Python-owned (``ClusterBarrier`` remains off) in either mode.
+Barriers stay Python-owned (``ClusterBarrier`` is forced off); subtile owns
+barrier emission via ``ClusterBarrier.py``.
 
-The wait toggle is honored only for kernels whose LDS producers are all TDM
+Wait-count insertion is honored only for kernels whose LDS producers are all TDM
 ``tensor_load_to_lds``. Kernels that feed LDS with ``buffer_load...lds`` (DTL)
 producers -- non-TDM A/B reads or MX-scale reads -- are not safe: StinkyTofu
 classifies such a load as a plain MUBUF load (not an LDS writer), so it would
 strip a Python producer wait it cannot re-derive. For those kernels the guard
-forces ``EnableWaitCntInsertion=False`` regardless of the toggle.
+forces ``EnableWaitCntInsertion=False`` and stays at the basic level.
 """
-
-import os
 
 from ...Common import print2, printWarning
 from ...Common.GlobalParameters import globalParameters
 
 
-# Environment toggle (default off) handing the subtile wait COUNTS to StinkyTofu.
-# Kept local to the subtile path so no shared-code plumbing is required.
-SUBTILE_WAITCNT_ENV = "SUBTILE_STINKYTOFU_WAITCNT"
-
-
-def subtileStinkyTofuWaitCntEnabled():
-    """True when the subtile StinkyTofu wait-count toggle is opted in.
-
-    Off unless ``SUBTILE_STINKYTOFU_WAITCNT`` is set to 1/true/yes/on.
-    """
-    val = os.environ.get(SUBTILE_WAITCNT_ENV)
-    if val is None:
-        return False
-    return val.strip().lower() in ("1", "true", "yes", "on")
+# Basic opt level for subtile kernels that do not select ScheduleIterAlg=4.
+# O0 still runs the required passes (including InsertVgprMsbPass).
+SUBTILE_STINKYTOFU_BASIC_OPTLEVEL = 0
 
 
 def subtileKernelIsWaitInsertionSafe(kernel):
@@ -69,38 +54,45 @@ def subtileKernelIsWaitInsertionSafe(kernel):
     return tdmA and tdmB and not hasMXScale
 
 
-def buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, writer):
+def buildSubtileStinkyTofuOptions(kernel, writer):
     """Build the StinkyTofu options dict for a subtile kernel body.
 
-    ClusterBarrier is forced off so subtile keeps owning barrier emission.
-    EnableWaitCntInsertion defaults off (pass-through); it flips on only when
-    the SUBTILE_STINKYTOFU_WAITCNT toggle opts the subtile path into
-    StinkyTofu-owned wait counts AND the kernel is wait-insertion-safe (all LDS
-    producers are TDM tensor_load_to_lds). Kernels with buffer_load...lds (DTL)
-    producers keep their Python-emitted waits.
+    ScheduleIterAlg=4 sets ``_StinkyTofuOptLevel`` (=3): that opt level is used
+    and ``EnableWaitCntInsertion`` is on. Otherwise the body runs at the basic
+    level (OptLevel=0) with wait-count insertion off.
+
+    ClusterBarrier is forced off so subtile keeps owning barrier emission. The
+    wait-insertion guard forces ``EnableWaitCntInsertion=False`` (and the basic
+    level) for kernels with ``buffer_load...lds`` (DTL) producers, which keep
+    their Python-emitted waits.
     """
-    enableWaitCnt = subtileStinkyTofuWaitCntEnabled()
+    siaOptLevel = kernel.get("_StinkyTofuOptLevel")
+    waitCntSelected = siaOptLevel is not None
+    optLevel = siaOptLevel if waitCntSelected else SUBTILE_STINKYTOFU_BASIC_OPTLEVEL
+
+    enableWaitCnt = waitCntSelected
     if enableWaitCnt and not subtileKernelIsWaitInsertionSafe(kernel):
         # DTL (buffer_load...lds) producers are classified as plain MUBUF loads
         # by StinkyTofu on gfx1250, so it would strip a producer wait it cannot
-        # reconstruct. Keep the Python waits for this kernel.
+        # reconstruct. Keep the Python waits and stay at the basic level.
         enableWaitCnt = False
+        optLevel = SUBTILE_STINKYTOFU_BASIC_OPTLEVEL
         kernelName = getattr(getattr(writer, "states", None), "kernelName", "")
         printWarning("StinkyTofu wait-count insertion disabled for subtile kernel "
                      "%s: it has buffer_load-to-LDS (DTL) producers; keeping "
                      "Python-emitted waits." % (kernelName or "<unnamed>"))
-        print2("[subtile StinkyTofu] %s honors SUBTILE_STINKYTOFU_WAITCNT only "
-               "for pure-TDM kernels." % SUBTILE_WAITCNT_ENV)
-    return {"OptLevel": stinky_opt_level,
+        print2("[subtile StinkyTofu] %s runs at the basic level (no wait-count "
+               "insertion) for DTL-producer kernels." % (kernelName or "<unnamed>"))
+
+    return {"OptLevel": optLevel,
             "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
             "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
             "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
             "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
             "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
             "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
-            # Off (default): subtile keeps its own split waits. When the
-            # SUBTILE_STINKYTOFU_WAITCNT toggle is on, StinkyTofu strips them
-            # (StinkyRemoveWaitCntPass) and re-inserts its own.
+            # On only for ScheduleIterAlg=4 wait-insertion-safe kernels; basic
+            # kernels keep their own split waits.
             "EnableWaitCntInsertion": enableWaitCnt,
             # True: expert scheduling mode2; False: mode 0. Independent of OptLevel.
             "EnableESM2": kernel["EnableStinkyTofuESM2"],
