@@ -110,21 +110,25 @@ class InstructionEmitter:
 
         # LDS double-buffer token state for MemTokenData tagging. Stamps every
         # tensor_load/ds_read/barrier so StinkyTofu can build LDS dependencies;
-        # MemTokenData emits no asm, so the tags are inert when unused.
-        self.memToken = SubtileMemTokenTracker(kernel)
+        # MemTokenData emits no asm, so the tags are inert when unused. Each
+        # tensor owns an independent LDS double buffer, so the tracker keeps
+        # per-tensor parity over the tensors this kernel actually uses.
+        memTokenTensors = ['A', 'B'] + (['SA', 'SB'] if self.hasScale else [])
+        self.memToken = SubtileMemTokenTracker(kernel, tensors=memTokenTensors)
 
-    def _tagLdsTokens(self, instructions):
-        """Attach MemTokenData to LDS producers/consumers in the flat list.
+    def _tagLdsTokens(self, instructions, tensor):
+        """Attach MemTokenData to one tensor's LDS producers/consumers.
 
         Tagging is consistent: every tensor_load/ds_write producer and every
-        ds_read consumer in the list is stamped (the rocisa
-        MemTokenConsistencyCheck pass fatals on partial tagging within a block).
+        ds_read consumer in the list is stamped with that tensor's current
+        write/read buffer id (the rocisa MemTokenConsistencyCheck pass fatals on
+        partial tagging within a block).
         """
         for inst in instructions:
             if isLdsProducer(inst):
-                inst.setMemToken(self.memToken.writeToken())
+                inst.setMemToken(self.memToken.writeToken(tensor))
             elif isLdsConsumer(inst):
-                inst.setMemToken(self.memToken.readToken())
+                inst.setMemToken(self.memToken.readToken(tensor))
         return instructions
 
     def emit_mfma(self, placement, unroll_iter=0):
@@ -201,7 +205,7 @@ class InstructionEmitter:
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
-        return self._tagLdsTokens(list(module.flatitems()))
+        return self._tagLdsTokens(list(module.flatitems()), tensor)
 
     def emit_gr(self, placement):
         """Emit GR (buffer_load) instructions from GRPlacement."""
@@ -217,7 +221,7 @@ class InstructionEmitter:
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
-        return self._tagLdsTokens(list(module.flatitems()))
+        return self._tagLdsTokens(list(module.flatitems()), tensor)
 
     def emit_wait_gr(self, source):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
@@ -268,10 +272,9 @@ class InstructionEmitter:
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
-        # All tensors swap the same LDS double-buffer half in lockstep; flip the
-        # shared read parity once per swap event (on the canonical 'A' trigger).
-        if tensor == 'A':
-            self.memToken.swapRead()
+        # This tensor owns an independent LDS read buffer; flip its parity to
+        # match the buffer swap this inc actually performs.
+        self.memToken.swapRead(tensor)
         return list(module.flatitems())
 
     def emit_gr_inc(self, source):
@@ -284,10 +287,9 @@ class InstructionEmitter:
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
-        # Flip the shared write parity once per swap event (on 'A'); all tensors
-        # swap the same LDS double-buffer half together.
-        if tensor == 'A':
-            self.memToken.swapWrite()
+        # This tensor owns an independent LDS write buffer; flip its parity to
+        # match the buffer swap this inc actually performs.
+        self.memToken.swapWrite(tensor)
         return list(module.flatitems())
 
     def emit_skip(self, source):

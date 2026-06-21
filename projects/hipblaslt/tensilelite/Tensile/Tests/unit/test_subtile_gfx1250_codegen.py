@@ -418,11 +418,12 @@ class TestSubtileStinkyTofu:
         assert opts == expected
 
 
-def _make_token_emitter(kernel_overrides=None):
+def _make_token_emitter(kernel_overrides=None, with_scale=False):
     """Build a minimal InstructionEmitter exposing the MemToken tagging logic.
 
     Only the attributes that __init__ and the tagging helpers touch are
-    populated; the heavy tile/scheduler state is mocked.
+    populated; the heavy tile/scheduler state is mocked. ``with_scale`` enables
+    the SA/SB scale tensors so their independent buffer parity can be exercised.
     """
     from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
     kernel = {"1LDSBuffer": 0, "enableTDMA": True, "enableTDMB": True}
@@ -430,11 +431,14 @@ def _make_token_emitter(kernel_overrides=None):
         kernel.update(kernel_overrides)
     tileInfoA = SimpleNamespace(subtileShape=[1, 2])
     tileInfoB = SimpleNamespace(subtileShape=[1, 2])
+    scaleA = SimpleNamespace(subtileShape=[1, 2]) if with_scale else None
+    scaleB = SimpleNamespace(subtileShape=[1, 2]) if with_scale else None
     return InstructionEmitter(
         writer=SimpleNamespace(states=SimpleNamespace(subtileLdsSwizzle=False)),
         kernel=kernel, config=SimpleNamespace(),
         tileInfoA=tileInfoA, tileInfoB=tileInfoB, dtileInfo=None,
-        vgprTilesA=[], vgprTilesB=[])
+        vgprTilesA=[], vgprTilesB=[],
+        scaleTileInfoA=scaleA, scaleTileInfoB=scaleB)
 
 
 def _make_tensor_load():
@@ -488,33 +492,50 @@ class TestSubtileMemToken:
 
     def test_tracker_double_buffer_toggle(self):
         from Tensile.Components.Subtile.MemToken import SubtileMemTokenTracker
-        t = SubtileMemTokenTracker({"1LDSBuffer": 0})
-        assert (t.writeTokenIdx, t.readTokenIdx) == (0, 0)
-        assert t.writeToken().tokens == [0]
-        assert t.readToken().tokens == [0]
-        # Before any swap both buffers coincide -> single-id barrier.
-        assert t.barrierToken().tokens == [0]
-        t.swapWrite()
-        assert t.writeTokenIdx == 1
-        assert t.writeToken().tokens == [1]
-        # Producer now on buffer1, consumer still buffer0 -> barrier spans both.
-        assert t.barrierToken().tokens == [0, 1]
-        t.swapRead()
-        assert t.readTokenIdx == 1
-        assert t.barrierToken().tokens == [1]
-        t.swapWrite()
-        assert t.writeTokenIdx == 0
+        t = SubtileMemTokenTracker({"1LDSBuffer": 0}, tensors=('A', 'B'))
+        # Distinct id space per tensor (A -> 0/1, B -> 2/3).
+        assert t.writeToken('A').tokens == [0]
+        assert t.readToken('A').tokens == [0]
+        assert t.writeToken('B').tokens == [2]
+        # Before any swap both buffers coincide -> one id per tensor.
+        assert t.barrierToken().tokens == [0, 2]
+        t.swapWrite('A')
+        assert t.writeToken('A').tokens == [1]
+        # A producer now on buffer1, A consumer still buffer0; B unchanged.
+        assert t.barrierToken().tokens == [0, 1, 2]
+        t.swapRead('A')
+        assert t.readToken('A').tokens == [1]
+        assert t.barrierToken().tokens == [1, 2]
+        t.swapWrite('A')
+        assert t.writeToken('A').tokens == [0]
 
     def test_tracker_one_lds_buffer_collapse(self):
         from Tensile.Components.Subtile.MemToken import SubtileMemTokenTracker
-        t = SubtileMemTokenTracker({"1LDSBuffer": 1})
-        assert (t.buffer0, t.buffer1) == (0, 0)
-        t.swapWrite()
-        t.swapRead()
-        # With a single LDS buffer every token id stays 0.
-        assert t.writeToken().tokens == [0]
-        assert t.readToken().tokens == [0]
-        assert t.barrierToken().tokens == [0]
+        t = SubtileMemTokenTracker({"1LDSBuffer": 1}, tensors=('A', 'B'))
+        t.swapWrite('A')
+        t.swapRead('A')
+        # With a single LDS buffer each tensor's token id stays on its base.
+        assert t.writeToken('A').tokens == [0]
+        assert t.readToken('A').tokens == [0]
+        assert t.writeToken('B').tokens == [2]
+        assert t.barrierToken().tokens == [0, 2]
+
+    def test_tracker_reset_and_snapshot_restore(self):
+        from Tensile.Components.Subtile.MemToken import SubtileMemTokenTracker
+        t = SubtileMemTokenTracker({"1LDSBuffer": 0}, tensors=('A', 'B'))
+        t.swapWrite('A')
+        t.swapRead('B')
+        snap = t.snapshot()
+        assert t.writeToken('A').tokens == [1]
+        assert t.readToken('B').tokens == [3]
+        # reset() returns every tensor to buffer0 (kernel-entry / tail state).
+        t.reset()
+        assert t.writeToken('A').tokens == [0]
+        assert t.readToken('B').tokens == [2]
+        # restore() re-establishes a captured parity.
+        t.restore(snap)
+        assert t.writeToken('A').tokens == [1]
+        assert t.readToken('B').tokens == [3]
 
     # -- producer/consumer classification --
 
@@ -536,9 +557,9 @@ class TestSubtileMemToken:
         from rocisa.instruction import SNop
         em = _make_token_emitter()
         tl, rd, nop = _make_tensor_load(), _make_ds_read(), SNop(waitState=0)
-        em._tagLdsTokens([tl, rd, nop])
-        assert tl.getMemToken().tokens == [0]   # producer -> write buffer
-        assert rd.getMemToken().tokens == [0]   # consumer -> read buffer
+        em._tagLdsTokens([tl, rd, nop], 'A')
+        assert tl.getMemToken().tokens == [0]   # producer -> A write buffer
+        assert rd.getMemToken().tokens == [0]   # consumer -> A read buffer
         assert nop.getMemToken() is None        # non-candidate untouched
 
     # -- tagging is consistent (no partial tagging in a region) --
@@ -549,7 +570,7 @@ class TestSubtileMemToken:
         em = _make_token_emitter()
         region = [_make_tensor_load(), _make_ds_read(), SNop(waitState=0),
                   _make_tensor_load(), _make_ds_read()]
-        em._tagLdsTokens(region)
+        em._tagLdsTokens(region, 'A')
         has_tagged, has_untagged = _candidate_tokens(region)
         assert has_tagged and not has_untagged
 
@@ -560,30 +581,68 @@ class TestSubtileMemToken:
         _stub_swap_emitters(monkeypatch)
         from Tensile.Components.Subtile.LogicalScheduler import GRIncOp, LRIncOp
         em = _make_token_emitter()
-        before_prod = em._tagLdsTokens([_make_tensor_load()])[0]
-        before_cons = em._tagLdsTokens([_make_ds_read()])[0]
+        before_prod = em._tagLdsTokens([_make_tensor_load()], 'A')[0]
+        before_cons = em._tagLdsTokens([_make_ds_read()], 'A')[0]
         assert before_prod.getMemToken().tokens == [0]
         assert before_cons.getMemToken().tokens == [0]
         # A global-read swap flips the producer buffer; local-read flips reader.
         em.emit_gr_inc(GRIncOp(tensor='A'))
         em.emit_lr_inc(LRIncOp(tensor='A'))
-        after_prod = em._tagLdsTokens([_make_tensor_load()])[0]
-        after_cons = em._tagLdsTokens([_make_ds_read()])[0]
+        after_prod = em._tagLdsTokens([_make_tensor_load()], 'A')[0]
+        after_cons = em._tagLdsTokens([_make_ds_read()], 'A')[0]
         assert after_prod.getMemToken().tokens == [1]
         assert after_cons.getMemToken().tokens == [1]
 
-    def test_swap_toggles_once_per_event_not_per_tensor(self, monkeypatch):
+    def test_per_tensor_swap_is_independent(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        _stub_swap_emitters(monkeypatch)
+        from Tensile.Components.Subtile.LogicalScheduler import GRIncOp, LRIncOp
+        em = _make_token_emitter()
+        # A B-only inc must swap B's buffer and leave A untouched: the inc is
+        # attached per tensor, and each tensor owns an independent LDS buffer.
+        em.emit_gr_inc(GRIncOp(tensor='B'))
+        em.emit_lr_inc(LRIncOp(tensor='B'))
+        a_prod = em._tagLdsTokens([_make_tensor_load()], 'A')[0]
+        b_prod = em._tagLdsTokens([_make_tensor_load()], 'B')[0]
+        b_cons = em._tagLdsTokens([_make_ds_read()], 'B')[0]
+        assert a_prod.getMemToken().tokens == [0]   # A still on buffer0
+        assert b_prod.getMemToken().tokens == [3]   # B write swapped to buffer1
+        assert b_cons.getMemToken().tokens == [3]   # B read swapped to buffer1
+
+    def test_scale_tensor_swap_independent(self, monkeypatch):
         _init_rocisa_gfx1250()
         _stub_swap_emitters(monkeypatch)
         from Tensile.Components.Subtile.LogicalScheduler import GRIncOp
+        em = _make_token_emitter(with_scale=True)
+        # An SA-only inc swaps only SA's buffer (id base 4 -> 5).
+        em.emit_gr_inc(GRIncOp(tensor='SA'))
+        assert em._tagLdsTokens([_make_tensor_load()], 'SA')[0] \
+            .getMemToken().tokens == [5]
+        assert em._tagLdsTokens([_make_tensor_load()], 'A')[0] \
+            .getMemToken().tokens == [0]
+        assert em._tagLdsTokens([_make_tensor_load()], 'SB')[0] \
+            .getMemToken().tokens == [6]
+
+    def test_parity_reset_clears_stale_between_bodies(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        _stub_swap_emitters(monkeypatch)
+        from Tensile.Components.Subtile.LogicalScheduler import GRIncOp, LRIncOp
         em = _make_token_emitter()
-        # A swap event issues an inc per tensor (A, B); only 'A' flips the
-        # shared parity so A+B together produce a single net toggle.
-        em.emit_gr_inc(GRIncOp(tensor='A'))
-        em.emit_gr_inc(GRIncOp(tensor='B'))
-        assert em.memToken.writeTokenIdx == 1
-        prod = em._tagLdsTokens([_make_tensor_load()])[0]
-        assert prod.getMemToken().tokens == [1]
+        # Body 1 performs real swaps, advancing A and B off buffer0.
+        for t in ('A', 'B'):
+            em.emit_gr_inc(GRIncOp(tensor=t))
+            em.emit_lr_inc(LRIncOp(tensor=t))
+        assert em._tagLdsTokens([_make_tensor_load()], 'A')[0] \
+            .getMemToken().tokens == [1]
+        # A fresh body re-initializes parity; it must NOT inherit the stale
+        # buffer1 ids left by body 1.
+        em.memToken.reset()
+        assert em._tagLdsTokens([_make_tensor_load()], 'A')[0] \
+            .getMemToken().tokens == [0]
+        assert em._tagLdsTokens([_make_ds_read()], 'A')[0] \
+            .getMemToken().tokens == [0]
+        assert em._tagLdsTokens([_make_tensor_load()], 'B')[0] \
+            .getMemToken().tokens == [2]
 
     # -- barrier carries both buffers it separates --
 
@@ -592,11 +651,12 @@ class TestSubtileMemToken:
         _stub_swap_emitters(monkeypatch)
         from Tensile.Components.Subtile.LogicalScheduler import GRIncOp
         em = _make_token_emitter()
+        # Barrier spans every tracked tensor's current buffers (A -> 0, B -> 2).
         barrier0 = em.emit_sync()[0]
-        assert barrier0.getMemToken().tokens == [0]
-        em.emit_gr_inc(GRIncOp(tensor='A'))  # producer now on buffer1
+        assert barrier0.getMemToken().tokens == [0, 2]
+        em.emit_gr_inc(GRIncOp(tensor='A'))  # A producer now on buffer1
         barrier1 = em.emit_sync()[0]
-        assert barrier1.getMemToken().tokens == [0, 1]
+        assert barrier1.getMemToken().tokens == [0, 1, 2]
 
     # -- StinkyTofu pipeline accepts a fully-tagged subtile body --
 
@@ -611,7 +671,7 @@ class TestSubtileMemToken:
         # One region with a fully-tagged producer -> barrier -> consumer chain.
         tl = _make_tensor_load()
         rd = _make_ds_read()
-        em._tagLdsTokens([tl, rd])
+        em._tagLdsTokens([tl, rd], 'A')
         barrier = SBarrier(comment="Barrier")
         barrier.setMemToken(em.memToken.barrierToken())
 
@@ -651,7 +711,7 @@ def _build_tagged_wait_body():
     em = _make_token_emitter()
     tl = _make_tensor_load()
     rd = _make_ds_read()
-    em._tagLdsTokens([tl, rd])
+    em._tagLdsTokens([tl, rd], 'A')
     barrier = SBarrier(comment="Barrier")
     barrier.setMemToken(em.memToken.barrierToken())
 

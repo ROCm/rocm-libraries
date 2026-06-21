@@ -432,6 +432,29 @@ def _preop_inc_tensors(placement, kind):
     return [op.tensor for op in placement.preOps if op.kind == kind]
 
 
+def _collect_mem_token_ids(emitted_3d):
+    """Collect MemTokenData id sets from LDS producers/consumers in a body.
+
+    Returns (producer_ids, consumer_ids) as sets of ints over every tagged
+    tensor_load (producer) and ds_read (consumer) in the emitted structure.
+    """
+    from Tensile.Components.Subtile.MemToken import isLdsProducer, isLdsConsumer
+    prod_ids, cons_ids = set(), set()
+    for partition_emitted in emitted_3d:
+        for em_list in partition_emitted:
+            for em in em_list:
+                for inst in em.instructions:
+                    is_prod = isLdsProducer(inst)
+                    is_cons = isLdsConsumer(inst)
+                    if not (is_prod or is_cons):
+                        continue
+                    tok = inst.getMemToken()
+                    if tok is None:
+                        continue
+                    (prod_ids if is_prod else cons_ids).update(tok.tokens)
+    return prod_ids, cons_ids
+
+
 # ══════════════════════════════════════════════════════════════
 # Step 1: Place LRs
 # ══════════════════════════════════════════════════════════════
@@ -2168,6 +2191,68 @@ class TestIntegration:
                     scheduled = instructionSchedule(emitted)
                     assert len(list(scheduled.flatitems())) > 0
 
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_mem_token_parity_per_body_and_per_tensor(self):
+        """End-to-end MemToken parity: per-tensor id spaces + per-body reset.
+
+        Reproduces both Phase 2 token bugs through the real populate path:
+          * Bug 2 (per-tensor swap): each tensor gets a distinct token-id space
+            (A=0/1, B=2/3, SA=4/5, SB=6/7), and a non-A tensor that swaps reaches
+            its buffer1 id -- impossible if only 'A' toggled a shared 0/1 parity.
+          * Bug 1 (per-body reset): the tail loop re-reads from buffer0, so every
+            tail token id is a buffer0 base -- it must not inherit the
+            mainloop/drain parity.
+        """
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            # Populate the tail loop body (resets parity to buffer0 internally).
+            sched.emitTailLoop(writer, kernel)
+
+            buf0_ids = {0, 2, 4, 6}      # per-tensor buffer0 bases
+            valid_ids = {0, 1, 2, 3, 4, 5, 6, 7}
+            non_a_buf1 = {3, 5, 7}       # B/SA/SB on buffer1
+
+            # Gather ids across every steady-state / drain body.
+            all_ids = set()
+            for body in (sched._preloop_emitted,
+                         *sched._emitted_per_unroll,
+                         *sched._ngll_per_unroll,
+                         *sched._nll_per_unroll):
+                p, c = _collect_mem_token_ids(body)
+                all_ids |= p | c
+
+            # Every observed id is a valid per-tensor buffer id.
+            assert all_ids, "expected tagged LDS producers/consumers"
+            assert all_ids <= valid_ids, f"unexpected token ids: {all_ids}"
+            # Distinct id spaces are actually in use (not the old shared 0/1).
+            assert all_ids - {0, 1}, \
+                "tokens collapsed to a single shared 0/1 space (Bug 2 not fixed)"
+            # A non-'A' tensor swap was tracked (only possible with per-tensor
+            # parity; the pre-fix code toggled solely on the 'A' trigger).
+            assert all_ids & non_a_buf1, \
+                "no B/SA/SB buffer1 id seen; non-A swaps not tracked (Bug 2)"
+
+            # Tail loop: all tokens reset to buffer0 (Bug 1).
+            tail_p, tail_c = _collect_mem_token_ids(sched._tailloop_emitted)
+            tail_ids = tail_p | tail_c
+            assert tail_ids, "expected tagged LDS ops in the tail loop"
+            assert tail_ids <= buf0_ids, \
+                f"tail inherited stale parity (Bug 1); ids={tail_ids}"
         finally:
             sched.deallocVgprTiles(writer)
 

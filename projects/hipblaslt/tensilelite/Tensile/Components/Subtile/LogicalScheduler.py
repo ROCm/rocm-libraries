@@ -2740,6 +2740,9 @@ class LogicalScheduler:
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
             module.add(inst)
+        # The tail loop re-reads from buffer0 (matching the classic tail-loop
+        # token reset), so clear any parity left by the mainloop/drain bodies.
+        self._emitter.memToken.reset()
         self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
         module.add(self._emitLoop(writer, kernel, "TAILLOOP",
                                   self._tailloop_emitted,
@@ -3029,20 +3032,34 @@ class LogicalScheduler:
         self.build_nll()
         self.build_tailloop_pgr0()
 
+        # LDS memory-token parity must reflect the buffer state the runtime has
+        # at each body's entry, not whatever an earlier body left behind. The
+        # kernel enters the preloop with every buffer on buffer0; the mainloop
+        # unroll copies run consecutively (and the loop-back returns to the
+        # copy-0 parity by the double-buffer invariant), so they accumulate
+        # parity continuously. Each NGLL/NLL drain copy is the same pipeline
+        # phase as the mainloop copy of the same index, so it re-enters with
+        # that copy's entry parity.
+        emitter.memToken.reset()
         emitter.populate(self._preloop_emitted, unroll_iter=0)
 
         self._emitted_per_unroll = []
         self._ngll_per_unroll = []
         self._nll_per_unroll = []
+        main_entry_parity = []
         for ui in range(self.unroll_factor):
             em_copy = copy.deepcopy(self._emitted)
+            main_entry_parity.append(emitter.memToken.snapshot())
             emitter.populate(em_copy, unroll_iter=ui)
             self._emitted_per_unroll.append(em_copy)
 
+        for ui in range(self.unroll_factor):
+            emitter.memToken.restore(main_entry_parity[ui])
             ngll_copy = copy.deepcopy(self._ngll_emitted)
             emitter.populate(ngll_copy, unroll_iter=ui)
             self._ngll_per_unroll.append(ngll_copy)
 
+            emitter.memToken.restore(main_entry_parity[ui])
             nll_copy = copy.deepcopy(self._nll_emitted)
             emitter.populate(nll_copy, unroll_iter=ui)
             self._nll_per_unroll.append(nll_copy)
