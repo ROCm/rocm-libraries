@@ -1224,14 +1224,13 @@ class TestCollectLogicalInsts(unittest.TestCase):
         self.assertEqual(outer._collect_logical_insts(), ["0", "1", "2", "3"])
 
     def test_skips_dummy_instruction_classes(self):
-        # Most instruction shims (e.g. ``SSleep``) remain dummies whose
-        # ``__getattr__`` returns a no-op that yields ``None``. The
-        # collector must skip them rather than smuggling ``None`` into the
-        # logical IR module. We pick ``SSleep`` here because it has no
-        # logical IR entry and remains a dummy.
-        from rocisa_stinkytofu_adaptor.instruction import SSleep  # noqa: WPS433
+        # Dummy instruction shims whose ``__getattr__`` returns a no-op that
+        # yields ``None``. The collector must skip them rather than smuggling
+        # ``None`` into the logical IR module. We pick ``SDcacheWb`` here
+        # because it has no logical IR entry and remains a dummy.
+        from rocisa_stinkytofu_adaptor.instruction import SDcacheWb  # noqa: WPS433
         m = Module()
-        m.add(SSleep())
+        m.add(SDcacheWb())
         self.assertEqual(m._collect_logical_insts(), [])
 
     def test_textblocks_and_logical_mixed(self):

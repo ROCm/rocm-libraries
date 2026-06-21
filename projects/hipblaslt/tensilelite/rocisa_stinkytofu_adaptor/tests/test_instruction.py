@@ -1228,11 +1228,7 @@ class TestDevelopInstructionExports(unittest.TestCase):
 
     _NAMES = (
         "BufferLoadB16",
-        "GlobalInv",
-        "GlobalPrefetchB8",
-        "GlobalWb",
         "SAtomicInc",
-        "SBfeU32",
         "SMemAtomicIncInstruction",
     )
 

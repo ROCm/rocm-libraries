@@ -814,6 +814,211 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     return cls
 
 
+def _make_no_operand_class(class_name: str, mnemonic: str):
+    """Factory for zero-operand instructions (no dst, no srcs): VNop, GlobalInv, etc."""
+
+    def __init__(self, comment: str = "", **kw):
+        _ = kw
+        Instruction.__init__(self, InstType.INST_NOTYPE, comment)
+        self.setInst(mnemonic)
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        factory = getattr(_st, class_name)
+        return factory(self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = object.__new__(type(self))
+        memo[id(self)] = dup
+        Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
+        dup.setInst(mnemonic)
+        return dup
+
+    cls = type(class_name, (Instruction,), {
+        "__doc__": f"``{mnemonic}`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "__slots__": (),
+        "getParams": getParams,
+        "getDstParams": getDstParams,
+        "getSrcParams": getSrcParams,
+        "toString": toString,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    cls.__module__ = __name__
+    return cls
+
+
+def _make_imm_no_dest_class(class_name: str, mnemonic: str, param_name: str = "simm16"):
+    """Factory for 1-imm, no-dest instructions: SSleep, SSetPrior, SDelayAlu, etc."""
+
+    def __init__(self, value: int = 0, comment: str = "", **kw):
+        _ = kw
+        Instruction.__init__(self, InstType.INST_NOTYPE, comment)
+        self._imm_value = int(value)
+        self.setInst(mnemonic)
+
+    def getParams(self):
+        return [self._imm_value]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self._imm_value]
+
+    def toString(self) -> str:
+        kstr = self.instStr + " " + _input_to_str(self._imm_value)
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        factory = getattr(_st, class_name)
+        return factory(_to_stinky_register(self._imm_value), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = object.__new__(type(self))
+        memo[id(self)] = dup
+        Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
+        dup._imm_value = self._imm_value
+        dup.setInst(mnemonic)
+        return dup
+
+    cls = type(class_name, (Instruction,), {
+        "__doc__": f"``{mnemonic} {{imm}}`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "__slots__": ("_imm_value",),
+        "getParams": getParams,
+        "getDstParams": getDstParams,
+        "getSrcParams": getSrcParams,
+        "toString": toString,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    cls.__module__ = __name__
+    return cls
+
+
+def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False):
+    """Factory for register-indirect jump/call: SSetPCB64, SSwapPCB64."""
+
+    if has_dest:
+        def __init__(self, dst: Any = None, src: Any = None, comment: str = "", **kw):
+            _ = kw
+            Instruction.__init__(self, InstType.INST_NOTYPE, comment)
+            self.dst = dst
+            self.src = src
+            self.setInst(mnemonic)
+
+        def getParams(self):
+            return [self.dst, self.src]
+
+        def getDstParams(self):
+            return [self.dst]
+
+        def getSrcParams(self):
+            return [self.src]
+
+        def toString(self) -> str:
+            kstr = self.instStr + " " + _input_to_str(self.dst) + ", " + _input_to_str(self.src)
+            return self.formatWithComment(kstr)
+
+        def to_stinky_logical(self) -> Any:
+            import stinkytofu as _st  # noqa: WPS433
+
+            factory = getattr(_st, class_name)
+            return factory(
+                _to_stinky_register(self.dst),
+                _to_stinky_register(self.src),
+                self.comment,
+            )
+
+        def __deepcopy__(self, memo):
+            if id(self) in memo:
+                return memo[id(self)]
+            dup = object.__new__(type(self))
+            memo[id(self)] = dup
+            Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
+            dup.dst = copy.deepcopy(self.dst, memo)
+            dup.src = copy.deepcopy(self.src, memo)
+            dup.setInst(mnemonic)
+            return dup
+
+        slots = ("dst", "src")
+    else:
+        def __init__(self, src: Any = None, comment: str = "", **kw):
+            _ = kw
+            Instruction.__init__(self, InstType.INST_NOTYPE, comment)
+            self.src = src
+            self.setInst(mnemonic)
+
+        def getParams(self):
+            return [self.src]
+
+        def getDstParams(self):
+            return []
+
+        def getSrcParams(self):
+            return [self.src]
+
+        def toString(self) -> str:
+            kstr = self.instStr + " " + _input_to_str(self.src)
+            return self.formatWithComment(kstr)
+
+        def to_stinky_logical(self) -> Any:
+            import stinkytofu as _st  # noqa: WPS433
+
+            factory = getattr(_st, class_name)
+            return factory(_to_stinky_register(self.src), self.comment)
+
+        def __deepcopy__(self, memo):
+            if id(self) in memo:
+                return memo[id(self)]
+            dup = object.__new__(type(self))
+            memo[id(self)] = dup
+            Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
+            dup.src = copy.deepcopy(self.src, memo)
+            dup.setInst(mnemonic)
+            return dup
+
+        slots = ("src",)
+
+    cls = type(class_name, (Instruction,), {
+        "__doc__": f"``{mnemonic}`` shim with stinkytofu left-path bridge.",
+        "__init__": __init__,
+        "__slots__": slots,
+        "getParams": getParams,
+        "getDstParams": getDstParams,
+        "getSrcParams": getSrcParams,
+        "toString": toString,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    cls.__module__ = __name__
+    return cls
+
+
 def _make_zero_src_class(class_name: str, mnemonic: str, inst_type: "InstType"):
     """Factory for zero-source instruction shim classes (dst only, no srcs)."""
 
@@ -1497,8 +1702,10 @@ SAddPCI64_SIMM = make_dummy_class(f"{_P}.SAddPCI64_SIMM")
 SCBranchVCCNZ = _make_branch_class("SCBranchVCCNZ", "s_cbranch_vccnz")
 # logicalIR: SCBranchVCCZ
 SCBranchVCCZ = _make_branch_class("SCBranchVCCZ", "s_cbranch_vccz")
-SSetPCB64 = make_dummy_class(f"{_P}.SSetPCB64")
-SSwapPCB64 = make_dummy_class(f"{_P}.SSwapPCB64")
+# logicalIR: SSetPCB64
+SSetPCB64 = _make_reg_jump_class("SSetPCB64", "s_setpc_b64", has_dest=False)
+# logicalIR: SSwapPCB64
+SSwapPCB64 = _make_reg_jump_class("SSwapPCB64", "s_swappc_b64", has_dest=True)
 # logicalIR: SCBranchExecZ
 SCBranchExecZ = _make_branch_class("SCBranchExecZ", "s_cbranch_execz")
 # logicalIR: SCBranchExecNZ
@@ -1773,7 +1980,8 @@ SCMovB64 = _make_scalar_unary_class("SCMovB64", "s_cmov_b64", InstType.INST_B64)
 SFf1B32 = _make_scalar_unary_class("SFf1B32", "s_ff1_i32_b32", InstType.INST_B32)
 # logicalIR: SBfmB32
 SBfmB32 = _make_scalar_alu_class("SBfmB32", "s_bfm_b32", InstType.INST_B32)
-SBfeU32 = make_dummy_class(f"{_P}.SBfeU32")
+# logicalIR: SBfeU32
+SBfeU32 = _make_scalar_alu_class("SBfeU32", "s_bfe_u32", InstType.INST_U32)
 SFlbitI32B32 = make_dummy_class(f"{_P}.SFlbitI32B32")
 # logicalIR: SMovkI32
 SMovkI32 = _make_scalar_unary_class("SMovkI32", "s_movk_i32", InstType.INST_I32)
@@ -1783,13 +1991,17 @@ SSExtI16toI32 = _make_scalar_unary_class("SSExtI16toI32", "s_sext_i32_i16", Inst
 # SAndSaveExecB64 — real class (see Scalar ALU section above)
 # SOrSaveExecB32 — real class (see Scalar ALU section above)
 # SOrSaveExecB64 — real class (see Scalar ALU section above)
-SSetPrior = make_dummy_class(f"{_P}.SSetPrior")
+# logicalIR: SSetPrior
+SSetPrior = _make_imm_no_dest_class("SSetPrior", "s_setprio")
 # SBarrier — real class (see SBarrier section above)
 SDcacheWb = make_dummy_class(f"{_P}.SDcacheWb")
-GlobalWb = make_dummy_class(f"{_P}.GlobalWb")
-GlobalInv = make_dummy_class(f"{_P}.GlobalInv")
+# logicalIR: GlobalWb
+GlobalWb = _make_no_operand_class("GlobalWb", "global_wb")
+# logicalIR: GlobalInv
+GlobalInv = _make_no_operand_class("GlobalInv", "global_inv")
 # SNop — real class (see class SNop above, after SMovB64).
-VNop = make_dummy_class(f"{_P}.VNop")
+# logicalIR: VNop
+VNop = _make_no_operand_class("VNop", "v_nop")
 
 
 # logicalIR: SEndpgm
@@ -1827,7 +2039,8 @@ class SEndpgm(Instruction):
         return dup
 
 
-SSleep = make_dummy_class(f"{_P}.SSleep")
+# logicalIR: SSleep
+SSleep = _make_imm_no_dest_class("SSleep", "s_sleep")
 SSetVgprMsb = make_dummy_class(f"{_P}.SSetVgprMsb")
 # SGetRegB32 — real class (see Scalar Control section above)
 # SSetRegB32 — real class (see Scalar Control section above)
@@ -2183,7 +2396,8 @@ class SWaitTensorcnt(Instruction):
 
 
 SWaitAlu = make_dummy_class(f"{_P}.SWaitAlu")
-SDelayAlu = make_dummy_class(f"{_P}.SDelayAlu")
+# logicalIR: SDelayAlu
+SDelayAlu = _make_imm_no_dest_class("SDelayAlu", "s_delay_alu")
 # logicalIR: VAddF16
 VAddF16 = _make_scalar_alu_class("VAddF16", "v_add_f16", InstType.INST_F16)
 # VAddF32 — real class (see Vector ALU section above)
@@ -2262,7 +2476,8 @@ VRcpF16 = _make_scalar_unary_class("VRcpF16", "v_rcp_f16", InstType.INST_F16)
 VRcpF32 = _make_scalar_unary_class("VRcpF32", "v_rcp_f32", InstType.INST_F32)
 # logicalIR: VRcpIFlagF32
 VRcpIFlagF32 = _make_scalar_unary_class("VRcpIFlagF32", "v_rcp_iflag_f32", InstType.INST_F32)
-VRcpF64 = make_dummy_class(f"{_P}.VRcpF64")
+# logicalIR: VRcpF64
+VRcpF64 = _make_scalar_unary_class("VRcpF64", "v_rcp_f64", InstType.INST_F64)
 # logicalIR: VRsqF16
 VRsqF16 = _make_scalar_unary_class("VRsqF16", "v_rsq_f16", InstType.INST_F16)
 # logicalIR: VRsqF32
@@ -2428,13 +2643,18 @@ VCvtScalePkF16toBF8 = _make_cvt_scale_class("VCvtScalePkF16toBF8", "v_cvt_scalef
 VCvtScaleSRF16toFP8 = _make_cvt_scale_class("VCvtScaleSRF16toFP8", "v_cvt_scalef32_sr_fp8_f16", InstType.INST_NOTYPE)
 VCvtScaleSRF16toBF8 = _make_cvt_scale_class("VCvtScaleSRF16toBF8", "v_cvt_scalef32_sr_bf8_f16", InstType.INST_NOTYPE)
 
-# --- No logicalIR mapping (remain as dummy) ---
-VCvtPkF32toF16 = make_dummy_class(f"{_P}.VCvtPkF32toF16")
+# --- Gfx1250 vector conversions ---
+# logicalIR: VCvtPkF32toF16
+VCvtPkF32toF16 = _make_scalar_alu_class("VCvtPkF32toF16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
+# logicalIR: VCvtF64toU32
+VCvtF64toU32 = _make_scalar_unary_class("VCvtF64toU32", "v_cvt_u32_f64", InstType.INST_U32)
+# logicalIR: VCvtU32toF64
+VCvtU32toF64 = _make_scalar_unary_class("VCvtU32toF64", "v_cvt_f64_u32", InstType.INST_F64)
+# logicalIR: PVCvtBF16toFP32
+PVCvtBF16toFP32 = _make_scalar_unary_class("PVCvtBF16toFP32", "v_cvt_f32_bf16", InstType.INST_F32)
+# (no Gfx1250 mapping - remain dummy)
 VCvtPkF32toFP16 = make_dummy_class(f"{_P}.VCvtPkF32toFP16")
-VCvtF64toU32 = make_dummy_class(f"{_P}.VCvtF64toU32")
-VCvtU32toF64 = make_dummy_class(f"{_P}.VCvtU32toF64")
 VCvtFP8toF16 = make_dummy_class(f"{_P}.VCvtFP8toF16")
-PVCvtBF16toFP32 = make_dummy_class(f"{_P}.PVCvtBF16toFP32")
 
 
 # ==========================================================================
@@ -2809,13 +3029,19 @@ DSLoadB16 = make_dummy_class(f"{_P}.DSLoadB16")
 DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32")
 DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
 DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
-DSLoadB96TrB6 = make_dummy_class(f"{_P}.DSLoadB96TrB6")
-DSLoadB64TrB4 = make_dummy_class(f"{_P}.DSLoadB64TrB4")
-DSLoadB64TrB16 = make_dummy_class(f"{_P}.DSLoadB64TrB16")
-DSLoadB128TrB16 = make_dummy_class(f"{_P}.DSLoadB128TrB16")
-DSLoadB64TrB8 = make_dummy_class(f"{_P}.DSLoadB64TrB8")
+# logicalIR: DSLoadB96TrB6
+DSLoadB96TrB6 = _make_ds_load_class("DSLoadB96TrB6", "ds_load_tr6_b96")
+# logicalIR: DSLoadB64TrB4
+DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_tr4_b64")
+# logicalIR: DSLoadB64TrB16
+DSLoadB64TrB16 = _make_ds_load_class("DSLoadB64TrB16", "ds_load_tr16_b64")
+# logicalIR: DSLoadB128TrB16
+DSLoadB128TrB16 = _make_ds_load_class("DSLoadB128TrB16", "ds_load_tr16_b128")
+# logicalIR: DSLoadB64TrB8
+DSLoadB64TrB8 = _make_ds_load_class("DSLoadB64TrB8", "ds_load_tr8_b64")
 DSLoadB128 = _make_ds_load_class("DSLoadB128", "ds_load_b128", latency=2)
-DSLoadB192 = make_dummy_class(f"{_P}.DSLoadB192")
+# logicalIR: DSLoadB192
+DSLoadB192 = _make_ds_load_class("DSLoadB192", "ds_load_b192", latency=2)
 def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1):
     """Factory for DS load2 (dual-address): rocisa(dst, src, ds, comment) → logicalIR 3 args."""
 
@@ -2858,13 +3084,16 @@ DSLoad2B64 = _make_ds_load2_class("DSLoad2B64", "ds_load2_b64")
 DSStoreU16 = make_dummy_class(f"{_P}.DSStoreU16")
 DSStoreB8 = _make_ds_store_class("DSStoreB8", "ds_store_b8")
 DSStoreB16 = _make_ds_store_class("DSStoreB16", "ds_store_b16")
-DSStoreB8HID16 = make_dummy_class(f"{_P}.DSStoreB8HID16")
-DSStoreD16HIB16 = make_dummy_class(f"{_P}.DSStoreD16HIB16")
+# logicalIR: DSStoreB8HID16
+DSStoreB8HID16 = _make_ds_store_class("DSStoreB8HID16", "ds_store_b8_d16_hi")
+# logicalIR: DSStoreD16HIB16
+DSStoreD16HIB16 = _make_ds_store_class("DSStoreD16HIB16", "ds_store_b16_d16_hi")
 DSStoreB32 = _make_ds_store_class("DSStoreB32", "ds_store_b32", latency=2)
 DSStoreB64 = _make_ds_store_class("DSStoreB64", "ds_store_b64", latency=3)
 DSStoreB96 = _make_ds_store_class("DSStoreB96", "ds_store_b96", latency=4)
 DSStoreB128 = _make_ds_store_class("DSStoreB128", "ds_store_b128", latency=5)
-DSStoreB192 = make_dummy_class(f"{_P}.DSStoreB192")
+# logicalIR: DSStoreB192
+DSStoreB192 = _make_ds_store_class("DSStoreB192", "ds_store_b192", latency=6)
 DSStoreB256 = make_dummy_class(f"{_P}.DSStoreB256")
 
 # --- DS Store2 / Permute (ternary): rocisa(dstAddr, src0, src1, ds, comment) ---
@@ -2950,7 +3179,36 @@ def _make_tensor_load_class():
 
 
 TensorLoadToLds = _make_tensor_load_class()
-GlobalPrefetchB8 = make_dummy_class(f"{_P}.GlobalPrefetchB8")
+# logicalIR: GlobalPrefetchB8 — 2 srcs (vaddr, saddr), no dest
+def _make_global_prefetch_class():
+    """GlobalPrefetchB8: (vaddr, saddr, globalModifiers) → logicalIR 2 srcs."""
+
+    class GlobalPrefetchB8(CommonInstruction):
+        __slots__ = ("_modifiers",)
+
+        def __init__(self, vaddr: Any = None, saddr: Any = None,
+                     modifiers: Any = None, comment: str = "", **kw):
+            _ = kw
+            CommonInstruction.__init__(
+                self, instType=InstType.INST_NOTYPE, dst=None,
+                srcs=[vaddr, saddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+            self.setInst("global_prefetch_b8")
+            self._modifiers = modifiers
+
+        def to_stinky_logical(self) -> Any:
+            import stinkytofu as _st
+            factory = getattr(_st, "GlobalPrefetchB8")
+            return factory(
+                _to_stinky_register(self.srcs[0]),
+                _to_stinky_register(self.srcs[1]),
+                self.comment)
+
+        def __deepcopy__(self, memo):
+            return CommonInstruction.__deepcopy__(self, memo)
+
+    return GlobalPrefetchB8
+
+GlobalPrefetchB8 = _make_global_prefetch_class()
 
 
 # ==========================================================================
