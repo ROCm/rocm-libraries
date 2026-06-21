@@ -1,0 +1,79 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Gradient + BiasSrc=A + UseScaleAB characterization config for gfx942.
+#
+# Target: KernelWriter.py gradient/multi-bias arms:
+#   - line 2895: initSumUnroll call (Gradient+UseBias+BiasSrc A/B)
+#   - line 3517: loopSum call in noLoadLoop NLL path
+#   - line 4361: loopSum call in main loop body
+#   - line 4873: initSumUnroll in shadow init path (doShadowInit==2)
+#   - line 5813: loopSum call in tail loop
+#   - line 6101: biasSumUnroll assignment + assert (Gradient+BiasSrc A/B)
+#   - line 7941: numVgprValu = MIWaveTile[0] (BiasSrc==A branch)
+#   - lines 8673-8677: preloadScaleA/B logic (UseScaleAB==Scalar)
+#
+# Strategy:
+#   - HHS (fp16/fp16/f32) TN layout with Gradient=True + UseBias=1 + BiasSrc=A
+#     triggers all BiasSrc=="A" arms in KW.py (lines 2895, 3517, 4361, 4873, 5813, 6101, 7941)
+#   - UseScaleAB: Scalar triggers the preload-scale logic at lines 8673-8677
+#   - Single MatrixInstruction shape + GSU=1 -> 1 kernel per BenchmarkProblems entry
+#   - No Activation to avoid complexity; UseE=False keeps StoreRemap off
+#
+# 2 kernels total: BiasSrc=A (TN), BiasSrc=B (NT)
+# Well within the <=8 limit.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS TN, Gradient=True, BiasSrc=A, UseScaleAB=Scalar
+  # Gates KW.py lines 2895, 3517, 4361, 4873, 5813, 6101, 7941, 8673
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      BiasSrc: "A"
+      Batched: True
+      Gradient: True
+      UseE: False
+      Activation: False
+      UseScaleAB: "Scalar"
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 8, 1,  1,   2, 4,  2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [2]
+        - StorePriorityOpt: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']

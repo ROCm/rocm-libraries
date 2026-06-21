@@ -1,0 +1,90 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 designed seed config for gfx90a (aldebaran, CDNA2/MFMA).
+#
+# Mirrors the schema of Tensile/Tests/common/gemm/bf16_tn.yaml
+# (GlobalParameters + BenchmarkProblems:[[ProblemType, {ForkParameters: ...}]]).
+#
+# Design rationale (see attribution-gfx90a.json):
+#   * ProblemType is BBS (DataType=b/BF16, ComputeDataType=s/Single, HPA) — the
+#     dominant attribution entry gfx90a__BBS_yaml (17875 whole-project lines,
+#     ~96% of the 18587-line arch union). One BF16 GEMM with bias+activation
+#     already drives the bulk of KernelWriter/KernelWriterAssembly: the MAC_BF16
+#     path, PackData/conversion, the global-write batch packing, and the
+#     activation Components.
+#   * The harness only emits BenchmarkProblems[0], so a single ProblemType /
+#     DataType is all that is reachable per seed. Within BBS we fork the
+#     edge-store / store-algorithm variation that gfx90a__DB_yaml flagged
+#     (660 marginal lines came from ShiftVectorComponents / edge-store paths):
+#       - two MatrixInstruction tile shapes (16x16x16 4,1 and 32x32x8 4,1) to
+#         vary the store/shift geometry,
+#       - GlobalSplitU 1 vs 2 to reach both MultipleBuffer and
+#         MultipleBufferSingleKernel store algorithms / GSU edge handling,
+#     for 2 x 2 = 4 fork permutations -> 4 emitted kernels (<= 8 limit).
+#   * ActivationType=all + UseBias keep the global-write / activation / PackData
+#     surface (referenced by gfx90a__HSS_yaml and gfx90a__HHS_yaml) live.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (BF16/BF16 -> Single) — dominant attribution entry
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
+          - [32, 32, 8, 1,  1,   1, 1,  4,1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1,2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255, 255, 1, 255]
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

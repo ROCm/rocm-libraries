@@ -1,0 +1,65 @@
+# End-to-end config for the GPU-less --cpu-only switch (T9). Trimmed from
+# Tensile/Tests/common/gemm/fp16_tn.yaml: a single Assembly kernel and a single
+# problem size. Deliberately NO `ISA` pinned here -- the target arch is supplied
+# at the command line via `--gpu-targets <arch>` (the primary --cpu-only path),
+# so the same config drives gfx942/gfx950/gfx90a. `UseEffLike` is left at its
+# default (True): addFromCSV's read_max_freq() reads the MAX_FREQ env var only
+# (no device probe) and falls back gracefully when unset, so this stays GPU-less.
+# A `LibraryLogic` section (empty -> defaultAnalysisParameters) is present so the
+# benchmark path runs through to LibraryLogic.addFromCSV end-to-end. Placed under
+# test_data/ so findConfigs() in test_config.py skips it. Consumed by
+# test_cpu_only_switch.py::test_cpu_only_end_to_end.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 4, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+
+# Empty -> defaultAnalysisParameters (no per-arch ArchitectureName pinned, so the
+# same config drives gfx942/gfx950/gfx90a). Triggers LibraryLogic.main ->
+# addFromCSV end-to-end on the synthetic results CSV. No LibraryClient section:
+# the GPU-less proof stops at the library-logic artifact (LibraryClient re-parses
+# logic into device-bound Solutions, which needs a populated isaInfoMap for the
+# arch and is outside this switch's scope).
+LibraryLogic:
