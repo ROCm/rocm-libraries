@@ -24,21 +24,49 @@
 
 """StinkyTofu module options for the subtile kernel path.
 
-The subtile body already emits its own waits and barriers, so this option set
+The subtile body emits its own waits and barriers. By default this option set
 keeps StinkyTofu as a neutral pass-through: wait-count insertion and the
 cluster-barrier handshake are disabled. The remaining keys mirror the classic
 option set but use subtile-correct values (subtile forces VectorWidthA/B=1).
+
+The ``SUBTILE_STINKYTOFU_WAITCNT`` environment variable opts the subtile path
+into StinkyTofu-owned wait counts. When enabled, StinkyTofu strips the
+subtile-emitted split waits (``StinkyRemoveWaitCntPass``) and re-inserts its own
+(``StinkyWaitCntInsertionPass``). The subtile wait emission itself is left in
+place untouched; this flag only chooses whether StinkyTofu replaces them.
+Barriers stay Python-owned (``ClusterBarrier`` remains off) in either mode.
 """
 
+import os
+
 from ...Common.GlobalParameters import globalParameters
+
+
+# Environment toggle (default off) handing the subtile wait COUNTS to StinkyTofu.
+# Kept local to the subtile path so no shared-code plumbing is required.
+SUBTILE_WAITCNT_ENV = "SUBTILE_STINKYTOFU_WAITCNT"
+
+
+def subtileStinkyTofuWaitCntEnabled():
+    """True when the subtile StinkyTofu wait-count toggle is opted in.
+
+    Off unless ``SUBTILE_STINKYTOFU_WAITCNT`` is set to 1/true/yes/on.
+    """
+    val = os.environ.get(SUBTILE_WAITCNT_ENV)
+    if val is None:
+        return False
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 
 def buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, writer):
     """Build the StinkyTofu options dict for a subtile kernel body.
 
-    EnableWaitCntInsertion and ClusterBarrier are forced off so the conversion
-    does not insert or strip waits/barriers; subtile owns those for now.
+    ClusterBarrier is forced off so subtile keeps owning barrier emission.
+    EnableWaitCntInsertion defaults off (pass-through); it flips on only when
+    the SUBTILE_STINKYTOFU_WAITCNT toggle opts the subtile path into
+    StinkyTofu-owned wait counts.
     """
+    enableWaitCnt = subtileStinkyTofuWaitCntEnabled()
     return {"OptLevel": stinky_opt_level,
             "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
             "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
@@ -46,8 +74,10 @@ def buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, writer):
             "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
             "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
             "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
-            # Neutral pass-through: subtile emits its own split waits.
-            "EnableWaitCntInsertion": False,
+            # Off (default): subtile keeps its own split waits. When the
+            # SUBTILE_STINKYTOFU_WAITCNT toggle is on, StinkyTofu strips them
+            # (StinkyRemoveWaitCntPass) and re-inserts its own.
+            "EnableWaitCntInsertion": enableWaitCnt,
             # True: expert scheduling mode2; False: mode 0. Independent of OptLevel.
             "EnableESM2": kernel["EnableStinkyTofuESM2"],
             "TileA0": kernel["ThreadTile0"],

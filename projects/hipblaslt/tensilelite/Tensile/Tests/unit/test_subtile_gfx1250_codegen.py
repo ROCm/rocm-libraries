@@ -635,3 +635,179 @@ class TestSubtileMemToken:
         asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
                                                sig, stinky_module_options=opts)
         assert asm is not None and 'amdgcn-amd-amdhsa--gfx1250' in asm
+
+
+def _build_tagged_wait_body():
+    """A tagged producer -> wait -> barrier -> consumer -> wait subtile body.
+
+    Mirrors the subtile main-loop shape closely enough for StinkyTofu to strip
+    and re-insert split-counter waits when the toggle is on: it carries the
+    Python-emitted SWaitTensorcnt / SWaitCnt that the subtile path produces.
+    """
+    from Tensile.Components.Subtile.InstructionEmitter import SWaitCntEx
+    from rocisa.code import Module, KernelBody, SignatureBase, Label
+    from rocisa.instruction import SEndpgm, SBarrier, SWaitTensorcnt
+
+    em = _make_token_emitter()
+    tl = _make_tensor_load()
+    rd = _make_ds_read()
+    em._tagLdsTokens([tl, rd])
+    barrier = SBarrier(comment="Barrier")
+    barrier.setMemToken(em.memToken.barrierToken())
+
+    body = Module("body")
+    body.add(Label("ASM_Start", "start"))
+    body.add(tl)
+    # Subtile-emitted TDM wait (producer side).
+    body.add(SWaitTensorcnt(tensorcnt=0, comment="Wait TDM (tensor_load_to_lds)"))
+    body.add(barrier)
+    body.add(rd)
+    # Subtile-emitted LR wait (consumer side).
+    body.add(SWaitCntEx(dscnt=0, vlcnt=-1, vscnt=-1, adjustVmcnt=False,
+                        comment="Wait for LR to complete"))
+    body.add(SEndpgm(comment="end"))
+    sig = SignatureBase("kernel_name", 1, "V5", 0, [0, 1, 2], 0, 256,
+                        totalVgprs=32, totalSgprs=32)
+    kb = KernelBody("kernelBody")
+    kb.addSignature(sig)
+    kb.addBody(body)
+    return kb, sig
+
+
+class TestSubtileStinkyTofuWaitCnt:
+    """Phase 3: subtile wait-count toggle + wait-placement comparison."""
+
+    # -- the toggle defaults off (Phase 2 pass-through) --
+
+    def test_waitcnt_flag_default_off(self, monkeypatch):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled,
+            buildSubtileStinkyTofuOptions)
+        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
+        assert subtileStinkyTofuWaitCntEnabled() is False
+        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
+                                             _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is False
+        # Barriers stay Python-owned regardless of the wait toggle.
+        assert opts["ClusterBarrier"] is False
+
+    # -- the toggle, when on, hands wait counts to StinkyTofu --
+
+    @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on"])
+    def test_waitcnt_flag_on_enables_insertion(self, monkeypatch, val):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled,
+            buildSubtileStinkyTofuOptions)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, val)
+        assert subtileStinkyTofuWaitCntEnabled() is True
+        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
+                                             _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is True
+        # Barriers remain Python-owned even with StinkyTofu waits on.
+        assert opts["ClusterBarrier"] is False
+
+    @pytest.mark.parametrize("val", ["0", "false", "no", "off", "", "  "])
+    def test_waitcnt_flag_off_for_non_truthy(self, monkeypatch, val):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, subtileStinkyTofuWaitCntEnabled)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, val)
+        assert subtileStinkyTofuWaitCntEnabled() is False
+
+    # -- wait-placement comparison: parsing + diffing synthetic streams --
+
+    def test_compare_identical_streams_no_divergence(self):
+        from Tensile.Components.Subtile.WaitPlacementCompare import (
+            compareWaitPlacement)
+        asm = ("label0:\n"
+               "  s_load_b64 s[0:1], s[2:3]\n"
+               "  s_wait_kmcnt 0\n"
+               "  buffer_load_b128 v[0:3], v4, s[0:3]\n"
+               "  s_wait_loadcnt 0\n"
+               "  v_add_f32 v5, v0, v1\n")
+        diff = compareWaitPlacement(asm, asm)
+        assert diff.anchorsMatch
+        assert not diff.diverges
+        assert diff.leftTotals == diff.rightTotals
+        assert "per-anchor divergences: none" in diff.summary()
+
+    def test_compare_detects_moved_and_changed_waits(self):
+        from Tensile.Components.Subtile.WaitPlacementCompare import (
+            compareWaitPlacement)
+        # Same anchors; the wait moves to a different gap and changes count.
+        left = ("a_inst\n"
+                "  s_wait_dscnt 0\n"
+                "b_inst\n"
+                "c_inst\n")
+        right = ("a_inst\n"
+                 "b_inst\n"
+                 "  s_wait_dscnt 1\n"
+                 "c_inst\n")
+        diff = compareWaitPlacement(left, right)
+        assert diff.anchorsMatch          # non-wait stream is identical
+        assert diff.diverges              # but the wait placement/count differs
+        assert len(diff.perAnchor) >= 1
+        summary = diff.summary()
+        assert "s_wait_dscnt" in summary
+
+    def test_compare_flags_anchor_stream_mismatch(self):
+        from Tensile.Components.Subtile.WaitPlacementCompare import (
+            compareWaitPlacement)
+        left = "a_inst\nb_inst\n"
+        right = "a_inst\nDIFFERENT\n"
+        diff = compareWaitPlacement(left, right)
+        assert not diff.anchorsMatch
+        assert diff.firstAnchorMismatch is not None
+        assert diff.firstAnchorMismatch[0] == 1
+
+    # -- flag-ON emission stays parseable gfx1250 asm --
+
+    def test_flag_on_emits_parseable_gfx1250_asm(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        kb, sig = _build_tagged_wait_body()
+        kernel = _stinky_kernel()
+        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
+                                             _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is True
+        asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
+                                               sig, stinky_module_options=opts)
+        assert asm is not None and 'amdgcn-amd-amdhsa--gfx1250' in asm
+
+    # -- end-to-end: emit off vs on, compare wait placement, report --
+
+    def test_wait_placement_off_vs_on_runs_and_reports(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        from Tensile.Components.Subtile.WaitPlacementCompare import (
+            compareWaitPlacement)
+        kernel = _stinky_kernel()
+
+        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
+        kb_off, sig_off = _build_tagged_wait_body()
+        opts_off = buildSubtileStinkyTofuOptions(kernel, 3, _stinky_mock_writer())
+        assert opts_off["EnableWaitCntInsertion"] is False
+        asm_off = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel,
+                                                   kb_off, sig_off,
+                                                   stinky_module_options=opts_off)
+
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        kb_on, sig_on = _build_tagged_wait_body()
+        opts_on = buildSubtileStinkyTofuOptions(kernel, 3, _stinky_mock_writer())
+        assert opts_on["EnableWaitCntInsertion"] is True
+        asm_on = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel,
+                                                  kb_on, sig_on,
+                                                  stinky_module_options=opts_on)
+
+        assert asm_off is not None and asm_on is not None
+        diff = compareWaitPlacement(asm_off, asm_on)
+        report = diff.summary()
+        # The comparison must always produce a human-readable report.
+        assert "Wait-placement comparison" in report
+        assert "total split waits" in report
+        # Surface the report in pytest -s output for manual inspection.
+        print("\n" + report)
