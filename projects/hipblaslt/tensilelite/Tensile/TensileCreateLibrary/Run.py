@@ -227,9 +227,15 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    cuocc = kernel["CUOccupancy"]
+    if cuocc <= 0 and getVerbosity() >= 2:
+        print2(
+            f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
+            f"runtime will clamp to 1."
+        )
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], kernel["CUOccupancy"], \
+        kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"]
     )
 
@@ -316,6 +322,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                     sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                    sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                     sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                     sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                     sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']
@@ -345,6 +352,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                         sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
+                        sol.sizeMapping.adaptiveGemmNTAB = sol.originalSolution._state.get('AdaptiveGemmNTAB', 0)
                         sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
                         sol.sizeMapping.WaveSeparateGlobalReadA = sol.originalSolution._state['WaveSeparateGlobalReadA']
                         sol.sizeMapping.WaveSeparateGlobalReadB = sol.originalSolution._state['WaveSeparateGlobalReadB']

@@ -313,7 +313,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::IsValid(
         use_tf32 = false;
         return loader.IsArgsSupported(
             CKSolverType::GrpConv3dWrw, problem, kernel_id, miopenBFloat16, false);
-    default: return false;
+
+    case miopenInt32:
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt64: return false;
     }
 }
 
@@ -375,8 +380,6 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::IsApplicable(
     const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem) const
 {
     if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS))
-        return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.HasMixedDataTypes())
         return false;

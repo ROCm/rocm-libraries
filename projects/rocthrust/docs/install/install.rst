@@ -12,7 +12,7 @@ Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 For advanced workflows, source builds, or custom configurations, see
-:doc:`./build`.
+:doc:`Build from source <./source-build>`.
 
 .. _install-rocm:
 

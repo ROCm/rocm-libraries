@@ -6,14 +6,6 @@
 namespace hip_kernel_provider_common
 {
 
-enum MaskType : int
-{
-    NO_MASK = 0,
-    TOP_LEFT_CAUSAL,
-    BOTTOM_RIGHT_CAUSAL,
-    WINDOW_GENERIC
-};
-
 enum RoundingMode : int
 {
     RTNE = 0, // Round to Nearest Even (IEEE default)

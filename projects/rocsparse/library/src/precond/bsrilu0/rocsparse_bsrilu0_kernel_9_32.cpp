@@ -495,7 +495,7 @@ namespace rocsparse
         {
             return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -521,7 +521,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

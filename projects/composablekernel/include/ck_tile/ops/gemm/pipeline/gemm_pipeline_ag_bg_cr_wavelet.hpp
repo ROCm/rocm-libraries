@@ -68,6 +68,8 @@ struct GemmPipelineAgBgCrWavelet
     // LaunchBlockSize: total threads launched per workgroup.
     static constexpr index_t LaunchBlockSize = MathBlockSize + LoadBlockSize;
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     // BlockSize exposed to the kernel for BlockGemm compatibility.
     // The kernel uses this for MFMA wave-to-tile mapping.
     static constexpr index_t BlockSize = MathBlockSize;
@@ -76,6 +78,12 @@ struct GemmPipelineAgBgCrWavelet
     static constexpr auto Scheduler        = Problem::Scheduler;
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr index_t NumWaveGroups = 1;
+
+    // Wavelet performs no weight preshuffle. Exposed so kernels that route
+    // through UniversalGemmKernel (e.g. bwd_weight) can gate their
+    // `if constexpr(GemmPipeline::Preshuffle)` branches, matching every other
+    // pipeline which defines `Preshuffle = Problem::Preshuffle;`.
+    static constexpr index_t Preshuffle = Problem::Preshuffle;
 
     // --- Wavelet traits ---
     static constexpr bool IsWavelet = true;

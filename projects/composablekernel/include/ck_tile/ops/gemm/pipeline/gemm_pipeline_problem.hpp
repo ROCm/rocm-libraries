@@ -91,9 +91,12 @@ struct GemmPipelineProblemBase
     static constexpr bool DoubleSmemBuffer  = Traits::DoubleSmemBuffer;
     static constexpr auto Scheduler         = GemmPipelineScheduler::Intrawave;
     static constexpr index_t VectorLoadSize = Traits::_VectorSize;
+    static constexpr bool LargeTensors      = Traits::LargeTensors;
 
     // In the base situation, the Preshuffle setting should be false.
     static constexpr bool Preshuffle = false;
+
+    static constexpr bool Async = false;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -253,6 +256,8 @@ struct UniversalGemmPipelineProblem
     using BElementWise = remove_cvref_t<BElementWise_>;
 
     static constexpr bool FixedVectorSize = FixedVectorSize_;
+
+    static constexpr bool LargeTensors = Traits::LargeTensors;
 
     using BlockGemmShape = remove_cvref_t<BlockGemmShape_>;
 

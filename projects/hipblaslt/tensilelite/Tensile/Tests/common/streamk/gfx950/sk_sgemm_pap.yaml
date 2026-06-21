@@ -1,0 +1,118 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  BoundsCheck: False
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  Architecture: gfx950
+  PrintLevel: 2
+  ISA: [[9, 5, 0]]
+
+BenchmarkProblems:
+  #######################################
+  # SGEMM NT - StreamK PrefetchAcrossPersistent
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup - stagger, DTL, and PGR coverage
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [64]
+        - DepthU: [16]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0, 1]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 4, 1, 1, 4, 2, 2, 2]
+          - [16, 16, 4, 1, 1, 2, 4, 2, 2]
+        - MIArchVgpr: [0]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1, 8]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - UseSgprForGRO: [0, 1]
+        - StaggerU: [0, 32]
+        - StaggerUStride: [256]
+        - Use64bShadowLimit: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]
+
+    - # BenchmarkProblemSizeGroup - 64-bit shadow-limit restore path
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [64]
+        - DepthU: [16]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 4, 1, 1, 4, 2, 2, 2]
+          - [16, 16, 4, 1, 1, 2, 4, 2, 2]
+        - MIArchVgpr: [0]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [4]
+        - TransposeLDS: [0]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1, 8]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - StaggerU: [32]
+        - StaggerUStride: [256]
+        - Use64bShadowLimit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]
