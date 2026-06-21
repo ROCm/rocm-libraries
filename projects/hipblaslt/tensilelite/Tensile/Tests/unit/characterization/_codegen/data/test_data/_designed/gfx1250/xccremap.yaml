@@ -1,0 +1,99 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R4 designed config for gfx1250 XCC-cluster-remap characterization.
+#
+# Target: KernelWriterAssembly.py lines 2398-2453
+#   "Init workgroup id from ttmp with cluster remap"
+#
+# Gate condition:
+#   self.states.archCaps["WorkGroupIdFromTTM"] is True on gfx12xx (isaVersion[0]==12)
+#   AND kernel["ClusterDim"][0] * kernel["ClusterDim"][1] != 1
+#
+# Design:
+#   Architecture: gfx1250 (ISA [12,5,0]) — WorkGroupIdFromTTM=True
+#   ClusterDim: [2, 2] — product=4, triggers enableCluster=True → cluster remap arm
+#   TDMInst: 3          — enables both TDMA+TDMB (tdmA=True, tdmB=True)
+#   MatrixInstruction variants:
+#     [16,16,32,1,1,1,1,1,1] → MIWaveGroup=[1,1], prod=1 → MulticastMaskA + MulticastMaskB
+#     [16,16,32,1,1,1,1,2,2] → MIWaveGroup=[2,2], prod=4 → MulticastMask (single combined)
+#
+# This covers lines 2398-2453 (cluster remap body) for every ClusterDim=[2,2] kernel,
+# plus both branches of the multicast mask calculation (lines 2467-2493).
+#
+# 2 emitted kernels (well within the <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN, gfx1250, TDMInst=3, ClusterDim=[2,2]
+  # WorkGroupIdFromTTM=True (gfx1250) + ClusterDim product=4 != 1
+  # triggers the "Init workgroup id from ttmp with cluster remap" arm
+  # (KernelWriterAssembly.py lines 2398-2453).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 0
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  1, 1]  # MIWaveGroup=[1,1] -> MulticastMaskA/B path
+          - [16, 16, 32, 1,  1,  1, 1,  2, 2]  # MIWaveGroup=[2,2] -> MulticastMask (combined) path
+        - TDMInst: [3]
+        - DepthU: [64]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [0]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [0]
+        - GroupLoadStore: [False]
+        - ClusterDim: [[2, 2]]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

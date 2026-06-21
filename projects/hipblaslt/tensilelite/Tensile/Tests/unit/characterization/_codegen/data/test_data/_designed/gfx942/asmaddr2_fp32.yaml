@@ -1,0 +1,59 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# asmaddr2: fp32 NT batched, large MIWaveTile[1]=8, SourceSwap=1.
+#
+# Target: AsmAddressCalculation.py remaining arms (64-bit / edge / multi-batch):
+#   - 101-102 : addScaled with scale != 1 (rowInc > 1 at batch boundary)
+#   - 135-137 : emitAddressCoordIncrement coordOffset0 > 64
+#   - 149-151 : emitAddressCoordIncrement rowInc > 64 (batch-boundary rowInc=113)
+#
+# Mechanism: MIWaveTile=[2,8], MIWaveGroup=[2,2], SourceSwap=1 creates elements
+# spanning multiple d1 rows with coordOffset1 jumps of 128 at batch boundaries.
+# The cross-batch rowInc (coordOffset1_new - lastCoordOffset1) reaches 113, which:
+#   - exceeds 64, driving the emitAddressCoordIncrement "large rowInc" branch, and
+#   - is != 1, driving the addScaled "scale by rowInc" branch.
+# With totalTT0=2, vectorWidth0=auto, coordOffset0 for d0=1 also exceeds 64.
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SSS (fp32 in / fp32 out) NT batched, no bias/scale extras.
+  # Large MIWaveTile[1]=8 + MIWaveGroup=[2,2] drives cross-batch coordOffset1
+  # jumps of 128, giving rowInc=113 at batch transitions.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 8, 2, 2]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

@@ -1,0 +1,133 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P7 DESIGNED config for gfx1250 LocalReadMFMA transposed-LDSTr (HasWMMA_V3) paths.
+#
+# Target missing ranges in Tensile/Components/LocalRead.py:
+#   835-883  : enableLDSTr + HasWMMA_V3 + bpeDS==1  (FP8, HasLDSTrB64B8=1)
+#   884-942  : enableLDSTr + HasWMMA_V3 + bpeDS==2  (FP16/BF16, HasLDSTrB128B16=1)
+#
+# Gate analysis:
+#   Line 782: if enableLDSTr:
+#   Line 784: if writer.states.asmCaps["HasWMMA_V3"]:
+#     Line 835: elif tP["bpeDS"] == 1:   (FP8 = 1 byte)
+#     Line 884: elif tP["bpeDS"] == 2:   (FP16/BF16 = 2 bytes)
+#
+# enableLDSTr = isLDSTrEnabled(asmCaps, LDSTrInst, UnrollMajorLDS, DirectToVgpr, numBytes)
+#   - requires: LDSTrInst=True, UnrollMajorLDS=False
+#   - for numBytes=2: needs HasLDSTrB128B16=1 (gfx1250: YES)
+#   - for numBytes=1 (FP8): needs HasLDSTrB64B8=1 (gfx1250: YES)
+#   - HasWMMA_V3=1 (gfx1250: YES)
+#
+# Config 1: HHS NN with LDSTrInst=True (bpeDS=2 -> lines 884-942)
+# Config 2: F8HS TN with LDSTrInst=True (bpeDS=1 -> lines 835-883)
+#
+# ForkParameters kept minimal (<=8 permutations total, limit=8).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # HHS NN — FP16 with LDSTrInst=True (gfx1250 HasWMMA_V3 + HasLDSTrB128B16)
+  # bpeDS=2 -> LocalReadMFMA lines 884-942 (bpeDS==2 arm under HasWMMA_V3)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # Two MI shapes: [16,16,32,1,1,4,4,2,2] and [16,16,32,1,1,2,4,2,1]
+        # With LDSTrInst=True, these emit enableLDSTrA/B=True (bpeDS=2, HasLDSTrB128B16=1)
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 4, 2, 1]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - LDSTrInst: [True]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - SourceSwap: [1]
+        - ExpandPointerSwap: [False]
+        - WavefrontSize: [32]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  ########################################
+  # F8HS TN — FP8 with LDSTrInst=True (gfx1250 HasWMMA_V3 + HasLDSTrB64B8)
+  # bpeDS=1 -> LocalReadMFMA lines 835-883 (bpeDS==1 arm under HasWMMA_V3)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [32, 32,  64, 1, 1, 1, 1, 2, 2]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LDSTrInst: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [1]
+        - ExpandPointerSwap: [False]
+        - WavefrontSize: [32]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

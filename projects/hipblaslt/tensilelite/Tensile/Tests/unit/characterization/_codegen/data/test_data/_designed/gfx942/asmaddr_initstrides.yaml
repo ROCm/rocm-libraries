@@ -1,0 +1,57 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# asmaddr_initstrides: fp32 TN GEMM with UseInitialStridesCD=True.
+#
+# Target: AsmAddressCalculation.py emitScaleToBpe non-unit stride0 arm:
+#   - 269-272 : VMulLOU32 for non-unit stride0 (isConstUnitStride returns False)
+#   - 273     : elementVgpr = addrVgpr (after non-unit stride scale)
+#
+# Mechanism: UseInitialStridesCD=True makes stride-D[0] a runtime SGPR reference
+#   instead of a compile-time "const" constant. isConstUnitStride(stride0) then
+#   returns False (RegisterContainer check), driving the VMulLOU32 branch.
+#   TransposeA=1, TransposeB=0 (TN) ensures contraction dimension alignment
+#   for correct code gen. Simple fp32 SSS, no Scale/Bias extras.
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SSS (fp32 in / fp32 out) TN batched, UseInitialStridesCD=True.
+  # Non-unit stride0 activates lines 269-273 in emitScaleToBpe.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      UseInitialStridesCD: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

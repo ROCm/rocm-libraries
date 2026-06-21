@@ -1,0 +1,85 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 designed MAC config for gfx90a / gfx942: non-MFMA fp16 HPA (DOT2) path.
+#
+# Target: Tensile/Components/MAC_F16_HPA.py  FMA_F16_HPA_DOT2.__call__
+#         (lines 44-88; 78 lines currently uncovered)
+#
+# Design rationale:
+#   * ProblemType is HHS (DataType=h/Half, DestDataType=h, ComputeDataType=s,
+#     HighPrecisionAccumulate=True) -- selects FMA_F16_HPA_DOT2 on gfx942
+#     (UseDotInstruction=True because ISA=9.4.2 and DataType.isHalf()).
+#   * EnableMatrixInstruction is determined by presence of ThreadTile+WorkGroup
+#     (non-MFMA), NOT MatrixInstruction entries.
+#   * LocalReadVectorWidth must equal NumDotElements(2) * InnerUnroll(1) = 2
+#     (dot kernel constraint checked in Solution.py).
+#   * Three ThreadTile shapes x two WorkGroup layouts = 6 fork permutations
+#     (within limit=8).
+#   * gfx942 has v_dot2_f32_f16=1, so the FMA_F16_HPA_DOT2 path uses
+#     VDot2F32F16 (line 52/77) hitting the v_dot2_f32_f16 branch.
+#   * NOTE: on gfx90a, UseDotInstruction is forced False (ISA != 9.4.2),
+#     so FMA_F16_HPA_MAD_MIX would be selected, but its __call__ signature
+#     (writer, m, innerUnroll) mismatches the call site (writer, tPA, tPB, m,
+#     innerUnroll) -- a latent source bug. The test therefore targets gfx942
+#     which is allowed by the task spec ("gfx90a or gfx942").
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (fp16/fp16 -> fp16, HPA) — non-MFMA DOT2 MAC path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [4, 4]
+          - [8, 4]
+          - [2, 4]
+        - WorkGroup:
+          - [8, 8, 1]
+          - [4, 16, 1]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - InnerUnroll: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [2]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - ScheduleIterAlg: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]

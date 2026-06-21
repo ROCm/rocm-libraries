@@ -1,0 +1,73 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 designed GSU-family sweep for gfx942 codegen characterization.
+#
+# Goal: exercise the uncovered GSU.py branches in methodology-A missing ranges:
+#   170-233, 246-301, 388-461, 480-588, 646-698 (257 miss total).
+#
+# Key routing:
+#   GlobalSplitU=1  -> GSUOff (GSU off-path methods, lines ~197-301)
+#   GlobalSplitU>1  -> GSUOn  (GSU on-path methods, lines ~303+)
+#                      with MultipleBuffer -> _GlobalAccumulation=MultipleBuffer
+#                      with SingleBuffer   -> _GlobalAccumulation=SingleBuffer
+#   GlobalSplitUWorkGroupMappingRoundRobin=True -> GSUWGMRR branch in graWorkGroup
+#
+# ForkParameters cartesian product:
+#   3 (GlobalSplitU) x 2 (GlobalSplitUAlgorithm) x 2 (GSUWGMRR) = 12 total
+# capped at limit=8 by the harness.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) NT, BH + Bias + Activation
+  # Same dominant ProblemType as seed.yaml — keeps the same valid kernel shape;
+  # only the GSU-family ForkParameters differ.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - SourceSwap: [1]
+        - GlobalSplitU: [1, 3, 8]
+        - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer"]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

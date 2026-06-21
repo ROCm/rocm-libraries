@@ -1,0 +1,82 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# LRA tile assignment characterization config for gfx942.
+#
+# Target: Tensile/Components/LraTileAssignment.py
+# Missing ranges: 78-91 (LraTileAssignmentVALU UseDotInstruction branches)
+#
+# Strategy: Two arm sweep on gfx942.
+#
+# ARM 1 — VALU dot path (lines 78-91 of LraTileAssignment.py):
+#   Requires EnableMatrixInstruction=False + DataType=h + HPA.
+#   UseDotInstruction=True (gfx942+fp16+HPA only).
+#   WaveSplitK=True with WorkGroup[2] > 1 -> NumWaveSplitK > 1 -> lines 78-87.
+#   WaveSplitK=True with WorkGroup[2] = 1 -> NumWaveSplitK = 1 -> lines 88-91.
+#
+# ARM 2 — MFMA path with MIWaveGroup + LdsBlockSizePerPad fork:
+#   Sweeps num1DWaves > 1 branch (wave offset in LraTileAssignmentMFMA).
+#   Sweeps LdsBlockSizePerPad to drive LdsPad=0 vs pad arms.
+#
+# Note: LraTileAssignmentTransposedMFMA (lines 144-249, 285-409, 473-592, 611-693)
+# require asmCaps["HasLDSTrB128B16"]=True which gfx942 lacks. Those ranges are
+# not reachable on gfx942 (ceiling evidence).
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # ARM 1: VALU dot2 path — fp16 HPA TT
+  # EnableMatrixInstruction=False, WaveSplitK sweep
+  # Targets lines 78-91 of LraTileAssignment.py
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [2, 2]
+        - WorkGroup:
+          - [8, 4, 2]
+          - [32, 2, 1]
+        - WaveSplitK: [True]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [2]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

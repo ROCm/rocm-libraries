@@ -1,0 +1,78 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R7 StreamK FixupTreeReduction config for gfx942 codegen characterization.
+#
+# Coverage targets (StreamK.py):
+#   Lines 630-784: storeBranchesCommon, StreamKFixupTreeReduction==1 arm.
+#                  Gating: kernel["StreamKFixupTreeReduction"] == 1 (line 629)
+#                          AND kernel["StreamKAtomic"] == 0 (line 622 guard).
+#
+# StreamKFixupTreeReduction=1 enables the tree-reduction fixup strategy in
+# storeBranchesCommon (shared by StreamK=1,2,3). When set, a loop of tree-
+# structured partial-tile accumulation is emitted instead of the linear scan.
+# StreamK=2 (TwoTileOriginal) exercises storeBranchesCommon via the dispatch
+# at line 2537, which calls self.storeBranchesCommon().
+# StreamK=1 (Basic) also calls storeBranchesCommon (line 2369) as a fallback.
+# Using both modes here gives the tree-reduction code two entry points.
+#
+# StreamKAtomic must be 0 — the storeBranchesCommon early-returns at line 622
+# when StreamKAtomic is nonzero, so the tree-reduction body would be skipped.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SGEMM NT, Batched, StreamK=[1,2], StreamKFixupTreeReduction=1
+  # StreamKAtomic=0 to pass the guard at line 622.
+  # StreamKFixupTreeReduction=1 to enter the tree-reduction body at line 629.
+  ########################################
+  -
+    - # ProblemType: SGEMM NT
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        - StreamK: [1, 2]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StreamKFixupTreeReduction: [1]
+        - DebugStreamK: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DepthU: [16]
+        - LocalReadVectorWidth: [1]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreRemapVectorWidth: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]
