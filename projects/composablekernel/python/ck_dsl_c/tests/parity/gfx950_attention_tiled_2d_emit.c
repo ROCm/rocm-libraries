@@ -550,10 +550,17 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
         s->use_mfma32_skip_legacy_qreg = true;
         s->use_transposed_half_local_pv = true;
         break;
-    /* idx52: #66 Lever-2 deep K prefetch ring (kv_ring_depth=3). The gfx950 C
-     * twin does not port the deep-ring schedule -> it REJECTS with
-     * CKC_ERR_NOTIMPL. The parity harness checks the C side fails cleanly with
-     * the same structured reason as a guard (Python emits the 3-slot ring). */
+    /* idx52 REMOVED: it exercised the deep K prefetch ring (kv_ring_depth=3), a
+     * Python-only experimental lever the production selector never sets and the
+     * gfx950 C twin rejects by design. A config one engine cannot emit is
+     * intrinsically asymmetric and does not belong in the byte-identity (emit-
+     * comparison) gate. The C reject guard remains in the public entry glue;
+     * ring-3 was superseded by use_softmax_mfma_interleave (not production). */
+    /* idx52 (renumbered from 53 after the ring-3 config was removed; kept
+     * contiguous so the gate does not stop early on a hole): #69 K single-buffer
+     * at T=64 -- the d128 long-context 2-WG/CU win. tile_size=64 +
+     * use_k_single_buffer (K_lds 2->1 slot, next-K deferred to after the PV-wait
+     * barrier). Ported to the gfx950 C twin -> must be C/Python byte-identical. */
     case 52:
         s->head_size = 128; s->block_size = 32;
         s->num_query_heads = 64; s->num_kv_heads = 8;
@@ -561,8 +568,8 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
         s->sliding_window = 0; s->has_softcap = false;
         s->num_seqs = 1;
         s->num_warps = 2; s->block_m_per_warp = 32;
-        s->has_tile_size = true; s->tile_size = 32;
-        s->kv_ring_depth = 3;
+        s->has_tile_size = true; s->tile_size = 64;
+        s->use_k_single_buffer = true;
         s->use_mfma_32x32 = true;
         s->use_transposed_qk_32x32 = true;
         s->use_transposed_scalar_state = true;

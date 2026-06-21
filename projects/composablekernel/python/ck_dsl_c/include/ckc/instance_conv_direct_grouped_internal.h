@@ -151,10 +151,15 @@ typedef struct ckc_dconv_16c_ctx
     /* fold_k32=False path: weights[r*KW+s], length KH*KW (<=9).            */
     ckc_value_t* weights[16];
     int n_weights;
-    /* fold_k32=True path: per-r folded K=32 + residual K=16, length KH (<=3) */
+    /* fold_k32=True path: per-r folded K=32 (S=0,1) + S=2 promoted to a
+     * zero-padded K=32 atom, length KH (<=3). */
     ckc_value_t* weights_k32[8];
-    ckc_value_t* weights_k16[8];
-    int n_weights_k32; /* == n_weights_k16 == KH when fold_k32 else 0       */
+    ckc_value_t* weights_s2_k32[8];
+    int n_weights_k32; /* == KH when fold_k32 else 0                        */
+    /* lane_in_lo_half = cmp_lt(c4, 2); fp16x8_zero = zero_vec_f16(8).
+     * Used to zero the upper-16-K (c4 in {2,3}) lanes of the S=2 wide atom. */
+    ckc_value_t* lane_in_lo_half;
+    ckc_value_t* fp16x8_zero;
 
     /* ---- per-thread chunk decode table (chunk_desc + chunk_meta) -- */
     const ckc_tensor_descriptor_t* chunk_desc; /* unmerge_magic decode      */
@@ -267,7 +272,7 @@ typedef struct ckc_dconv_4c_ctx
 bool ckc_dconv16c_prologue(ckc_dconv_16c_ctx_t* ctx);
 
 /* Weight-load phase (lines 357-415): build b_desc, k_out_val, and load
- * weights/weights_k32/weights_k16 per the fold_k32 branch. */
+ * weights/weights_k32/weights_s2_k32 per the fold_k32 branch. */
 void ckc_dconv16c_load_weights(ckc_dconv_16c_ctx_t* ctx);
 
 /* Chunk-decode phase (lines 444-473): build chunk_desc (naive + unmerge_magic)
@@ -305,6 +310,12 @@ ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx, int q_subtile, int s_const
  * <8 x half> read for the folded K=32 MFMA. */
 ckc_value_t*
 ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
+
+/* Closure: lds_read_input_s2_k32(q_subtile, lds). Per-lane <8 x half> read
+ * for the S=2 residual promoted to a zero-padded K=32 MFMA (high half
+ * zeroed via select(lane_in_lo_half, vec, fp16x8_zero)). */
+ckc_value_t*
+ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
 
 /* Prologue prefetch (lines 609-616): store_to_lds(issue_dram_load(c0), A_smem)
  * then sync(). Zero-fills row 0 (= -PAD) via the descriptor's embed validity. */

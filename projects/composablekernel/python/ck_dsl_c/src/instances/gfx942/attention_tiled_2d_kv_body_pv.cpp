@@ -34,6 +34,7 @@
 #include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h" /* ckc_mfma_16x16x16_for_dtype */
 #include "ckc/ir.h"
+#include "ckc/helper_ck_dsl.helpers.schedule.h" /* CKC_SCHED_DS_READ / CKC_SCHED_MFMA, T8 */
 
 /* ============================================================ *
  *  local builder aliases (mirror the Python ``b.<op>`` surface)
@@ -330,6 +331,11 @@ ckc_value_t* ckc_gfx942_attn2d_apply_transposed_pv_regs(ckc_gfx942_attn2d_build_
             }
             ckc_value_t* B_p_t = ckc_b_vec_pack(B, b_p_elems, 4, DT);
             acc32              = mfma_32x32x8(ctx, A_v_t, B_p_t, acc32);
+            if(ctx->USE_QK_PV_SCHED_GROUP_BARRIER)
+            {
+                ckc_b_sched_group_barrier(B, CKC_SCHED_DS_READ, 4, 1);
+                ckc_b_sched_group_barrier(B, CKC_SCHED_MFMA, 1, 1);
+            }
         }
         return acc32;
     }

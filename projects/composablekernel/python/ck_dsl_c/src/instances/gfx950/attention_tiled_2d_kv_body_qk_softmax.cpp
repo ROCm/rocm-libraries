@@ -465,8 +465,9 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     const int M_ATOMS_PER_WARP    = ctx->M_ATOMS_PER_WARP;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
-    /* nxt_buf = 1 - cur_buf (gfx950 is always double-buffered). */
-    ctx->nxt_buf_v = ckc_b_sub(b, ckc_b_const_i32(b, 1), ctx->cur_buf);
+    /* nxt_buf = 1 - cur_buf (double-buffer); #69 single slot -> const 0. */
+    ctx->nxt_buf_v = ctx->K_SINGLE_BUFFER ? ckc_b_const_i32(b, 0)
+                                          : ckc_b_sub(b, ckc_b_const_i32(b, 1), ctx->cur_buf);
 
     ckc_value_t* tile_off = ckc_b_mul(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->T));
 
@@ -814,6 +815,12 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         {
             ckc_gfx950_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
         }
+        else if(ctx->K_SINGLE_BUFFER)
+        {
+            /* #69 single K slot: issue V[i] now; DEFER the next-K prefetch to
+             * after the PV-wait barrier (avoids WAR-racing QK[i] ds_reads). */
+            ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+        }
         else
         {
             ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
@@ -873,6 +880,11 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             else if(ctx->EARLY_V_SCHEDULE)
             {
                 ckc_gfx950_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
+            }
+            else if(ctx->K_SINGLE_BUFFER)
+            {
+                /* #69 single K slot: V[i] now; defer next-K to post-PV barrier. */
+                ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
             }
             else
             {
@@ -1044,6 +1056,12 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         {
             ckc_gfx950_attn2d_issue_k(ctx, safe_next_tile, nxt_buf);
         }
+        else if(ctx->K_SINGLE_BUFFER)
+        {
+            /* #69 single K slot: issue V[i] now; DEFER the next-K prefetch to
+             * after the PV-wait barrier (avoids WAR-racing QK[i] ds_reads). */
+            ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
+        }
         else
         {
             ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
@@ -1197,9 +1215,10 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             pv_in.pt32_g1    = pt32_g1;
             pv_in.pt32_count = QK_N_TILES * 16;
         }
-        pv_in.cur_buf    = ctx->cur_buf;
-        pv_in.nxt_buf    = ctx->nxt_buf_v;
-        pv_in.safe_tile1 = safe_tile1;
+        pv_in.cur_buf        = ctx->cur_buf;
+        pv_in.nxt_buf        = ctx->nxt_buf_v;
+        pv_in.safe_tile1     = safe_tile1;
+        pv_in.safe_next_tile = safe_next_tile; /* #69 deferred K prefetch */
         ckc_gfx950_attn2d_emit_pv_bucket(ctx, &pv_in);
     }
 

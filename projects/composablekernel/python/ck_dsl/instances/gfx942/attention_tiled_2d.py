@@ -149,6 +149,17 @@ _warp_xor_reduce_sum = warp_xor_reduce_sum
 _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 
+# AMDGPU sched.group.barrier instruction-class mask bits (T8 DSL-novel).
+_SGB_MFMA = 0x008  # MFMA / WMMA
+_SGB_DS_READ = 0x100  # ds_read (LDS load)
+
+
+def _sched_group_pin_mfma_step(b, ds_reads: int, mfma_count: int, sgid: int) -> None:
+    """Pin one K-step of the MFMA k-loop as a scheduler-ordered block."""
+    b.sched_group_barrier(_SGB_DS_READ, int(ds_reads), int(sgid))
+    b.sched_group_barrier(_SGB_MFMA, int(mfma_count), int(sgid))
+
+
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
     head_size: int
@@ -406,6 +417,12 @@ class UnifiedAttention2DTiledSpec:
     # the KV-loop body, letting the AMDGPU post-RA scheduler choose a canned
     # MFMA/DS/VMEM interleave without explicit sched_group_barrier fences.
     use_iglp_opt: bool = False
+    # T8 (DSL-novel): pin each MFMA k-step of the QK and PV loops as an explicit
+    # sched_group_barrier-ordered block (DS_READ then MFMA) so the AMDGPU post-RA
+    # scheduler interleaves ds_read into the MFMA window 1:1, matching CK Tile's
+    # hand-tuned schedule. Requires the transposed-x8 path; mutually exclusive
+    # with iglp_opt (which owns the whole-loop schedule).
+    use_qk_pv_sched_group_barrier: bool = False
     # Gather Q directly from global into Q32 registers instead of using K_lds as
     # one-time Q scratch. This is tested independently from sliced K because it
     # can remove a barrier/prologue even when full-tile K buffering remains.
@@ -455,7 +472,13 @@ class UnifiedAttention2DTiledSpec:
                 ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
                 ("use_mfma32_skip_legacy_qreg", self.use_mfma32_skip_legacy_qreg),
                 ("use_grouped_kv2_softmax", self.use_grouped_kv2_softmax),
-                ("use_agpr_alloc_zero", self.use_agpr_alloc_zero),
+                # ``use_agpr_alloc_zero`` is NOT an ISA feature -- it is a backend
+                # codegen hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form)
+                # that asks LLVM to keep MFMA accumulators in VGPR instead of
+                # spilling them to AGPR. It is legal on the gfx942 wide x8
+                # transposed path (the only 32x32 MFMA path gfx942 has); the
+                # detailed pairing guard below enforces that. So it is gated
+                # there, not blanket-rejected here.
                 ("use_fp8_mfma_qk", self.use_fp8_mfma_qk),
                 ("use_fp8_mfma_pv", self.use_fp8_mfma_pv),
             )
@@ -661,6 +684,17 @@ class UnifiedAttention2DTiledSpec:
         if self.use_q_direct_global:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError("use_q_direct_global currently targets transposed-x8")
+        if self.use_qk_pv_sched_group_barrier:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_qk_pv_sched_group_barrier requires the transposed-x8 path (use_mfma_32x32x8 + use_transposed_qk_32x32)"
+                )
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_qk_pv_sched_group_barrier requires fp16 or bf16")
+            if self.use_iglp_opt:
+                raise ValueError(
+                    "use_qk_pv_sched_group_barrier is mutually exclusive with use_iglp_opt (iglp_opt owns the loop schedule)"
+                )
         if self.num_warps == 8 and self.block_m_per_warp == 32:
             if not (self.use_q_direct_global and self.use_conflict_free_v_store):
                 raise ValueError(
@@ -739,15 +773,25 @@ class UnifiedAttention2DTiledSpec:
                     "HD=64 BS=32 T=64 num_warps=4"
                 )
         if self.use_agpr_alloc_zero:
-            if not (
+            _agpr0_r4_s1mask_hlpv = (
                 self.use_mfma_32x32
                 and self.use_transposed_qk_32x32
                 and self.use_transposed_scalar_state
                 and self.use_transposed_mask_once
                 and self.use_transposed_half_local_pv
-            ):
+            )
+            # Wide K=8 bf16/fp16 transposed flash path (the D128 ship geometry).
+            # The accumulator-residency win is orthogonal to the softmax-VALU
+            # opts of the R4_s1mask_hlpv family: any 32x32 MFMA path that touches
+            # the C accumulator across the online-softmax loop benefits from
+            # VGPR-form MFMA. Accept the x8 transposed orientation directly so the
+            # D128 wide config can request zero-AGPR codegen.
+            _agpr0_wide_x8 = self.use_mfma_32x32x8 and self.use_transposed_qk_32x32
+            if not (_agpr0_r4_s1mask_hlpv or _agpr0_wide_x8):
                 raise ValueError(
-                    "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv path"
+                    "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv "
+                    "path or the wide x8 transposed path "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
                 )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
@@ -871,6 +915,7 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "qdir" if self.use_q_direct_global else "",
+            "qsgb" if self.use_qk_pv_sched_group_barrier else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "stream" else "",
             "gldlds" if self.use_global_load_lds_k else "",
             "qgrid" if self.use_q_major_grid else "",
@@ -1221,6 +1266,7 @@ def build_unified_attention_2d_tiled(
     K_SLICED_RING = spec.use_k_sliced_ring
     K_SLICED_LDSSEQ = spec.use_k_sliced_ldsseq
     USE_IGLP_OPT = spec.use_iglp_opt
+    USE_QK_PV_SCHED_GROUP_BARRIER = spec.use_qk_pv_sched_group_barrier
     USE_GLOBAL_LOAD_LDS_K = spec.use_global_load_lds_k
     # DIAGNOSTIC ONLY (not signature-gated -- toggle re-JITs via env): read the
     # transposed cfv [HD,T+pad] V via 4 scalar n=1 reads instead of one n=4
@@ -3934,6 +3980,13 @@ def build_unified_attention_2d_tiled(
                                 acc32 = _mfma_32x32x8(b, dtype, A_k_t, B_q_t, acc32)
                             else:
                                 acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
+                            if USE_QK_PV_SCHED_GROUP_BARRIER:
+                                _sched_group_pin_mfma_step(
+                                    b,
+                                    ds_reads=max(1, TQK_FRAG // 4),
+                                    mfma_count=1,
+                                    sgid=0,
+                                )
                         ST32_n[n] = acc32
                 if GROUPED_KV2:
                     # Second score tile for the opt-in grouped online-softmax
@@ -4657,6 +4710,10 @@ def build_unified_attention_2d_tiled(
                                 b_p_elems.append(b.cast_f32_to(p_val, dtype))
                             B_p_t = b.vec_pack(b_p_elems, dtype)
                             acc32 = _mfma_32x32x8(b, dtype, A_v_t, B_p_t, acc32)
+                            if USE_QK_PV_SCHED_GROUP_BARRIER:
+                                _sched_group_pin_mfma_step(
+                                    b, ds_reads=4, mfma_count=1, sgid=1
+                                )
                         return acc32
                     for k in range(T // 16):
                         if TRANSPOSED_HALF_LOCAL_PV:

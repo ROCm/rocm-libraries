@@ -13,7 +13,7 @@ default. For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `CK_DSL_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `ckc_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `CK_DSL_LLVM_FLAVOR` | `llvm22` \| `llvm20` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto: PyTorch's bundled ROCm version → `/opt/rocm` → `llvm22`. Set `llvm22` when your `comgr` is 7.2 but `/opt/rocm` is older, to avoid a `COMPILE_SOURCE_TO_BC` rejection. |
+| `CK_DSL_LLVM_FLAVOR` | `llvm22` \| `llvm20` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-resolves from the **comgr lib that will actually load** (torch-bundled comgr 7.2 → `llvm22`; else `/opt/rocm` version → default `llvm22`). **`llvm22` (ROCm 7.2) is the production backend and it MATERIALLY AFFECTS PERF** — MFMA scheduling and register allocation differ from `llvm20`, and some kernels (notably attention prefill bodies) that look register-bound / AGPR-spilled / occupancy-collapsed on `llvm20` are clean 2-WG/CU and far faster on `llvm22`. **Always benchmark on `llvm22`.** Import torch (or otherwise load comgr 7.2) FIRST so the right comgr is selected; forcing `llvm22` while the loaded comgr is 7.0/7.1 is rejected with a clean error (not a silent wrong-backend run). |
 | `CK_DSL_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `ckc_engine` is unavailable. |
 | `CK_DSL_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `CK_DSL_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
@@ -30,7 +30,8 @@ default. For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `CK_DSL_C_JIT` | `1` (unset) | Provider generates kernels from C source at runtime (C-JIT) instead of loading prebuilt HSACOs. |
-| `CK_DSL_PROVIDER_C_JIT` | CMake `ON`/`OFF` | Build-time switch compiling the provider's C-JIT path. |
+| `CK_DSL_PROVIDER_C_JIT` | CMake `ON`/`OFF` (**ON**) | Build-time switch compiling the provider's C-JIT path. Pair with `-DCKC_LIB=<libckc_core.a>` (or build the engine fresh). Runtime use still requires `CK_DSL_C_JIT=1`. |
+| `HIPDNN_ENABLE_SDPA` | CMake `ON`/`OFF` (**OFF**) | Build-time hipDNN option. **REQUIRED (ON) for any SDPA/attention graph** — the SDPA frontend is `#ifdef`-compiled-out otherwise. The hipDNN SDK at `HIPDNN_ROOT` AND the provider must BOTH be built with it, or the SDPA plan silently DECLINEs. |
 | `CK_DSL_ALLOW_ENGINE_MISMATCH` | `1` (unset) | Downgrade the engine build-id freshness check from a hard error to a warning on a stale/mismatched kernel bundle (default: fail loudly). |
 | `CK_DSL_KERNEL_LIB_PATH` | path (unset) | Directory of the prebuilt HSACO kernel bundle the provider loads (Fast mode); leave empty to force C-JIT. |
 | `CK_DSL_ML_MODEL_DIR` | path (unset) | Directory of the ML heuristic models used for kernel selection. |

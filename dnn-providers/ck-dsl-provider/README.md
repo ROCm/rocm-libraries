@@ -53,12 +53,23 @@ cmake -S runtime -B /var/tmp/ckdsl_rt -G Ninja \
 ninja -C /var/tmp/ckdsl_rt
 /var/tmp/ckdsl_rt/ck_dsl_runtime_test <bundle_dir> 512 512 256 gfx950
 
-# 2) the hipDNN plugin
+# 2) the hipDNN plugin (C-JIT + SDPA enabled)
 cmake -S . -B /var/tmp/ckdsl_prov -G Ninja \
   -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DHIPDNN_ROOT="${HIPDNN_ROOT:-<repo>/projects/hipdnn}"
+  -DHIPDNN_ROOT="${HIPDNN_ROOT:-<repo>/projects/hipdnn}" \
+  -DHIPDNN_ENABLE_SDPA=ON \
+  -DCK_DSL_PROVIDER_C_JIT=ON
+  # optional: -DCKC_LIB=/abs/path/to/libckc_core.a   (else the C engine is built fresh in-step)
 ninja -C /var/tmp/ckdsl_prov          # -> libck_dsl_provider_plugin.so
 ```
+
+### Required build flags (set these EXPLICITLY — the defaults are easy to miss)
+
+| CMake flag | default | when you need it |
+|---|---|---|
+| `-DHIPDNN_ENABLE_SDPA=ON` | **OFF** | **REQUIRED for any SDPA / attention graph.** It is a *hipDNN* option (`projects/hipdnn/CMakeLists.txt`); the SDPA frontend is `#ifdef`-compiled-out without it, so the **hipDNN SDK at `HIPDNN_ROOT` must ALSO have been built with `-DHIPDNN_ENABLE_SDPA=ON`** — otherwise the provider links a frontend that silently lacks SDPA and the plan **DECLINEs**. (This is the usual cause of "SDPA doesn't run" — the flag was not explicit.) |
+| `-DCK_DSL_PROVIDER_C_JIT=ON` | ON | Compile the pure-C **C-JIT** path (kernels generated from C source at plan-build time — no shipped HSACO, no Python). Set OFF only to drop the `libckc_core` link dependency entirely. |
+| `-DCKC_LIB=/abs/.../libckc_core.a` | (unset → build fresh) | Pin a specific engine archive (must exist or configure fails). Omit to build the engine fresh in-step — recommended, avoids a stale archive shadowing a fresh build. |
 
 ## Run
 
@@ -67,14 +78,19 @@ The plugin discovers its kernel bundle from `CK_DSL_KERNEL_LIB_PATH` (a director
 generator). Install the `.so` into hipDNN's plugin dir and point `HIPDNN_PLUGIN_PATH` at it, then
 run any SDPA/matmul graph — same flow as `ck-fmha-provider`'s EndToEnd demo.
 
-## Environment variables
+## Environment variables (run time)
 
-Main provider flags: `CK_DSL_KERNEL_LIB_PATH` (prebuilt HSACO bundle dir; leave
-empty to force C-JIT), `HIPDNN_PLUGIN_PATH` (plugin location), `CK_DSL_C_JIT=1`
-(generate kernels from C source at runtime), `CK_DSL_ALLOW_ENGINE_MISMATCH=1`
-(downgrade the stale-bundle freshness check to a warning). The DSL build toolchain
-also honours `CK_DSL_LLVM_FLAVOR` (`llvm22`/`llvm20`). **Full list of every
-flag:** [`dsl_docs/reference/env_flags.md`](../../projects/composablekernel/python/ck_dsl/dsl_docs/reference/env_flags.md).
+Pick the kernel-resolution path and the toolchain explicitly:
+
+| env flag | set it to | effect |
+|---|---|---|
+| `CK_DSL_C_JIT` | `1` | **Use the C-JIT path** (generate kernels from C source at run time). Requires the build was configured with `-DCK_DSL_PROVIDER_C_JIT=ON`. |
+| `CK_DSL_KERNEL_LIB_PATH` | `<bundle dir>` | "Fast" path: load the prebuilt HSACO bundle (`manifest.json` + `.hsaco`/`.ll`). **Leave empty to force C-JIT.** |
+| `HIPDNN_PLUGIN_PATH` | `<plugin dir>` | Where hipDNN finds `libck_dsl_provider_plugin.so`. |
+| `CK_DSL_LLVM_FLAVOR` | **`llvm22`** | LLVM IR flavor. **USE `llvm22` (ROCm 7.2) — it MATERIALLY AFFECTS PERF** (MFMA scheduling / register allocation differ vs `llvm20`; some attention bodies that look register-bound / AGPR-spilled on `llvm20` are clean 2-WG/CU on `llvm22`). Resolve it from the *loaded* comgr: import torch (or use a ROCm-7.2 toolchain) FIRST so comgr 7.2 loads, then this auto-resolves to `llvm22`. Forcing `llvm22` while comgr is 7.0/7.1 is rejected (clean error, not a silent wrong-backend run). |
+| `CK_DSL_ALLOW_ENGINE_MISMATCH` | `1` | Downgrade the stale-bundle freshness check to a warning. |
+
+**Full list of every flag:** [`dsl_docs/reference/env_flags.md`](../../projects/composablekernel/python/ck_dsl/dsl_docs/reference/env_flags.md).
 
 ## Status
 

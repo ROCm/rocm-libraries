@@ -271,6 +271,17 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ckc_b_s_waitcnt(b, 0, 0, -1);
         ckc_b_sync(b);
     }
+    else if(ctx->K_SINGLE_BUFFER)
+    {
+        /* #69 single K slot. Only V[i] is in flight here (next-K was deferred).
+         * Fully drain it for PV, then s_barrier. After the barrier all QK[i]
+         * K_lds reads are retired, so re-issue the next-K prefetch into the
+         * single slot (overlaps PV[i]; the next iter-start full drain makes it
+         * visible before QK[i+1]). No WAR race. */
+        ckc_b_s_waitcnt(b, 0, 0, -1);
+        ckc_b_sync(b);
+        ckc_gfx950_attn2d_issue_k(ctx, in->safe_next_tile, ctx->nxt_buf_v);
+    }
     else
     {
         ckc_b_s_waitcnt(b, kv_calls_per_tile, kv_calls_per_tile, -1);

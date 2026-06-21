@@ -42,16 +42,20 @@ A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7
 - `llvm.amdgcn.make.buffer.rsrc.p1` → `llvm.amdgcn.make.buffer.rsrc.p8.p1`, `num_records` widened from `i32` to `i64` (LLVM PR #126828).
 - `llvm.amdgcn.mfma.f32.{16x16x32,32x32x16}.{fp8,bf8}.{fp8,bf8}` A/B operands collapsed from `<2 x i32>` to scalar `i64`.
 
+**The flavor is tied to the comgr-lib vintage that will actually load — the IR must match the library that compiles it.** The mismatch that matters is llvm22-shaped IR fed to a comgr `< 7.2`: comgr verifies top-level `declare`s BEFORE running the auto-upgrade pass, so a mismatched declare fails the verifier (historically a `SIGABRT`) even when LLVM would otherwise auto-upgrade the call site. So the detection keys off *the comgr library that runtime will dlopen*, not just the ambient ROCm version.
+
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
 1. `CK_DSL_LLVM_FLAVOR` env var (`llvm20` or `llvm22`).
-2. `torch.version.hip` if `torch` is already in `sys.modules`. Mirrors the runtime's torch-bundled-lib resolution (see `runtime/hip_module.py::_torch_bundled_lib`): when ck_dsl ends up driving torch's bundled comgr, the IR flavor must match torch's ROCm vintage. ROCm `>= 7.2` → `llvm22`, else `llvm20`.
-3. `/opt/rocm/.info/version` — the system ROCm install ck_dsl falls back to when torch is not in the process. Same `>= 7.2` threshold.
+2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when ck_dsl ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. ROCm `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`).
+3. `torch.version.hip` / `/opt/rocm/.info/version` — fallbacks when the comgr-lib path cannot be resolved.
 4. Default: `llvm22`.
 
-Resolution is *lazy*: `_LLVM_FLAVOR` stays `None` at module import; the first call to `lower_kernel_to_llvm(kernel)` runs `_resolve_llvm_flavor()` and pins the flavor for the remainder of the process. This lets the caller import `ck_dsl` and `torch` in either order (or only one of them) and still emit the matching IR. Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22`). Both constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES`, and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples).
+Resolution is *lazy and import-order-robust*: `_LLVM_FLAVOR` stays `None` at module import; the first call to `lower_kernel_to_llvm(kernel)` runs `_resolve_llvm_flavor()`. The cache is **keyed on the resolved comgr-lib path** (the "basis"), not resolved-once-forever — so a torch-less early call that picks llvm20 no longer locks the process: once torch enters and the loadable comgr becomes the torch-bundled 7.2 lib, the flavor re-resolves to llvm22. This lets the caller import `ck_dsl` and `torch` in either order (or only one of them) and still emit the matching IR.
 
-Why a flavor pick rather than a runtime probe of the loaded comgr: comgr verifies toplevel `declare`s BEFORE running the auto-upgrade pass, so a mismatched declare fails the verifier even when LLVM would otherwise auto-upgrade the call site.
+**Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` calls `_assert_ir_flavor_matches_lib` (same module), which reads the IR datalayout `p8` field (`p8:128:128:128:48` = llvm22, else llvm20) and compares it to the loaded comgr vintage. On a mismatched pair (llvm22 IR + comgr `< 7.2`) it raises a clean `ComgrError` that names the fix, instead of the bare `SIGABRT`. The guard is a no-op on matched pairs and protects **both** lowering engines (C-lowered `.ll` funnels through the same comgr path). Flavor outcomes are unchanged for the two common cases (torch-first → llvm22, torch-less → llvm20), so byte-identity is preserved.
+
+Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22`). Both constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES`, and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples).
 
 ## Wave Size
 

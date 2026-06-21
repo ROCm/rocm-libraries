@@ -159,7 +159,7 @@ typedef struct ckc_gfx950_attention_tiled_2d_supports_args
     const char* arch;               /* NULL == "gfx950"                           */
     bool use_mfma_32x32x8;          /* accepted for parity; ignored on gfx950     */
     bool use_transposed_qk_32x32;   /* accepted for parity; ignored on gfx950     */
-    bool use_k_single_buffer;       /* accepted for parity; ignored on gfx950     */
+    bool use_k_single_buffer;       /* #69: K single-buffer (T=64 2-WG/CU d128)   */
     bool use_conflict_free_v_store; /* accepted for parity; ignored on gfx950     */
     bool use_k_sliced_ring;         /* accepted for parity; ignored on gfx950     */
 } ckc_gfx950_attention_tiled_2d_supports_args_t;

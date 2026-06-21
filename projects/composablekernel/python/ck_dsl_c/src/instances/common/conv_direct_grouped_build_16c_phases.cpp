@@ -217,6 +217,12 @@ void ckc_dconv16c_load_weights(ckc_dconv_16c_ctx_t* ctx)
     ctx->n_weights     = 0;
     ctx->n_weights_k32 = 0;
 
+    /* lane_in_lo_half = b.cmp_lt(c4, b.const_i32(2))
+     * fp16x8_zero     = b.zero_vec_f16(8)
+     * (emitted here, matching the Python SSA order, before the per-r loop). */
+    ctx->lane_in_lo_half = ckc_b_cmp_lt(b, ctx->c4, ckc_b_const_i32(b, 2));
+    ctx->fp16x8_zero     = ckc_b_zero_vec_f16(b, 8);
+
     if(ctx->spec->fold_k32)
     {
         int r_const;
@@ -224,7 +230,8 @@ void ckc_dconv16c_load_weights(ckc_dconv_16c_ctx_t* ctx)
         {
             ckc_value_t* r_i       = ckc_b_const_i32(b, r_const);
             ckc_value_t* w_off_k32 = NULL;
-            ckc_value_t* w_off_k16 = NULL;
+            ckc_value_t* w_off_s2  = NULL;
+            ckc_value_t* w_s2      = NULL;
             ckc_value_t* valid     = NULL;
 
             /* Fold S=0,S=1 into one K=32 MFMA: <8 x half> at
@@ -242,19 +249,22 @@ void ckc_dconv16c_load_weights(ckc_dconv_16c_ctx_t* ctx)
             ctx->weights_k32[r_const] = ckc_b_buffer_load_vN_f16(
                 b, ctx->b_rsrc, ckc_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
 
-            /* Residual S=2 K=16, 4 channels per lane. */
+            /* Residual S=2 promoted to a zero-padded K=32 atom: low half
+             * (c4 in {0,1}) carries B[k_out,r,2,0:8]/[8:16]; high half zero. */
             {
                 const char* in_names[4] = {"k_out", "r", "s", "c"};
                 ckc_value_t* in_values[4];
                 in_values[0] = ctx->k_out_val;
                 in_values[1] = r_i;
                 in_values[2] = ckc_b_const_i32(b, 2);
-                in_values[3] = ctx->ch_lane_k16;
+                in_values[3] = ctx->ch_lane_k32;
                 ckc_transforms_descriptor_offset(
-                    b, ctx->b_desc, in_names, in_values, 4, &w_off_k16, &valid);
+                    b, ctx->b_desc, in_names, in_values, 4, &w_off_s2, &valid);
             }
-            ctx->weights_k16[r_const] = ckc_b_buffer_load_vN_f16(
-                b, ctx->b_rsrc, ckc_b_mul(b, w_off_k16, ctx->c_half_bytes), ctx->c0, 2);
+            w_s2 = ckc_b_buffer_load_vN_f16(
+                b, ctx->b_rsrc, ckc_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
+            ctx->weights_s2_k32[r_const] =
+                ckc_b_select(b, ctx->lane_in_lo_half, w_s2, ctx->fp16x8_zero);
         }
         ctx->n_weights_k32 = ctx->p.KH;
     }

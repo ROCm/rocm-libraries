@@ -593,6 +593,7 @@ ckc__attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_q_direct_global ? "qdir" : "",
+            s->use_qk_pv_sched_group_barrier ? "qsgb" : "",
             kvcp_buf,
             s->use_global_load_lds_k ? "gldlds" : "",
             s->use_q_major_grid ? "qgrid" : "",

@@ -393,6 +393,74 @@ class UnifiedAttention2DTiledSpec:
     # request zero AGPR allocation so LLVM selects VGPR-form MFMA and avoids
     # AGPR<->VGPR copies around the online-softmax/PV accumulator scaling.
     use_agpr_alloc_zero: bool = False
+    # #69: K single-buffer for the standard (V-single-buffer) d128 schedule.
+    # K_lds collapses from 2 slots to 1, halving K LDS so a LARGER tile (T=64)
+    # fits the 32 KB / 2-WG/CU budget at HD=128. The next-K prefetch is moved
+    # to AFTER the PV-wait s_barrier (where all of QK[i]'s ds_reads are drained)
+    # so writing K[i+1] into the single slot cannot WAR-race QK[i]'s reads --
+    # this is the documented gfx942-naive-single-buffer race, avoided here by
+    # the reorder. Scoped to the no-ring / no-grouped / no-fp8 / V-single-buffer
+    # path (the S>=2048 single-batch d128 cohort). Default OFF (golden-safe).
+    use_k_single_buffer: bool = False
+    # #79: VGPR-frugal BLOCK_M=128 transposed-2D prefill body. Gathers the
+    # per-lane Q32 MFMA operand DIRECTLY from global memory into VGPRs (the
+    # Triton ``unified_attention_2d`` choice) instead of bouncing Q through an
+    # LDS staging slab (``Q_lds``). This (a) FREES the entire ``Q_lds``
+    # allocation -- at BLOCK_M=128/HD=128 that is 32 KB of LDS -- and (b)
+    # removes the cooperative Q->LDS store loop + its barrier. Combined with
+    # ``use_k_single_buffer`` it lets the BLOCK_M=128/T=64 d128 body reach the
+    # K(16 KB)+V(16 KB)=32 KB LDS budget that Triton runs at, WITHOUT the
+    # ``block_m <= tile_size`` restriction (Q no longer needs to fit in the K
+    # slot because it never touches LDS). The Q operand fed to the QK MFMA is
+    # bit-identical to the LDS-staged path (same (token,head,dim) elements,
+    # same <8 x dtype> packing) -- it is purely a load-source change. Requires
+    # the transposed 32x32 path (use_mfma_32x32 + use_transposed_qk_32x32) and
+    # is mutually exclusive with use_q_reread (which needs a surviving Q_lds)
+    # and the fp8 KV / native-fp8 QK paths (Q stays in the working dtype).
+    # Default OFF (golden-safe).
+    use_q_direct_reg: bool = False
+    # STEP 2 lever: MFMA<->softmax interleave hint for the transposed-32x32 d128
+    # body. The diagnosed remaining gap vs Triton-2D on the d128 GQA-8 prefill
+    # body is the MFMA SCHEDULE: a ~335-instruction inter-MFMA gap (vs Triton's
+    # ~155) opens up in the softmax/mask VALU stretch that sits BETWEEN the QK
+    # MFMA cluster (ST32) and the PV MFMA cluster -- it holds the causal-mask
+    # cndmasks, the per-element scale fmul, the exp2 chain, and the max/sum
+    # reductions, all MFMA-idle. Triton hides this window by interleaving QK/PV
+    # MFMAs INTO it. When set, this flag asks the LLVM post-RA scheduler to do
+    # the same via ``__builtin_amdgcn`` hints emitted around the QK/softmax/PV
+    # clusters. The concrete hint is selected by ``softmax_interleave_mode``:
+    #   0 = iglp_opt(0)  (canned GEMM MFMA interleave at loop top)
+    #   1 = iglp_opt(1)  (canned attention-style interleave at loop top)
+    #   2 = sched_group_barrier grouping: emit alternating
+    #       (MFMA, VALU) sched_group_barrier groups across the softmax block so
+    #       the scheduler is free to (and asked to) pull MFMA work into the VALU
+    #       window. ``softmax_interleave_groups`` sets the group count.
+    # Plain ``sched_barrier`` is known to make this WORSE (it FENCES rather than
+    # interleaves) so it is intentionally not one of the modes. Requires the
+    # transposed 32x32 path (use_mfma_32x32 + use_transposed_qk_32x32). Mutually
+    # exclusive with use_sched_barrier (the two steer the scheduler in opposite
+    # directions). Default OFF (golden-safe); the default build is byte-identical
+    # to the pre-STEP-2 baseline.
+    use_softmax_mfma_interleave: bool = False
+    # Hint selector for ``use_softmax_mfma_interleave`` (see above). 0/1 select
+    # iglp_opt level; 2 selects sched_group_barrier grouping. Only consulted when
+    # ``use_softmax_mfma_interleave`` is set.
+    softmax_interleave_mode: int = 1
+    # Number of (MFMA, VALU) alternation groups for mode 2. Only consulted when
+    # ``use_softmax_mfma_interleave`` is set and ``softmax_interleave_mode == 2``.
+    softmax_interleave_groups: int = 4
+    # STEP 2 lever (re-try of the reverted full-tile mask peel). Splits the KV
+    # loop into a full-tile phase (causal mask elided -- provably a no-op since
+    # ``select(true, s, -inf) == s``) followed by a masked boundary phase, so the
+    # per-element causal-mask ``v_cndmask`` VALU is emitted only for the boundary
+    # tiles. The reverted experiment was ~7% SLOWER at BLOCK_M=32 because the
+    # kernel was occupancy-bound and the duplicated body cost more I-cache than
+    # the masking VALU it saved. The VGPR-frugal BLOCK_M=128 body
+    # (use_q_direct_reg + use_k_single_buffer) flips the kernel to VALU-bound at
+    # matched occupancy, so the peel can finally pay off there. Requires the
+    # no-SW transposed-32x32 combo (TRANSPOSED_MASK_LIMIT). Default OFF
+    # (golden-safe; the single-loop body is byte-identical).
+    use_mask_phase_split: bool = False
 
     def __post_init__(self):
         if self.num_warps not in (1, 2, 4, 8):
@@ -522,6 +590,44 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_q_reread requires the transposed-32x32 path")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_q_reread v1 does not support FP8 KV")
+        if self.use_q_direct_reg:
+            # #79 direct-to-register Q gather (Triton-style). Wired only on the
+            # transposed-32x32 QK MFMA path (the only path that consumes Q32_reg).
+            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_q_direct_reg requires the transposed-32x32 path "
+                    "(use_mfma_32x32 + use_transposed_qk_32x32)"
+                )
+            if self.use_q_reread:
+                raise ValueError(
+                    "use_q_direct_reg is mutually exclusive with use_q_reread "
+                    "(direct-reg never stages Q in LDS; re-read needs a Q_lds)"
+                )
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_q_direct_reg v1 does not support FP8 KV")
+            if self.use_fp8_mfma_qk:
+                raise ValueError(
+                    "use_q_direct_reg v1 does not support native-fp8 QK "
+                    "(Q stays in the working dtype)"
+                )
+        if self.use_mask_phase_split:
+            # The two-phase full-tile peel is wired only on the no-SW
+            # transposed-32x32 combo (it relies on TRANSPOSED_MASK_LIMIT's
+            # skip_mask path). The masked single-loop body remains the default.
+            if not (
+                self.use_mfma_32x32
+                and self.use_transposed_qk_32x32
+                and self.use_transposed_mask_limit
+            ):
+                raise ValueError(
+                    "use_mask_phase_split requires the transposed-32x32 "
+                    "mask_limit combo path"
+                )
+            if self.sliding_window > 0:
+                raise ValueError(
+                    "use_mask_phase_split requires no sliding window "
+                    "(the peel assumes a monotone causal bound)"
+                )
         if self.kv_ring_depth not in (2, 3):
             # Only the depth-2 (current double-buffer) and depth-3 (deep K
             # prefetch ring, #66) schedules are wired. N>3 would need a wider
@@ -557,6 +663,52 @@ class UnifiedAttention2DTiledSpec:
             if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
                 raise ValueError(
                     "kv_ring_depth=3 requires the transposed-32x32 combo path"
+                )
+        if self.use_k_single_buffer:
+            # #69: K single-buffer is wired ONLY on the standard V-single-buffer
+            # schedule (the `else` path). It collapses K_lds 2 slots -> 1 and
+            # re-issues K[i+1] AFTER the PV-wait barrier (slot-free) to avoid the
+            # WAR race. Reject combos that own the K buffer differently.
+            if self.use_v_double_buffer:
+                raise ValueError(
+                    "use_k_single_buffer requires V single-buffer (it shares the "
+                    "post-PV K re-issue point; V double-buffer uses a different "
+                    "K/V prefetch schedule)"
+                )
+            if self.kv_ring_depth != 2:
+                raise ValueError(
+                    "use_k_single_buffer is incompatible with kv_ring_depth!=2 "
+                    "(the ring owns >2 K slots)"
+                )
+            if self.use_grouped_kv2_softmax:
+                raise ValueError(
+                    "use_k_single_buffer does not support grouped_kv2 (needs 2 K "
+                    "tiles resident for the dual-tile QK)"
+                )
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_k_single_buffer v1 does not support FP8 KV")
+            if self.use_early_v_schedule:
+                raise ValueError(
+                    "use_k_single_buffer does not support early_v_schedule"
+                )
+            if self.use_staggered_iter_wait:
+                raise ValueError(
+                    "use_k_single_buffer does not support staggered_iter_wait"
+                )
+            # With a single K slot, Q can still alias K_lds[0] but MUST fit in
+            # that one slot (block_m <= tile_size) -- the dual-slot Q spill
+            # (Q_USES_DUAL_SLOT) would write into the non-existent K_lds[1].
+            # For the d128 cohort BLOCK_M = num_warps*16 (or 2x for mw32) == T.
+            # EXCEPTION (#79): with use_q_direct_reg, Q is gathered straight
+            # from global into VGPRs and never aliases the K slot, so the
+            # block_m <= tile_size constraint does not apply -- BLOCK_M=128
+            # with T=64 is allowed (K_lds[1]=16 KB + V_lds[1]=16 KB = 32 KB).
+            if self.block_m > self.tile_size_eff and not self.use_q_direct_reg:
+                raise ValueError(
+                    "use_k_single_buffer requires block_m <= tile_size (Q must "
+                    f"fit in the single K slot; got block_m={self.block_m}, "
+                    f"tile_size={self.tile_size_eff}). Set use_q_direct_reg to "
+                    "lift this (Q is then gathered to VGPRs, never to the K slot)."
                 )
         if self.use_fast_paged_kv_desc:
             if not (
@@ -704,10 +856,23 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "vdbuf" if self.use_v_double_buffer else "",
+            "ksb" if self.use_k_single_buffer else "",
+            "mphsplit" if self.use_mask_phase_split else "",
             (f"ring{self.kv_ring_depth}" if self.kv_ring_depth != 2 else ""),
             "stgw" if self.use_staggered_iter_wait else "",
             (f"schedb{self.sched_barrier_mask}" if self.use_sched_barrier else ""),
+            (
+                f"smxil{self.softmax_interleave_mode}"
+                + (
+                    f"g{self.softmax_interleave_groups}"
+                    if self.softmax_interleave_mode == 2
+                    else ""
+                )
+                if self.use_softmax_mfma_interleave
+                else ""
+            ),
             "qrr" if self.use_q_reread else "",
+            "qdreg" if self.use_q_direct_reg else "",
             "agpr0" if self.use_agpr_alloc_zero else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
@@ -1166,6 +1331,11 @@ def build_unified_attention_2d_tiled(
     # gets overwritten by K[0]), so it cannot share K_lds.
     if spec.use_q_reread:
         Q_ALIAS_K = False
+    # #79 direct-to-register Q gather: Q never touches LDS (no Q_lds at all),
+    # so it cannot alias K either.
+    Q_DIRECT_REG = bool(spec.use_q_direct_reg)
+    if Q_DIRECT_REG:
+        Q_ALIAS_K = False
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     # Deep K prefetch ring (#66). kv_ring_depth=3 allocates K_lds as 3 slots
     # so K[i], K[i+1], K[i+2] are resident simultaneously (vs the depth-2
@@ -1173,7 +1343,11 @@ def build_unified_attention_2d_tiled(
     # small-tile d128 cohort (T=block_size=32) that is +8 KB -> K_lds[3]=24 KB,
     # which with V_lds[1]=8 KB still fits the 32 KB budget for 2 WG/CU.
     KV_RING_DEPTH = int(spec.kv_ring_depth)
-    K_BUFS = KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2
+    # #69: K single-buffer collapses K_lds to ONE slot (halves K LDS so T=64
+    # fits the 32 KB / 2-WG/CU budget at HD=128). Validated to be incompatible
+    # with the ring (>2) and V-double-buffer paths in __post_init__.
+    K_SINGLE_BUFFER = bool(spec.use_k_single_buffer)
+    K_BUFS = 1 if K_SINGLE_BUFFER else (KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2)
     K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     # V double-buffer: 2 slots let V[i+1] prefetch into the alternate slot
     # during iter i (reusing ``cur_buf``), giving V the same 1-deep prefetch
@@ -1191,6 +1365,15 @@ def build_unified_attention_2d_tiled(
     # prefetch issue.
     USE_SCHED_BARRIER = bool(spec.use_sched_barrier)
     SCHED_BARRIER_MASK = int(spec.sched_barrier_mask)
+    # STEP 2 lever: MFMA<->softmax interleave hint (see spec docstring).
+    USE_SOFTMAX_INTERLEAVE = bool(spec.use_softmax_mfma_interleave)
+    SOFTMAX_INTERLEAVE_MODE = int(spec.softmax_interleave_mode)
+    SOFTMAX_INTERLEAVE_GROUPS = int(spec.softmax_interleave_groups)
+    if USE_SOFTMAX_INTERLEAVE and USE_SCHED_BARRIER:
+        raise ValueError(
+            "use_softmax_mfma_interleave and use_sched_barrier are mutually "
+            "exclusive (they steer the post-RA scheduler in opposite directions)"
+        )
     V_BUFS = 2 if V_DOUBLE_BUF else 1
     if FP8_MFMA_PV:
         # Native-fp8 PV uses ds_read_b64_tr_b8. The validated lane mapping
@@ -1267,7 +1450,12 @@ def build_unified_attention_2d_tiled(
     if KV_FP8 and spec.use_fp8_mfma_qk:
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
-    if Q_ALIAS_K:
+    if Q_DIRECT_REG:
+        # #79: Q is gathered straight from global into VGPRs -- there is NO
+        # Q_lds slab at all (this is the LDS win that lets BLOCK_M=128/T=64
+        # fit 32 KB with K-single-buffer + V-single-buffer).
+        Q_lds = None
+    elif Q_ALIAS_K:
         # Reuse K_lds[0] (and K_lds[1] if BLOCK_M > T) as Q-load scratch.
         # Q is gathered to VGPRs after, then the K-prefetch overwrites
         # the slot(s).
@@ -1342,7 +1530,10 @@ def build_unified_attention_2d_tiled(
         lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
     )
-    for li in range(Q_VECS_PER_THREAD):
+    # #79 direct-reg: skip the cooperative Q->LDS staging store entirely.
+    # The per-lane Q32 MFMA operand is gathered straight from global in the
+    # QK-operand block below (Q_lds is None).
+    for li in range(0) if Q_DIRECT_REG else range(Q_VECS_PER_THREAD):
         q_vid = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
         Q_row = b.div(q_vid, b.const_i32(Q_VECS_PER_ROW))
         Q_col = b.mul(b.mod(q_vid, b.const_i32(Q_VECS_PER_ROW)), b.const_i32(8))
@@ -2434,7 +2625,7 @@ def build_unified_attention_2d_tiled(
     # M_ATOMS_PER_WARP = up to 32 halves = 16 VGPRs for
     # ``BLOCK_M_PER_WARP=32``.
     Q_reg = [[None] * QK_K_ITERS for _ in range(M_ATOMS_PER_WARP)]
-    if not (USE_MFMA_32X32 and SKIP_LEGACY_QREG):
+    if not (USE_MFMA_32X32 and SKIP_LEGACY_QREG) and not Q_DIRECT_REG:
         for atom in range(M_ATOMS_PER_WARP):
             q_row_atom = b.add(wave_row_base, b.add(b.const_i32(atom * 16), lane_col))
             # Map Q_row → (buf, row_in_buf) for the K_lds-aliased case.
@@ -2524,7 +2715,42 @@ def build_unified_attention_2d_tiled(
             q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
             return b.smem_load_vN(Q_lds, q32_row, q32_col, dtype=dtype, n=8)
 
-        for k in range(0) if Q_REREAD else range(QK_K_ITERS):
+        # #79 direct-to-register Q gather (Triton-style): compute the global
+        # (token, head, dim) of this lane's 8-element Q operand and load it
+        # straight from HBM into VGPRs. (q32_row, q32_col) index the BLOCK_M x
+        # HD Q tile EXACTLY as the LDS-staged path would have read from Q_lds,
+        # so the <8 x dtype> operand is bit-identical to the staged path.
+        #   row -> q_pos = qb_start_pos + row // NQK ; qh = kv_head*NQK + row%NQK
+        #   col -> dim
+        # Out-of-range (token >= q_len or head >= NUM_QH) lanes read 0 (masked),
+        # matching the staging store's zero-fill.
+        def _read_q32_global(k: int) -> Value:
+            q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
+            qg_pos = b.add(qb_start_pos, b.div(q32_row, b.const_i32(NQK)))
+            qg_h = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)),
+                b.mod(q32_row, b.const_i32(NQK)),
+            )
+            qg_mask = b.land(
+                b.cmp_lt(qg_pos, cur_batch_q_len),
+                b.cmp_lt(qg_h, b.const_i32(NUM_QH)),
+            )
+            qg_pos_safe = b.select(qg_mask, qg_pos, b.const_i32(0))
+            qg_h_safe = b.select(qg_mask, qg_h, b.const_i32(0))
+            qg_off, _ = q_desc.offset(
+                b,
+                token=b.add(cu_q_start, qg_pos_safe),
+                head=qg_h_safe,
+                dim=b.const_i32(0),
+            )
+            v8 = b.global_load_vN(query, b.add(qg_off, q32_col), dtype, 8, align=16)
+            return b.vector_select(b.vector_splat(qg_mask, 8), v8, z8)
+
+        if Q_DIRECT_REG:
+            for k in range(QK_K_ITERS):
+                Q32_reg[k] = _read_q32_global(k)
+            # No Q_lds round-trip, so no LDS drain/barrier needed before K[0].
+        for k in range(0) if (Q_REREAD or Q_DIRECT_REG) else range(QK_K_ITERS):
             q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
             q32_idx_args = (
                 (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
@@ -2730,7 +2956,12 @@ def build_unified_attention_2d_tiled(
         else:
             ring_pf_buf = None
             ring_next_cur = None
-            nxt_buf = b.sub(b.const_i32(1), cur_buf)
+            if K_SINGLE_BUFFER:
+                # Single K slot: cur_buf is always 0 and the next-K prefetch
+                # re-uses the SAME slot (deferred to after the PV-wait barrier).
+                nxt_buf = b.const_i32(0)
+            else:
+                nxt_buf = b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
         if GROUPED_KV2:
             tile1_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -2817,6 +3048,13 @@ def build_unified_attention_2d_tiled(
         else:
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
+        # STEP 2 lever (modes 0/1): canned iglp interleave for the whole loop
+        # body. Placed once at the top of the main loop body (after the iter-start
+        # K drain) per the iglp_opt contract; it owns the schedule, so the manual
+        # sched_barrier site below is suppressed when this is active. Level 0 =
+        # GEMM MFMA-interleave, level 1 = attention-style interleave.
+        if USE_SOFTMAX_INTERLEAVE and SOFTMAX_INTERLEAVE_MODE in (0, 1):
+            b.iglp_opt(SOFTMAX_INTERLEAVE_MODE)
         if EARLY_V_SCHEDULE:
             if V_DOUBLE_BUF:
                 # V[i] (cur_buf) was prefetched in the previous iter / prologue
@@ -2903,6 +3141,23 @@ def build_unified_attention_2d_tiled(
                         B_q_t = _read_q32(k) if Q_REREAD else Q32_reg[k]
                         acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
                     ST32_n[n] = acc32
+                # STEP 2 lever (mode 2): sched_group_barrier grouping to pull
+                # MFMA work INTO the softmax/mask VALU window that follows. We
+                # emit ``softmax_interleave_groups`` alternating (MFMA, VALU)
+                # group barriers at the QK->softmax boundary. The scheduler is
+                # told to place ``mfma_per_group`` MFMAs then a slab of VALU per
+                # group, repeated -- so instead of one dense QK MFMA cluster then
+                # a long MFMA-idle softmax stretch, the MFMAs get spread across
+                # the VALU. The MFMAs available to schedule here are the QK
+                # cluster above plus (within this loop region) the PV cluster
+                # below. 0x008 = MFMA, 0x002 = VALU.
+                if USE_SOFTMAX_INTERLEAVE and SOFTMAX_INTERLEAVE_MODE == 2:
+                    _G = max(1, SOFTMAX_INTERLEAVE_GROUPS)
+                    _total_mfma = QK_N_TILES * QK_K_ITERS
+                    _mfma_per_group = max(1, _total_mfma // _G)
+                    for _gi in range(_G):
+                        b.sched_group_barrier(0x008, _mfma_per_group, 0)
+                        b.sched_group_barrier(0x002, 100, 0)
                 if GROUPED_KV2:
                     # Second score tile for the opt-in grouped online-softmax
                     # experiment. For an odd tile count, safe_tile1 duplicates
@@ -3257,6 +3512,13 @@ def build_unified_attention_2d_tiled(
             # the alternate slot to overlap this iter (PV reads V[i] from cur_buf).
             _issue_v(safe_next_tile, nxt_buf)
             _issue_k(safe_next_tile, nxt_buf)
+        elif K_SINGLE_BUFFER:
+            # #69 single K slot: issue V[i] now (overlaps softmax), but DEFER the
+            # next-K prefetch -- writing K[i+1] into the single slot here would
+            # WAR-race QK[i]'s ds_reads (the documented gfx942 naive-single-buffer
+            # race). K[i+1] is re-issued after the PV-wait s_barrier below, where
+            # all QK[i] reads are guaranteed retired. K[i+1] then overlaps PV[i].
+            _issue_v(kv_tile_iv, cur_buf)
         else:
             _issue_v(kv_tile_iv, cur_buf)
             _issue_k(safe_next_tile, nxt_buf)
@@ -3504,6 +3766,19 @@ def build_unified_attention_2d_tiled(
             # V[i] from cur_buf, already visible from the iter-start sync.
             b.s_waitcnt(vmcnt=2 * kv_calls_per_tile, lgkmcnt=2 * kv_calls_per_tile)
             b.sync()
+        elif K_SINGLE_BUFFER:
+            # #69 single K slot. The only in-flight async op here is V[i] (issued
+            # before QK; the next-K prefetch was DEFERRED). Fully drain it so PV's
+            # V_lds reads are valid, then s_barrier. After this barrier ALL of
+            # QK[i]'s K_lds ds_reads are retired, so the single K slot is free --
+            # K[i+1] is re-issued immediately below (overlaps the PV MFMA).
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.sync()
+            # Re-issue the next-K prefetch into the single slot. The above
+            # s_barrier guarantees no QK[i] read can still touch K_lds, so this
+            # write cannot WAR-race. K[i+1]'s DMA streams during PV[i]; the next
+            # iter-start full drain makes it visible before QK[i+1].
+            _issue_k(safe_next_tile, nxt_buf)
         else:
             # Wait for current V while leaving next K pending. Current V was
             # issued before next K, so `kv_calls_per_tile` pending operations are
@@ -3897,9 +4172,51 @@ def build_unified_attention_2d_tiled(
     # softmax/acc/buffer carry is threaded from one phase into the next via
     # ``scf_for_iter`` results so the second loop resumes exactly where the
     # first left off (same K/V double-buffer slot, same online-softmax state).
-    kvloop = b.scf_for_iter(tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile")
-    with kvloop as (kv_tile_iv, carry):
-        _emit_kv_body(kv_tile_iv, carry, False)
+    MASK_PHASE_SPLIT = (
+        bool(spec.use_mask_phase_split)
+        and TRANSPOSED_MASK_LIMIT
+        and SLIDING_WINDOW == 0
+    )
+    if MASK_PHASE_SPLIT:
+        # Full-tile peel: a tile j (keys [j*T, (j+1)*T)) needs NO causal/prefix
+        # masking iff its last key is within the bound for EVERY row in the
+        # block. The minimum causal limit over the block's rows is
+        # ``context_len + qb_start_pos`` (the first query position), and every
+        # key must also be < max_seq_prefix_len. So the first masked tile is
+        #   split = min((min_causal_lim+1)//T, max_seq_prefix_len//T)
+        # clamped to [tile_start, tile_end]. Phase 1 (tile_start..split) elides
+        # the mask; phase 2 (split..tile_end) is the masked boundary.
+        min_causal_lim = b.add(context_len, qb_start_pos)
+        full_by_causal = b.div(b.add(min_causal_lim, b.const_i32(1)), b.const_i32(T))
+        full_by_prefix = b.div(max_seq_prefix_len, b.const_i32(T))
+        split_raw = b.select(
+            b.cmp_lt(full_by_causal, full_by_prefix), full_by_causal, full_by_prefix
+        )
+        # clamp into [tile_start, tile_end]
+        split_lo = b.select(b.cmp_lt(split_raw, tile_start), tile_start, split_raw)
+        split = b.select(b.cmp_lt(split_lo, tile_end), split_lo, tile_end)
+        loop1 = b.scf_for_iter(
+            tile_start, split, kv_step, iter_args, iv_name="kv_tile_f"
+        )
+        with loop1 as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, True)
+        # thread loop1 results into loop2's iter_args. The iter_arg NAMES seed the
+        # minted SSA value names, so loop2 MUST use distinct names or the two
+        # loops collide ("multiple definition of local value 'm0'"). Suffix them.
+        r1 = loop1.results
+        iter_args2 = [(iter_args[i][0] + "_b", r1[i]) for i in range(len(iter_args))]
+        loop2 = b.scf_for_iter(
+            split, tile_end, kv_step, iter_args2, iv_name="kv_tile_b"
+        )
+        with loop2 as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
+        kvloop = loop2
+    else:
+        kvloop = b.scf_for_iter(
+            tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile"
+        )
+        with kvloop as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
 
     # ---------------- epilogue ----------------
     # The loop issues a uniform "next K" async load every iteration, including

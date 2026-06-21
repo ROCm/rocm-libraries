@@ -55,6 +55,27 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
         s->dtype = "bf16"; s->use_sinks = false;
         s->sliding_window = 0; s->has_softcap = false;
         break;
+    case 5: /* gfx942 bf16 D128 small-tile double-K (landed prefill lever). */
+        s->head_size = 128; s->block_size = 32;
+        s->num_query_heads = 8; s->num_kv_heads = 1;
+        s->dtype = "bf16"; s->use_sinks = false;
+        s->sliding_window = 0; s->has_softcap = false;
+        s->num_warps = 2; s->block_m_per_warp = 32;
+        s->has_tile_size = true; s->tile_size = 32;
+        s->use_mfma_32x32x8 = true; s->use_transposed_qk_32x32 = true;
+        s->use_k_single_buffer = false;
+        break;
+    case 6: /* cfg5 + use_agpr_alloc_zero (ck83 Fix-A residency lever). */
+        s->head_size = 128; s->block_size = 32;
+        s->num_query_heads = 8; s->num_kv_heads = 1;
+        s->dtype = "bf16"; s->use_sinks = false;
+        s->sliding_window = 0; s->has_softcap = false;
+        s->num_warps = 2; s->block_m_per_warp = 32;
+        s->has_tile_size = true; s->tile_size = 32;
+        s->use_mfma_32x32x8 = true; s->use_transposed_qk_32x32 = true;
+        s->use_k_single_buffer = false;
+        s->use_agpr_alloc_zero = true;
+        break;
     default:
         return -1;
     }

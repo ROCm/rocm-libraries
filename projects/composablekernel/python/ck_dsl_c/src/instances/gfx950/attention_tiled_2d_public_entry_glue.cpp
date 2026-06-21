@@ -488,6 +488,58 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ckc_g950_fail(
             b, CKC_ERR_NOTIMPL, "use_q_reread: gfx950 C twin does not yet port the Q-reread path");
     }
+    if(spec->use_q_direct_reg)
+    {
+        /* #79: the direct-to-register Q gather (Triton-style, frees Q_lds) is
+         * carried in the spec for byte-identity with the Python dataclass but
+         * the gfx950 C twin does not yet emit this body. Reject (do not
+         * silently ignore), matching the Python __post_init__ contract. */
+        ckc_g950_fail(
+            b,
+            CKC_ERR_NOTIMPL,
+            "use_q_direct_reg: gfx950 C twin does not yet port the direct-register Q gather");
+    }
+    if(spec->use_softmax_mfma_interleave)
+    {
+        /* #80: the softmax-window MFMA interleave (iglp_opt / sched_group_barrier
+         * at the loop top) rides on the use_q_direct_reg BLOCK_M=128 body, which
+         * the gfx950 C twin does not yet emit. Carried in the spec for
+         * byte-identity with the Python dataclass; reject (do not silently
+         * ignore), matching the Python __post_init__ contract. */
+        ckc_g950_fail(
+            b,
+            CKC_ERR_NOTIMPL,
+            "use_softmax_mfma_interleave: gfx950 C twin does not yet port the "
+            "softmax-window MFMA interleave (its host body use_q_direct_reg is unported)");
+    }
+    /* #69: K single-buffer IS ported in the gfx950 C twin (it shares the
+     * depth-2 V-single `else` schedule). Mirror Python __post_init__ guards so
+     * incompatible combos reject with matching reasons rather than mis-emit. */
+    if(spec->use_k_single_buffer)
+    {
+        if(spec->use_v_double_buffer)
+            ckc_g950_fail(b,
+                          CKC_ERR_NOTIMPL,
+                          "use_k_single_buffer requires V single-buffer (it shares the "
+                          "post-PV K re-issue point; V double-buffer uses a different "
+                          "K/V prefetch schedule)");
+        if(spec->kv_ring_depth != 2)
+            ckc_g950_fail(b,
+                          CKC_ERR_NOTIMPL,
+                          "use_k_single_buffer is incompatible with kv_ring_depth!=2 "
+                          "(the ring owns >2 K slots)");
+        if(spec->use_grouped_kv2_softmax)
+            ckc_g950_fail(b,
+                          CKC_ERR_NOTIMPL,
+                          "use_k_single_buffer does not support grouped_kv2 (needs 2 K "
+                          "tiles resident for the dual-tile QK)");
+        if(spec->use_early_v_schedule)
+            ckc_g950_fail(
+                b, CKC_ERR_NOTIMPL, "use_k_single_buffer does not support early_v_schedule");
+        if(spec->use_staggered_iter_wait)
+            ckc_g950_fail(
+                b, CKC_ERR_NOTIMPL, "use_k_single_buffer does not support staggered_iter_wait");
+    }
 
     /* gfx950 does NOT pre-resolve a catalog atom or ArchTarget in the prologue
      * (the kv_body calls mfma_32x32x16_for_dtype / mfma_16x16x32_for_dtype
@@ -532,6 +584,7 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ctx->I64_KV_ADDR                = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE           = spec->use_early_v_schedule;
     ctx->AGPR_ALLOC_ZERO            = spec->use_agpr_alloc_zero;
+    ctx->K_SINGLE_BUFFER            = spec->use_k_single_buffer; /* #69 */
     ctx->USE_SCHED_BARRIER          = spec->use_sched_barrier;
     ctx->SCHED_BARRIER_MASK         = spec->sched_barrier_mask;
 
@@ -740,12 +793,13 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     const int Q_BYTES          = BLOCK_M * HD * 2;
     const int K_LDS_ELEM_BYTES = ckc_type_eq(K_LDS_DTYPE, ckc_fp8e4m3()) ? 1 : 2;
     const int K_BUF_BYTES      = T * HD * K_LDS_ELEM_BYTES;
-    const int K_TOTAL_BYTES    = 2 * K_BUF_BYTES; /* K_lds has 2 double-buffer slots */
+    const int K_TOTAL_BYTES    = 2 * K_BUF_BYTES; /* K_lds Q-alias region (2 slots worth) */
     ctx->Q_BYTES               = Q_BYTES;
     ctx->K_LDS_ELEM_BYTES      = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES           = K_BUF_BYTES;
-    ctx->K_BUFS                = 2;
-    ctx->K_TOTAL_BYTES         = K_TOTAL_BYTES;
+    /* #69: K single-buffer -> 1 slot (halves K_lds so T=64 fits 2 WG/CU). */
+    ctx->K_BUFS        = ctx->K_SINGLE_BUFFER ? 1 : 2;
+    ctx->K_TOTAL_BYTES = K_TOTAL_BYTES;
 
     const bool Q_ALIAS_K        = ckc_type_eq(K_LDS_DTYPE, dtype) && (Q_BYTES <= K_TOTAL_BYTES);
     const bool Q_USES_DUAL_SLOT = Q_ALIAS_K && (BLOCK_M > T);
@@ -755,7 +809,7 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
 
     /* ---- K_lds smem_alloc (Py1038) ---- */
     {
-        int shp[3] = {2, T, HD};
+        int shp[3] = {ctx->K_BUFS, T, HD}; /* #69: 1 slot when K single-buffer */
         ctx->K_lds = ckc_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "Klds");
     }
 
@@ -1021,9 +1075,11 @@ ckc_g950_attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, s
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_v_double_buffer ? "vdbuf" : "",
+            s->use_k_single_buffer ? "ksb" : "", /* #69 */
             s->use_staggered_iter_wait ? "stgw" : "",
             schedb_buf,
             s->use_q_reread ? "qrr" : "",
+            s->use_q_direct_reg ? "qdreg" : "", /* #79 */
             s->use_agpr_alloc_zero ? "agpr0" : "",
             s->use_fp8_mfma_qk ? "fp8mfma" : "",
             s->use_fp8_mfma_pv ? "fp8pv" : "",

@@ -1984,9 +1984,20 @@ class TestInstances(unittest.TestCase):
         spec = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=True)
         kernel = build_direct_conv_16c(spec)
         ll = lower_kernel_to_llvm(kernel)
-        # Hot loop emits both 16x16x16 and 16x16x32 MFMAs (K=32 folded).
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # K32-folded hot loop emits ONLY the wide 16x16x32 MFMA: S=0/1 fold
+        # into one wide atom and the S=2 residual is promoted to a SECOND
+        # wide atom (zero-padded upper K) so both atoms on the accumulator
+        # are the same width. Mixing a 16x16x16 residual into the same
+        # accumulator triggered a cross-width MFMA accumulator hazard that
+        # both comgr and hipcc miscompiled at the H-edges; the all-wide fold
+        # is bit-correct.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # The unfolded (gfx942-capable) path still uses only 16x16x16.
+        spec_nf = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=False)
+        ll_nf = lower_kernel_to_llvm(build_direct_conv_16c(spec_nf))
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll_nf)
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll_nf)
 
     def test_direct_conv_4c_builds(self):
         prob = DirectConvProblem(

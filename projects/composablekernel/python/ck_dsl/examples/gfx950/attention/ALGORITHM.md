@@ -165,12 +165,33 @@ them, so the SW combo runs with them off.
 
 Static ISA inspection shows the combo kernel is **VALU/SALU-bound** (~800 VALU +
 ~650 SALU vs only ~16 MFMA per kernel), dominated by the per-element causal-mask
-`v_cndmask`. Two findings shaped the tuning (both detailed in the README):
+`v_cndmask`. But the binding constraint on this kernel is **how many workgroups
+fit per CU** — it is occupancy/latency-bound, and the wins all come from raising
+WG/CU, never from cutting instructions. Three levers shaped the tuning (all
+detailed in the README):
 
-1. **Raise `waves_per_eu`.** The combo is VGPR-limited (~137 VGPR → 3 WG/CU at the
-   default `waves_per_eu=2`); `waves_per_eu=3` reaches 4 WG/CU (+15%), and
-   `waves_per_eu=4` adds ~5% more on full-attention shapes.
-2. **Lighten the prelude for sliding window.** SW prunes the K-loop to a handful
+1. **Raise `waves_per_eu` (the d64/b32 trace family).** That combo is VGPR-limited
+   (~137 VGPR → 3 WG/CU at the default `waves_per_eu=2`); `waves_per_eu=3` reaches
+   4 WG/CU (+15%), and `waves_per_eu=4` adds ~5% more on full-attention shapes.
+2. **K single-buffer for single-batch d128 prefill (the LDS lever).** The
+   single-batch d128 combo at `num_warps=2` is not VGPR-limited but **LDS-limited**:
+   at `tile_size T = 2·block_size = 64` the K double-buffer + V single-buffer LDS
+   (`K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB`) admits only **1 WG/CU**, while the
+   register file already admits two. Keeping the larger `T = 64` tile (good
+   long-context per-iter amortization) but **halving K_lds via K single-buffer**
+   (`use_k_single_buffer`: `K_lds[1] 16 KB + V_lds[1] 16 KB = 32 KB → 2 WG/CU`,
+   VGPR=215 AGPR=0) doubles occupancy and hides the per-iter latency. **V
+   double-buffer is OFF on d128** — a V[i+1] prefetch is a net drag there and
+   would re-inflate LDS back to 1 WG/CU. The single K slot re-issues its next-K
+   prefetch *after* the PV-wait barrier (all QK reads drained) so it cannot
+   WAR-race. This took the single-batch d128 prefill cohort from below flash to
+   **≈1.10x over torch SDPA flash** (geomean; 1.36x at S1024, 1.02x at S2048,
+   but **0.95x at the long S4096 holdout — a small honest loss to flash there**,
+   re-measured on verified llvm22). The same cohort still **trails Triton's
+   multi-warp 2D kernel (~0.55-0.60x)**; see README. d64 single-batch prefill
+   instead keeps `num_warps=4` with a wider `tile_size = 128` to feed its KV
+   loop.
+3. **Lighten the prelude for sliding window.** SW prunes the K-loop to a handful
    of tiles, so the per-CTA prelude (Q→LDS, binary search, sink init) dominates.
    For **bf16** SW the combo drops to `num_warps=2` (BLOCK_M=64, half the
    prelude, 2× the CTAs) but keeps `tile_size = 2·block_size`; fp8 SW is
@@ -221,7 +242,30 @@ spirit:
 - **3D split-KV** otherwise — long, full-context sequences where the 2D grid is
   too small to fill the device.
 
-This is why the parity harness reports **three tables** (`auto`/`2d`/`3d`):
+Once a shape lands on the 2D path, a second tier of routing picks the *kernel
+geometry* for it, driven entirely by the occupancy (WG/CU) the shape can sustain:
+
+- **Single-batch (`num_seqs == 1`) d128 long prefill** (bf16/fp16, GQA, no
+  bias/SW, $S_q > 256$): the full transposed-32×32 combo with **`num_warps=2`,
+  `tile_size T = 2·block_size = 64`, K single-buffer on, V double-buffer off**.
+  The K single-buffer halves K_lds so the larger `T=64` tile still fits in the
+  **32 KB → 2 WG/CU** budget (see §4 lever 2). This is the LDS-bound occupancy
+  story that reversed the old d128-prefill loss vs flash; it now **wins ≈1.10x
+  over torch SDPA flash** (1.36x S1024 → 0.95x at the S4096 holdout) but
+  **still trails Triton's 2D kernel (~0.55-0.60x)** — see the README cohort
+  section. Only same-session ratios are load-bearing (±25-30% auto-clock).
+- **Single-batch d64 long prefill**: same combo but **`num_warps=4`,
+  `tile_size = 128`** (8·block_size) — d64 is wide-KV-loop-bound, so it wants the
+  wider tile and more warps rather than the d128 LDS lever.
+- **The d64/b32 GQA-8 serving traces** (multi-seq chunked prefill, sinks): the
+  combo with the `waves_per_eu` lever (§4 lever 1) and the prelude-light
+  `num_warps=2` SW geometry (§4 lever 3).
+- **Decode / long full-context** shapes route to **3D split-KV** before the 2D
+  geometry tier even runs — the segment grid is the only way to fill the device
+  on single-query decode, and that lane is a clean ≈1.20x win over Triton (3D
+  vs 3D, verified llvm22; see README).
+
+This is also why the parity harness reports **three tables** (`auto`/`2d`/`3d`):
 `auto` is what production launches, while forcing both backends to the *same*
 path (`2d`-vs-`2d`, `3d`-vs-`3d`) is the algorithmically-fair comparison.
 

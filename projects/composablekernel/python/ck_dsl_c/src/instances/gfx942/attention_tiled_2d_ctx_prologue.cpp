@@ -202,17 +202,18 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
     ctx->FP8_MFMA_PV         = FP8_MFMA_PV;
     ctx->FP8_NATIVE_QK       = FP8_NATIVE_QK;
 
-    ctx->REGISTER_PV                 = spec->use_register_pv;
-    ctx->TRANSPOSED_QK_32X32         = spec->use_transposed_qk_32x32;
-    ctx->CONFLICT_FREE_V             = spec->use_conflict_free_v;
-    const bool CONFLICT_FREE_V_STORE = spec->use_conflict_free_v_store;
-    ctx->CONFLICT_FREE_V_STORE       = CONFLICT_FREE_V_STORE;
-    ctx->K_SINGLE_BUF                = spec->use_k_single_buffer;
-    const bool K_SLICED_RING         = spec->use_k_sliced_ring;
-    ctx->K_SLICED_RING               = K_SLICED_RING;
-    ctx->K_SLICED_LDSSEQ             = spec->use_k_sliced_ldsseq;
-    ctx->USE_IGLP_OPT                = spec->use_iglp_opt;
-    ctx->USE_GLOBAL_LOAD_LDS_K       = spec->use_global_load_lds_k;
+    ctx->REGISTER_PV                   = spec->use_register_pv;
+    ctx->TRANSPOSED_QK_32X32           = spec->use_transposed_qk_32x32;
+    ctx->CONFLICT_FREE_V               = spec->use_conflict_free_v;
+    const bool CONFLICT_FREE_V_STORE   = spec->use_conflict_free_v_store;
+    ctx->CONFLICT_FREE_V_STORE         = CONFLICT_FREE_V_STORE;
+    ctx->K_SINGLE_BUF                  = spec->use_k_single_buffer;
+    const bool K_SLICED_RING           = spec->use_k_sliced_ring;
+    ctx->K_SLICED_RING                 = K_SLICED_RING;
+    ctx->K_SLICED_LDSSEQ               = spec->use_k_sliced_ldsseq;
+    ctx->USE_IGLP_OPT                  = spec->use_iglp_opt;
+    ctx->USE_GLOBAL_LOAD_LDS_K         = spec->use_global_load_lds_k;
+    ctx->USE_QK_PV_SCHED_GROUP_BARRIER = spec->use_qk_pv_sched_group_barrier;
 
     /* env-var diagnostic switches (lines 1218-1235). os.environ defaults "0". */
     ctx->CFV_SCALAR_READ       = false;

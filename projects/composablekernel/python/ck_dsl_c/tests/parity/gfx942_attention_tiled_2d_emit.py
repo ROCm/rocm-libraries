@@ -67,6 +67,46 @@ _CONFIGS = {
         sliding_window=0,
         has_softcap=False,
     ),
+    # cfg5: gfx942 bf16 D128 small-tile double-K (the landed prefill lever).
+    # T=32, nw=2, double-K (use_k_single_buffer=False), transposed-x8. Pins the
+    # C-twin byte-identity gate for the small-tile geometry (PASS, sha-identical).
+    5: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+    ),
+    # cfg6: cfg5 + use_agpr_alloc_zero (the ck83 Fix-A residency lever). Same
+    # D128 small-tile double-K geometry; the only delta vs cfg5 is the
+    # "amdgpu-agpr-alloc"="0,0" kernel attr (-> VGPR-form MFMA). Pins the
+    # C-twin byte-identity gate for the agpr0 wide-x8 path.
+    6: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=8,
+        num_kv_heads=1,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_k_single_buffer=False,
+        use_agpr_alloc_zero=True,
+    ),
 }
 
 

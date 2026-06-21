@@ -428,7 +428,7 @@ def supports_native_unified_attention_tiled(
             num_warps=nw,
             block_m_per_warp=32,
             kv_storage_dtype=_kv_storage_dtype(problem),
-            tile_size=64,
+            tile_size=_gfx942_bf16_wide_tile_size(problem),
             arch=arch,
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
@@ -557,6 +557,33 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
+    """#69 d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
+
+    For the same single-batch d128 cohort that ``_enable_d128_small_tile`` gates,
+    keep the LARGER T=64 tile (better long-context per-iter amortisation) but
+    halve K_lds via K single-buffer so LDS stays at 32 KB -> 2 WG/CU. The
+    next-K prefetch is re-issued after the PV-wait barrier (no WAR race). This
+    crosses flash at the S4096 holdout (0.976x -> 1.020x bf16+fp16) and beats
+    the #66 T=32 pick at every measured shape (gfx950 MI355X, same-session vs
+    torch SDPA FLASH, GPU-idle; see #69 report). Occupancy proof (llvm-readelf):
+    T=64 + K-single -> VGPR=215 AGPR=0 LDS=32 KB -> 2 WG/CU.
+
+    Scoped to the EXACT V-single-buffer combo path the gfx950 emitter wires K
+    single-buffer on (no ring, no grouped_kv2, no FP8, V single-buffer). The
+    cohort already satisfies these; the spec __post_init__ re-validates loudly.
+
+    GEOMETRY GUARD: K-single needs Q to fit the lone K slot, i.e.
+    ``block_m <= tile_size``. The cohort runs num_warps=2 / block_m_per_warp=32
+    -> block_m=64, with tile_size = 2*block_size, so this only holds for
+    ``block_size >= 32`` (T>=64). At block_size=16 (T=32) Q (64 rows) cannot fit
+    the single 32-token K slot and the __post_init__ validator rejects it
+    (use_q_direct_reg would lift this but is not wired on this path). Fall back
+    to the no-K-single small-tile config there.
+    """
+    return _enable_d128_small_tile(problem) and problem.block_size >= 32
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -636,17 +663,23 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     if _enable_single_batch_combo(problem):
         if problem.head_size == 64:
             return 128
-        # #66 d128 occupancy lever: at num_warps=2 the d128 combo is LDS-bound
-        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU; the
-        # register file already fits 2 waves/SIMD, V+A<=256). Halving the tile to
-        # T = block_size (one paged block per iter) drops LDS to 24 KB AND VGPR
-        # 229->173 -> 2 WG/CU, which crosses flash on S=2048 (0.98x->1.06x) and
-        # S=4096 (0.83x->1.03x), all correctness-clean (measured #66 MI355X).
-        # Default-OFF (golden/production unchanged) behind an env opt-in until a
-        # broader multi-shape sweep reconciles it with the #52 autotuner's
-        # T=2*BS pick; set HIPDNN_GFX950_D128_SMALL_TILE=1 to enable.
+        # #69 d128 occupancy lever (supersedes the #66 small-tile pick for the
+        # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound
+        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU). #66
+        # halved the TILE (T=block_size=32) to drop LDS 48->24 KB -> 2 WG/CU,
+        # but at T=32 the long-context S4096 path runs 128 outer iters whose
+        # per-iter overhead under-amortises -> only 0.976x flash. #69 instead
+        # keeps the LARGER T=64 tile (64 iters at S4096) and halves K_lds via
+        # ``use_k_single_buffer`` (K_lds[1,T,HD]=16 KB + V_lds[1,T,HD]=16 KB =
+        # 32 KB -> 2 WG/CU, VGPR=215 AGPR=0). This crosses flash at S4096
+        # (0.976x -> 1.020x bf16+fp16) AND beats the T=32 pick at every shape
+        # (S1024 1.451->1.476x, S2048 1.065->1.099x; same correctness rel).
+        # The single K slot re-issues the next-K prefetch AFTER the PV-wait
+        # barrier (all QK reads drained) so it cannot WAR-race -- avoiding the
+        # documented gfx942 naive-single-buffer hazard. Default-OFF behind the
+        # same env opt-in (golden/production routing unchanged) until landed.
         if _enable_d128_small_tile(problem):
-            return problem.block_size
+            return 2 * problem.block_size
         return 2 * problem.block_size
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
@@ -1469,8 +1502,63 @@ def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, b
     sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
     """
     if problem.head_size == 128:
+        # gfx942 bf16 D128 small-tile double-K (synthesized from the gfx942
+        # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
+        # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
+        # so restore the K double-buffer (single_k=False) instead of the T=64
+        # K-single-buffer. Same-session MEASURED on MI300X (gfx942): xflash vs
+        # torch FLASH 0.24->0.57-0.65 (~2.3-2.4x the shipped T=64 single-K
+        # baseline) on bf16 D128 S1024/S2048/S4096, occupancy unchanged at
+        # 2 WG/CU (the win is K-double-buffer prefetch overlap, not occupancy --
+        # matches the CK Tile ground truth that D128 is already 2 WG/CU and the
+        # gap is inner-loop scheduling). Default-ON for the bf16 D128 prefill
+        # cohort with a paged cache block_size==32; env escape
+        # HIPDNN_GFX942_D128_SMALLTILE_DK=0 reverts to the shipped config. T=32
+        # is an EXISTING tile_size value so the per-spec emit is byte-identical
+        # (C-twin parity GREEN); only the selector routing changes.
+        if _enable_gfx942_d128_smalltile_doublek(problem):
+            return 2, False
         return 2, True
     return 4, False
+
+
+def _gfx942_bf16_wide_tile_size(problem: UnifiedAttentionProblem) -> int:
+    """tile_size (T) for the gfx942 bf16 wide-K path. Default T=64; the D128
+    small-tile double-K lever halves D128 to T=block_size(==32) to restore the
+    K double-buffer prefetch at the same 2 WG/CU. T=32 is an EXISTING tile_size
+    value -> per-spec EMIT byte-identical; this is a pure ROUTING change."""
+    if _enable_gfx942_d128_smalltile_doublek(problem):
+        return problem.block_size
+    return 64
+
+
+def _enable_gfx942_d128_smalltile_doublek(
+    problem: UnifiedAttentionProblem,
+) -> bool:
+    """gfx942 bf16 D128 small-tile (T=32) double-K geometry.
+
+    DEFAULT-ON for the gfx942 bf16 D128 prefill cohort with a paged cache
+    block_size==32 (T=32 must be a multiple of block_size). Env escape
+    HIPDNN_GFX942_D128_SMALLTILE_DK in {0,off,...} disables and reverts to the
+    shipped T=64 K-single-buffer config (byte-identical OFF path). T=32 is an
+    EXISTING tile_size value so the per-spec emit is byte-identical; only the
+    selector routing changes. Restricted to the bf16 wide path (D128); fp16
+    keeps its sliced-K ring (small-tile regressed fp16 prefill)."""
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX942_D128_SMALLTILE_DK", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    if _resolve_attention_arch() != "gfx942":
+        return False
+    if problem.head_size != 128:
+        return False
+    if problem.block_size != 32:
+        return False
+    return _enable_gfx942_bf16_flash(problem)
 
 
 def _enable_gfx942_d128_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
@@ -1773,7 +1861,7 @@ def _tiled_spec_from_problem(
             num_warps=nw,
             waves_per_eu=_select_2d_waves_per_eu(problem),
             kv_storage_dtype=_kv_storage_dtype(problem),
-            tile_size=64,
+            tile_size=_gfx942_bf16_wide_tile_size(problem),
             block_m_per_warp=32,
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
@@ -1854,6 +1942,14 @@ def _tiled_spec_from_problem(
         )
     if "use_sched_barrier" in _spec_field_names:
         _gfx950_schedule_fields["use_sched_barrier"] = _enable_sched_barrier(problem)
+    # #69 d128 long-context lever: K single-buffer lets the larger T=64 tile fit
+    # the 2-WG/CU LDS budget at HD=128 (see _select_2d_tile_size). Gated on the
+    # same d128 small-tile cohort + opt-in env so default/production routing is
+    # byte-identical. Field-presence guarded (gfx942/gfx1250 spec classes lack
+    # it). _enable_k_single_buffer also re-asserts the T=64 / V-single-buffer /
+    # no-fp8 preconditions so it can never fire on an incompatible spec.
+    if "use_k_single_buffer" in _spec_field_names and _enable_k_single_buffer(problem):
+        _gfx950_schedule_fields["use_k_single_buffer"] = True
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,

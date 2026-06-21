@@ -90,8 +90,12 @@ ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
     s.kv_ring_depth                   = 2;
     s.use_staggered_iter_wait         = false;
     s.use_q_reread                    = false;
+    s.use_q_direct_reg                = false; /* #79 */
     s.use_sched_barrier               = false;
     s.sched_barrier_mask              = 0;
+    s.use_softmax_mfma_interleave     = false; /* #80 */
+    s.softmax_interleave_mode         = 1;
+    s.softmax_interleave_groups       = 4;
     s.has_tile_size                   = false;
     s.tile_size                       = 0;
     s.block_m_per_warp                = 16;
@@ -117,6 +121,7 @@ ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
     s.use_k_sliced_ring               = false;
     s.use_k_sliced_ldsseq             = false;
     s.use_iglp_opt                    = false;
+    s.use_qk_pv_sched_group_barrier   = false;
     s.use_q_direct_global             = false;
     s.kv_cache_policy                 = "stream";
     s.use_global_load_lds_k           = false;
@@ -238,10 +243,15 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         return false;
     }
 
-    /* gfx950-only experimental knobs rejected up front on gfx942. */
+    /* gfx950-only experimental knobs rejected up front on gfx942.
+     * NOTE: use_agpr_alloc_zero is NOT an ISA feature -- it is a backend codegen
+     * hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form) that keeps MFMA
+     * accumulators in VGPR. It is legal on the gfx942 wide x8 transposed path;
+     * the detailed pairing guard below enforces that (mirrors Python
+     * attention_tiled_2d.py line 765). So it is gated there, not blanket-rejected
+     * here. */
     if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg ||
-       s->use_grouped_kv2_softmax || s->use_agpr_alloc_zero || s->use_fp8_mfma_qk ||
-       s->use_fp8_mfma_pv)
+       s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
     {
         ckc_attn2d_set_err(b,
                            CKC_ERR_VALUE,
@@ -415,6 +425,32 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         return false;
     }
 
+    if(s->use_qk_pv_sched_group_barrier)
+    {
+        if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
+        {
+            ckc_attn2d_set_err(b,
+                               CKC_ERR_VALUE,
+                               "use_qk_pv_sched_group_barrier requires the transposed-x8 path "
+                               "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
+            return false;
+        }
+        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
+        {
+            ckc_attn2d_set_err(
+                b, CKC_ERR_VALUE, "use_qk_pv_sched_group_barrier requires fp16 or bf16");
+            return false;
+        }
+        if(s->use_iglp_opt)
+        {
+            ckc_attn2d_set_err(b,
+                               CKC_ERR_VALUE,
+                               "use_qk_pv_sched_group_barrier is mutually exclusive with "
+                               "use_iglp_opt (iglp_opt owns the loop schedule)");
+            return false;
+        }
+    }
+
     if(s->num_warps == 8 && s->block_m_per_warp == 32 &&
        !(s->use_q_direct_global && s->use_conflict_free_v_store))
     {
@@ -443,6 +479,27 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     {
         ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
         return false;
+    }
+
+    /* use_agpr_alloc_zero detailed pairing guard (mirrors Python
+     * attention_tiled_2d.py line 765). On gfx942 the R4_s1mask_hlpv family is
+     * gfx950-only (use_mfma_32x32 / use_transposed_half_local_pv are rejected
+     * above), so the only legal pairing here is the wide x8 transposed path. */
+    if(s->use_agpr_alloc_zero)
+    {
+        const bool agpr0_r4_s1mask_hlpv =
+            s->use_mfma_32x32 && s->use_transposed_qk_32x32 && s->use_transposed_scalar_state &&
+            s->use_transposed_mask_once && s->use_transposed_half_local_pv;
+        const bool agpr0_wide_x8 = s->use_mfma_32x32x8 && s->use_transposed_qk_32x32;
+        if(!(agpr0_r4_s1mask_hlpv || agpr0_wide_x8))
+        {
+            ckc_attn2d_set_err(b,
+                               CKC_ERR_VALUE,
+                               "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv "
+                               "path or the wide x8 transposed path "
+                               "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
+            return false;
+        }
     }
 
     return true;

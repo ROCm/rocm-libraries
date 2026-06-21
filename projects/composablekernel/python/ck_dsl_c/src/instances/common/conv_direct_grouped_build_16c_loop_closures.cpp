@@ -204,6 +204,41 @@ ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_val
 }
 
 /* ===================================================================== *
+ *  Closure: lds_read_input_s2_k32(q_subtile, lds)
+ *
+ *  Per-lane <8 x half> input read for the S=2 residual, promoted to a
+ *  zero-padded K=32 atom. Low half (c4 in {0,1}) reads the S=2 column
+ *  (W_lds = q_in_lane + 2) at channel block ch_lane_k32; high half (c4 in
+ *  {2,3}) is zeroed via select(lane_in_lo_half, vec, fp16x8_zero).
+ * ===================================================================== */
+ckc_value_t*
+ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds)
+{
+    ckc_ir_builder_t* b = ctx->b;
+    ckc_value_t* W_lds_idx;
+    ckc_value_t* lds_idx;
+    ckc_value_t* vec;
+    ckc_value_t* indices[2];
+
+    /* W_lds_idx = b.add(q_in_lane, b.const_i32(q_subtile*16 + 2)) */
+    W_lds_idx = ckc_b_add(b, ctx->q_in_lane, ckc_b_const_i32(b, q_subtile * 16 + 2));
+    /* lds_idx = b.add(b.add(b.mul(W_lds_idx, c_BG_cpg), b.mul(wave_id, c_cpg)),
+     *                 ch_lane_k32) -- force Python left-to-right SSA order. */
+    {
+        ckc_value_t* mul_wlds = ckc_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
+        ckc_value_t* mul_wave = ckc_b_mul(b, ctx->wave_id, ctx->c_cpg);
+        ckc_value_t* inner    = ckc_b_add(b, mul_wlds, mul_wave);
+        lds_idx               = ckc_b_add(b, inner, ctx->ch_lane_k32);
+    }
+    /* vec = b.smem_load_vN_f16(lds, c0, lds_idx, n=8) */
+    indices[0] = ctx->c0;
+    indices[1] = lds_idx;
+    vec        = ckc_b_smem_load_vN_f16(b, lds, indices, 2, 8);
+    /* return b.select(lane_in_lo_half, vec, fp16x8_zero) */
+    return ckc_b_select(b, ctx->lane_in_lo_half, vec, ctx->fp16x8_zero);
+}
+
+/* ===================================================================== *
  *  Prologue prefetch                               (Python lines 609-616)
  *
  *  store_to_lds(issue_dram_load(c0), A_smem); b.sync().
@@ -266,10 +301,10 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
     {
         ckc_value_t* cur;
         ckc_value_t* nxt;
-        /* Per-q inputs. fold_k32: inputs_by_q[qt] = (input_k32, input_k16).
+        /* Per-q inputs. fold_k32: inputs_by_q[qt] = (input_k32, input_s2).
          * else: inputs_by_q[qt][s] for s in range(KW). */
         ckc_value_t* in_k32[CKC_DCONV_MAX_QTILES];
-        ckc_value_t* in_k16[CKC_DCONV_MAX_QTILES];
+        ckc_value_t* in_s2[CKC_DCONV_MAX_QTILES];
         ckc_value_t* in_s[CKC_DCONV_MAX_QTILES][16];
         ckc_value_t* loads_next_vecs[CKC_DCONV16C_MAX_PASSES];
         ckc_value_t* loads_next_lds[CKC_DCONV16C_MAX_PASSES];
@@ -297,9 +332,9 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
         {
             for(qt = 0; qt < q_subtiles; ++qt)
             {
-                /* (lds_read_input_k32(qt, cur), lds_read_input(qt, 2, cur)) */
+                /* (lds_read_input_k32(qt, cur), lds_read_input_s2_k32(qt, cur)) */
                 in_k32[qt] = ckc_dconv16c_lds_read_input_k32(ctx, qt, cur);
-                in_k16[qt] = ckc_dconv16c_lds_read_input(ctx, qt, 2, cur);
+                in_s2[qt]  = ckc_dconv16c_lds_read_input_s2_k32(ctx, qt, cur);
             }
         }
         else
@@ -341,12 +376,24 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
 
                 if(ctx->spec->fold_k32)
                 {
-                    /* acc_in = mfma_f32_16x16x32_f16(weights_k32[r], input_k32, acc_in)
-                     * acc_in = mfma_f32_16x16x16_f16(weights_k16[r], input_k16, acc_in) */
+                    /* All-wide fold (CORRECTNESS-CRITICAL): both folded MFMAs
+                     * are the SAME width (16x16x32). S=0/1 fold into one wide
+                     * atom; S=2 is promoted to a SECOND wide atom with its
+                     * upper 16 K zero-padded (weights_s2_k32 / in_s2). Chaining
+                     * two same-width atoms on one accumulator matches the
+                     * mfma_gemm hero path. Mixing a 16x16x16 residual into the
+                     * same accumulator as the 16x16x32 atom -- a narrow MFMA
+                     * whose C-operand is the just-written result of a wide MFMA
+                     * (or vice versa) -- is a read-after-write accumulator
+                     * hazard that BOTH comgr and hipcc miscompile in this
+                     * fully-unrolled kernel, corrupting H-edge output rows in a
+                     * shape-dependent way. Op order matches Python:
+                     *   acc_in = mfma_f32_16x16x32_f16(weights_k32[r], in_k32, acc_in)
+                     *   acc_in = mfma_f32_16x16x32_f16(weights_s2_k32[r], in_s2, acc_in) */
                     acc_in = ckc_b_mfma_f32_16x16x32_f16(
                         b, ctx->weights_k32[r_const], in_k32[qt], acc_in);
-                    acc_in = ckc_b_mfma_f32_16x16x16_f16(
-                        b, ctx->weights_k16[r_const], in_k16[qt], acc_in);
+                    acc_in = ckc_b_mfma_f32_16x16x32_f16(
+                        b, ctx->weights_s2_k32[r_const], in_s2[qt], acc_in);
                 }
                 else
                 {
@@ -367,6 +414,25 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
         /* if loads_next is not None: store_to_lds(loads_next, nxt) */
         if(has_loads_next)
         {
+            /* Single-buffer correctness barrier. When double_buffer is
+             * False, cur and nxt are the SAME LDS allocation, so the
+             * store_to_lds below overwrites the row this iteration just read
+             * via lds_read_input. With more than one wave per workgroup
+             * (block_groups > 1) the only barrier used to be the one at the
+             * end of the iteration, so a fast wave could begin storing row
+             * y+1 into LDS while a slower wave was still issuing its ds_reads
+             * for row y -- a read-after-write race that corrupted the slower
+             * waves' inputs (seen as nondeterministic wrong outputs in the
+             * interior waves/groups and near the H/W edges). The next-row
+             * DRAM loads were already issued into registers above, so this
+             * barrier only forces every wave to finish reading the current
+             * LDS row before any wave overwrites it; the MFMAs above overlap
+             * the ds_read latency. The double-buffer path doesn't need it
+             * (the store targets the other ping-pong buffer). */
+            if(!ctx->spec->double_buffer)
+            {
+                ckc_b_sync(b);
+            }
             ckc_dconv16c_store_to_lds(ctx, loads_next_vecs, loads_next_lds, n_loads_next, nxt);
         }
         /* b.sync() */

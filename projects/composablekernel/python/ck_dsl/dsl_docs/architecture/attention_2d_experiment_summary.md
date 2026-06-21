@@ -1,7 +1,31 @@
 # CK DSL Unified Attention 2D Experiment Summary
 
-Date: 2026-05-21  
+Date: 2026-05-21 (original multi-batch d64 study); updated 2026-06-19 with the
+single-batch d128 occupancy push (see "Update — single-batch d128/d64 prefill" below).  
 Scope: bf16 prefill-2D unified attention, primarily `d64_b32_h64kv8` with sinks on gfx950.
+
+> **Backend-validity note.** Perf and register/occupancy numbers are
+> backend-sensitive. Production is **llvm22 + comgr 7.2** (torch imported
+> first). Several of this session's pre-2026-06-19 d128 measurements were
+> taken on an **llvm20 + comgr 7.0.1** backend, where the d128 body falsely
+> read as 256 VGPR + spills / 1 WG/CU and the prefill gap looked far worse
+> (the small-tile / K-single-buffer occupancy story and the `sched_barrier`
+> `+35 %` were llvm20 artifacts). The d128 numbers below are corrected inline
+> to the production llvm22 values. Correctness / byte-identity facts are
+> backend-independent.
+
+> **Standing as of the 2026-06-19 update (production llvm22): the gfx950 forward
+> attention cohort is at/above parity vs Triton and PyTorch flash** — d128 prefill
+> is 0.95–1.01× Triton (crosses Triton at bf16 S1024) and ~0.96–1.41× flash
+> (crosses flash at S1024/S2048; ~0.96× at S4096, where flash is also bandwidth-
+> bound), d64 prefill wins, and decode beats flash (and ~2× CK Tile via
+> hipGraph replay). The "0.848× CK speedup vs Triton" figure in the original
+> "Current Best Policy" section below is the *multi-batch d64* state from May; it
+> is superseded by the single-batch d128/d64 work in the update section at the
+> end of this file. Read both: the levers in the body (HLPV, transposed combo,
+> early-V, T=32 SW) still hold; the update adds the single-batch routing fix and
+> the MFMA-schedule lever (`use_softmax_mfma_interleave`) that closed d128 on
+> production llvm22.
 
 ## Baseline
 
@@ -497,3 +521,120 @@ After AGPR moves are no longer the primary issue for the current best path, rema
 4. Keep AGPR residency support as backend infrastructure, not a default attention option.
 5. Move proven selector policy into `attention_unified.py` only after the benchmark harness policy is stable.
 6. Continue using Triton-vs-current-best HSACO/ISA diffs to rank future work.
+
+---
+
+## Update (2026-06-19) — single-batch d128/d64 prefill: the occupancy push that won the cohort
+
+The May study above optimized **multi-batch** d64. This update covers the
+**single-batch** (`num_seqs == 1`) d128/d64 long-prefill path, where a
+combinatorial autotuner exposed a routing bug and an occupancy story that, once
+fixed, crossed PyTorch flash across the whole prefill cohort. All numbers are
+MI355X / gfx950, LLVM backend (llvm22 + comgr 7.2), same-session HIP-event A/B vs
+torch SDPA flash unless noted. A ratio >1.0 means CK DSL is faster than flash.
+
+### Routing bug: single-batch fell off the combo
+
+The production selector gated the full 32×32 transposed "combo"
+(`use_mfma_32x32` + `use_transposed_qk_32x32` + scalar-state + mask-once +
+mask-limit + skip-legacy-qreg + half-local-PV) to `num_seqs >= 2`, so
+**single-batch** d128/d64 prefill fell to the legacy 16×16×32 path (~1.5–2.7×
+slower). The old gate's docstring justified the restriction with a measurement
+of the *plain* transposed path (0.74–0.85×) — but the *full* combo was never
+built for `num_seqs == 1`, and it is 1.5–2.7× *faster*, correctness-equal
+(`max_abs == flash` on every shape). Fix: `_enable_single_batch_combo` routes the
+qualifying cohort (gfx950, `num_seqs==1`, bf16/fp16, no-FP8, no-SW,
+`head_size ∈ {64,128}`, `max_seqlen_q > 256`) to the full combo.
+
+### The d128 occupancy story: a wall on llvm20, already clean on llvm22
+
+With the combo selected, an early **llvm20 + comgr 7.0.1** measurement showed
+d128 losing to flash with the body at **256 VGPR + spills / 1 WG/CU**, which
+motivated an LDS-cut occupancy story: at `num_warps>=2` the body read as
+LDS-bound, and two LDS cuts each reached 2 WG/CU — a `T=block_size` "small
+tile" (LDS 24 KB) and a `T=64` K-single-buffer (LDS 32 KB), with a 229 / 173 /
+215 VGPR table.
+
+**That wall was an llvm20 backend artifact.** Re-measured on the production
+**llvm22 + comgr 7.2** backend (torch imported first), the shipped
+`BLOCK_M=128` `use_q_direct_reg` body is already occupancy-clean — there is no
+LDS cut to make:
+
+| Config (production llvm22) | VGPR | AGPR | spill | LDS | WG/CU |
+|---|---:|---:|---:|---:|---:|
+| `BLOCK_M=128`, `use_q_direct_reg` (shipped body) | 213 | 0 | 0 | 32 KB | 2 |
+| + `use_softmax_mfma_interleave` (winning config) | 240 | 0 | 0 | 32 KB | 2 |
+
+`waves_per_eu=2` does the occupancy work; the register file is well under the
+256 cap at 2 waves/SIMD. The small-tile / K-single-buffer levers and the
+`HIPDNN_GFX950_D128_SMALL_TILE` escape hatch remain in the tree but are **not**
+the production lever — they addressed an occupancy wall that does not exist on
+llvm22.
+
+With occupancy clean, the residual is **MFMA scheduling**: the mainloop's max
+inter-MFMA instruction gap (the MFMA-idle stretch where the causal-mask +
+softmax VALU runs) is what costs. The production lever is
+`use_softmax_mfma_interleave` — one `iglp_opt` at the loop top that lets the
+backend interleave that VALU mass into the MFMA window. It shrinks the gap and
+crosses Triton at bf16 S1024.
+
+Final d128 on production llvm22 (winning config = `use_q_direct_reg` +
+`waves_per_eu=2` + `use_softmax_mfma_interleave`), same-session:
+
+| dtype | metric | S1024 | S2048 | S4096 |
+|---|---|---:|---:|---:|
+| bf16 | vs Triton | **1.012× (cross)** | 0.953× | 0.947× |
+| bf16 | vs flash | ~1.41× | ~1.04× | ~0.96× |
+| fp16 | vs Triton | 0.984× | 0.951× | 0.945× |
+| fp16 | vs flash | ~1.41× | ~1.05× | ~0.96× |
+
+So d128 prefill is **0.95–1.01× Triton** on production — it crosses Triton at
+bf16 S1024 and crosses flash at S1024/S2048. The residual at S≥2048 is the
+HBM-bandwidth-bound long-context regime (flash is ~0.96× too there) plus the
+causal-mask VALU mass that the canned interleave cannot fully overlap.
+
+### `num_warps`, `waves_per_eu`, and the V double-buffer (corrected)
+
+- **`num_warps`**: single-batch d128 combo → `num_warps=2`. `num_warps=1` is
+  occupancy-starved on the tiny single-seq grid (the lone resident wave can't
+  hide the prefetch-in-MFMA-window cost). d64 combo → `num_warps=4` (paired with
+  `T=128`).
+- **`waves_per_eu`**: `waves_per_eu=2` for the cohort, and this is what does the
+  d128 occupancy work on llvm22 (the body sits at 213 VGPR / 2 WG/CU). An earlier
+  `waves_per_eu=3`-at-long-S rule regressed this cohort and is off.
+- **V double-buffer is off for d128** — the winning path is `num_warps=2` with
+  no V prefetch. (On the early llvm20 backend the prefetch's extra LDS re-inflated
+  the footprint and dropped occupancy; on llvm22 the body is occupancy-clean
+  regardless, and the no-prefetch path is still the faster pick.) It stays a win
+  only on d64 short prefill. Turning it off for d128 also auto-disables
+  `use_sched_barrier` (which gated on it) — and the production schedule lever is
+  `use_softmax_mfma_interleave`, which is mutually exclusive with `use_sched_barrier`.
+
+### `sched_barrier`: a real compile-time effect, then superseded
+
+The `llvm.amdgcn.sched.barrier` fence between the QK MFMA cluster and the post-QK
+async prefetch (steering the post-RA scheduler to keep QK MFMAs packed instead of
+interleaving the next-tile `buffer_load_lds`) was measured on the early **llvm20**
+backend to produce **+35–36 %** on the single-batch d128 combo at `num_warps==1`
+(DSL/flash ~0.67× → ~0.92×), and a **−2.5–4.6 % regression** at `num_warps>=2`.
+That win is **both backend-specific and superseded**: on production llvm22 the
+d128 body is already occupancy-clean at `num_warps=2`, and the production schedule
+lever is `use_softmax_mfma_interleave` (an `iglp_opt`), which is mutually
+exclusive with `use_sched_barrier`. The mechanism note still holds and is
+backend-independent: `sched_barrier` is a **compile-time fence**, distinct from
+the runtime `s_sched_barrier` instruction, and frequently leaves no instruction in
+the disassembly (so a 0 `sched_barrier` bucket in `probe_isa_inspect.py` means the
+*runtime instruction* is absent, not that the constraint was dropped — verify a
+hint by diffing the mainloop ISA, never by perf alone; arch reference §21.8).
+`use_sched_barrier` is not on any live cohort — kept in the tree for the mechanism.
+
+### Final gfx950 forward scorecard
+
+- **d128 prefill** (production llvm22): vs Triton 1.012× / 0.953× / 0.947× (bf16
+  S1024/S2048/S4096), 0.984× / 0.951× / 0.945× (fp16) — i.e. 0.95–1.01× Triton,
+  crossing Triton at bf16 S1024. vs flash ~1.41× / ~1.04× / ~0.96×, crossing
+  flash at S1024/S2048.
+- **d64 prefill**: wins.
+- **decode**: beats flash, and ~2× CK Tile via hipGraph replay (opt-in
+  `HIPDNN_GFX950_3D_GRAPH=1`, gated `q<=768`; dispatch/host-only).
+- **Production trace**: 142-shape cohort geomean Triton/CK DSL ~1.11, 105/142 win.

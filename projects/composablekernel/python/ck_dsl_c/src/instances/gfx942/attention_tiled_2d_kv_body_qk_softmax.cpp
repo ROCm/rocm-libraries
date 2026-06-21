@@ -45,6 +45,7 @@
 #include "ckc/helper_ck_dsl.helpers.attention.h"        /* ckc_warp_xor_reduce_sum */
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h"   /* ckc_mfma_attn_mfma_32x32x16_for_dtype */
 #include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h" /* _mfma_32x32_c_* */
+#include "ckc/helper_ck_dsl.helpers.schedule.h" /* CKC_SCHED_DS_READ / CKC_SCHED_MFMA, T8 */
 
 /* ===================================================================== *
  *  Local recompute of the prologue-derived scalar/lane invariants.
@@ -204,6 +205,16 @@ fh_mfma_32x32x8(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* a, ckc_value_t*
     if(ctx->dtype != NULL && ctx->dtype->name != NULL && strcmp(ctx->dtype->name, "bf16") == 0)
         return ckc_b_mfma_f32_32x32x8_bf16(ctx->b, a, bv, c);
     return ckc_b_mfma_f32_32x32x8_f16(ctx->b, a, bv, c);
+}
+
+/* T8 (DSL-novel): pin one MFMA k-step as a sched_group_barrier-ordered block. */
+static void fh_sched_group_pin_mfma_step(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                         int ds_reads,
+                                         int mfma_count,
+                                         int sgid)
+{
+    ckc_b_sched_group_barrier(ctx->b, CKC_SCHED_DS_READ, ds_reads, sgid);
+    ckc_b_sched_group_barrier(ctx->b, CKC_SCHED_MFMA, mfma_count, sgid);
 }
 
 /* _read_k8_mfma_operand(buf, k_row, k_off, frag) for the non-fp8 path (Python
@@ -466,6 +477,13 @@ void ckc_gfx942_attn2d_emit_kv_body(ckc_gfx942_attn2d_build_ctx_t* ctx)
                     acc32 = fh_mfma_32x32x8(ctx, A_k_t, B_q_t, acc32);
                 else
                     acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
+                if(ctx->USE_QK_PV_SCHED_GROUP_BARRIER)
+                {
+                    int ds_reads = TQK_FRAG / 4;
+                    if(ds_reads < 1)
+                        ds_reads = 1;
+                    fh_sched_group_pin_mfma_step(ctx, ds_reads, 1, 0);
+                }
             }
             ST32_n[n] = acc32;
         }
