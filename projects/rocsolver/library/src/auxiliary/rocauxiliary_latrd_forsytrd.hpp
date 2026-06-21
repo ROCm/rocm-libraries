@@ -280,13 +280,13 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
     int m = c + 1;
     int cw = c - mm + k;
     T* y = A + idx2D(0, c, lda);
-    T* A1 = A + idx2D(0, c + 1, lda);
+    T const* __restrict__ A1 = A + idx2D(0, c + 1, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(0, cw + 1, ldw);
+    T const* __restrict__ A2 = W + idx2D(0, cw + 1, ldw);
     int lda2 = ldw;
-    T* x1 = W + idx2D(c, cw + 1, ldw);
+    T const* __restrict__ x1 = W + idx2D(c, cw + 1, ldw);
     int incx1 = ldw;
-    T* x2 = A + idx2D(c, c + 1, lda);
+    T const* __restrict__ x2 = A + idx2D(c, c + 1, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -339,7 +339,9 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
 
         // write results
         if(tidc == 0 && i < m)
+        {
             y[i] = ac;
+        }
     }
 }
 
@@ -389,13 +391,13 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
     int m = mm - c;
     int n = c;
     T* y = A + idx2D(c, c, lda);
-    T* A1 = A + idx2D(c, 0, lda);
+    T const* __restrict__ A1 = A + idx2D(c, 0, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(c, 0, ldw);
+    T const* __restrict__ A2 = W + idx2D(c, 0, ldw);
     int lda2 = ldw;
-    T* x1 = W + idx2D(c, 0, ldw);
+    T const* __restrict__ x1 = W + idx2D(c, 0, ldw);
     int incx1 = ldw;
-    T* x2 = A + idx2D(c, 0, lda);
+    T const* __restrict__ x2 = A + idx2D(c, 0, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -448,7 +450,9 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
 
         // write results
         if(tidc == 0 && i < m)
+        {
             y[i] = ac;
+        }
     }
 }
 
@@ -512,14 +516,14 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(i != c)
     {
-#define FORLOOP(K)                                                    \
-    {                                                                 \
-        _Pragma(STRINGIFY(unroll K)) for(int j = 0; j < K; j += NB_X) \
-        {                                                             \
-            auto const aj = nontemporal_load(&(a[j]));                \
-            res += conj(aj) * x[tx + j];                              \
-        };                                                            \
-        break;                                                        \
+#define FORLOOP(K)                                                  \
+    {                                                               \
+        _Pragma(STRINGIFY(unroll)) for(int j = 0; j < K; j += NB_X) \
+        {                                                           \
+            auto const aj = nontemporal_load(&(a[j]));              \
+            res += conj(aj) * x[tx + j];                            \
+        };                                                          \
+        break;                                                      \
     }
         switch(n_full)
         {
@@ -755,14 +759,14 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
 
     if(it != c)
     {
-#define FORLOOP(K)                                                    \
-    {                                                                 \
-        _Pragma(STRINGIFY(unroll K)) for(int j = 0; j < K; j += NB_X) \
-        {                                                             \
-            auto const aj = nontemporal_load(&(a[j]));                \
-            res += conj(aj) * x[tx + j];                              \
-        };                                                            \
-        break;                                                        \
+#define FORLOOP(K)                                                  \
+    {                                                               \
+        _Pragma(STRINGIFY(unroll)) for(int j = 0; j < K; j += NB_X) \
+        {                                                           \
+            auto const aj = nontemporal_load(&(a[j]));              \
+            res += conj(aj) * x[tx + j];                            \
+        };                                                          \
+        break;                                                      \
     }
         switch(n_full)
         {
@@ -1000,12 +1004,12 @@ ROCSOLVER_KERNEL void latrd_upper_updateW_kernel(const rocblas_int mm,
     int m = c;
     int cw = c - mm + k;
     T* y = W + idx2D(0, cw, ldw);
-    T* A1 = A + idx2D(0, c + 1, lda);
+    T const* __restrict__ A1 = A + idx2D(0, c + 1, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(0, cw + 1, ldw);
+    T const* __restrict__ A2 = W + idx2D(0, cw + 1, ldw);
     int lda2 = ldw;
-    T* x1 = work;
-    T* x2 = W + idx2D(c + 1, cw, ldw);
+    T const* __restrict__ x1 = work;
+    T const* __restrict__ x2 = W + idx2D(c + 1, cw, ldw);
     T* t = tau + c - 1;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -1058,7 +1062,9 @@ ROCSOLVER_KERNEL void latrd_upper_updateW_kernel(const rocblas_int mm,
 
         // write groups results in temp array for further reduction
         if(tidc == 0 && i < m)
+        {
             y[i] = ac * t[0];
+        }
     }
 }
 
@@ -1115,12 +1121,12 @@ ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
     int m = mm - c - 1;
     int n = c;
     T* y = W + idx2D(c + 1, c, ldw);
-    T* A1 = A + idx2D(c + 1, 0, lda);
+    T const* __restrict__ A1 = A + idx2D(c + 1, 0, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(c + 1, 0, ldw);
+    T const* __restrict__ A2 = W + idx2D(c + 1, 0, ldw);
     int lda2 = ldw;
-    T* x1 = work;
-    T* x2 = W + idx2D(0, c, ldw);
+    T const* __restrict__ x1 = work;
+    T const* __restrict__ x2 = W + idx2D(0, c, ldw);
     T* t = tau + c;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -1173,7 +1179,9 @@ ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
 
         // write groups results in temp array for further reduction
         if(tidc == 0 && i < m)
+        {
             y[i] = ac * t[0];
+        }
     }
 }
 
