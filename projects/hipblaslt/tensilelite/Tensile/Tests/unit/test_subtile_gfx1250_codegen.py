@@ -416,3 +416,222 @@ class TestSubtileStinkyTofu:
             "PrefetchLocalRead": 1,
         }
         assert opts == expected
+
+
+def _make_token_emitter(kernel_overrides=None):
+    """Build a minimal InstructionEmitter exposing the MemToken tagging logic.
+
+    Only the attributes that __init__ and the tagging helpers touch are
+    populated; the heavy tile/scheduler state is mocked.
+    """
+    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+    kernel = {"1LDSBuffer": 0, "enableTDMA": True, "enableTDMB": True}
+    if kernel_overrides:
+        kernel.update(kernel_overrides)
+    tileInfoA = SimpleNamespace(subtileShape=[1, 2])
+    tileInfoB = SimpleNamespace(subtileShape=[1, 2])
+    return InstructionEmitter(
+        writer=SimpleNamespace(states=SimpleNamespace(subtileLdsSwizzle=False)),
+        kernel=kernel, config=SimpleNamespace(),
+        tileInfoA=tileInfoA, tileInfoB=tileInfoB, dtileInfo=None,
+        vgprTilesA=[], vgprTilesB=[])
+
+
+def _make_tensor_load():
+    from rocisa.instruction import TensorLoadToLds
+    from rocisa.container import sgpr
+    return TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None,
+                           comment="TDM: global->LDS")
+
+
+def _make_ds_read(dst=8, addr=16):
+    from rocisa.instruction import DSLoadB128
+    from rocisa.container import vgpr, DSModifiers
+    return DSLoadB128(dst=vgpr(dst, 4), src=vgpr(addr),
+                      ds=DSModifiers(offset=0), comment="ds_read")
+
+
+def _stub_swap_emitters(monkeypatch):
+    """Replace the heavy GR/LR swap emitters with no-op Modules.
+
+    Lets emit_gr_inc/emit_lr_inc exercise the token toggle without a full
+    writer/tileInfo state.
+    """
+    from rocisa.code import Module
+    import Tensile.Components.Subtile.InstructionEmitter as IE
+    stub = lambda *a, **k: Module()
+    for name in ("globalReadPtrUpdates", "globalReadLDSBufferSwap",
+                 "globalReadScalePtrUpdates", "localReadLDSBufferSwap"):
+        monkeypatch.setattr(IE, name, stub)
+
+
+def _candidate_tokens(insts):
+    """Mirror the rocisa MemTokenConsistencyCheck: per-region all-or-none.
+
+    Returns (has_tagged, has_untagged) over ds_read/ds_write/tensor_load.
+    """
+    from Tensile.Components.Subtile.MemToken import isLdsProducer, isLdsConsumer
+    has_tagged = has_untagged = False
+    for inst in insts:
+        if isLdsProducer(inst) or isLdsConsumer(inst):
+            if inst.getMemToken() is not None:
+                has_tagged = True
+            else:
+                has_untagged = True
+    return has_tagged, has_untagged
+
+
+class TestSubtileMemToken:
+    """Phase 2: MemTokenData tagging for the gfx1250 subtile path."""
+
+    # -- token-ID scheme: double-buffer toggling --
+
+    def test_tracker_double_buffer_toggle(self):
+        from Tensile.Components.Subtile.MemToken import SubtileMemTokenTracker
+        t = SubtileMemTokenTracker({"1LDSBuffer": 0})
+        assert (t.writeTokenIdx, t.readTokenIdx) == (0, 0)
+        assert t.writeToken().tokens == [0]
+        assert t.readToken().tokens == [0]
+        # Before any swap both buffers coincide -> single-id barrier.
+        assert t.barrierToken().tokens == [0]
+        t.swapWrite()
+        assert t.writeTokenIdx == 1
+        assert t.writeToken().tokens == [1]
+        # Producer now on buffer1, consumer still buffer0 -> barrier spans both.
+        assert t.barrierToken().tokens == [0, 1]
+        t.swapRead()
+        assert t.readTokenIdx == 1
+        assert t.barrierToken().tokens == [1]
+        t.swapWrite()
+        assert t.writeTokenIdx == 0
+
+    def test_tracker_one_lds_buffer_collapse(self):
+        from Tensile.Components.Subtile.MemToken import SubtileMemTokenTracker
+        t = SubtileMemTokenTracker({"1LDSBuffer": 1})
+        assert (t.buffer0, t.buffer1) == (0, 0)
+        t.swapWrite()
+        t.swapRead()
+        # With a single LDS buffer every token id stays 0.
+        assert t.writeToken().tokens == [0]
+        assert t.readToken().tokens == [0]
+        assert t.barrierToken().tokens == [0]
+
+    # -- producer/consumer classification --
+
+    def test_producer_consumer_classification(self):
+        _init_rocisa_gfx1250()
+        from rocisa.instruction import SNop
+        from Tensile.Components.Subtile.MemToken import isLdsProducer, isLdsConsumer
+        tl = _make_tensor_load()
+        rd = _make_ds_read()
+        nop = SNop(waitState=0, comment="nop")
+        assert isLdsProducer(tl) and not isLdsConsumer(tl)
+        assert isLdsConsumer(rd) and not isLdsProducer(rd)
+        assert not isLdsProducer(nop) and not isLdsConsumer(nop)
+
+    # -- tagging: producers/consumers carry expected tokens --
+
+    def test_tag_lds_tokens_producer_consumer(self):
+        _init_rocisa_gfx1250()
+        from rocisa.instruction import SNop
+        em = _make_token_emitter()
+        tl, rd, nop = _make_tensor_load(), _make_ds_read(), SNop(waitState=0)
+        em._tagLdsTokens([tl, rd, nop])
+        assert tl.getMemToken().tokens == [0]   # producer -> write buffer
+        assert rd.getMemToken().tokens == [0]   # consumer -> read buffer
+        assert nop.getMemToken() is None        # non-candidate untouched
+
+    # -- tagging is consistent (no partial tagging in a region) --
+
+    def test_tagging_is_consistent_within_region(self):
+        _init_rocisa_gfx1250()
+        from rocisa.instruction import SNop
+        em = _make_token_emitter()
+        region = [_make_tensor_load(), _make_ds_read(), SNop(waitState=0),
+                  _make_tensor_load(), _make_ds_read()]
+        em._tagLdsTokens(region)
+        has_tagged, has_untagged = _candidate_tokens(region)
+        assert has_tagged and not has_untagged
+
+    # -- tokens toggle across an LDS swap --
+
+    def test_tokens_toggle_across_swap(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        _stub_swap_emitters(monkeypatch)
+        from Tensile.Components.Subtile.LogicalScheduler import GRIncOp, LRIncOp
+        em = _make_token_emitter()
+        before_prod = em._tagLdsTokens([_make_tensor_load()])[0]
+        before_cons = em._tagLdsTokens([_make_ds_read()])[0]
+        assert before_prod.getMemToken().tokens == [0]
+        assert before_cons.getMemToken().tokens == [0]
+        # A global-read swap flips the producer buffer; local-read flips reader.
+        em.emit_gr_inc(GRIncOp(tensor='A'))
+        em.emit_lr_inc(LRIncOp(tensor='A'))
+        after_prod = em._tagLdsTokens([_make_tensor_load()])[0]
+        after_cons = em._tagLdsTokens([_make_ds_read()])[0]
+        assert after_prod.getMemToken().tokens == [1]
+        assert after_cons.getMemToken().tokens == [1]
+
+    def test_swap_toggles_once_per_event_not_per_tensor(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        _stub_swap_emitters(monkeypatch)
+        from Tensile.Components.Subtile.LogicalScheduler import GRIncOp
+        em = _make_token_emitter()
+        # A swap event issues an inc per tensor (A, B); only 'A' flips the
+        # shared parity so A+B together produce a single net toggle.
+        em.emit_gr_inc(GRIncOp(tensor='A'))
+        em.emit_gr_inc(GRIncOp(tensor='B'))
+        assert em.memToken.writeTokenIdx == 1
+        prod = em._tagLdsTokens([_make_tensor_load()])[0]
+        assert prod.getMemToken().tokens == [1]
+
+    # -- barrier carries both buffers it separates --
+
+    def test_emit_sync_barrier_token(self, monkeypatch):
+        _init_rocisa_gfx1250()
+        _stub_swap_emitters(monkeypatch)
+        from Tensile.Components.Subtile.LogicalScheduler import GRIncOp
+        em = _make_token_emitter()
+        barrier0 = em.emit_sync()[0]
+        assert barrier0.getMemToken().tokens == [0]
+        em.emit_gr_inc(GRIncOp(tensor='A'))  # producer now on buffer1
+        barrier1 = em.emit_sync()[0]
+        assert barrier1.getMemToken().tokens == [0, 1]
+
+    # -- StinkyTofu pipeline accepts a fully-tagged subtile body --
+
+    def test_tagged_body_passes_consistency_check(self):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        from rocisa.code import Module, KernelBody, SignatureBase, Label
+        from rocisa.instruction import SEndpgm, SBarrier
+
+        em = _make_token_emitter()
+        # One region with a fully-tagged producer -> barrier -> consumer chain.
+        tl = _make_tensor_load()
+        rd = _make_ds_read()
+        em._tagLdsTokens([tl, rd])
+        barrier = SBarrier(comment="Barrier")
+        barrier.setMemToken(em.memToken.barrierToken())
+
+        body = Module("body")
+        body.add(Label("ASM_Start", "start"))
+        body.add(tl)
+        body.add(barrier)
+        body.add(rd)
+        body.add(SEndpgm(comment="end"))
+        sig = SignatureBase("kernel_name", 1, "V5", 0, [0, 1, 2], 0, 256,
+                            totalVgprs=32, totalSgprs=32)
+        kb = KernelBody("kernelBody")
+        kb.addSignature(sig)
+        kb.addBody(body)
+
+        kernel = _stinky_kernel()
+        opts = buildSubtileStinkyTofuOptions(kernel, kernel["_StinkyTofuOptLevel"],
+                                             _stinky_mock_writer())
+        # MemTokenConsistencyCheck runs at kernel scope; consistent tags must
+        # not abort and must yield assembly.
+        asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
+                                               sig, stinky_module_options=opts)
+        assert asm is not None and 'amdgcn-amd-amdhsa--gfx1250' in asm

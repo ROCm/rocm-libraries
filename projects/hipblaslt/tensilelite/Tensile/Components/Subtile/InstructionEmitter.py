@@ -19,6 +19,9 @@ from Tensile.Components.Subtile.SubtileLREmit import (
 from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
+from Tensile.Components.Subtile.MemToken import (
+    SubtileMemTokenTracker, isLdsProducer, isLdsConsumer,
+)
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
@@ -105,6 +108,25 @@ class InstructionEmitter:
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
 
+        # LDS double-buffer token state for MemTokenData tagging. Stamps every
+        # tensor_load/ds_read/barrier so StinkyTofu can build LDS dependencies;
+        # MemTokenData emits no asm, so the tags are inert when unused.
+        self.memToken = SubtileMemTokenTracker(kernel)
+
+    def _tagLdsTokens(self, instructions):
+        """Attach MemTokenData to LDS producers/consumers in the flat list.
+
+        Tagging is consistent: every tensor_load/ds_write producer and every
+        ds_read consumer in the list is stamped (the rocisa
+        MemTokenConsistencyCheck pass fatals on partial tagging within a block).
+        """
+        for inst in instructions:
+            if isLdsProducer(inst):
+                inst.setMemToken(self.memToken.writeToken())
+            elif isLdsConsumer(inst):
+                inst.setMemToken(self.memToken.readToken())
+        return instructions
+
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
@@ -179,7 +201,7 @@ class InstructionEmitter:
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
-        return list(module.flatitems())
+        return self._tagLdsTokens(list(module.flatitems()))
 
     def emit_gr(self, placement):
         """Emit GR (buffer_load) instructions from GRPlacement."""
@@ -195,7 +217,7 @@ class InstructionEmitter:
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
-        return list(module.flatitems())
+        return self._tagLdsTokens(list(module.flatitems()))
 
     def emit_wait_gr(self, source):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
@@ -227,7 +249,11 @@ class InstructionEmitter:
                          comment="Wait for LR to complete")]
 
     def emit_sync(self):
-        return [SBarrier(comment="Barrier")]
+        barrier = SBarrier(comment="Barrier")
+        # Carry both buffer ids the barrier separates so StinkyTofu orders LDS
+        # producers and consumers across it. Emits no asm.
+        barrier.setMemToken(self.memToken.barrierToken())
+        return [barrier]
 
     def emit_inline(self, source):
         """Emit a writer-built Module supplied by an InlineModuleOp callback."""
@@ -242,6 +268,10 @@ class InstructionEmitter:
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
+        # All tensors swap the same LDS double-buffer half in lockstep; flip the
+        # shared read parity once per swap event (on the canonical 'A' trigger).
+        if tensor == 'A':
+            self.memToken.swapRead()
         return list(module.flatitems())
 
     def emit_gr_inc(self, source):
@@ -254,6 +284,10 @@ class InstructionEmitter:
         else:
             module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
+        # Flip the shared write parity once per swap event (on 'A'); all tensors
+        # swap the same LDS double-buffer half together.
+        if tensor == 'A':
+            self.memToken.swapWrite()
         return list(module.flatitems())
 
     def emit_skip(self, source):
