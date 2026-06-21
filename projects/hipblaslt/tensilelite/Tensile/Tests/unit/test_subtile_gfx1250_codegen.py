@@ -264,7 +264,11 @@ class TestGfx1250SubtileCodegen:
 
 
 def _stinky_kernel():
-    """Minimal kernel dict carrying the keys the StinkyTofu option builders read."""
+    """Minimal kernel dict carrying the keys the StinkyTofu option builders read.
+
+    Defaults to a pure-TDM (wait-insertion-safe) kernel: both A and B feed LDS
+    via tensor_load_to_lds and there are no MX-scale DTL producers.
+    """
     return {
         "_StinkyTofuOptLevel": 3,
         "EnableStinkyTofuESM2": False,
@@ -285,6 +289,10 @@ def _stinky_kernel():
         "PrefetchGlobalRead": 1,
         "PrefetchLocalRead": 1,
         "ClusterBarrier": True,
+        # Pure-TDM, no MX scales -> wait-insertion-safe.
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "ProblemType": {"MXBlockA": 0, "MXBlockB": 0},
     }
 
 
@@ -871,3 +879,90 @@ class TestSubtileStinkyTofuWaitCnt:
         assert "total split waits" in report
         # Surface the report in pytest -s output for manual inspection.
         print("\n" + report)
+
+
+def _non_tdm_kernel():
+    """A subtile kernel with non-TDM A/B reads (buffer_load...lds DTL producers)."""
+    k = _stinky_kernel()
+    k["enableTDMA"] = False
+    k["enableTDMB"] = False
+    return k
+
+
+def _mx_scale_kernel():
+    """A pure-TDM A/B kernel that additionally has MX-scale DTL producers."""
+    k = _stinky_kernel()
+    k["ProblemType"] = {"MXBlockA": 32, "MXBlockB": 32}
+    return k
+
+
+class TestSubtileStinkyTofuWaitInsertionGuard:
+    """Subtile-side safety guard for the StinkyTofu wait-insertion toggle.
+
+    Kernels with buffer_load...lds (DTL) producers -- non-TDM A/B or MX scale --
+    must never let StinkyTofu strip/re-insert waits, even with the flag on.
+    """
+
+    # -- the safe/unsafe predicate, tested directly --
+
+    def test_predicate_pure_tdm_is_safe(self):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            subtileKernelIsWaitInsertionSafe)
+        assert subtileKernelIsWaitInsertionSafe(_stinky_kernel()) is True
+
+    def test_predicate_non_tdm_is_unsafe(self):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            subtileKernelIsWaitInsertionSafe)
+        # Either tensor missing TDM means non-TDM A/B DTL producers exist.
+        assert subtileKernelIsWaitInsertionSafe(_non_tdm_kernel()) is False
+        only_a = _stinky_kernel()
+        only_a["enableTDMB"] = False
+        assert subtileKernelIsWaitInsertionSafe(only_a) is False
+
+    def test_predicate_mx_scale_is_unsafe(self):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            subtileKernelIsWaitInsertionSafe)
+        assert subtileKernelIsWaitInsertionSafe(_mx_scale_kernel()) is False
+        only_mxb = _stinky_kernel()
+        only_mxb["ProblemType"] = {"MXBlockA": 0, "MXBlockB": 32}
+        assert subtileKernelIsWaitInsertionSafe(only_mxb) is False
+
+    # -- guard: flag ON keeps insertion on only for the safe (pure-TDM) kernel --
+
+    def test_guard_flag_on_pure_tdm_keeps_insertion(self, monkeypatch):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        opts = buildSubtileStinkyTofuOptions(_stinky_kernel(), 3,
+                                             _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is True
+
+    # -- guard: flag ON is forced off for DTL-producer kernels --
+
+    def test_guard_flag_on_non_tdm_forced_off(self, monkeypatch):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        opts = buildSubtileStinkyTofuOptions(_non_tdm_kernel(), 3,
+                                             _stinky_mock_writer())
+        # Guard wins over the flag: StinkyTofu must not strip Python waits.
+        assert opts["EnableWaitCntInsertion"] is False
+        assert opts["ClusterBarrier"] is False
+
+    def test_guard_flag_on_mx_scale_forced_off(self, monkeypatch):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        monkeypatch.setenv(SUBTILE_WAITCNT_ENV, "1")
+        opts = buildSubtileStinkyTofuOptions(_mx_scale_kernel(), 3,
+                                             _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is False
+
+    # -- guard: flag OFF stays off for every kernel shape --
+
+    def test_guard_flag_off_unsafe_stays_off(self, monkeypatch):
+        from Tensile.Components.Subtile.StinkyTofu import (
+            SUBTILE_WAITCNT_ENV, buildSubtileStinkyTofuOptions)
+        monkeypatch.delenv(SUBTILE_WAITCNT_ENV, raising=False)
+        for kernel in (_stinky_kernel(), _non_tdm_kernel(), _mx_scale_kernel()):
+            opts = buildSubtileStinkyTofuOptions(kernel, 3, _stinky_mock_writer())
+            assert opts["EnableWaitCntInsertion"] is False

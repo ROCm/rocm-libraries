@@ -35,10 +35,18 @@ subtile-emitted split waits (``StinkyRemoveWaitCntPass``) and re-inserts its own
 (``StinkyWaitCntInsertionPass``). The subtile wait emission itself is left in
 place untouched; this flag only chooses whether StinkyTofu replaces them.
 Barriers stay Python-owned (``ClusterBarrier`` remains off) in either mode.
+
+The wait toggle is honored only for kernels whose LDS producers are all TDM
+``tensor_load_to_lds``. Kernels that feed LDS with ``buffer_load...lds`` (DTL)
+producers -- non-TDM A/B reads or MX-scale reads -- are not safe: StinkyTofu
+classifies such a load as a plain MUBUF load (not an LDS writer), so it would
+strip a Python producer wait it cannot re-derive. For those kernels the guard
+forces ``EnableWaitCntInsertion=False`` regardless of the toggle.
 """
 
 import os
 
+from ...Common import print2, printWarning
 from ...Common.GlobalParameters import globalParameters
 
 
@@ -58,15 +66,52 @@ def subtileStinkyTofuWaitCntEnabled():
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
+def subtileKernelIsWaitInsertionSafe(kernel):
+    """True when StinkyTofu may own this subtile kernel's wait counts.
+
+    A kernel is safe only when every LDS producer is a TDM
+    ``tensor_load_to_lds``. Two emission paths instead write LDS via
+    ``buffer_load...lds`` (DTL):
+
+      * Non-TDM A/B global reads (``emitSingleBufferLoad``) -- taken whenever
+        ``enableTDMA``/``enableTDMB`` is not set for that tensor.
+      * MX-scale global reads (``globalReadDoScaleSubtile``) -- always DTL and
+        emitted whenever ``MXBlockA`` or ``MXBlockB`` is set (scales have no
+        TDM path).
+
+    StinkyTofu (gfx1250) treats a DTL load as a plain MUBUF load, so it cannot
+    re-derive a stripped producer wait for it. Safe iff both A and B use TDM
+    AND there are no MX-scale DTL producers.
+    """
+    tdmA = bool(kernel.get("enableTDMA", False))
+    tdmB = bool(kernel.get("enableTDMB", False))
+    problemType = kernel.get("ProblemType", {}) or {}
+    hasMXScale = bool(problemType.get("MXBlockA", 0)) or bool(problemType.get("MXBlockB", 0))
+    return tdmA and tdmB and not hasMXScale
+
+
 def buildSubtileStinkyTofuOptions(kernel, stinky_opt_level, writer):
     """Build the StinkyTofu options dict for a subtile kernel body.
 
     ClusterBarrier is forced off so subtile keeps owning barrier emission.
     EnableWaitCntInsertion defaults off (pass-through); it flips on only when
     the SUBTILE_STINKYTOFU_WAITCNT toggle opts the subtile path into
-    StinkyTofu-owned wait counts.
+    StinkyTofu-owned wait counts AND the kernel is wait-insertion-safe (all LDS
+    producers are TDM tensor_load_to_lds). Kernels with buffer_load...lds (DTL)
+    producers keep their Python-emitted waits.
     """
     enableWaitCnt = subtileStinkyTofuWaitCntEnabled()
+    if enableWaitCnt and not subtileKernelIsWaitInsertionSafe(kernel):
+        # DTL (buffer_load...lds) producers are classified as plain MUBUF loads
+        # by StinkyTofu on gfx1250, so it would strip a producer wait it cannot
+        # reconstruct. Keep the Python waits for this kernel.
+        enableWaitCnt = False
+        kernelName = getattr(getattr(writer, "states", None), "kernelName", "")
+        printWarning("StinkyTofu wait-count insertion disabled for subtile kernel "
+                     "%s: it has buffer_load-to-LDS (DTL) producers; keeping "
+                     "Python-emitted waits." % (kernelName or "<unnamed>"))
+        print2("[subtile StinkyTofu] %s honors SUBTILE_STINKYTOFU_WAITCNT only "
+               "for pure-TDM kernels." % SUBTILE_WAITCNT_ENV)
     return {"OptLevel": stinky_opt_level,
             "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
             "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),

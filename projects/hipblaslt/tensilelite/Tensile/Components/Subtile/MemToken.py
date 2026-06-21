@@ -119,7 +119,14 @@ class SubtileMemTokenTracker:
 # tagged consistently within a region (the rocisa MemTokenConsistencyCheck pass
 # fatals on partial tagging of tensor_load / ds_read / ds_write in a block).
 def isLdsProducer(inst):
-    """True for LDS-producing mem-token candidates (tensor_load_to_lds / ds_write)."""
+    """True for LDS-producing mem-token candidates (tensor_load_to_lds / ds_write).
+
+    buffer_load...lds (DTL) loads also write LDS, but are deliberately NOT
+    tagged: StinkyTofu (gfx1250) classifies them as plain MUBUF loads rather
+    than LDS writers, so a token on them is inert in release and asserts in
+    debug. Kernels with such producers are instead kept off StinkyTofu-owned
+    wait counts by the subtile guard (see StinkyTofu.subtileKernelIsWaitInsertionSafe).
+    """
     from rocisa.instruction import TensorLoadToLds, DSStoreInstruction
     return isinstance(inst, (TensorLoadToLds, DSStoreInstruction))
 
