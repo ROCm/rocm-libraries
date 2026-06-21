@@ -508,6 +508,55 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     )
 
 
+def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
+    """#66 d128 occupancy lever: select T = block_size (small tile) + nw=2 for
+    the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
+
+    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured #66; re-verified #67 on
+    the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
+    K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB at T=2*block_size -> only 1 workgroup
+    fits the 64 KB/CU budget; the register file already admits 2 waves/SIMD
+    (V+A=229 <= 256). Halving the tile to T=block_size makes LDS=24 KB and
+    VGPR=173 -> 2 WG/CU (measured via llvm-readelf on the produced HSACO:
+    OFF VGPR=229/256, LDS=48 KB -> 1 WG/CU; ON VGPR=173, AGPR=0, LDS=24 KB
+    -> 2 WG/CU, for S=1024/2048/4096 alike). Same-session vs torch SDPA FLASH
+    (#67 apples-to-apples, OFF vs ON on this exact tree):
+      bf16: S1024 1.333x->1.437x, S2048 0.968x->1.059x (CROSS 1.0),
+            S4096 0.916x->0.974x (DSL 0.789->0.741 ms, +6% faster kernel).
+      fp16: S1024 1.312x->1.436x, S2048 0.973x->1.061x (CROSS 1.0),
+            S4096 0.918x->0.975x. Correctness rel ~4.4e-3 bf16 / ~5.5e-4 fp16
+            (IDENTICAL to baseline at every S).
+
+    **#67 RECONCILIATION + DEFAULT-ON.** The small-tile win REQUIRES nw=2 for
+    ALL seqlens (the #64 nw=4-at-S>=2048 rule + T=32 is occupancy-WORSE: 56 KB
+    LDS -> back to 1 WG/CU), so when this gate fires the num_warps selector
+    forces nw=2. Verified C-twin selector output == Python for the whole cohort
+    and that NO non-cohort shape changes (3826 trace records across the three
+    canonical aiter_ua* sets: 0 selector changes). It is therefore enabled by
+    DEFAULT for the gfx950 single-batch d128 no-FP8 combo. This is a production
+    ROUTING change (the dispatched d128 prefill kernel changes: T 64->32,
+    nw S>=2048 4->2); per-spec golden EMIT is unchanged (T=block_size is an
+    existing tile_size value, byte-identical to the old code path).
+
+    ESCAPE HATCH: ``HIPDNN_GFX950_D128_SMALL_TILE=0`` (or off/no/false) force-
+    DISABLES the lever, restoring the #64 routing (T=64, nw=2/4). Any other
+    value (or unset) -> default-ON for the cohort.
+    """
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX950_D128_SMALL_TILE", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "false", "no", "off"):
+        return False
+    return (
+        problem.head_size == 128
+        and not problem.use_fp8
+        and _enable_single_batch_combo(problem)
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -587,6 +636,17 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     if _enable_single_batch_combo(problem):
         if problem.head_size == 64:
             return 128
+        # #66 d128 occupancy lever: at num_warps=2 the d128 combo is LDS-bound
+        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU; the
+        # register file already fits 2 waves/SIMD, V+A<=256). Halving the tile to
+        # T = block_size (one paged block per iter) drops LDS to 24 KB AND VGPR
+        # 229->173 -> 2 WG/CU, which crosses flash on S=2048 (0.98x->1.06x) and
+        # S=4096 (0.83x->1.03x), all correctness-clean (measured #66 MI355X).
+        # Default-OFF (golden/production unchanged) behind an env opt-in until a
+        # broader multi-shape sweep reconciles it with the #52 autotuner's
+        # T=2*BS pick; set HIPDNN_GFX950_D128_SMALL_TILE=1 to enable.
+        if _enable_d128_small_tile(problem):
+            return problem.block_size
         return 2 * problem.block_size
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
@@ -718,8 +778,19 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         #     over nw=2 and lifts S=4096 from 0.81 to 0.885x).
         #   * d64: nw=4 paired with T=128 (the wider tile + 4 warps was the
         #     winner for both MHA and GQA-8 d64 S2048).
+        #
+        # #66 RECONCILIATION: the d128 SMALL-TILE occupancy win (T=block_size
+        # -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens. The #64 nw=4-at-
+        # S>=2048 choice combined with T=block_size is occupancy-WORSE
+        # (nw=4 + T=32 -> 56 KB LDS -> back to 1 WG/CU); the measured 2-WG/CU
+        # crossing (S=2048 1.06x, S=4096 1.02x flash) only holds at nw=2 + T=32
+        # (V+A=173, LDS=24 KB). So when the small-tile cohort is active, force
+        # nw=2 here, overriding the S>=2048 -> nw=4 rule. When the small-tile
+        # gate is OFF this branch is byte-for-byte the #64 behavior.
         if problem.head_size == 64:
             target = 4
+        elif _enable_d128_small_tile(problem):
+            target = 2
         elif problem.max_seqlen_q <= 1024:
             target = 2
         else:
@@ -940,7 +1011,8 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     # seqlens. The prior wpe=3-at-S>=4096 rule REGRESSED the single-batch
     # cohort (d128 S4096: nw=4 wpe=2 = 0.881 vs nw=4 wpe=3 = 0.856). Checked
     # before the combo wpe=4 rule because the single-batch geometry is
-    # smaller-grid and prefers fewer waves.
+    # smaller-grid and prefers fewer waves. (#66 small-tile uses nw=2 + T=32
+    # which is 2 WG/CU at wpe=2; wpe=2 is correct for that cohort too.)
     if _enable_single_batch_combo(problem):
         return 2
     # Combo (incl. fp8 combo) wants wpe=4 -- handled below; check it before
@@ -1087,6 +1159,9 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem) -> bool:
     occupancy-starved nw=1 baseline). Turning vdbuf off for d128 also
     auto-disables the lever-3 ``use_sched_barrier`` (it gates on this
     predicate), which was only patching the symptom of the unwanted prefetch.
+    (#66 small-tile keeps d128 vdbuf OFF too: its 2-WG/CU LDS budget = K_lds[2]
+    24 KB + V_lds[1] 8 KB; a V[i+1] prefetch would re-inflate LDS and drop back
+    to 1 WG/CU.)
 
     LONG prefill (>=2048) gets NO V double-buffer regardless of head_size: the
     extra prefetch REGRESSES long prefill (the long KV loop already hides V

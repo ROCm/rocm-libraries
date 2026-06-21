@@ -474,8 +474,14 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     }
     if(spec->kv_ring_depth != 2)
     {
-        ckc_g950_fail(
-            b, CKC_ERR_NOTIMPL, "kv_ring_depth>2 (deep prefetch ring) is scoped but not yet wired");
+        /* #66: the Python builder wires a depth-3 deep K prefetch ring on the
+         * d128 small-tile combo, but the gfx950 C twin shares the depth-2
+         * single/early-V emitter and does not port the 3-slot ring + staggered
+         * waits. Reject cleanly rather than silently emit a depth-2 schedule. */
+        ckc_g950_fail(b,
+                      CKC_ERR_NOTIMPL,
+                      "kv_ring_depth!=2 (deep prefetch ring, #66) not yet ported to "
+                      "the gfx950 C twin");
     }
     if(spec->use_q_reread)
     {

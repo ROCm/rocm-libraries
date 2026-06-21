@@ -747,6 +747,63 @@ _CONFIGS = {
         use_transposed_half_local_pv=True,
         use_sched_barrier=True,
     ),
+    # idx51: #66 small-tile d128 2-WG/CU win path -- the full single-batch d128
+    # combo with tile_size=32 (== block_size, one paged block per iter) at
+    # num_warps=2. This is the geometry that halves K_lds/V_lds (48->24 KB) and
+    # drops VGPR (229->173) -> 2 WG/CU at d128. It uses NO new code path (just a
+    # smaller tile_size on the existing combo), so it MUST be C/Python identical.
+    51: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_invariant_hoist=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    ),
+    # idx52: #66 Lever-2 deep K prefetch ring (kv_ring_depth=3) on the d128
+    # small-tile combo. The Python builder emits the 3-slot K ring; the gfx950 C
+    # twin does NOT yet port the deep-ring schedule (it shares the depth-2
+    # single/early-V emitter) and REJECTS kv_ring_depth=3 with CKC_ERR_NOTIMPL
+    # (mirrored in attention_tiled_2d_public_entry_glue.cpp). The parity harness
+    # therefore checks that the C side fails cleanly with the SAME structured
+    # reason rather than silently emitting a depth-2 schedule.
+    52: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+        kv_ring_depth=3,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_invariant_hoist=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    ),
 }
 
 

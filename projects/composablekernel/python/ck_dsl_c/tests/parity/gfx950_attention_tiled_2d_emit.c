@@ -531,6 +531,47 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
         s->use_transposed_half_local_pv = true;
         s->use_sched_barrier = true;
         break;
+    /* idx51: #66 small-tile d128 2-WG/CU win path (tile_size=32 on the combo,
+     * num_warps=2). Pure existing code path -> must be C/Python byte-identical. */
+    case 51:
+        s->head_size = 128; s->block_size = 32;
+        s->num_query_heads = 64; s->num_kv_heads = 8;
+        s->dtype = "bf16"; s->use_sinks = false;
+        s->sliding_window = 0; s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2; s->block_m_per_warp = 32;
+        s->has_tile_size = true; s->tile_size = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        break;
+    /* idx52: #66 Lever-2 deep K prefetch ring (kv_ring_depth=3). The gfx950 C
+     * twin does not port the deep-ring schedule -> it REJECTS with
+     * CKC_ERR_NOTIMPL. The parity harness checks the C side fails cleanly with
+     * the same structured reason as a guard (Python emits the 3-slot ring). */
+    case 52:
+        s->head_size = 128; s->block_size = 32;
+        s->num_query_heads = 64; s->num_kv_heads = 8;
+        s->dtype = "bf16"; s->use_sinks = false;
+        s->sliding_window = 0; s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2; s->block_m_per_warp = 32;
+        s->has_tile_size = true; s->tile_size = 32;
+        s->kv_ring_depth = 3;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_invariant_hoist = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        break;
 
     default:
         return -1;

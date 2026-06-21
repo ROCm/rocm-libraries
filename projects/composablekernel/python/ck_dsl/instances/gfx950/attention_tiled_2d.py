@@ -522,16 +522,42 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_q_reread requires the transposed-32x32 path")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_q_reread v1 does not support FP8 KV")
-        if self.kv_ring_depth != 2:
-            # N>2 deep ring + iter-start partial-drain is designed (see the flag
-            # docstring) but NOT yet wired: the partial-wait ordering between the
-            # softmax P_lds writes and the in-flight buffer_load_lds prefetches
-            # share the lgkmcnt counter, so the schedule needs on-GPU parity
-            # validation across multiple seqlens before it can be enabled. Fail
-            # loudly rather than silently ignore the flag.
+        if self.kv_ring_depth not in (2, 3):
+            # Only the depth-2 (current double-buffer) and depth-3 (deep K
+            # prefetch ring, #66) schedules are wired. N>3 would need a wider
+            # iter_arg carry + deeper staggered-wait accounting and is not built.
             raise NotImplementedError(
-                "kv_ring_depth>2 (deep prefetch ring) is scoped but not yet wired"
+                f"kv_ring_depth must be 2 or 3 (got {self.kv_ring_depth})"
             )
+        if self.kv_ring_depth == 3:
+            # The depth-3 K ring (#66) is wired ONLY on the no-fp8, no-grouped,
+            # V-single-buffer transposed-32x32 combo path -- the d128 prefill
+            # cohort where it composes with the small-tile 2-WG/CU occupancy win
+            # (K_lds[3] + V_lds[1] stays <= 32 KB at T=block_size). The ring
+            # prefetches K[i], K[i+1], K[i+2] (3 slots) and uses a staggered
+            # iter-start partial wait so QK fires as soon as K[i]'s ds-writes
+            # retire while K[i+1]/K[i+2] stream. Reject the unsupported combos
+            # loudly rather than silently emit a depth-2 schedule.
+            if self.kv_storage_dtype is not None:
+                raise ValueError("kv_ring_depth=3 does not support FP8 KV")
+            if self.use_grouped_kv2_softmax:
+                raise ValueError("kv_ring_depth=3 does not support grouped_kv2")
+            if self.use_v_double_buffer:
+                raise ValueError(
+                    "kv_ring_depth=3 requires V single-buffer (keeps LDS <= 32 KB "
+                    "for 2 WG/CU); V prefetch is the depth-2 use_v_double_buffer path"
+                )
+            if self.use_early_v_schedule:
+                raise ValueError("kv_ring_depth=3 does not support early_v_schedule")
+            if self.use_staggered_iter_wait:
+                raise ValueError(
+                    "kv_ring_depth=3 has its own staggered wait; "
+                    "do not combine with use_staggered_iter_wait"
+                )
+            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "kv_ring_depth=3 requires the transposed-32x32 combo path"
+                )
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
@@ -678,6 +704,7 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "vdbuf" if self.use_v_double_buffer else "",
+            (f"ring{self.kv_ring_depth}" if self.kv_ring_depth != 2 else ""),
             "stgw" if self.use_staggered_iter_wait else "",
             (f"schedb{self.sched_barrier_mask}" if self.use_sched_barrier else ""),
             "qrr" if self.use_q_reread else "",
@@ -1140,11 +1167,23 @@ def build_unified_attention_2d_tiled(
     if spec.use_q_reread:
         Q_ALIAS_K = False
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
-    K_lds = b.smem_alloc(K_LDS_DTYPE, [2, T, HD], name_hint="Klds")
+    # Deep K prefetch ring (#66). kv_ring_depth=3 allocates K_lds as 3 slots
+    # so K[i], K[i+1], K[i+2] are resident simultaneously (vs the depth-2
+    # double-buffer's 2 slots). The extra slot adds T*HD*2 B of LDS; at the
+    # small-tile d128 cohort (T=block_size=32) that is +8 KB -> K_lds[3]=24 KB,
+    # which with V_lds[1]=8 KB still fits the 32 KB budget for 2 WG/CU.
+    KV_RING_DEPTH = int(spec.kv_ring_depth)
+    K_BUFS = KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2
+    K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     # V double-buffer: 2 slots let V[i+1] prefetch into the alternate slot
     # during iter i (reusing ``cur_buf``), giving V the same 1-deep prefetch
     # K has. Costs only LDS (async DMA bypasses VGPR), occupancy-neutral.
     V_DOUBLE_BUF = bool(spec.use_v_double_buffer)
+    # Lever 2 (#66): depth-3 deep K prefetch ring. Keeps 3 K tiles in flight
+    # (cur, cur+1, cur+2) and uses a staggered iter-start partial wait so QK[i]
+    # fires as soon as K[i]'s ds-writes retire, leaving K[i+1]/K[i+2] streaming.
+    # V stays single-buffered (gated in __post_init__) so LDS stays in budget.
+    RING3 = KV_RING_DEPTH == 3
     # Lever 1 (#51): staggered iter-start partial wait + K-first per-iter
     # prefetch order on the V-double-buffer schedule.
     STAGGER_ITER_WAIT = bool(spec.use_staggered_iter_wait)
@@ -2532,6 +2571,18 @@ def build_unified_attention_2d_tiled(
 
     # Prefetch tile_start's K into buffer 0 BEFORE the loop.
     _issue_k(tile_start, b.const_i32(0))
+    if RING3:
+        # Deep ring (#66): also pre-issue K[start+1] into slot 1 so the ring is
+        # primed with 2 tiles before the loop. Iter 0 then prefetches K[start+2]
+        # into slot 2, keeping 3 K tiles resident. The clamp keeps the index in
+        # range when the loop has fewer than 2 tiles (then this duplicates the
+        # last tile into slot 1; QK on it is masked out / never consumed because
+        # the loop trip count is < ring depth, so it is a harmless prefetch).
+        tile_start1_raw = b.add(tile_start, b.const_i32(1))
+        tile_start1 = b.select(
+            b.cmp_lt(tile_start1_raw, tile_end), tile_start1_raw, tile_start
+        )
+        _issue_k(tile_start1, b.const_i32(1))
     # V double-buffer: also prefetch tile_start's V into slot 0 before the loop
     # so iter 0 finds V ready (mirrors the K prologue). Each iter then prefetches
     # V[i+1] into the alternate slot instead of issuing V[i] in-iter.
@@ -2661,7 +2712,25 @@ def build_unified_attention_2d_tiled(
             return acc_vals[n * ACC_M_ATOMS + atom]
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
-        nxt_buf = b.sub(b.const_i32(1), cur_buf)
+        if RING3:
+            # 3-slot ring: cur_buf holds K[i]; (cur_buf+1)%3 holds K[i+1]
+            # (prefetched last iter / prologue); the prefetch target for K[i+2]
+            # is (cur_buf+2)%3 == ``ring_pf_buf``. Modular arithmetic via select
+            # (N==3, so at most one wrap subtraction).
+            def _mod3_add(x, c):
+                s = b.add(x, b.const_i32(c))
+                return b.select(
+                    b.cmp_ge(s, b.const_i32(3)), b.sub(s, b.const_i32(3)), s
+                )
+
+            ring_pf_buf = _mod3_add(cur_buf, 2)
+            ring_next_cur = _mod3_add(cur_buf, 1)
+            # nxt_buf is the K[i+2] prefetch slot on the ring path.
+            nxt_buf = ring_pf_buf
+        else:
+            ring_pf_buf = None
+            ring_next_cur = None
+            nxt_buf = b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
         if GROUPED_KV2:
             tile1_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -2713,10 +2782,30 @@ def build_unified_attention_2d_tiled(
             next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
         in_range_next = b.cmp_lt(next_tile_iv_raw, tile_end)
         safe_next_tile = b.select(in_range_next, next_tile_iv_raw, kv_tile_iv)
+        if RING3:
+            # Ring depth 3 prefetches K[i+2] (two tiles ahead) into ring_pf_buf.
+            ring_pf_tile_raw = b.add(kv_tile_iv, b.const_i32(2))
+            ring_pf_tile = b.select(
+                b.cmp_lt(ring_pf_tile_raw, tile_end), ring_pf_tile_raw, kv_tile_iv
+            )
+        else:
+            ring_pf_tile = None
 
         # Wait for current K. There should be no in-flight next-K work here;
         # the previous iteration waited all async loads before PV.
-        if STAGGER_ITER_WAIT:
+        if RING3:
+            # Deep ring (#66) staggered iter-start wait. Outstanding async loads
+            # at iter-start: K[i+1] and K[i+2] prefetches (2 tiles, 2*kv_calls)
+            # PLUS V[i] if it was issued (single-buffer V is issued post-QK, so
+            # at iter-start only the two K prefetches are pending). Drain down to
+            # kv_calls_per_tile pending: that retires the OLDEST in-flight K
+            # (== K[i+1]'s predecessor, i.e. K[i] which the previous iter's
+            # prefetch wrote) while leaving the newest K prefetch streaming. QK[i]
+            # reads cur_buf (K[i]), whose ds-writes are guaranteed retired once
+            # the wait drops below 2*kv_calls. lgkmcnt counts the LDS writes of
+            # the async DMA; vmcnt counts the global reads.
+            b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
+        elif STAGGER_ITER_WAIT:
             # Lever 1 (#51): the previous iter prefetched K[i] THEN V[i] into
             # cur_buf (K older, V newer -- see the K-first issue below), and the
             # PV partial-wait left BOTH pending (2*kv_calls). Drain only the
@@ -3142,7 +3231,15 @@ def build_unified_attention_2d_tiled(
         # Now that QK no longer needs VMEM, start current V first and next K
         # second. This ordering is what lets the partial wait before PV leave
         # only next K pending.
-        if GROUPED_KV2:
+        if RING3:
+            # Deep ring (#66): V is single-buffered (slot 0). Issue V[i] for this
+            # iter's PV, then prefetch K[i+2] into the freed ring slot
+            # (ring_pf_buf == (cur_buf+2)%3) so 3 K tiles stay resident. V[i] is
+            # issued BEFORE the K prefetch so it is the older op in the queue and
+            # the PV partial-wait can drain it while K[i+2] streams.
+            _issue_v(kv_tile_iv, cur_buf)
+            _issue_k(ring_pf_tile, ring_pf_buf)
+        elif GROUPED_KV2:
             _issue_v(kv_tile_iv, cur_buf)
             # Both K buffers have been consumed by QK0/QK1. Refill cur_buf
             # with the next group's first K tile and carry cur_buf forward.
@@ -3368,7 +3465,17 @@ def build_unified_attention_2d_tiled(
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r])
             for r in range(SOFTMAX_STATE_SLOTS)
         ]
-        if GROUPED_KV2:
+        if RING3:
+            # Deep ring (#66) PV wait. Post-QK we issued V[i] (oldest of this
+            # iter) then K[i+2] (newest). Together with the still-in-flight K[i+1]
+            # from the iter-start window, the pending ops oldest->newest are:
+            # K[i+1], V[i], K[i+2]. PV reads V[i] (slot 0), so drain down to
+            # kv_calls_per_tile pending: that retires K[i+1] and V[i] (making V[i]
+            # LDS-visible) while leaving the newest K[i+2] prefetch streaming into
+            # its ring slot. The s_barrier then publishes V[i] to all PV reads.
+            b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
+            b.sync()
+        elif GROUPED_KV2:
             # Simplicity-first prototype: wait for V0 and the next group's K
             # prefetch together. This proves the grouped softmax/PV dataflow;
             # a later performance pass can restore the one-tile partial wait.
@@ -3775,7 +3882,12 @@ def build_unified_attention_2d_tiled(
         for n in range(ACC_N_TILES):
             for atom in range(ACC_M_ATOMS):
                 yields.append(new_acc[n * ACC_M_ATOMS + atom])
-        yields.append(cur_buf if GROUPED_KV2 else nxt_buf)
+        if RING3:
+            # Advance the ring cursor by 1 (mod 3): next iter reads K[i+1] from
+            # (cur_buf+1)%3, which this iter's prologue/prefetch already filled.
+            yields.append(ring_next_cur)
+        else:
+            yields.append(cur_buf if GROUPED_KV2 else nxt_buf)
         b.scf_yield(*yields)
 
     # ---- drive the (one or two) KV-loop phases ----

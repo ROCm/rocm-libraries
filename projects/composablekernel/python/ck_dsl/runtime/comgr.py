@@ -22,6 +22,8 @@ linker search path. ABI definitions mirror ROCm's `amd_comgr.h`.
 from __future__ import annotations
 
 import ctypes
+import os
+import sys
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -80,6 +82,132 @@ def _resolve_lib() -> ctypes.CDLL:
     if _lib is None:
         _lib = _load_lib()
     return _lib
+
+
+def resolved_lib_path() -> Optional[str]:
+    """Path of the ``libamd_comgr`` this module will load (torch-bundled
+    preferred over ``/opt/rocm``; see :func:`hip_module._torch_bundled_lib`).
+
+    Returns the already-loaded lib's path once :func:`_resolve_lib` has run,
+    else the first existing candidate. Pure lookup -- does NOT ``dlopen``, so it
+    is safe to call from flavor resolution before any compile.
+    """
+    if _lib is not None:
+        return getattr(_lib, "_name", None)
+    try:
+        cands = _candidate_lib_paths("amd_comgr", "CK_DSL_COMGR_LIB", ["3"])
+    except Exception:
+        return None
+    for p in cands:
+        try:
+            if os.path.exists(p):
+                return p
+        except Exception:
+            continue
+    return cands[0] if cands else None
+
+
+def _parse_rocm_version(text: str) -> Optional[Tuple[int, int]]:
+    head = str(text).strip().split("-", 1)[0]
+    parts = head.split(".")
+    try:
+        return int(parts[0]), (int(parts[1]) if len(parts) >= 2 else 0)
+    except (IndexError, ValueError):
+        return None
+
+
+def _read_rocm_version_file(path: str) -> Optional[Tuple[int, int]]:
+    try:
+        with open(path) as fh:
+            return _parse_rocm_version(fh.read())
+    except OSError:
+        return None
+
+
+def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
+    """ROCm ``(major, minor)`` vintage of the comgr lib that will actually
+    compile the IR -- the authoritative, import-order-robust signal for LLVM
+    flavor selection (the flavor MUST match the compiling comgr).
+
+    Derived from the *resolved comgr lib path* (:func:`resolved_lib_path`):
+
+      * torch-bundled (path under the imported torch's package dir) ->
+        ``torch.version.hip``;
+      * a ROCm tree (``<root>/lib/libamd_comgr.so``) -> ``<root>/.info/version``
+        (with ``/opt/rocm`` as a final fallback).
+
+    Returns ``None`` when the path or version cannot be determined.
+    """
+    path = resolved_lib_path()
+    if not path:
+        return None
+    try:
+        rp = os.path.realpath(path)
+    except Exception:
+        rp = path
+    # torch-bundled comgr -> torch's ROCm vintage (matches what _load_lib picks
+    # when torch is in the process).
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is not None:
+        tfile = getattr(torch_mod, "__file__", None)
+        if tfile:
+            try:
+                tdir = os.path.realpath(os.path.dirname(tfile))
+            except Exception:
+                tdir = os.path.dirname(tfile)
+            if rp == tdir or rp.startswith(tdir + os.sep):
+                ver = getattr(getattr(torch_mod, "version", None), "hip", None)
+                return _parse_rocm_version(ver) if ver else None
+    # ROCm tree: <root>/lib/libamd_comgr.so -> <root>/.info/version.
+    root = os.path.dirname(os.path.dirname(rp))
+    for verfile in (os.path.join(root, ".info", "version"), "/opt/rocm/.info/version"):
+        ver = _read_rocm_version_file(verfile)
+        if ver is not None:
+            return ver
+    return None
+
+
+def _ir_flavor_is_llvm22(ir_text: str) -> Optional[bool]:
+    """Infer an IR module's LLVM flavor from its ``target datalayout`` p8 field.
+
+    ``True`` = llvm22 (``p8:128:128:128:48``), ``False`` = llvm20
+    (``p8:128:128`` only), ``None`` = no recognisable datalayout. Mirrors
+    ``core.lower_llvm._DATALAYOUT_LLVM20`` / ``_DATALAYOUT_LLVM22`` (kept here
+    to avoid a runtime->core import).
+    """
+    if "p8:128:128:128:48" in ir_text:
+        return True
+    if "p8:128:128-" in ir_text:
+        return False
+    return None
+
+
+def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
+    """Refuse to feed comgr an IR whose LLVM flavor mismatches the loaded comgr.
+
+    An llvm22 IR on a pre-7.2 comgr SIGABRTs deep in codegen (the
+    ``make.buffer.rsrc.p8.p1`` i64-stride form only the >=7.2 backend selects);
+    the reverse errors. This guard turns that into a clear, catchable
+    :class:`ComgrError` naming the fix. No-op when either side is unknown -- we
+    never block compilation on uncertainty.
+    """
+    ir22 = _ir_flavor_is_llvm22(ir_text)
+    if ir22 is None:
+        return
+    ver = resolved_lib_rocm_version()
+    if ver is None:
+        return
+    lib22 = ver >= (7, 2)
+    if ir22 != lib22:
+        raise ComgrError(
+            "LLVM IR flavor / comgr vintage mismatch: IR is "
+            f"{'llvm22' if ir22 else 'llvm20'} but the loaded comgr is ROCm "
+            f"{ver[0]}.{ver[1]} ({'llvm22' if lib22 else 'llvm20'}) at "
+            f"{resolved_lib_path()!r}. Import torch before lowering so both pick "
+            "the same vintage, or set CK_DSL_LLVM_FLAVOR to match the comgr lib. "
+            "(An llvm22 IR on a <7.2 comgr aborts in codegen; this guard turns "
+            "that abort into a clean error.)"
+        )
 
 
 # Opaque handles are returned as a struct containing a single uint64_t.
@@ -220,6 +348,10 @@ def build_hsaco_from_llvm_ir(
     directly to `hipModuleLoadData`.
     """
     options = list(options or ["-O3"])
+
+    # Fail fast + clean on an IR-flavor / comgr-vintage mismatch rather than
+    # letting comgr SIGABRT in codegen (see _assert_ir_flavor_matches_lib).
+    _assert_ir_flavor_matches_lib(ir_text)
 
     # Handles are created lazily below; declare them up front so the
     # ``finally`` block can release whatever was successfully created even

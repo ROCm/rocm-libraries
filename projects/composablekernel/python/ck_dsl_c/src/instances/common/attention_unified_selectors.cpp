@@ -16,6 +16,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ckc/helper_helper_ck_dsl.instances.common.attention_unified_selectors.h"
@@ -154,6 +155,40 @@ static bool enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
         return false;
     }
     return true;
+}
+
+/* Python: _enable_d128_small_tile(problem). #66 d128 occupancy lever: select
+ * T = block_size (small tile) + nw=2 for the single-batch d128 combo so the
+ * kernel drops from 1 -> 2 WG/CU (the d128 combo is purely LDS-bound; halving
+ * the tile takes LDS 48->24 KB and crosses flash on S=2048/S=4096).
+ *
+ * #67 DEFAULT-ON: enabled by default for the gfx950 single-batch d128 no-FP8
+ * combo. This is a production ROUTING change (per-spec golden emit unchanged --
+ * T=block_size is an existing tile_size value). ESCAPE HATCH:
+ * HIPDNN_GFX950_D128_SMALL_TILE=0 (or off/no/false) force-DISABLES it. Mirrors
+ * the Python helper's env gate byte-faithfully (case-folded, off-keywords only). */
+static bool enable_d128_small_tile(const ckc_unified_attn_problem_t* p)
+{
+    const char* env = getenv("HIPDNN_GFX950_D128_SMALL_TILE");
+    if(env != NULL)
+    {
+        /* case-fold then compare to the OFF keywords (matches Python
+           .strip().lower() in ("0","false","no","off")). */
+        char buf[16];
+        size_t i = 0;
+        for(; env[i] != '\0' && i + 1 < sizeof(buf); ++i)
+        {
+            char c = env[i];
+            buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+        }
+        buf[i] = '\0';
+        if(strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0 ||
+           strcmp(buf, "off") == 0)
+        {
+            return false;
+        }
+    }
+    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
 
 /* Python: _enable_transposed_qk_32x32(problem). */
@@ -344,6 +379,13 @@ static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
         {
             return 128;
         }
+        /* #66 d128 occupancy lever: halve the tile to T=block_size (one paged
+           block per iter) -> LDS 48->24 KB -> 2 WG/CU. #67 DEFAULT-ON;
+           HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
+        if(enable_d128_small_tile(p))
+        {
+            return p->block_size;
+        }
         return 2 * p->block_size;
     }
     /* Qwen3-30B-A3B prefill specialization. */
@@ -423,6 +465,14 @@ int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
         if(p->head_size == 64)
         {
             t2 = 4;
+        }
+        /* #66 RECONCILIATION: the d128 small-tile occupancy win (T=block_size
+           -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens; nw=4 + T=32 is
+           occupancy-WORSE (56 KB LDS -> 1 WG/CU). Override the S>=2048 -> nw=4
+           rule when the small-tile cohort is active. */
+        else if(enable_d128_small_tile(p))
+        {
+            t2 = 2;
         }
         else if(p->max_seqlen_q <= 1024)
         {
@@ -676,6 +726,11 @@ bool ckc_unified_attn_enable_single_batch_combo(const ckc_unified_attn_problem_t
 bool ckc_unified_attn_enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
 {
     return enable_transposed_subflags(p);
+}
+
+bool ckc_unified_attn_enable_d128_small_tile(const ckc_unified_attn_problem_t* p)
+{
+    return enable_d128_small_tile(p);
 }
 
 bool ckc_unified_attn_enable_v_double_buffer(const ckc_unified_attn_problem_t* p)

@@ -154,18 +154,39 @@ def _system_rocm_version() -> Optional[Tuple[int, int]]:
         return None
 
 
+def _comgr_lib_rocm_version() -> Optional[Tuple[int, int]]:
+    """ROCm vintage of the comgr lib :mod:`runtime.comgr` will actually load.
+
+    This is the authoritative flavor signal: the flavor MUST match the comgr
+    that compiles the IR, and that comgr is the torch-bundled lib whenever torch
+    is in the process (regardless of import order) -- not whatever
+    ``/opt/rocm`` happens to be. Delegates to
+    :func:`runtime.comgr.resolved_lib_rocm_version` (lazy import to avoid a
+    core->runtime module-load cycle). Returns ``None`` when the lib path /
+    version can't be determined, so the caller falls back to the proxies.
+    """
+    try:
+        from ..runtime.comgr import resolved_lib_rocm_version
+
+        return resolved_lib_rocm_version()
+    except Exception:
+        return None
+
+
 def _detect_llvm_flavor() -> str:
     """Pick the LLVM IR flavor for this process.
 
     Resolution order:
 
     1. ``$CK_DSL_LLVM_FLAVOR`` (explicit override; test/dev knob).
-    2. ``torch.version.hip`` if torch is already imported. This is what
-       :func:`runtime.hip_module._torch_bundled_lib` will resolve at
-       first comgr call, so emit IR matching that bundle.
-    3. ``/opt/rocm/.info/version`` — the system ROCm install ck_dsl
-       falls back to when torch is not in the process.
-    4. :data:`LLVM_FLAVOR_LLVM22` (the modern default).
+    2. The ROCm vintage of the **comgr lib that will actually compile the IR**
+       (:func:`_comgr_lib_rocm_version`). This is the authoritative signal --
+       it is import-order-robust and tracks the torch-bundled comgr over a
+       stale ``/opt/rocm``, so the emitted IR always matches the codegen
+       backend (no ``make.buffer.rsrc.p8.p1`` abort).
+    3. ``torch.version.hip`` if torch is imported (fallback proxy).
+    4. ``/opt/rocm/.info/version`` (fallback when the comgr path is unknown).
+    5. :data:`LLVM_FLAVOR_LLVM22` (the modern default).
 
     Unknown env values fall through to the auto-detection rather than
     raising on a typo. Each step is wrapped in :func:`try` so a
@@ -174,6 +195,9 @@ def _detect_llvm_flavor() -> str:
     env = os.environ.get("CK_DSL_LLVM_FLAVOR", "").strip().lower()
     if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
         return env
+    comgr_ver = _comgr_lib_rocm_version()
+    if comgr_ver is not None:
+        return _flavor_for_rocm(*comgr_ver)
     torch_ver = _torch_hip_version()
     if torch_ver is not None:
         return _flavor_for_rocm(*torch_ver)
@@ -183,17 +207,29 @@ def _detect_llvm_flavor() -> str:
     return LLVM_FLAVOR_LLVM22
 
 
-# Lazy: resolved on first ``_resolve_llvm_flavor`` call (i.e. the first
-# ``lower_kernel_to_llvm`` invocation) so that ck_dsl and torch can be
-# imported in any order. Tests / callers who need a specific flavor
-# pass ``llvm_flavor=`` directly to :func:`lower_kernel_to_llvm`.
+# Cached, but keyed on the resolved comgr lib path (the "basis") rather than
+# resolved-once-forever. An early torch-less call would otherwise lock in the
+# /opt/rocm flavor; keying on the comgr path means that once torch (and its
+# bundled comgr) enters the process the basis changes and the flavor
+# re-resolves. An explicit env override is stable and short-circuits.
 _LLVM_FLAVOR: Optional[str] = None
+_LLVM_FLAVOR_BASIS: Optional[str] = None
 
 
 def _resolve_llvm_flavor() -> str:
-    global _LLVM_FLAVOR
-    if _LLVM_FLAVOR is None:
+    global _LLVM_FLAVOR, _LLVM_FLAVOR_BASIS
+    env = os.environ.get("CK_DSL_LLVM_FLAVOR", "").strip().lower()
+    if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+        return env
+    try:
+        from ..runtime.comgr import resolved_lib_path
+
+        basis = resolved_lib_path() or "<none>"
+    except Exception:
+        basis = "<none>"
+    if _LLVM_FLAVOR is None or _LLVM_FLAVOR_BASIS != basis:
         _LLVM_FLAVOR = _detect_llvm_flavor()
+        _LLVM_FLAVOR_BASIS = basis
     return _LLVM_FLAVOR
 
 
