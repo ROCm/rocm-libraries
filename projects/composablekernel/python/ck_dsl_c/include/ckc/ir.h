@@ -869,6 +869,8 @@ ckc_b_mfma_f32_16x16x32_bf8(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb
 ckc_value_t*
 ckc_b_mfma_f32_32x32x8_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
 ckc_value_t*
+ckc_b_mfma_f32_32x32x8_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
+ckc_value_t*
 ckc_b_mfma_f32_32x32x16_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
 ckc_value_t*
 ckc_b_mfma_f32_32x32x16_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);

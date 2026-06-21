@@ -44,6 +44,7 @@
 // The pure-C ck_dsl engine. These are C99 TUs compiled into libckc_core.a; the
 // declarations must be visible with C linkage.
 extern "C" {
+#include "ckc/helper_helper_ck_dsl.instances.common.attention_unified_selectors.h"
 #include "ckc/instance_attention_unified.h"
 #include "ckc/instance_conv_implicit_gemm.h"
 #include "ckc/instance_gemm_universal.h"
@@ -496,15 +497,84 @@ inline CEngineResult CEngine::build_sdpa_tiled(const SdpaProblem& p) {
     spec.use_sinks = false;
     spec.sliding_window = p.sliding_window;
     spec.has_softcap = p.softcap != 0.0;
-    // num_warps from the heuristic (default 4, the shipped w4 geometry).
-    spec.num_warps = p.num_warps > 0 ? p.num_warps : 4;
-    // The shipped artifact's wide-atom 32x32 transposed-QK geometry (mfma32 /
-    // stqk / mw32). These are baked into the validated kernel identity, not a
-    // tunable knob the heuristic carries.
-    spec.use_mfma_32x32 = true;
-    spec.use_transposed_qk_32x32 = true;
-    spec.block_m_per_warp = 32;
-    // tile_size for the wide-atom 32x32 transposed-QK path.
+
+    // ------------------------------------------------------------------
+    // Per-shape config selection. Mirror the Python selector's
+    // _tiled_spec_from_problem so the C-JIT prefill kernel tracks the SAME
+    // per-shape tuning the Python dispatcher applies (instead of a fixed
+    // wide-atom default). The C selectors (ckc_unified_attn_select_2d_* /
+    // ckc_unified_attn_enable_*) are byte-faithful ports of the Python
+    // _select_2d_* / _enable_* functions, so this is the same knob choice the
+    // Python graph path makes for the same problem.
+    //
+    // Selectors are UPSTREAM of emission: the gfx950 wide-atom emitter is
+    // driven by these spec flags, so switching them per shape changes WHICH
+    // validated config is built, never the emitter -- byte-identity safe.
+    ckc_unified_attn_problem_t sel{};
+    sel.total_q = p.total_q;
+    sel.num_seqs = p.num_seqs;
+    sel.num_query_heads = p.num_query_heads;
+    sel.num_kv_heads = p.num_kv_heads;
+    sel.head_size = p.head_size;
+    sel.block_size = spec.block_size;  // heuristic-overlaid block_q already folded
+    sel.max_seqlen_q = p.max_seqlen_q;
+    sel.max_seqlen_k = p.max_seqlen_k;
+    sel.dtype = spec.dtype;
+    sel.q_dtype = nullptr;
+    sel.sliding_window = p.sliding_window;
+    sel.softcap = p.softcap;
+    sel.use_sinks = false;
+    sel.use_alibi = false;
+    sel.use_qq_bias = false;
+    sel.use_fp8 = false;
+    sel.num_sms = 120;
+    sel.num_kv_blocks = 0;
+    // Pin the selectors' arch resolution to the build target so the gfx942 /
+    // gfx950 branches in the C selectors fire for the right device (the static
+    // port otherwise defaults to gfx950). Static string lifetime (the arch
+    // strings are "gfx950" / "gfx942" literals owned by the caller).
+    ckc_unified_attn_set_resolved_arch(is_gfx950 ? "gfx950" : "gfx942");
+
+    // num_warps: heuristic override (manifest-carried) wins; else the per-shape
+    // selector (Python _select_2d_num_warps), not a fixed 4.
+    spec.num_warps = p.num_warps > 0 ? p.num_warps : ckc_unified_attn_select_2d_num_warps(&sel);
+    // block_m_per_warp + the wide-atom 32x32 transposed-QK gates: per-shape from
+    // the selector (Python _select_2d_block_m_per_warp / _enable_mfma_32x32 /
+    // _enable_transposed_qk_32x32). The fixed mw=32 + mfma32-always default was
+    // structurally WRONG for the shapes Python routes to the narrow 16x16x32
+    // path (e.g. single-seq D128 prefill: Python picks mw=16 / nw=2 / mfma32
+    // OFF / register_pv, the provider forced mw=32 / nw=4 / mfma32 ON).
+    spec.block_m_per_warp = ckc_unified_attn_select_2d_block_m_per_warp(&sel);
+    const bool mfma_32x32 = ckc_unified_attn_enable_mfma_32x32(&sel);
+    spec.use_mfma_32x32 = mfma_32x32;
+    spec.use_transposed_qk_32x32 = ckc_unified_attn_enable_transposed_qk_32x32(&sel);
+    // use_transposed_half_local_pv: the Python selector enables this whenever the
+    // transposed-32x32 path fires (it is a bit-identical PURE VALU SCHEDULE rewrite
+    // -- no numeric change vs the without-flag path, just a faster reschedule).
+    // Follow the selector's choice, matching Python's default.
+    //
+    // History: the ck_dsl_c C-port of the hlpv emitter used to STUB the half-local
+    // PV branch (instances/gfx950/.../kv_body_pv_epilogue.cpp emitted a bare
+    // `continue;` for TRANSPOSED_HALF_LOCAL_PV), so it dropped every PV V-load +
+    // MFMA on that path and produced numerically wrong output (max_abs ~1.6). The
+    // branch is now fully ported (ckc_pv32_v_load_paired + paired ds_read_tr16_b64
+    // + 32x32x16 MFMA) and is BYTE-IDENTICAL to the Python emitter's .ll/HSACO
+    // across d64/d128 x fp16/bf16 on the transposed-32x32 path, so it is safe to
+    // enable by default. CK_DSL_ATTN_HLPV=0 force-disables it for A/B measurement.
+    {
+        const char* h = std::getenv("CK_DSL_ATTN_HLPV");
+        const bool hlpv_force_off =
+            h && (h[0] == '0' || h[0] == 'n' || h[0] == 'N' || h[0] == 'f' || h[0] == 'F');
+        spec.use_transposed_half_local_pv =
+            !hlpv_force_off && ckc_unified_attn_enable_transposed_half_local_pv(&sel);
+    }
+    spec.use_register_pv = ckc_unified_attn_enable_register_pv(&sel);
+    int wpe = 0;
+    if (ckc_unified_attn_select_2d_waves_per_eu(&sel, &wpe)) {
+        spec.has_waves_per_eu = true;
+        spec.waves_per_eu = wpe;
+    }
+    // tile_size for the (possibly wide-atom) transposed-QK path.
     //
     // The QK GEMM tiles the KV dimension into N-tiles of QK_MFMA_N = 32 columns
     // (the 32x32x16 atom), so the build emits exactly ``QK_N_TILES = tile_size_eff
@@ -529,20 +599,32 @@ inline CEngineResult CEngine::build_sdpa_tiled(const SdpaProblem& p) {
     // never silently shrunk below a full N-tile.
     {
         const int bs = spec.block_size;
-        // lcm(bs, 32) via gcd; bs is in {16,32,64} for the tiled gate.
-        auto gcd = [](int x, int y) {
-            while (y) {
-                const int t = x % y;
-                x = y;
-                y = t;
-            }
-            return x;
-        };
-        const int step = bs > 0 ? (bs / gcd(bs, 32)) * 32 : 32;  // lcm(bs,32)
-        int ts = p.tile_size > 0 ? p.tile_size : step;
-        // Round up to the nearest multiple of ``step`` so tile_size_eff is both a
-        // multiple of block_size and of 32 (one whole QK N-tile).
-        if (step > 0 && ts % step != 0) ts = ((ts + step - 1) / step) * step;
+        // Per-shape tile_size from the selector (Python _select_2d_tile_size:
+        // 2*block_size by default, with the documented per-shape exceptions),
+        // unless the heuristic carried an explicit tile_size.
+        int ts = p.tile_size > 0 ? p.tile_size : ckc_unified_attn_select_2d_tile_size(&sel);
+        if (mfma_32x32) {
+            // The wide-atom 32x32 transposed-QK path needs tile_size to be a
+            // multiple of 32 (one whole QK N-tile of QK_MFMA_N=32 columns) AND a
+            // multiple of block_size (paged-KV slab alignment). The smallest such
+            // value is lcm(block_size, 32). Round the selected tile up to the
+            // nearest valid multiple so a full N-tile is never silently shrunk to
+            // zero (QK_N_TILES = tile_size_eff/32 must be >= 1, else the
+            // per-tile P-register array is left NULL -> a hard build failure).
+            // The narrow 16x16x32 path (mfma_32x32 OFF) has no 32-multiple
+            // constraint, so it uses the selected tile_size verbatim (matching
+            // Python, where T=2*block_size=32 is the common prefill choice).
+            auto gcd = [](int x, int y) {
+                while (y) {
+                    const int t = x % y;
+                    x = y;
+                    y = t;
+                }
+                return x;
+            };
+            const int step = bs > 0 ? (bs / gcd(bs, 32)) * 32 : 32;  // lcm(bs,32)
+            if (step > 0 && ts % step != 0) ts = ((ts + step - 1) / step) * step;
+        }
         spec.has_tile_size = true;
         spec.tile_size = ts;
     }

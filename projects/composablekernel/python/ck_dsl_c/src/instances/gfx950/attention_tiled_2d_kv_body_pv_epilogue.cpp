@@ -74,6 +74,56 @@ static ckc_value_t* ckc__attn2d_mfma_16x16x32(
 #define MFMA_N_CONST 16 /* Python module constant MFMA_N = 16 */
 
 /* ============================================================ *
+ *  ckc_pv32_v_load_paired   (helpers/attention.py:794-857)
+ *
+ *  Promoted 32x32x16 PV V-load reached on the TRANSPOSED_HALF_LOCAL_PV branch:
+ *  two paired ds_read_tr16_b64 transpose reads + vec_concat -> <8 x dtype> per
+ *  lane. Faithful port of the Python helper (gfx942 twin has an identical port
+ *  at instances/gfx942/attention_tiled_2d_kv_body_pv.cpp).
+ *
+ *  Every sub-expression is bound in Python source (left-to-right) order so C's
+ *  unspecified arg-eval order does not shuffle the SSA value numbering.
+ * ============================================================ */
+static ckc_value_t* ckc_pv32_v_load_paired(ckc_ir_builder_t* b,
+                                           ckc_value_t* V_lds,
+                                           ckc_value_t* v_buf,
+                                           int n,
+                                           int k,
+                                           ckc_value_t* lane_half32,
+                                           ckc_value_t* lane_col32,
+                                           const ckc_type_t* dtype)
+{
+    /* col_group16 = (lane_col32 / 16) * 16. Python emits the div (with its const
+     * 16) BEFORE the mul's const 16; bind the div first. */
+    ckc_value_t* col_div16   = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 16));
+    ckc_value_t* col_group16 = ckc_b_mul(b, col_div16, ckc_b_const_i32(b, 16));
+    /* tr_col32 = col_group16 + (lane_col32 % 4) * 4. Bind the mod first. */
+    ckc_value_t* tr_col_mod = ckc_b_mod(b, lane_col32, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_col_rhs = ckc_b_mul(b, tr_col_mod, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_col32   = ckc_b_add(b, col_group16, tr_col_rhs);
+    /* tr_row_base32 = (k*16 + lane_half32*4) + ((lane_col32 / 4) % 4). Python
+     * evaluates the inner add (const(k*16), mul(lane_half32,4)) BEFORE the mod. */
+    ckc_value_t* tr_row_k = ckc_b_const_i32(b, (int64_t)(k * 16));
+    ckc_value_t* tr_row_inner =
+        ckc_b_add(b, tr_row_k, ckc_b_mul(b, lane_half32, ckc_b_const_i32(b, 4)));
+    ckc_value_t* tr_row_div4   = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_mod    = ckc_b_mod(b, tr_row_div4, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_base32 = ckc_b_add(b, tr_row_inner, tr_row_mod);
+
+    /* Python computes col = add(const(n*32), tr_col32) INLINE inside EACH
+     * ds_read call (helpers/attention.py 844-846, 851-853), so it is emitted
+     * TWICE -- once per read. Mirror that (do NOT hoist) for value numbering. */
+    ckc_value_t* col0    = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
+    ckc_value_t* idx0[3] = {v_buf, tr_row_base32, col0};
+    ckc_value_t* A_r0    = ckc_b_ds_read_tr16_b64(b, V_lds, idx0, 3, dtype);
+    ckc_value_t* row1    = ckc_b_add(b, tr_row_base32, ckc_b_const_i32(b, 8));
+    ckc_value_t* col1    = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
+    ckc_value_t* idx1[3] = {v_buf, row1, col1};
+    ckc_value_t* A_r1    = ckc_b_ds_read_tr16_b64(b, V_lds, idx1, 3, dtype);
+    return ckc_b_vec_concat(b, A_r0, A_r1);
+}
+
+/* ============================================================ *
  *  ckc_gfx950_attn2d_apply_transposed_pv_regs   (Python lines 3234-3314)
  *
  *  Transposed PV via registers: O^T = V^T @ P^T. For each K=16 sub-tile,
@@ -83,8 +133,8 @@ static ckc_value_t* ckc__attn2d_mfma_16x16x32(
  *
  *  ``p_regs`` is the flat [p_tile * RPL + reg] array (RPL = REGS_PER_LANE for
  *  the 32x32 path == 16); ``p_count`` is its length. The TRANSPOSED_HALF_LOCAL_PV
- *  experimental branch (Python 3237-3265) uses pv32_v_load_paired, which is not
- *  in this port's surface; that predicate is default-off and is not exercised.
+ *  branch (Python 3361-3391) uses pv32_v_load_paired (ported above) for the
+ *  half-local K orientation; both branches are byte-faithful to Python.
  * ============================================================ */
 ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                                         ckc_value_t* acc32,
@@ -119,8 +169,22 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
 
         if(ctx->TRANSPOSED_HALF_LOCAL_PV)
         {
-            /* Experimental half-local PV (Python 3237-3265): requires
-             * pv32_v_load_paired, not ported in this surface. Default-off. */
+            /* Half-local PV (Python 3361-3391). Each 32-lane half consumes only
+             * the P rows already local to that half via the paired transpose
+             * V-read so V and P share the same permuted K order. */
+            A_v_t = ckc_pv32_v_load_paired(
+                b, ctx->V_lds, v_buf, n, k, ctx->lane_half32_v, ctx->lane_col32_v, dtype);
+            for(kk = 0; kk < 8; ++kk)
+            {
+                int local_in_group = kk % 4;
+                int band           = kk / 4;
+                int p_tile         = (k * 16 + band * 8 + local_in_group) / 32;
+                int row_static     = (k * 16 + band * 8 + local_in_group) % 32;
+                int preg           = (row_static / 8) * 4 + (row_static % 4);
+                b_p_elems[kk]      = ckc_b_cast_f32_to(b, p_regs[p_tile * RPL + preg], dtype);
+            }
+            B_p_t = ckc_b_vec_pack(b, b_p_elems, 8, dtype);
+            acc32 = ckc_mfma_attn_mfma_32x32x16_for_dtype(b, dtype, A_v_t, B_p_t, acc32);
             continue;
         }
 

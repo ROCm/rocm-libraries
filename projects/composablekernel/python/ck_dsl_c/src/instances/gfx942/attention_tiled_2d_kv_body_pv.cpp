@@ -108,7 +108,13 @@ mfma_32x32x8(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* a, ckc_value_t* bv
     {
         return ckc_b_mfma_f32_32x32x8_f16(B, a, bv, c);
     }
-    /* Python: raise ValueError("...32x32x8 dtype ... (fp16 only)") */
+    if(dtype_is(DT, "bf16"))
+    {
+        /* gfx942-legal wide-K bf16 K=8 atom (the `.1k` intrinsic). Mirrors
+         * helpers/attention.py:mfma_32x32x8_for_dtype. */
+        return ckc_b_mfma_f32_32x32x8_bf16(B, a, bv, c);
+    }
+    /* Python: raise ValueError("...32x32x8 dtype ... (fp16/bf16 only)") */
     return NULL;
 }
 

@@ -126,6 +126,9 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     bool SKIP_LEGACY_QREG, TRANSPOSED_MASK_LIMIT, GROUPED_KV2;
     bool FAST_PAGED_KV_DESC, I64_KV_ADDR, EARLY_V_SCHEDULE;
     bool AGPR_ALLOC_ZERO;
+    /* Lever-3 (#51) sched_barrier fence after the QK MFMA cluster. */
+    bool USE_SCHED_BARRIER;
+    int SCHED_BARRIER_MASK;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV;
     bool REGISTER_PV, USE_MFMA_32X32, TRANSPOSED_QK_32X32;

@@ -193,10 +193,16 @@ static ckc_value_t* fh_mfma_32x32x16(ckc_gfx942_attn2d_build_ctx_t* ctx,
     return ckc_mfma_attn_mfma_32x32x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
 }
 
-/* _mfma_32x32x8(b, dtype, a, bv, c): fp16-only 32x32x8 QK atom (gfx942). */
+/* _mfma_32x32x8(b, dtype, a, bv, c): the gfx942-legal wide-K 32x32x8 QK atom.
+ * Mirrors helpers/attention.py:mfma_32x32x8_for_dtype -- BOTH fp16 and bf16 are
+ * CDNA3-legal here (f16 -> mfma_f32_32x32x8_f16, bf16 -> the `.1k` intrinsic
+ * mfma_f32_32x32x8_bf16). The wider K=16 bf16 atom is gfx950-only, so the gfx942
+ * wide-bf16 flash path uses THIS K=8 atom. */
 static ckc_value_t*
 fh_mfma_32x32x8(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* a, ckc_value_t* bv, ckc_value_t* c)
 {
+    if(ctx->dtype != NULL && ctx->dtype->name != NULL && strcmp(ctx->dtype->name, "bf16") == 0)
+        return ckc_b_mfma_f32_32x32x8_bf16(ctx->b, a, bv, c);
     return ckc_b_mfma_f32_32x32x8_f16(ctx->b, a, bv, c);
 }
 

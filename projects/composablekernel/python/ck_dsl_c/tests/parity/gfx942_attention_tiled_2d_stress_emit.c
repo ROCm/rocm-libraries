@@ -195,6 +195,71 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
         s->head_size=384; s->block_size=128; s->num_query_heads=16; s->num_kv_heads=4;
         s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
         break;
+    /* idx40-49: gfx942 wide-K (32x32x8) transposed-x8 coverage (mirrors the
+     * .py). Exercises the bf16 32x32x8 atom across d64/d128/d256/GQA/sinks+SW
+     * plus kv_cache_policy and i64-KV on the wide path. */
+    case 40:
+        s->head_size=64; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 41:
+        s->head_size=128; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=2; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 42:
+        s->head_size=64; s->block_size=32; s->num_query_heads=64; s->num_kv_heads=8;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 43:
+        s->head_size=64; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=true; s->sliding_window=2048; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 44:
+        s->head_size=128; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="fp16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=2; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 45:
+        s->head_size=64; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        s->kv_cache_policy="nt";
+        break;
+    case 46:
+        s->head_size=64; s->block_size=16; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 47:
+        s->head_size=64; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=true;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
+    case 48:
+        s->head_size=64; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=32;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=4; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        s->kv_cache_policy="global";
+        break;
+    case 49:
+        s->head_size=128; s->block_size=32; s->num_query_heads=32; s->num_kv_heads=8;
+        s->dtype="bf16"; s->use_sinks=false; s->sliding_window=0; s->has_softcap=false;
+        s->num_warps=2; s->block_m_per_warp=32; s->has_tile_size=true; s->tile_size=64;
+        s->use_mfma_32x32x8=true; s->use_transposed_qk_32x32=true;
+        break;
     default:
         return -1;
     }

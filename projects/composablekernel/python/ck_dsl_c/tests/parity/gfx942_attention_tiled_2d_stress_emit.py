@@ -447,6 +447,180 @@ _CONFIGS = {
         sliding_window=0,
         has_softcap=False,
     ),
+    # --- idx40-49: gfx942 wide-K (32x32x8) transposed-x8 coverage the gate
+    #     never sampled. The production flash selector (_enable_gfx942_*_flash)
+    #     routes the bf16/fp16 wide path here; this exercises the bf16 32x32x8
+    #     MFMA atom (`.1k` intrinsic) across d64/d128/d256/GQA/sinks+SW plus
+    #     kv_cache_policy and i64-KV on the wide path. (The deeper flash
+    #     sub-knobs -- cfvst V-store scheduling, K single-buffer drain, the
+    #     sliced-K ring, direct-Q-global, and the mask-limit/invariant-hoist
+    #     VALU stack -- are surfaced as known unported gfx942 C-twin paths; see
+    #     the task report. They are NOT sampled here because the C twin cannot
+    #     yet match them byte-for-byte.) ---
+    # idx40: bf16 transposed-x8 d64 (exercises the bf16 32x32x8 atom).
+    40: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx41: bf16 transposed-x8 d128 nw2.
+    41: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx42: bf16 transposed-x8 GQA-8 (the production prefill head ratio).
+    42: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx43: bf16 transposed-x8 with sinks + sliding window (mask features on
+    #        the wide atom).
+    43: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx44: fp16 transposed-x8 d128 nw2 (the D128 wide-atom geometry).
+    44: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx45: bf16 transposed-x8 + kv_cache_policy="nt" on the wide path.
+    45: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        kv_cache_policy="nt",
+    ),
+    # idx46: bf16 transposed-x8 with block_size=16 (paged-KV block edge on the
+    #        wide atom).
+    46: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx47: bf16 transposed-x8 + softcap on the wide atom.
+    47: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx48: bf16 transposed-x8 + kv_cache_policy="global".
+    48: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        kv_cache_policy="global",
+    ),
+    # idx49: bf16 transposed-x8 d128 GQA (h32 kv8) on the wide atom.
+    49: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+    ),
 }
 
 

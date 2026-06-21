@@ -448,6 +448,41 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
         }
     }
 
+    /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.
+     * Python __post_init__ accepts these flags (and the emitter wires the
+     * depth-2 V-double-buffer + staggered iter-start schedule). The gfx950 C
+     * twin currently emits ONLY the depth-2 single/early-V schedule, so reject
+     * any spec that asks for the V-double-buffer family (and kv_ring_depth!=2 /
+     * q_reread) rather than silently emit the wrong schedule. This keeps the
+     * spec struct byte-identical with Python (provider passthrough) while making
+     * the C emitter's narrower coverage explicit. When these schedules are
+     * ported to C, replace these guards with the real emit + Python's exact
+     * __post_init__ messages. */
+    if(spec->use_v_double_buffer)
+    {
+        ckc_g950_fail(b,
+                      CKC_ERR_NOTIMPL,
+                      "use_v_double_buffer: gfx950 C twin emits only the depth-2 "
+                      "single/early-V schedule (not yet ported)");
+    }
+    if(spec->use_staggered_iter_wait)
+    {
+        ckc_g950_fail(b,
+                      CKC_ERR_NOTIMPL,
+                      "use_staggered_iter_wait: gfx950 C twin emits only the depth-2 "
+                      "single/early-V schedule (not yet ported)");
+    }
+    if(spec->kv_ring_depth != 2)
+    {
+        ckc_g950_fail(
+            b, CKC_ERR_NOTIMPL, "kv_ring_depth>2 (deep prefetch ring) is scoped but not yet wired");
+    }
+    if(spec->use_q_reread)
+    {
+        ckc_g950_fail(
+            b, CKC_ERR_NOTIMPL, "use_q_reread: gfx950 C twin does not yet port the Q-reread path");
+    }
+
     /* gfx950 does NOT pre-resolve a catalog atom or ArchTarget in the prologue
      * (the kv_body calls mfma_32x32x16_for_dtype / mfma_16x16x32_for_dtype
      * directly). Leave ctx->target / ctx->qk_atom NULL, matching Python. */
@@ -491,6 +526,8 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ctx->I64_KV_ADDR                = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE           = spec->use_early_v_schedule;
     ctx->AGPR_ALLOC_ZERO            = spec->use_agpr_alloc_zero;
+    ctx->USE_SCHED_BARRIER          = spec->use_sched_barrier;
+    ctx->SCHED_BARRIER_MASK         = spec->sched_barrier_mask;
 
     /* ---- fp8 K/V cache predicates (Py783-797) ---- */
     const bool KV_FP8      = ckc_g950_streq(spec->kv_storage_dtype, "fp8e4m3");
@@ -733,8 +770,13 @@ static bool ckc_g950_build_ctx_init_local(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ctx->V_lds = ckc_b_smem_alloc(b, V_LDS_DTYPE, shp, 3, "Vlds");
     }
 
-    /* ---- P_lds (Py1061-1076) ---- */
-    if(!ctx->REGISTER_PV)
+    /* ---- P_lds (Py1061-1076) ----
+     * The transposed-32x32 path keeps P entirely in registers (softmax publish
+     * is a no-op, PV reads PT32_n from registers), so P_lds was dead LDS there.
+     * Drop the allocation to free the occupancy-limiting LDS at HD=128.
+     * Mirrors attention_tiled_2d.py P_LDS_DEAD and the ctx_prologue twin. */
+    const bool P_LDS_DEAD = USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32;
+    if(!ctx->REGISTER_PV && !P_LDS_DEAD)
     {
         const int P_LDS_PAD = FP8_MFMA_PV ? 16 : 8;
         ctx->P_LDS_PAD      = P_LDS_PAD;
@@ -909,7 +951,7 @@ static ckc_status_t
 ckc_g950_attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
 {
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
-    char sw_buf[32], w_buf[32], mw_buf[32];
+    char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -941,6 +983,10 @@ ckc_g950_attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, s
         snprintf(mw_buf, sizeof(mw_buf), "mw%d", s->block_m_per_warp);
     else
         mw_buf[0] = '\0';
+    if(s->use_sched_barrier)
+        snprintf(schedb_buf, sizeof(schedb_buf), "schedb%d", s->sched_barrier_mask);
+    else
+        schedb_buf[0] = '\0';
 
     {
         const char* parts[] = {
@@ -968,6 +1014,10 @@ ckc_g950_attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, s
             s->use_grouped_kv2_softmax ? "gkv2" : "",
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
+            s->use_v_double_buffer ? "vdbuf" : "",
+            s->use_staggered_iter_wait ? "stgw" : "",
+            schedb_buf,
+            s->use_q_reread ? "qrr" : "",
             s->use_agpr_alloc_zero ? "agpr0" : "",
             s->use_fp8_mfma_qk ? "fp8mfma" : "",
             s->use_fp8_mfma_pv ? "fp8pv" : "",

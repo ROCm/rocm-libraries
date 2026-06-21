@@ -108,6 +108,46 @@ int ckc_unified_attn_select_2d_block_m_per_warp(const ckc_unified_attn_problem_t
  * Returns the literal "fp8e4m3" when use_fp8, else NULL (the Python None). */
 const char* ckc_unified_attn_kv_storage_dtype(const ckc_unified_attn_problem_t* p);
 
+/* Python: _select_2d_waves_per_eu(problem) -> Optional[int].
+ * Writes the selected waves_per_eu into *out_wpe and returns true when the
+ * Python returns a concrete int; returns false (and leaves *out_wpe untouched)
+ * when the Python returns None (no override; the LLVM backend heuristic picks).
+ * Note: the FP8 long-prefill (wpe=3) and combo (wpe=4) branches read
+ * problem.waves_per_eu; this struct has no such field, so the host-pin branch is
+ * treated as "no pin" -- matching the provider's SdpaProblem (no wpe override).
+ */
+bool ckc_unified_attn_select_2d_waves_per_eu(const ckc_unified_attn_problem_t* p, int* out_wpe);
+
+/* ------------------------------------------------ 2D feature-gate predicates *
+ * Exposed mirrors of the Python _enable_* gates that _tiled_spec_from_problem
+ * consults when it builds the per-shape UnifiedAttention2DTiledSpec. The
+ * provider's C-JIT build_sdpa_tiled reads these so the tiled spec it emits
+ * tracks the SAME per-shape feature selection the Python selector applies
+ * (instead of a fixed wide-atom default). Pure: emit no IR. */
+
+/* Python: _enable_combo_2d(problem). */
+bool ckc_unified_attn_enable_combo_2d(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_transposed_qk_32x32(problem). */
+bool ckc_unified_attn_enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_mfma_32x32(problem) == _enable_transposed_qk_32x32(problem). */
+bool ckc_unified_attn_enable_mfma_32x32(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_transposed_half_local_pv(problem) == transposed_qk_32x32. */
+bool ckc_unified_attn_enable_transposed_half_local_pv(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_register_pv(problem). */
+bool ckc_unified_attn_enable_register_pv(const ckc_unified_attn_problem_t* p);
+
+/* Python: _enable_single_batch_combo(problem) -- single-batch (num_seqs==1)
+ * d128/d64 prefill full-combo cohort (#52). */
+bool ckc_unified_attn_enable_single_batch_combo(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_transposed_subflags(problem) -- the no-SW transposed-softmax
+ * VALU sub-flag stack (scalar_state + mask_once + mask_limit + skip_legacy_qreg)
+ * for the whole no-SW transposed-32x32 cohort. */
+bool ckc_unified_attn_enable_transposed_subflags(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_v_double_buffer(problem) -- short single-batch combo prefill. */
+bool ckc_unified_attn_enable_v_double_buffer(const ckc_unified_attn_problem_t* p);
+/* Python: _enable_early_v_schedule(problem) -- long single-batch combo prefill. */
+bool ckc_unified_attn_enable_early_v_schedule(const ckc_unified_attn_problem_t* p);
+
 /* ----------------------------------------------------------- magic div */
 
 /* Python: _magic_div(b, dividend, divisor) -> Value.

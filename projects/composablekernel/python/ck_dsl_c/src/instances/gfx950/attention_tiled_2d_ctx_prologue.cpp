@@ -391,8 +391,17 @@ bool ckc_gfx950_attn2d_build_ctx_init(ckc_gfx950_attn2d_build_ctx_t* ctx,
         ctx->V_lds = ckc_b_smem_alloc(b, V_LDS_DTYPE, shp, 3, "Vlds");
     }
 
-    /* ---- P_lds (lines 1061-1076) ---- */
-    if(!ctx->REGISTER_PV)
+    /* ---- P_lds (lines 1061-1076) ----
+     * The transposed-32x32 path (USE_MFMA_32X32 && TRANSPOSED_QK_32X32) keeps P
+     * entirely in registers: the softmax publish takes the no-op (pass) branch
+     * and the PV consumer reads PT32_n from registers, so P_lds is allocated but
+     * never written or read -- pure dead LDS (~18 KiB at BLOCK_M=128/T=64).
+     * Dropping it is byte-identical for every non-P_lds instruction and frees
+     * the occupancy-limiting LDS at HD=128. Mirrors attention_tiled_2d.py
+     * P_LDS_DEAD. The legacy 16x16x32 path, the transitional non-transposed
+     * 32x32 consumer, and the fp8-MFMA PV quantised-P path all still use P_lds. */
+    const bool P_LDS_DEAD = USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32;
+    if(!ctx->REGISTER_PV && !P_LDS_DEAD)
     {
         const int P_LDS_PAD = FP8_MFMA_PV ? 16 : 8;
         ctx->P_LDS_PAD      = P_LDS_PAD;

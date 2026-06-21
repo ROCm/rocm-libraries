@@ -106,6 +106,22 @@ typedef struct ckc_attention_tiled_2d_spec
     bool use_fp8_mfma_pv; /* False */
     bool use_register_pv; /* False */
 
+    /* Deep K+V prefetch / V-double-buffer schedule controls (Python mirror).
+     * The gfx950 C emitter currently builds only the depth-2 single/early-V
+     * schedule; these fields are carried so the spec is byte-identical with the
+     * Python dataclass and the provider/dispatcher can pass them through. A
+     * builder that sees use_v_double_buffer / use_staggered_iter_wait / kv_ring
+     * _depth!=2 / use_q_reread it does not yet emit must reject in validate(),
+     * NOT silently ignore (mirrors the Python __post_init__). */
+    bool use_v_double_buffer;     /* False */
+    int kv_ring_depth;            /* 2 */
+    bool use_staggered_iter_wait; /* False */
+    bool use_q_reread;            /* False */
+    /* Lever-3 sched_barrier fence after the QK MFMA cluster (CK-Tile-derived).
+     * Emitted by the gfx950 C twin (independent of the V schedule). */
+    bool use_sched_barrier; /* False */
+    int sched_barrier_mask; /* 0 */
+
     bool has_tile_size; /* Optional[int] None */
     int tile_size;
 

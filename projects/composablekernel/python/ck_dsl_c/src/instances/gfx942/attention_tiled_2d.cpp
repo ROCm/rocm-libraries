@@ -86,6 +86,12 @@ ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
     s.use_fp8_mfma_qk                 = false;
     s.use_fp8_mfma_pv                 = false;
     s.use_register_pv                 = false;
+    s.use_v_double_buffer             = false;
+    s.kv_ring_depth                   = 2;
+    s.use_staggered_iter_wait         = false;
+    s.use_q_reread                    = false;
+    s.use_sched_barrier               = false;
+    s.sched_barrier_mask              = 0;
     s.has_tile_size                   = false;
     s.tile_size                       = 0;
     s.block_m_per_warp                = 16;

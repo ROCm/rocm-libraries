@@ -235,6 +235,38 @@ class UnifiedAttention2DTiledSpec:
     # the current double-buffer + full-drain schedule byte-for-byte (golden-safe
     # default). Supersedes use_v_double_buffer (which is N==2 with a V prefetch).
     kv_ring_depth: int = 2
+    # CK-Tile-derived staggered iter-start wait (lever 1 from #51's ISA
+    # analysis). The depth-2 V-double-buffer schedule issues the per-iter
+    # prefetches as V[i+1] THEN K[i+1] into the alternate slot, so at the next
+    # iter-start K[i] is the NEWEST in-flight op and making it LDS-visible for QK
+    # requires draining V[i] too -> a FULL drain s_waitcnt(vmcnt=0,lgkmcnt=0)
+    # that serializes the loop (CK Tile's QRKSVSAsync instead issues K first and
+    # uses staggered partial lgkmcnt waits so the QK MFMA fires as soon as K's
+    # ds-write retires, leaving V in flight). When set (V_DOUBLE_BUF only), the
+    # per-iter prefetch order is flipped to K[i+1] THEN V[i+1] (K older), and the
+    # iter-start full drain becomes a PARTIAL wait that drains only K[i]
+    # (``kv_calls_per_tile`` pending) while leaving V[i] streaming -- V is
+    # consumed later at the PV partial-wait. Occupancy-neutral (async DMA bypasses
+    # VGPR). Default off (golden-safe); the dispatcher enables it for the
+    # single-batch d128 short-prefill cohort where it measurably helps.
+    use_staggered_iter_wait: bool = False
+    # CK-Tile-derived sched_barrier steering (lever 3 from #51). CK Tile places
+    # ``__builtin_amdgcn_sched_barrier(mask)`` directives to fence the LLVM
+    # post-RA scheduler so the QK MFMA cluster stays packed and the next-tile
+    # async prefetch VMEM is not hoisted into the MFMA window. When set, a
+    # ``sched_barrier`` is emitted between the QK MFMA cluster and the post-QK
+    # K/V prefetch issue. The mask selects which instruction classes may still
+    # reorder across the fence (``sched_barrier_mask``; 0 == hard barrier).
+    # NOTE: prior gfx950 experiments with ``sched_group_barrier`` GROUPING hints
+    # regressed prefill ~50% (the grouping over-constrains attention's
+    # mask+softmax+PV pattern); this is the simpler ORDERING fence. Default off;
+    # the dispatcher enables it only where it measurably helps. Golden-safe off.
+    use_sched_barrier: bool = False
+    # Mask passed to the lever-3 sched_barrier. 0 = full ordering barrier
+    # (nothing reorders across). Bit flags follow the AMDGPU sched_barrier ABI
+    # (e.g. allow VALU/SALU/MFMA/DS to move). Only consulted when
+    # ``use_sched_barrier`` is set.
+    sched_barrier_mask: int = 0
     # VGPR-reduction experiment [TESTED: dead end, kept gated]. Re-read Q from a
     # DEDICATED Q_lds inside the QK loop instead of holding the Q tile in
     # ``Q32_reg`` VGPRs. Hypothesis was that freeing ~32 archVGPR lifts the
@@ -472,6 +504,17 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_v_double_buffer does not support grouped_kv2")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_v_double_buffer v1 does not support FP8 KV")
+        if self.use_staggered_iter_wait:
+            # Lever 1 is wired only on the V-double-buffer schedule (it flips
+            # that path's per-iter K/V prefetch order and partial-waits the
+            # iter-start drain). The early-V, grouped-KV2 and FP8 paths have
+            # their own wait structure and are out of scope for v1.
+            if not self.use_v_double_buffer:
+                raise ValueError("use_staggered_iter_wait requires use_v_double_buffer")
+            if self.use_grouped_kv2_softmax:
+                raise ValueError("use_staggered_iter_wait does not support grouped_kv2")
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_staggered_iter_wait v1 does not support FP8 KV")
         if self.use_q_reread:
             # The re-read path is wired only through the transposed-32x32 QK
             # MFMA (the combo). It reads Q from the dedicated Q_lds.
@@ -635,6 +678,8 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "vdbuf" if self.use_v_double_buffer else "",
+            "stgw" if self.use_staggered_iter_wait else "",
+            (f"schedb{self.sched_barrier_mask}" if self.use_sched_barrier else ""),
             "qrr" if self.use_q_reread else "",
             "agpr0" if self.use_agpr_alloc_zero else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
@@ -1100,6 +1145,13 @@ def build_unified_attention_2d_tiled(
     # during iter i (reusing ``cur_buf``), giving V the same 1-deep prefetch
     # K has. Costs only LDS (async DMA bypasses VGPR), occupancy-neutral.
     V_DOUBLE_BUF = bool(spec.use_v_double_buffer)
+    # Lever 1 (#51): staggered iter-start partial wait + K-first per-iter
+    # prefetch order on the V-double-buffer schedule.
+    STAGGER_ITER_WAIT = bool(spec.use_staggered_iter_wait)
+    # Lever 3 (#51): sched_barrier ordering fence between QK and the post-QK
+    # prefetch issue.
+    USE_SCHED_BARRIER = bool(spec.use_sched_barrier)
+    SCHED_BARRIER_MASK = int(spec.sched_barrier_mask)
     V_BUFS = 2 if V_DOUBLE_BUF else 1
     if FP8_MFMA_PV:
         # Native-fp8 PV uses ds_read_b64_tr_b8. The validated lane mapping
@@ -1122,7 +1174,24 @@ def build_unified_attention_2d_tiled(
         )
     else:
         V_lds = b.smem_alloc(V_LDS_DTYPE, [V_BUFS, T, HD], name_hint="Vlds")
-    if not REGISTER_PV:
+    # The transposed-32x32 path (``USE_MFMA_32X32 and TRANSPOSED_QK_32X32``)
+    # keeps the softmax probabilities P entirely in registers: the softmax
+    # publish takes the ``pass`` branch (no ``smem_store`` into ``P_lds``) and
+    # the PV consumer reads ``PT32_n`` from registers via
+    # ``_apply_transposed_pv_regs`` (no ``smem_load`` from ``P_lds``). In that
+    # path ``P_lds`` was allocated but *never written or read* -- pure dead LDS
+    # (~18 KiB at BLOCK_M=128/T=64). Dropping the allocation is byte-identical
+    # for every non-P_lds instruction and frees LDS, which at HD=128 is the
+    # occupancy-limiting resource (the d128 prefill tile is LDS-bound, not
+    # VGPR-bound). Gate the allocation off there.
+    #
+    # NOTE: the legacy 16x16x32 path, the transitional non-transposed 32x32
+    # consumer (the ``else:`` "logical P_lds bridge"), and the fp8-MFMA PV
+    # quantised-P path all still publish/consume P through P_lds and MUST keep
+    # the allocation. Only the fully-transposed register-P path is dead.
+    P_LDS_DEAD = USE_MFMA_32X32 and TRANSPOSED_QK_32X32
+    P_lds = None
+    if not REGISTER_PV and not P_LDS_DEAD:
         # P_lds row stride padding (16 bytes = 8 halves) to eliminate 4-way
         # LDS bank conflict on the softmax `ds_write_b16` stores. With row
         # stride T*2 = 128 bytes = exactly 32 banks, lanes 0, 16, 32, 48
@@ -2647,7 +2716,17 @@ def build_unified_attention_2d_tiled(
 
         # Wait for current K. There should be no in-flight next-K work here;
         # the previous iteration waited all async loads before PV.
-        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+        if STAGGER_ITER_WAIT:
+            # Lever 1 (#51): the previous iter prefetched K[i] THEN V[i] into
+            # cur_buf (K older, V newer -- see the K-first issue below), and the
+            # PV partial-wait left BOTH pending (2*kv_calls). Drain only the
+            # oldest kv_calls (== K[i]) so QK can start as soon as K's ds-write
+            # retires; V[i] (the newer kv_calls) stays in flight and is consumed
+            # at the PV partial-wait. This is CK Tile's staggered partial-barrier
+            # schedule -- no full drain, MFMA fires off the next ds_read.
+            b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
+        else:
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
         if EARLY_V_SCHEDULE:
             if V_DOUBLE_BUF:
@@ -3053,6 +3132,13 @@ def build_unified_attention_2d_tiled(
                 for atom in range(M_ATOMS_PER_WARP):
                     S_n[atom][n] = acc_per_atom[atom]
 
+        # Lever 3 (#51): fence the just-emitted QK MFMA cluster from the post-QK
+        # async prefetch VMEM below, so the LLVM post-RA scheduler keeps the QK
+        # MFMAs packed instead of interleaving the next-tile buffer_load_lds into
+        # the MFMA window (CK Tile places sched_barrier here for the same reason).
+        if USE_SCHED_BARRIER:
+            b.sched_barrier(mask=SCHED_BARRIER_MASK)
+
         # Now that QK no longer needs VMEM, start current V first and next K
         # second. This ordering is what lets the partial wait before PV leave
         # only next K pending.
@@ -3063,6 +3149,12 @@ def build_unified_attention_2d_tiled(
             _issue_k(safe_next_tile, cur_buf)
         elif EARLY_V_SCHEDULE:
             _issue_k(safe_next_tile, nxt_buf)
+        elif V_DOUBLE_BUF and STAGGER_ITER_WAIT:
+            # Lever 1 (#51): K-FIRST prefetch so K[i+1] is the OLDER outstanding
+            # op at the next iter-start (lets the staggered partial wait drain
+            # only K and leave V streaming). PV reads V[i] from cur_buf.
+            _issue_k(safe_next_tile, nxt_buf)
+            _issue_v(safe_next_tile, nxt_buf)
         elif V_DOUBLE_BUF:
             # V[i] (cur_buf) already prefetched; prefetch V[i+1] + K[i+1] into
             # the alternate slot to overlap this iter (PV reads V[i] from cur_buf).
@@ -3287,6 +3379,14 @@ def build_unified_attention_2d_tiled(
             # completes before returning). The full LDS-visibility sync
             # below ensures PV's V_lds reads see the just-loaded V bytes.
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.sync()
+        elif V_DOUBLE_BUF and STAGGER_ITER_WAIT:
+            # Lever 1 (#51): the staggered iter-start wait drained only K[i],
+            # leaving V[i] in flight. Entering PV the outstanding ops are, oldest
+            # -> newest: V[i] (1x, from last iter), then this iter's K[i+1] +
+            # V[i+1] (K-first, 2x). PV reads V[i] from cur_buf, so drain V[i]
+            # while leaving the two next-tile prefetches (2x) pending.
+            b.s_waitcnt(vmcnt=2 * kv_calls_per_tile, lgkmcnt=2 * kv_calls_per_tile)
             b.sync()
         elif V_DOUBLE_BUF:
             # Double-buffered V: current V[i] (cur_buf) was prefetched last iter

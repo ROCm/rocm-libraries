@@ -186,13 +186,34 @@ def _lower_via_cpp_engine(
     """Lower serialized ``ck.dsl.ir/v1`` text through the C++ engine.
 
     Wraps ``ckc_engine.lower_serialized_ir`` (the family-agnostic
-    parse+lower endpoint). ``llvm_flavor`` (``None`` => engine AUTO) pins the
-    intrinsic-declaration shape, matching the Python lowerer's ``llvm_flavor``
-    parameter. Raises :class:`BackendError` if the engine extension is
-    unavailable.
+    parse+lower endpoint). ``llvm_flavor`` pins the intrinsic-declaration
+    shape, matching the Python lowerer's ``llvm_flavor`` parameter.
+
+    Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
+    the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
+    before handing it to the engine, rather than passing ``""`` (engine
+    AUTO). The C99 engine's own AUTO resolver only consults
+    ``$CK_DSL_LLVM_FLAVOR`` -> ``/opt/rocm/.info/version`` -> default
+    llvm22; it cannot portably introspect ``torch.version.hip``. The Python
+    autodetector adds the torch step in between, which is what the bundled
+    comgr actually keys off. Resolving here makes ``backend="cpp"`` pick the
+    SAME flavor as ``backend="python"`` on a torch-rocm box where
+    ``/opt/rocm`` is absent or a different vintage; without it the two
+    backends emit non-byte-identical IR unless ``CK_DSL_LLVM_FLAVOR`` is
+    forced. An explicit ``llvm_flavor`` argument still overrides. On a
+    torch-less box the torch step returns ``None`` and the Python resolver
+    falls through to ``/opt/rocm`` / default exactly as the engine would,
+    so behaviour is unchanged.
+
+    Raises :class:`BackendError` if the engine extension is unavailable.
     """
     engine = _import_engine()
-    return engine.lower_serialized_ir(ir_text, arch=arch, flavor=llvm_flavor or "")
+    flavor = llvm_flavor
+    if flavor is None:
+        from .lower_llvm import _resolve_llvm_flavor
+
+        flavor = _resolve_llvm_flavor()
+    return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
 
 
 def lower_kernel_via_backend(

@@ -607,71 +607,118 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         ckc_value_t* st_scores0[CKC_GFX950_ATTN2D_MAX_N_TILES][16];
         ckc_value_t* st_scores1[CKC_GFX950_ATTN2D_MAX_N_TILES][16];
         int n_groups = ctx->GROUPED_KV2 ? 2 : 1;
+
+        /* ---- TRANSPOSED_MASK_LIMIT setup (Python 2791-2820). skip_mask is
+         * always False in this single-loop body, so the not-skip_mask branch is
+         * the only one wired. Algebraically identical to the per-element
+         * land(row_ok, col_abs <= valid_tail): fold row_ok into the threshold
+         * (row invalid -> threshold = -BIG) and pre-subtract the compile-time
+         * row_off so the per-element add folds away into a single cmp_le. ---- */
+        ckc_value_t* st_mask_thresh[16];
+        ckc_value_t* st_row_half_base = NULL;
+        for(int _r = 0; _r < 16; ++_r)
+            st_mask_thresh[_r] = NULL;
+        if(ctx->TRANSPOSED_MASK_LIMIT)
+        {
+            ckc_value_t* mlim_row_ok =
+                ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_row_ok_hoist : st_row_ok_iter;
+            ckc_value_t* mlim_causal_lim =
+                ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_causal_lim_hoist : st_causal_lim_iter;
+            ckc_value_t* prefix_tail = ckc_b_sub(b, max_seq_prefix_len, ckc_b_const_i32(b, 1));
+            ckc_value_t* valid_tail  = ckc_b_select(
+                b, ckc_b_cmp_lt(b, mlim_causal_lim, prefix_tail), mlim_causal_lim, prefix_tail);
+            st_row_half_base            = ckc_b_mul(b, fh_lane_half32(ctx), ckc_b_const_i32(b, 4));
+            ckc_value_t* neg_big        = ckc_b_const_i32(b, -(1 << 30));
+            ckc_value_t* valid_tail_eff = ckc_b_select(b, mlim_row_ok, valid_tail, neg_big);
+            for(int reg = 0; reg < 16; ++reg)
+                st_mask_thresh[reg] =
+                    ckc_b_sub(b, valid_tail_eff, ckc_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
+        }
+
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
         {
             ckc_value_t* const* st_regs = (group_idx == 0) ? ST32_n : ST32_n_g1;
             ckc_value_t* group_tile_off = (group_idx == 0) ? tile_off : tile_off_g1;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
+                /* MASK_LIMIT per-(group,n) col_abs_base (Python 2862-2865). */
+                ckc_value_t* col_abs_base = NULL;
+                if(ctx->TRANSPOSED_MASK_LIMIT)
+                    col_abs_base =
+                        ckc_b_add(b,
+                                  ckc_b_add(b, group_tile_off, ckc_b_const_i32(b, n * 32)),
+                                  st_row_half_base);
                 for(int reg = 0; reg < 16; ++reg)
                 {
-                    ckc_value_t* k_local_base = ckc_b_const_i32(b, n * 32);
-                    ckc_value_t* k_local      = ckc_b_add(b, k_local_base, fh_c32_row(ctx, reg));
-                    ckc_value_t* qp_r;
-                    ckc_value_t* row_ok;
-                    ckc_value_t* causal_lim;
-                    ckc_value_t* col_abs;
-                    ckc_value_t* causal_ok;
-                    ckc_value_t* in_prefix;
-                    ckc_value_t* m_ok;
-                    if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                    ckc_value_t* qp_r       = NULL;
+                    ckc_value_t* row_ok     = NULL;
+                    ckc_value_t* causal_lim = NULL;
+                    ckc_value_t* col_abs    = NULL;
+                    ckc_value_t* m_ok       = NULL;
+                    if(ctx->TRANSPOSED_MASK_LIMIT)
                     {
-                        /* invariant-hoist: row_ok / causal_lim hoisted pre-loop
-                         * (Python 2776-2779). */
-                        qp_r       = ctx->st_qp_hoist;
-                        row_ok     = ctx->st_row_ok_hoist;
-                        causal_lim = ctx->st_causal_lim_hoist;
-                        col_abs    = ckc_b_add(b, group_tile_off, k_local);
-                    }
-                    else if(ctx->TRANSPOSED_MASK_ONCE)
-                    {
-                        /* mask-once: row_ok / causal_lim hoisted per-iter. */
-                        qp_r       = st_qp_iter;
-                        row_ok     = st_row_ok_iter;
-                        causal_lim = st_causal_lim_iter;
-                        col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                        /* col_abs_base + row_off <= valid_tail  <=>
+                         * col_abs_base <= (valid_tail_eff - row_off), with row_ok
+                         * folded into the threshold (Python 2875-2879). No
+                         * per-element k_local / col_abs is computed on this path. */
+                        m_ok = ckc_b_cmp_le(b, col_abs_base, st_mask_thresh[reg]);
                     }
                     else
                     {
-                        /* Plain transposed (Python 2784-2806): recompute the
-                         * per-element row position / mask inline. */
-                        ckc_value_t* q_row_t = ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
-                        ckc_value_t* qh_r;
-                        ckc_value_t* qh_mul;
-                        ckc_value_t* qh_mod;
-                        ckc_value_t* row_ok_pos;
-                        ckc_value_t* row_ok_qh;
-                        qp_r = ckc_b_add(b,
-                                         ctx->qb_start_pos,
-                                         ckc_b_div(b, q_row_t, ckc_b_const_i32(b, ctx->NQK)));
-                        /* mul before mod; first cmp on qp_r (Python arg order). */
-                        qh_mul     = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
-                        qh_mod     = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, ctx->NQK));
-                        qh_r       = ckc_b_add(b, qh_mul, qh_mod);
-                        row_ok_pos = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                        row_ok_qh  = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
-                        row_ok     = ckc_b_land(b, row_ok_pos, row_ok_qh);
-                        col_abs    = ckc_b_add(b, group_tile_off, k_local);
-                        causal_lim = ckc_b_add(b, ctx->context_len, qp_r);
-                    }
-                    causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
-                    in_prefix = ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                    m_ok      = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
-                    if(ctx->SLIDING_WINDOW > 0)
-                    {
-                        ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
-                        m_ok              = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
-                    }
+                        ckc_value_t* causal_ok;
+                        ckc_value_t* in_prefix;
+                        ckc_value_t* k_local_base = ckc_b_const_i32(b, n * 32);
+                        ckc_value_t* k_local = ckc_b_add(b, k_local_base, fh_c32_row(ctx, reg));
+                        if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                        {
+                            /* invariant-hoist: row_ok / causal_lim hoisted pre-loop
+                             * (Python 2776-2779). */
+                            qp_r       = ctx->st_qp_hoist;
+                            row_ok     = ctx->st_row_ok_hoist;
+                            causal_lim = ctx->st_causal_lim_hoist;
+                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                        }
+                        else if(ctx->TRANSPOSED_MASK_ONCE)
+                        {
+                            /* mask-once: row_ok / causal_lim hoisted per-iter. */
+                            qp_r       = st_qp_iter;
+                            row_ok     = st_row_ok_iter;
+                            causal_lim = st_causal_lim_iter;
+                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                        }
+                        else
+                        {
+                            /* Plain transposed (Python 2784-2806): recompute the
+                             * per-element row position / mask inline. */
+                            ckc_value_t* q_row_t =
+                                ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+                            ckc_value_t* qh_r;
+                            ckc_value_t* qh_mul;
+                            ckc_value_t* qh_mod;
+                            ckc_value_t* row_ok_pos;
+                            ckc_value_t* row_ok_qh;
+                            qp_r = ckc_b_add(b,
+                                             ctx->qb_start_pos,
+                                             ckc_b_div(b, q_row_t, ckc_b_const_i32(b, ctx->NQK)));
+                            /* mul before mod; first cmp on qp_r (Python arg order). */
+                            qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+                            qh_mod = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, ctx->NQK));
+                            qh_r   = ckc_b_add(b, qh_mul, qh_mod);
+                            row_ok_pos = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+                            row_ok_qh  = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
+                            row_ok     = ckc_b_land(b, row_ok_pos, row_ok_qh);
+                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                            causal_lim = ckc_b_add(b, ctx->context_len, qp_r);
+                        }
+                        causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
+                        in_prefix = ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
+                        m_ok      = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
+                        if(ctx->SLIDING_WINDOW > 0)
+                        {
+                            ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
+                            m_ok = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
+                        }
+                    } /* end non-MASK_LIMIT mask path */
                     ckc_value_t* s_raw    = ckc_b_vec_extract(b, st_regs[n], reg);
                     ckc_value_t* s_scaled = ckc_b_fmul(b, s_raw, qk_scale);
                     if(ctx->USE_SOFTCAP)
@@ -750,6 +797,11 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             l_local[r] = st_l_sum;
         }
 
+        /* Lever 3 (#51): fence the QK MFMA cluster from the post-QK prefetch
+         * VMEM (mirrors Python attention_tiled_2d.py:3141). */
+        if(ctx->USE_SCHED_BARRIER)
+            ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
+
         /* post-QK V/K issue. */
         ckc_value_t* cur_buf = ctx->cur_buf;
         ckc_value_t* nxt_buf = ctx->nxt_buf_v;
@@ -804,6 +856,10 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             }
             S32_n[n] = acc32;
         }
+
+        /* Lever 3 (#51): sched_barrier fence before the post-QK prefetch. */
+        if(ctx->USE_SCHED_BARRIER)
+            ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
 
         /* post-QK V/K issue (Python 2966-2975). */
         {
@@ -971,6 +1027,10 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
                 S_n[atom][n] = acc_per_atom[atom];
         }
+
+        /* Lever 3 (#51): sched_barrier fence before the post-QK prefetch. */
+        if(ctx->USE_SCHED_BARRIER)
+            ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
 
         /* post-QK V/K issue. */
         ckc_value_t* cur_buf = ctx->cur_buf;

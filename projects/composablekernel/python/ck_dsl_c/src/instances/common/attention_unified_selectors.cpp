@@ -110,6 +110,52 @@ static bool enable_combo_2d(const ckc_unified_attn_problem_t* p)
     return true;
 }
 
+/* Python: _enable_single_batch_combo(problem). Single-batch (num_seqs == 1)
+ * d128/d64 prefill -> full 32x32 combo (#52). The combinatorial autotuner proved
+ * the full combo is 1.5-2.7x faster than the legacy 16x16x32 path for this cohort
+ * and correctness-equal; the old gate's num_seqs>=2 restriction was stale (it was
+ * measured on the bare transposed path, not the full combo). */
+static bool enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
+{
+    if(!arch_is("gfx950"))
+    {
+        return false;
+    }
+    if(p->num_seqs != 1)
+    {
+        return false;
+    }
+    if(strcmp(p->dtype, "bf16") != 0 && strcmp(p->dtype, "fp16") != 0)
+    {
+        return false;
+    }
+    if(p->use_fp8)
+    {
+        return false;
+    }
+    if(p->use_alibi || p->use_qq_bias)
+    {
+        return false;
+    }
+    if(p->softcap > 0 || p->use_sinks)
+    {
+        return false;
+    }
+    if(p->sliding_window > 0)
+    {
+        return false;
+    }
+    if(p->head_size != 64 && p->head_size != 128)
+    {
+        return false;
+    }
+    if(p->max_seqlen_q <= 256)
+    {
+        return false;
+    }
+    return true;
+}
+
 /* Python: _enable_transposed_qk_32x32(problem). */
 static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
 {
@@ -118,6 +164,12 @@ static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
         return false;
     }
     if(enable_combo_2d(p))
+    {
+        return true;
+    }
+    /* Single-batch d128/d64 prefill full-combo cohort (#52): the routing fix.
+       num_seqs == 1 now gets the 32x32 transposed combo. */
+    if(enable_single_batch_combo(p))
     {
         return true;
     }
@@ -157,6 +209,55 @@ static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
         return false;
     }
     return true;
+}
+
+/* Python: _enable_early_v_schedule(problem). Long d64 single-batch combo prefill
+ * (head_size==64, max_seqlen_q >= 2048) issues the V load early; bit-identical,
+ * supersedes the V double-buffer. d128 long gets no V schedule flag (early-V
+ * regresses d128 -- see the Python docstring's ablation). */
+static bool enable_early_v_schedule(const ckc_unified_attn_problem_t* p)
+{
+    if(!enable_single_batch_combo(p))
+    {
+        return false;
+    }
+    return p->head_size == 64 && p->max_seqlen_q >= 2048;
+}
+
+/* Python: _enable_v_double_buffer(problem). Short single-batch combo prefill
+ * (max_seqlen_q <= 1024) on d64 stacks the V[i+1] double-buffer prefetch;
+ * bit-identical, mutually exclusive with early-V. d128: vdbuf is a NET DRAG
+ * (joint num_warps x schedule sweep: the win path is nw=2 with NO prefetch =
+ * 1.30x flash) -> OFF for d128, which also auto-disables sched_barrier (it
+ * gates on this predicate). */
+static bool enable_v_double_buffer(const ckc_unified_attn_problem_t* p)
+{
+    if(!enable_single_batch_combo(p))
+    {
+        return false;
+    }
+    if(enable_early_v_schedule(p))
+    {
+        return false;
+    }
+    if(p->head_size == 128)
+    {
+        return false;
+    }
+    return p->max_seqlen_q <= 1024;
+}
+
+/* Python: _enable_transposed_subflags(problem). The no-SW transposed-softmax
+ * VALU sub-flags fire for the whole no-SW transposed-32x32 cohort (combo,
+ * single-batch, AND the multi-batch transposed path the prod selector previously
+ * left them off -- the autotuner's ~1.19x multi-batch miss). */
+static bool enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
+{
+    if(p->sliding_window > 0)
+    {
+        return false;
+    }
+    return enable_transposed_qk_32x32(p);
 }
 
 /* Python: _enable_gfx942_small_q_narrow(problem). */
@@ -235,6 +336,16 @@ static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
     {
         return p->block_size;
     }
+    /* Single-batch d128/d64 prefill full-combo cohort (#52): d128 -> 2*BS,
+       d64 -> 128 (paired with num_warps=4). */
+    if(enable_single_batch_combo(p))
+    {
+        if(p->head_size == 64)
+        {
+            return 128;
+        }
+        return 2 * p->block_size;
+    }
     /* Qwen3-30B-A3B prefill specialization. */
     if(p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1 && !p->use_fp8 &&
        strcmp(p->dtype, "bf16") == 0 && nqpk(p) >= 4)
@@ -283,6 +394,44 @@ int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
         int HD = p->head_size;
         int BS = p->block_size;
         int T  = select_2d_tile_size(p);
+        while(t2 > 1)
+        {
+            if((T * HD) < 64 * t2 * 8)
+            {
+                t2 /= 2;
+                continue;
+            }
+            if((64 * 8) / HD > BS)
+            {
+                t2 /= 2;
+                continue;
+            }
+            break;
+        }
+        return (t2 > 1) ? t2 : 1;
+    }
+    /* Single-batch d128/d64 prefill full-combo cohort (#52, re-tuned by the
+       joint num_warps x schedule sweep): d64 -> nw=4 (T=128); d128 -> nw=2
+       (S<=1024, nw=2 + V-double-buffer OFF = 1.30x flash) / nw=4 (S>=2048,
+       nw=4 wpe=2 lifts S=4096 to 0.885x). Subject to the same step-down. */
+    if(enable_single_batch_combo(p))
+    {
+        int t2;
+        int HD = p->head_size;
+        int BS = p->block_size;
+        int T  = select_2d_tile_size(p);
+        if(p->head_size == 64)
+        {
+            t2 = 4;
+        }
+        else if(p->max_seqlen_q <= 1024)
+        {
+            t2 = 2;
+        }
+        else
+        {
+            t2 = 4;
+        }
         while(t2 > 1)
         {
             if((T * HD) < 64 * t2 * 8)
@@ -416,6 +565,127 @@ int ckc_unified_attn_select_2d_block_m_per_warp(const ckc_unified_attn_problem_t
 const char* ckc_unified_attn_kv_storage_dtype(const ckc_unified_attn_problem_t* p)
 {
     return p->use_fp8 ? "fp8e4m3" : NULL;
+}
+
+/* ------------------------------------------------- select_2d_waves_per_eu */
+
+/* Python: _select_2d_waves_per_eu(problem). The gfx1250 and the
+ * problem.waves_per_eu host-pin branches are not reachable here (no gfx1250 in
+ * this build path; the problem struct carries no waves_per_eu field), so this
+ * mirrors the remaining branches: combo -> 4, fp8 long multi-seq prefill -> 3,
+ * otherwise -> 2. Always returns a concrete int (Python only returns None on the
+ * gfx1250 / host-pin branches this port elides), so out_wpe is always written. */
+bool ckc_unified_attn_select_2d_waves_per_eu(const ckc_unified_attn_problem_t* p, int* out_wpe)
+{
+    int wpe = 2;
+    if(enable_single_batch_combo(p))
+    {
+        /* Single-batch combo (#52, re-tuned by the joint num_warps x schedule
+           sweep): wpe=2 across all seqlens. The prior wpe=3-at-S>=4096 rule
+           regressed the cohort (d128 S4096 nw=4: wpe=2 0.881 > wpe=3 0.856). */
+        wpe = 2;
+    }
+    else if(enable_combo_2d(p))
+    {
+        wpe = 4;
+    }
+    else if(p->use_fp8 && p->max_seqlen_q > 256 && p->num_seqs >= 2)
+    {
+        wpe = 3;
+    }
+    if(out_wpe != NULL)
+    {
+        *out_wpe = wpe;
+    }
+    return true;
+}
+
+/* ----------------------------------------------- 2D feature-gate predicates */
+
+/* Python: _enable_register_pv(problem). */
+static bool enable_register_pv(const ckc_unified_attn_problem_t* p)
+{
+    if(strcmp(p->dtype, "bf16") != 0)
+    {
+        return false;
+    }
+    if(p->use_sinks)
+    {
+        return false;
+    }
+    if(p->sliding_window > 0)
+    {
+        return false;
+    }
+    if(p->softcap > 0)
+    {
+        return false;
+    }
+    if(p->use_alibi)
+    {
+        return false;
+    }
+    if(p->use_qq_bias)
+    {
+        return false;
+    }
+    if(ckc_unified_attn_kv_storage_dtype(p) != NULL)
+    {
+        return false;
+    }
+    /* use_register_pv requires the 16x16x32 path; conflicts with mfma_32x32. */
+    if(enable_transposed_qk_32x32(p)) /* == _enable_mfma_32x32 */
+    {
+        return false;
+    }
+    return true;
+}
+
+bool ckc_unified_attn_enable_combo_2d(const ckc_unified_attn_problem_t* p)
+{
+    return enable_combo_2d(p);
+}
+
+bool ckc_unified_attn_enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
+{
+    return enable_transposed_qk_32x32(p);
+}
+
+bool ckc_unified_attn_enable_mfma_32x32(const ckc_unified_attn_problem_t* p)
+{
+    /* Python: _enable_mfma_32x32(problem) == _enable_transposed_qk_32x32. */
+    return enable_transposed_qk_32x32(p);
+}
+
+bool ckc_unified_attn_enable_transposed_half_local_pv(const ckc_unified_attn_problem_t* p)
+{
+    /* Python: _enable_transposed_half_local_pv == _enable_transposed_qk_32x32. */
+    return enable_transposed_qk_32x32(p);
+}
+
+bool ckc_unified_attn_enable_register_pv(const ckc_unified_attn_problem_t* p)
+{
+    return enable_register_pv(p);
+}
+
+bool ckc_unified_attn_enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
+{
+    return enable_single_batch_combo(p);
+}
+
+bool ckc_unified_attn_enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
+{
+    return enable_transposed_subflags(p);
+}
+
+bool ckc_unified_attn_enable_v_double_buffer(const ckc_unified_attn_problem_t* p)
+{
+    return enable_v_double_buffer(p);
+}
+
+bool ckc_unified_attn_enable_early_v_schedule(const ckc_unified_attn_problem_t* p)
+{
+    return enable_early_v_schedule(p);
 }
 
 /* ----------------------------------------------------------- magic div */
