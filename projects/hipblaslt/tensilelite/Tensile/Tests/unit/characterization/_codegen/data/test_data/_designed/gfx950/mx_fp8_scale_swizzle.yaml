@@ -59,8 +59,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -74,7 +74,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [True]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -85,11 +85,11 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [16]
         - GlobalReadVectorWidthB: [16]
         - StaggerU: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - GlobalSplitU: [1]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 256]

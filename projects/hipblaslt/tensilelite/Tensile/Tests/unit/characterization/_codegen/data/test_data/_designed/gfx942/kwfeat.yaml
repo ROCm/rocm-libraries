@@ -58,8 +58,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -82,7 +82,7 @@ BenchmarkProblems:
         # GSU=[1,2]: GSU>1 triggers GlobalSplitU accumulation + helper kernels.
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ClusterLocalRead: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

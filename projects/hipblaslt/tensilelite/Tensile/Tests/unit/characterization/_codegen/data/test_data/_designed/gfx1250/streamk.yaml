@@ -69,7 +69,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 1, 1, 2, 2]
         - DepthU: [256]
@@ -88,12 +88,12 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]

@@ -43,8 +43,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 0
@@ -55,10 +55,10 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 2, 2, 2, 2]
-        - BufferStore: [0]
+        - BufferStore: [False]
         - DepthU: [16]
         - GlobalSplitU: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [False]
         - PrefetchGlobalRead: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

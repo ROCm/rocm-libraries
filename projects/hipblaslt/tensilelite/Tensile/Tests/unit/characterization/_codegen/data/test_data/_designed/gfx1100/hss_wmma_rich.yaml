@@ -43,8 +43,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       BiasDataTypeList: [s]
@@ -69,9 +69,9 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         # GlobalSplitU fork: 1 (default) vs 2 (MultipleBuffer GSU path)
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]

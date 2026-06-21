@@ -39,8 +39,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Sparse: 1
@@ -56,7 +56,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  2, 2]
           - [16, 16, 32, 1,  1,  2, 2,  2, 2]
-        - DirectToVgprSparseMetadata: [1]
+        - DirectToVgprSparseMetadata: [True]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]
@@ -65,7 +65,7 @@ BenchmarkProblems:
         - TransposeLDS: [1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - StaggerU: [0]
         - WorkGroupMapping: [8]
         - 1LDSBuffer: [-1]

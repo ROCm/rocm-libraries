@@ -58,8 +58,8 @@ BenchmarkProblems:
       OperationType: GEMM
       DataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -70,7 +70,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 2, 3, 2, 2]
           - [32, 32, 2, 1, 1, 2, 1, 2, 2]
-        - SourceSwap: [0, 1]
+        - SourceSwap: [False, True]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]

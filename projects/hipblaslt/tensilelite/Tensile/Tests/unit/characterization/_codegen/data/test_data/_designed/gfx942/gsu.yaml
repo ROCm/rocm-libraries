@@ -38,8 +38,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -58,9 +58,9 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - GlobalSplitU: [1, 3, 8]
         - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer"]
         - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]
