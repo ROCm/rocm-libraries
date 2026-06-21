@@ -96,8 +96,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -112,8 +112,8 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [False]
+        - SourceSwap: [True]
         - GlobalSplitU: [1]
         - TransposeLDS: [0, 1, 2]
         - AssertSummationElementMultiple: [1, 32]
@@ -405,7 +405,7 @@ def test_r6_transposeLDS_unrollmajorlds(_base_state, _isa_info_map, _rocm_versio
     if tlds == 0:
         assert umA == 0 and umB == 0, f"TLDS=0: expected UMLDSx=0, got A={umA},B={umB}"
     elif tlds == 1:
-        # TLUA=True (TransposeA=1), TLUB=False (TransposeB=0) for BBS NT:
+        # TLUA=True (TransposeA=True), TLUB=False (TransposeB=False) for BBS NT:
         # UnrollMajorLDSA = not True = 0, UnrollMajorLDSB = not False = 1
         assert umA == (not tlua) and umB == (not tlub), (
             f"TLDS=1: A={umA}(want {not tlua}), B={umB}(want {not tlub})"

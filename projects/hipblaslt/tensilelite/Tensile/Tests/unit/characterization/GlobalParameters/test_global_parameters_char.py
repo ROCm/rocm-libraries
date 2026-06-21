@@ -11,6 +11,7 @@ and ``setupRestoreClocks``. The process-global dict is isolated per test."""
 import pytest
 
 import Tensile.Common.GlobalParameters as GP
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
 
 pytestmark = pytest.mark.unit
 
@@ -66,11 +67,11 @@ def test_assign_global_parameters_env_overrides(isolate_globals, isa_info_map, m
     assert GP.globalParameters["CmakeCCompiler"] == "my-cc"
 
 
-def test_assign_global_parameters_unrecognised_key_warns(isolate_globals, isa_info_map, monkeypatch):
+def test_assign_global_parameters_unrecognised_key_raises(isolate_globals, isa_info_map, monkeypatch):
     _stub_hipcc(monkeypatch)
-    GP.assignGlobalParameters({"TotallyMadeUpGlobal": 7, "Architecture": "gfx942"}, isa_info_map)
-    # unrecognised key still stored; ignoreKey ("Architecture") skipped.
-    assert GP.globalParameters["TotallyMadeUpGlobal"] == 7
+    with pytest.raises(ConfigTypeError, match="Unknown global parameter 'TotallyMadeUpGlobal'"):
+        GP.assignGlobalParameters({"TotallyMadeUpGlobal": 7, "Architecture": "gfx942"}, isa_info_map)
+    assert "TotallyMadeUpGlobal" not in GP.globalParameters
     assert "Architecture" not in GP.globalParameters
 
 

@@ -72,8 +72,8 @@ def _make_problem_type(arch="gfx942"):
         "DestDataType": "b",
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
-        "TransposeA": 1,
-        "TransposeB": 0,
+        "TransposeA": True,
+        "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
     }
@@ -101,10 +101,10 @@ def _make_constant_params():
         "DepthU": 32,
         "LocalReadVectorWidth": 8,
         "ScheduleIterAlg": 3,
-        "ExpandPointerSwap": 0,
+        "ExpandPointerSwap": False,
         "TransposeLDS": 1,
         "GlobalSplitU": 1,
-        "SourceSwap": 0,
+        "SourceSwap": False,
         "StoreRemapVectorWidth": 0,
         "ClusterLocalRead": 1,
     }
@@ -239,8 +239,8 @@ class TestGenerateCustomKernelSolutions:
                 "DestDataType": "b",
                 "ComputeDataType": "s",
                 "HighPrecisionAccumulate": True,
-                "TransposeA": 0,  # different from the fixture's TransposeA=1
-                "TransposeB": 0,
+                "TransposeA": False,  # different from the fixture's TransposeA=True
+                "TransposeB": False,
                 "UseBeta": True,
                 "Batched": True,
             }
@@ -282,8 +282,8 @@ class TestGenerateCustomKernelSolutions:
         from config_harness import _isolated_globals_with_isa
 
         assembler, iim = toolchain
-        # Build a stub whose ProblemType is a DIFFERENT ProblemType object (TransposeA=0
-        # instead of 1) so solution["ProblemType"] != problemType evaluates True.
+        # Build a stub whose ProblemType is a DIFFERENT ProblemType object (TransposeA=False
+        # instead of True) so solution["ProblemType"] != problemType evaluates True.
         stub = self._build_stub_solution(problem_type, valid=True, mismatch_transpose=True)
 
         monkeypatch.setattr(M, "_getCustomKernelSolutionObj", lambda *a, **kw: stub)
@@ -467,8 +467,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -483,10 +483,10 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
         - GlobalSplitU: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
       BenchmarkFinalParameters:
         - ProblemSizes:
