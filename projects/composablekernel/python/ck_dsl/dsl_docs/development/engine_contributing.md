@@ -37,7 +37,8 @@ bitten this codebase before).
 
 An engine change is done when **all** of these hold:
 
-1. The Python static tests pass (see [`testing.md`](./testing.md)).
+1. The Python unit tests pass (see [`testing.md`](./testing.md)) — most run
+   without a GPU; a handful of harness/timer tests need one.
 2. The C++ engine builds clean.
 3. The **differential `.ll` gate is green** — C++ emission matches Python
    emission, byte for byte, across every family. This is the contract.
@@ -192,7 +193,7 @@ code — the cause is usually the build, not the source.
 
 ## Checklist before you call it done
 
-- [ ] Python static tests pass.
+- [ ] Python unit tests pass (`test_ck_dsl.py`; most no-GPU, ~20 need a GPU).
 - [ ] `ck_dsl_c/tools/check_byte_identity.sh` is green (engine builds + `.ll` gate).
 - [ ] If output changed on purpose: golden re-blessed, diff reviewed.
 - [ ] New/changed instance family: `prove_parity_binding.py` validates the binding.

@@ -242,8 +242,10 @@ Decide what the kernel computes before deciding how it should run.
 The DSL ships several layered correctness gates. Use them in order
 from cheapest to most expensive:
 
-1. `pytest test/test_ck_dsl.py` — 245 static tests (IR construction,
-   transform DAG, helpers, instance smoke). ~1.7 s.
+1. `pytest test/test_ck_dsl.py` — 245 unit tests (IR construction,
+   transform DAG, helpers, instance smoke). The IR/lowering subset needs
+   no GPU; ~20 harness/validation/launch-timer tests require a GPU
+   (torch+HIP).
 2. `python python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` —
    imports every symbol, exercises every IR builder method, lowers
    every spec to LLVM/HIP/CK Tile, builds HSACO, launches small
@@ -2435,8 +2437,9 @@ that dominate every MFMA-tiled kernel's optimisation log.
 
 The documented validation pass at the time of writing exercises:
 
-- The 245-test static unit suite (`test_ck_dsl.py`) — IR construction,
-  transform DAG, helpers, instance smoke.
+- The 245-test unit suite (`test_ck_dsl.py`) — IR construction,
+  transform DAG, helpers, instance smoke. Most run without a GPU; ~20
+  harness/validation/timer tests require one.
 - `verify_dsl_docs.py` — imports every symbol referenced by the docs,
   exercises every IR builder method, lowers every spec to LLVM / HIP
   / CK Tile, builds HSACO, launches small kernels.

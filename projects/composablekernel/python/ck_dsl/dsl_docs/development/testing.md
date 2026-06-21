@@ -5,7 +5,7 @@ This page covers how to run the `ck_dsl` test suites, how to build and validate 
 ## Repo Layout For Testing
 
 ```text
-python/test/test_ck_dsl.py            # static unit suite (no GPU required)
+python/test/test_ck_dsl.py            # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
 python/test/test_ck_dsl_examples.py   # end-to-end example harness (HIP required)
 example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected.json (when shipped)
 python/ck_dsl/examples/               # Python-owned example generators
@@ -271,7 +271,7 @@ export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python python/test/test_ck_dsl.py                       # static
+python python/test/test_ck_dsl.py                       # unit (most no-GPU; ~20 need a GPU)
 python -m ck_dsl.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest \

@@ -246,6 +246,15 @@ def _lower_via_cpp_engine(
         from .lower_llvm import _resolve_llvm_flavor
 
         flavor = _resolve_llvm_flavor()
+    # Validate an explicit flavor in Python, mirroring the native lowerer
+    # (lower_llvm raises ``ValueError("unknown LLVM flavor ...")``), so the error
+    # contract is backend-INDEPENDENT: backend="cpp" must reject a bad flavor with
+    # the same ValueError as backend="python"/"both", not the engine's RuntimeError
+    # (which only surfaces once the ckc_engine .so is on the path).
+    from .lower_llvm import LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22
+
+    if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+        raise ValueError(f"unknown LLVM flavor {flavor!r}")
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
     except Exception as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise

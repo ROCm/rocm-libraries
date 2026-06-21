@@ -73,7 +73,8 @@ python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
-Run the core static test suite:
+Run the core unit test suite (the IR/lowering tests need no GPU; ~20
+harness/timer tests require a GPU):
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \

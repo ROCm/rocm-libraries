@@ -101,16 +101,15 @@ def compile_kernel(
     discarded.
 
     `backend` selects which engine produces the lowered AMDGPU ``.ll``:
-    ``"python"`` (native, the default and byte-identical to historical
-    behaviour), ``"cpp"`` (route through the C++ engine binding), or
-    ``"both"`` (lower with both and assert byte-equality, returning the
-    Python result). When unset, the ``CK_DSL_BACKEND`` environment
-    variable is consulted, else ``"python"``. Routing to the cpp/both
-    engines requires the instance-level ``spec`` (the C++ engine lowers
-    from the spec, not the post-IR ``KernelDef``); pass it via ``spec``.
-    Only the universal-GEMM family is wired to the cpp engine today; any
-    other ``spec`` type raises a clear error rather than silently
-    diverging.
+    ``"python"`` (the native lowerer, byte-identical to the historical
+    path), ``"cpp"`` (serialize the kernel and lower it through the C++
+    engine), or ``"both"`` (lower with both and assert byte-equality,
+    returning the Python result). When unset, the ``CK_DSL_BACKEND``
+    environment variable is consulted, else the package default (currently
+    the **C++** engine). The cpp/both paths are **family-agnostic**: they
+    lower from the built kernel's serialized ``ck.dsl.ir/v1`` IR, so no
+    per-family wiring is needed (the legacy ``spec`` argument is accepted
+    for backward compatibility but is no longer consulted).
     """
     if arch is not None:
         from ..core.arch import ArchTarget

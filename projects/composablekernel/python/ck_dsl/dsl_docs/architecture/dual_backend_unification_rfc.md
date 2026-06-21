@@ -127,8 +127,8 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 
 | Selector | Values | Meaning |
 |---|---|---|
-| Env `CK_DSL_BACKEND` | `python` (default during dev) | native Python build + lower |
-| | `cpp` | drive the C++ engine via pybind |
+| Env `CK_DSL_BACKEND` | `python` | native Python build + lower |
+| | `cpp` (current default) | drive the C++ engine via pybind |
 | | `both` | run both, assert equality, return the Python result (or C++ in runtime profile) |
 | API `compile_kernel(..., backend=...)` | same three | per-call override |
 | Provider env `CK_DSL_C_JIT` | `1` | provider uses the C++ engine at runtime (existing flag, now the validated path) |
