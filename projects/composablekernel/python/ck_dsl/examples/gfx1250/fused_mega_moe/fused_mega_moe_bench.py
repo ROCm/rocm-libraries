@@ -24,8 +24,15 @@ import struct
 
 
 def _build(
-    arch, dtype, tile_n_inter, tile_n_down, warp_n=4, pipeline="mem",
-    double_buffer=False, waves_per_eu=None, tile_m=16,
+    arch,
+    dtype,
+    tile_n_inter,
+    tile_n_down,
+    warp_n=4,
+    pipeline="mem",
+    double_buffer=False,
+    waves_per_eu=None,
+    tile_m=16,
 ):
     if arch == "gfx1250":
         from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
@@ -45,7 +52,11 @@ def _build(
             double_buffer=double_buffer,
             waves_per_eu=waves_per_eu,
         )
-        return spec, build_moe_fused_mega_wmma(spec, arch=arch), moe_fused_mega_wmma_grid
+        return (
+            spec,
+            build_moe_fused_mega_wmma(spec, arch=arch),
+            moe_fused_mega_wmma_grid,
+        )
     from ck_dsl.instances.common.moe_fused_mega import (
         FusedMegaKernelSpec,
         build_moe_fused_mega_gemm,
@@ -63,6 +74,9 @@ def _build(
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250", choices=("gfx1250", "gfx950"))
     p.add_argument("--tokens", type=int, default=512)  # sorted rows (mult of 16)
@@ -87,7 +101,7 @@ def main() -> int:
     from ck_dsl.helpers import compile_kernel
     from ck_dsl.runtime.hip_module import Runtime
 
-    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout
+    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout  # noqa: E741
     TILE_M = args.tile_m
     if T % TILE_M:
         raise SystemExit(f"tokens must be a multiple of tile_m={TILE_M}")
@@ -95,16 +109,21 @@ def main() -> int:
         raise SystemExit("inter % tile_n_inter and hout % tile_n_down must be 0")
 
     spec, kdef, grid_fn = _build(
-        args.arch, args.dtype, args.tile_n_inter, args.tile_n_down,
-        warp_n=args.warp_n, pipeline=args.pipeline,
-        double_buffer=args.double_buffer, waves_per_eu=args.waves_per_eu,
+        args.arch,
+        args.dtype,
+        args.tile_n_inter,
+        args.tile_n_down,
+        warp_n=args.warp_n,
+        pipeline=args.pipeline,
+        double_buffer=args.double_buffer,
+        waves_per_eu=args.waves_per_eu,
         tile_m=args.tile_m,
     )
     art = compile_kernel(kdef, arch=args.arch)
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")
 
     num_m_blocks = T // TILE_M
-    st = np.dtype(np.float16) if args.dtype == "fp16" else np.dtype(np.uint16)
+    st = np.dtype(np.float16) if args.dtype == "fp16" else np.dtype(np.uint16)  # noqa: F841
     elem_b = 2
 
     block_expert_ids = (np.arange(num_m_blocks) % E).astype(np.int32)
@@ -142,9 +161,24 @@ def main() -> int:
     stride_b_down = H_out * I
     packed = struct.pack(
         "<8Q10i",
-        ad, wgd, wud, wdd, stid, swd, beid, yd,
-        num_m_blocks * TILE_M, I, K, H_out, 0, stride_b_gate, stride_b_gate,
-        stride_b_down, 0, T,
+        ad,
+        wgd,
+        wud,
+        wdd,
+        stid,
+        swd,
+        beid,
+        yd,
+        num_m_blocks * TILE_M,
+        I,
+        K,
+        H_out,
+        0,
+        stride_b_gate,
+        stride_b_gate,
+        stride_b_down,
+        0,
+        T,
     )
     grid = grid_fn(num_m_blocks, I, spec)
     block = (spec.block_size, 1, 1)
@@ -175,7 +209,7 @@ def main() -> int:
     print(
         f"[{args.arch}] fused-mega {args.dtype} pl={args.pipeline} M{M} K{K} I{I} "
         f"Hout{H_out} E{E} grid={grid} block={block[0]}: {per_us:.2f} us/iter  "
-        f"{tflops:.2f} TFLOPs  ({flops/1e9:.2f} GFLOP/iter)"
+        f"{tflops:.2f} TFLOPs  ({flops / 1e9:.2f} GFLOP/iter)"
     )
     return 0
 

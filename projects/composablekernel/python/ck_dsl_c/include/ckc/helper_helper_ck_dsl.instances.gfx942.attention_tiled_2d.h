@@ -117,7 +117,7 @@ typedef struct ckc_attention_tiled_2d_spec
     int kv_ring_depth;            /* 2 */
     bool use_staggered_iter_wait; /* False */
     bool use_q_reread;            /* False */
-    /* #79: VGPR-frugal BLOCK_M=128 body -- gather the per-lane Q32 MFMA operand
+    /* VGPR-frugal BLOCK_M=128 body -- gather the per-lane Q32 MFMA operand
      * straight from global into VGPRs (no Q_lds), freeing 32 KB LDS so
      * BLOCK_M=128/T=64 fits the 32 KB / 2-WG/CU budget with K+V single-buffer.
      * Carried for spec byte-identity with the Python dataclass; the gfx950 C
@@ -129,7 +129,7 @@ typedef struct ckc_attention_tiled_2d_spec
     bool use_sched_barrier; /* False */
     int sched_barrier_mask; /* 0 */
 
-    /* #80: softmax-window MFMA interleave (Python gfx950 lever). The default
+    /* softmax-window MFMA interleave (Python gfx950 lever). The default
      * (off) is byte-identical; when on it emits a single iglp_opt at the loop
      * top (mode 0/1) or sched_group_barrier groups (mode 2) to schedule the
      * QK/PV MFMAs into the softmax VALU window. Carried for spec parity with the

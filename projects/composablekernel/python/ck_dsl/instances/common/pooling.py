@@ -435,7 +435,7 @@ def build_pooling2d(spec: Pooling2DSpec, arch: str = "gfx950") -> KernelDef:
         acc_list = [b.fmul(acc, rcp_count) for acc in acc_list]
 
     # Store through a CK Tile ``store_tile`` + ``tile_distribution`` over the
-    # flat output ``[N*Ho*Wo*C]`` (idiom A6 #2 store side). The per-thread
+    # flat output ``[N*Ho*Wo*C]`` (idiom A6, store side). The per-thread
     # tile is the ``VEC``-wide C slab -- a single X dim of length ``VEC``
     # consumed by one Y dim, so ``store_tile`` packs the ``VEC`` casted
     # scalars and issues one coalesced ``buffer_store_vN_f16`` (or a scalar

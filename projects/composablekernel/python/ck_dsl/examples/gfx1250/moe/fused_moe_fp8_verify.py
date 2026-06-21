@@ -21,6 +21,9 @@ from ck_dsl.runtime.hip_module import Runtime
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tokens", type=int, default=2)
     p.add_argument("--experts", type=int, default=8)
@@ -34,7 +37,7 @@ def main() -> int:
     import ml_dtypes
     import numpy as np
 
-    T, E, K, H, I = args.tokens, args.experts, args.topk, args.hidden, args.intermediate
+    T, E, K, H, I = args.tokens, args.experts, args.topk, args.hidden, args.intermediate  # noqa: E741
     fp8 = ml_dtypes.float8_e4m3fn if args.lowbit == "fp8e4m3" else ml_dtypes.float8_e5m2
     qmax = 448.0 if args.lowbit == "fp8e4m3" else 57344.0
     rng = np.random.default_rng(0xF00D)
@@ -55,7 +58,13 @@ def main() -> int:
     rt = Runtime()
     moe = Gfx1250Fp8Moe(spec)
     Y, dbg = moe.forward_numpy(
-        rt, X=X, topk_ids=topk_ids, topk_weights=topk_w, Wg=Wg, Wu=Wu, Wd=Wd,
+        rt,
+        X=X,
+        topk_ids=topk_ids,
+        topk_weights=topk_w,
+        Wg=Wg,
+        Wu=Wu,
+        Wd=Wd,
         return_debug=True,
     )
 

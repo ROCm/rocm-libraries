@@ -343,6 +343,66 @@ def _mfma_b_32x32x8(builder, lane, slot):
     return k, n_in_atom
 
 
+def _mfma_a_16x16x32(builder, lane, slot):
+    """MFMA 16x16x32 A operand: row ``lane % 16``, K ``k_blk*8 + slot``.
+
+    Per ``MfmaAtom.f16_16x16x32`` (the K-packed CDNA3 atom, hardware-verified to
+    1e-3): ``m_in_atom = lane % 16``, ``k_blk = lane // 16`` (0..3), and the
+    lane's ``<8 x half>`` covers the *contiguous* block
+    ``K = [k_blk*8 : k_blk*8 + 8]``. The flat-concat alternative
+    (``[k_blk*4 : k_blk*4+4] + [k_blk*4+16 : k_blk*4+20]``) compiles and
+    validates only to 1e-2 -- this contiguous packing is the correct one.
+    Returns ``(row, k)``.
+    """
+    c16 = builder.const_i32(16)
+    m_in_atom = builder.mod(lane, c16)
+    k_blk = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
+    return m_in_atom, k
+
+
+def _mfma_b_16x16x32(builder, lane, slot):
+    """MFMA 16x16x32 B operand: col ``lane % 16``, K ``k_blk*8 + slot``.
+
+    Symmetric to :func:`_mfma_a_16x16x32` (B laid out by column). Returns
+    ``(k, col)``.
+    """
+    c16 = builder.const_i32(16)
+    n_in_atom = builder.mod(lane, c16)
+    k_blk = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
+    return k, n_in_atom
+
+
+def _mfma_a_32x32x16(builder, lane, slot):
+    """MFMA 32x32x16 A operand: row ``lane % 32``, K ``k_blk*8 + slot``.
+
+    The K=16 sibling of :func:`_mfma_a_32x32x8` (per ``MfmaAtom.f16_32x32x16``):
+    ``m_in_atom = lane % 32``, ``k_blk = lane // 32`` (0 or 1), and the lane's
+    ``<8 x half>`` covers the contiguous block ``K = [k_blk*8 : k_blk*8 + 8]`` --
+    the same CDNA3 K-packing rule the verified 16x16x32 atom uses (contiguous,
+    not flat-concat). Returns ``(row, k)``.
+    """
+    c32 = builder.const_i32(32)
+    m_in_atom = builder.mod(lane, c32)
+    k_blk = builder.div(lane, c32)
+    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
+    return m_in_atom, k
+
+
+def _mfma_b_32x32x16(builder, lane, slot):
+    """MFMA 32x32x16 B operand: col ``lane % 32``, K ``k_blk*8 + slot``.
+
+    Symmetric to :func:`_mfma_a_32x32x16` (B laid out by column). Returns
+    ``(k, col)``.
+    """
+    c32 = builder.const_i32(32)
+    n_in_atom = builder.mod(lane, c32)
+    k_blk = builder.div(lane, c32)
+    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
+    return k, n_in_atom
+
+
 def _wmma_acc_16x16(builder, lane, slot):
     """WMMA 16x16x16 accumulator (wave32, hardware-verified gfx1151).
 
@@ -518,24 +578,44 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "mfma_f32_16x16x16_f16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
     ),
-    "mfma_f32_16x16x32_f16": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
+    "mfma_f32_16x16x32_f16": _FragInfo(
+        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    ),
     "mfma_f32_32x32x8_f16": _FragInfo(
         4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32
     ),
-    "mfma_f32_32x32x16_f16": _FragInfo(8, 8, 16, 64, c_fn=_mfma_acc_32x32),
+    "mfma_f32_32x32x16_f16": _FragInfo(
+        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    ),
     "mfma_f32_4x4x4_f16": _FragInfo(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
     "mfma_f32_16x16x16_bf16": _FragInfo(
         4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
     ),
-    "mfma_f32_16x16x32_bf16": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
-    "mfma_f32_32x32x8_bf16": _FragInfo(4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32),
-    "mfma_f32_32x32x16_bf16": _FragInfo(8, 8, 16, 64, c_fn=_mfma_acc_32x32),
+    "mfma_f32_16x16x32_bf16": _FragInfo(
+        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    ),
+    "mfma_f32_32x32x8_bf16": _FragInfo(
+        4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32
+    ),
+    "mfma_f32_32x32x16_bf16": _FragInfo(
+        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    ),
     # --- MFMA fp8 / bf8 (wave64) -----------------------------------------
-    "mfma_f32_16x16x32_fp8": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
-    "mfma_f32_16x16x32_bf8": _FragInfo(8, 8, 4, 64, c_fn=_mfma_acc_16x16),
-    "mfma_f32_32x32x16_fp8": _FragInfo(8, 8, 16, 64, c_fn=_mfma_acc_32x32),
-    "mfma_f32_32x32x16_bf8": _FragInfo(8, 8, 16, 64, c_fn=_mfma_acc_32x32),
+    # fp8/bf8 share the f16 operand lane layout (a_per_lane=8, same K-packing);
+    # only the element type / intrinsic mangling differ.
+    "mfma_f32_16x16x32_fp8": _FragInfo(
+        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    ),
+    "mfma_f32_16x16x32_bf8": _FragInfo(
+        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    ),
+    "mfma_f32_32x32x16_fp8": _FragInfo(
+        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    ),
+    "mfma_f32_32x32x16_bf8": _FragInfo(
+        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    ),
     # --- MFMA MX (wave64), frag lengths only -----------------------------
     "mfma_f32_16x16x128_fp4": _FragInfo(16, 16, 4, 64),
     "mfma_f32_16x16x96_fp6": _FragInfo(12, 12, 4, 64),
@@ -582,8 +662,13 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # each); accumulator is the same 16x16 column-distributed <8 x float> as
     # gfx12. Lane maps verified by examples/gfx1250/wmma_probe.py.
     "wmma_gfx1250_f32_16x16x32_f16": _FragInfo(
-        16, 16, 8, 32,
-        _wmma_gfx1250_a_16x16x32, _wmma_gfx1250_b_16x16x32, _wmma_gfx12_acc_16x16,
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x32,
+        _wmma_gfx1250_b_16x16x32,
+        _wmma_gfx12_acc_16x16,
     ),
     # gfx1250 FP8/BF8 K=64 WMMA. A/B carry 32 low-bit bytes per lane presented
     # as <8 x i32>; accumulator is the same 16x16 column-distributed <8 x float>
@@ -591,20 +676,49 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # offsets directly (no LayoutMap), so only frag lengths + wave size are
     # registered here; the accumulator map is shared with the f16 path.
     "wmma_gfx1250_f32_16x16x64_fp8_fp8": _FragInfo(
-        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+        8,
+        8,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_fp8_bf8": _FragInfo(
-        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+        8,
+        8,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_bf8_fp8": _FragInfo(
-        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+        8,
+        8,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
     ),
     "wmma_gfx1250_f32_16x16x64_bf8_bf8": _FragInfo(
-        8, 8, 8, 32, None, None, _wmma_gfx12_acc_16x16,
+        8,
+        8,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
     ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
-        16, 16, 8, 32,
-        _wmma_gfx1250_a_16x16x32, _wmma_gfx1250_b_16x16x32, _wmma_gfx12_acc_16x16,
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x32,
+        _wmma_gfx1250_b_16x16x32,
+        _wmma_gfx12_acc_16x16,
     ),
 }
 

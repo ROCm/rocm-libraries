@@ -100,6 +100,6 @@ Repeated spec/grid/epilogue code that should be a shared helper.
 
 **Perf verdict:** drift is real and repeatable but environmental/baseline (3D
 split-KV path + noisy box), **not a code regression**. The only perf-coded
-backlog item is **#7** (grouped-GEMM single-launch / persistent path): the
+backlog item (grouped-GEMM single-launch / persistent path): the
 uniform-shape single launch has landed; the remaining launch-overhead win is the
 fully-variable-shape / persistent path, still unimplemented.

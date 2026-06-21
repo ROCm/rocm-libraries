@@ -26,7 +26,7 @@ versioned header, drops `loc`, renders attrs without type tags (an `int` `1` and
 a `bool` `True`/`1` are ambiguous), and is not parseable. `ck.dsl.ir/v1` is the
 opposite on every axis: versioned, typed, lossless, parseable, and canonical.
 
-Non-goal (RFC N2): this is **not** a human authoring input. It is a machine
+Non-goal: this is **not** a human authoring input. It is a machine
 contract. Readability is a courtesy, not a requirement.
 
 ---
@@ -334,7 +334,7 @@ Two notions of equality:
    "ids must match too" check.
 
 The two are intentionally separate: byte-identity proves *the serialization is
-faithful*; canonical-equality proves *two builds mean the same thing*. The RFC
+faithful*; canonical-equality proves *two builds mean the same thing*. The design
 wants both — byte-identity as the round-trip gate, canonical-equality as the
 drift-tolerant semantic diff.
 

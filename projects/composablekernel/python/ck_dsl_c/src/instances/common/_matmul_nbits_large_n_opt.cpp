@@ -269,7 +269,7 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         ckc_value_t* k_grp       = ckc_b_div(b, k0, c_group); /* scale group index */
         ckc_value_t* k_half_base = ckc_b_div(b, k0, c2);      /* packed-byte base  */
 
-        /* --- #1: stage the A tile [tile_m x tile_k] into LDS --- */
+        /* --- step 1: stage the A tile [tile_m x tile_k] into LDS --- */
         {
             int ch;
             for(ch = 0; ch < a_chunks; ++ch)
@@ -292,7 +292,7 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         }
         ckc_b_sync(b); /* A tile visible to all waves */
 
-        /* --- #2: contract the whole group into a group-local f32 accumulator,
+        /* --- step 2: contract the whole group into a group-local f32 accumulator,
          *          feeding UNSCALED int4->f16 fragments to the WMMA atom. --- */
         ckc_value_t** gacc =
             (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*gacc));
@@ -442,7 +442,7 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
 
     ckc_value_t* const* results = loop.op->results;
 
-    /* --- #3: write the column-distributed accumulator to LDS, then store the
+    /* --- step 3: write the column-distributed accumulator to LDS, then store the
      *         whole tile to global as coalesced b128 (8 halves/transaction). --- */
     ckc_value_t* wn_local = ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave));
     {

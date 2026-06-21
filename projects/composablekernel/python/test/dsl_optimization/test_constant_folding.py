@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Test constant folding helpers in CK DSL lowering pass.
 
 This tests Phase 2 implementation: _is_constant() and _eval_constant().
 """
+
 import sys
 from pathlib import Path
 
@@ -11,8 +16,8 @@ CKDSL_ROOT = Path("/workspace/rocm-libraries/projects/composablekernel/python")
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
-from ck_dsl.core.ir import IRBuilder, I32, F32
-from ck_dsl.core.lower_llvm import _Lowerer
+from ck_dsl.core.ir import IRBuilder, I32  # noqa: E402 -- import after sys.path shim
+from ck_dsl.core.lower_llvm import _Lowerer  # noqa: E402 -- import after sys.path shim
 
 
 def test_is_constant():
@@ -123,9 +128,9 @@ def test_loop_bounds_detection():
 
     # Test Case 1: Constant bounds
     is_unrollable_1 = (
-        lowerer._is_constant(lower_const) and
-        lowerer._is_constant(upper_const) and
-        lowerer._is_constant(step_const)
+        lowerer._is_constant(lower_const)
+        and lowerer._is_constant(upper_const)
+        and lowerer._is_constant(step_const)
     )
     assert is_unrollable_1, "Should detect constant bounds as unrollable"
 
@@ -135,18 +140,18 @@ def test_loop_bounds_detection():
         step_val = lowerer._eval_constant(step_const)
         trip_count = (upper_val - lower_val) // step_val
 
-        print(f"  ✓ Case 1 (constant bounds): Unrollable")
+        print("  ✓ Case 1 (constant bounds): Unrollable")
         print(f"    lower={lower_val}, upper={upper_val}, step={step_val}")
         print(f"    trip_count={trip_count} iterations")
 
     # Test Case 2: Non-constant bounds
     is_unrollable_2 = (
-        lowerer._is_constant(lower_var) and
-        lowerer._is_constant(upper_var) and
-        lowerer._is_constant(step_var)
+        lowerer._is_constant(lower_var)
+        and lowerer._is_constant(upper_var)
+        and lowerer._is_constant(step_var)
     )
     assert not is_unrollable_2, "Should detect non-constant bounds as not unrollable"
-    print(f"  ✓ Case 2 (non-constant bounds): Not unrollable")
+    print("  ✓ Case 2 (non-constant bounds): Not unrollable")
 
     print()
 
@@ -182,7 +187,7 @@ def test_conv_k_loop_bounds():
     step_val = lowerer._eval_constant(step)
     trip_count = (upper_val - lower_val) // step_val
 
-    print(f"  ✓ K-loop is unrollable:")
+    print("  ✓ K-loop is unrollable:")
     print(f"    K_gemm={upper_val}, block_k={step_val}")
     print(f"    Trip count: {trip_count} iterations")
     print(f"    Total MFMAs (8 per iter): {trip_count * 8}")

@@ -150,7 +150,9 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
         ok, why = is_valid_moe_sorting_spec(sort_spec, ARCH)
         self.assertTrue(ok, why)
 
-        too_small = MoeSortingSpec(tokens=2, topk=TOPK, experts=NUM_EXPERTS, block_size=64)
+        too_small = MoeSortingSpec(
+            tokens=2, topk=TOPK, experts=NUM_EXPERTS, block_size=64
+        )
         ok, why = is_valid_moe_sorting_spec(too_small, ARCH)
         self.assertFalse(ok)
         self.assertIn("experts", why)
@@ -167,8 +169,8 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
             [0.40, 0.20, 0.10, 0.08, 0.07, 0.06, 0.05, 0.04],
             [0.35, 0.18, 0.12, 0.10, 0.08, 0.07, 0.06, 0.04],
         ]
-        offsets, counts, sorted_tokens, sorted_topk, sorted_weights = _moe_sort_reference(
-            topk_ids, topk_weights, NUM_EXPERTS
+        offsets, counts, sorted_tokens, sorted_topk, sorted_weights = (
+            _moe_sort_reference(topk_ids, topk_weights, NUM_EXPERTS)
         )
         self.assertEqual(sum(counts), QWEN3_30B_A3B_DECODE.total_pairs)
         self.assertEqual(counts[0], 2)
@@ -184,7 +186,9 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
         self.assertTrue(fwd._use_static_offsets)
         self.assertEqual(fwd._static_slot_size, QWEN3_30B_A3B_DECODE.static_slot_size)
         static_offsets, static_tokens = _static_offset_scatter_reference(
-            topk_ids, NUM_EXPERTS, QWEN3_30B_A3B_DECODE.static_slot_size,
+            topk_ids,
+            NUM_EXPERTS,
+            QWEN3_30B_A3B_DECODE.static_slot_size,
         )
         self.assertEqual(static_offsets[0], 0)
         self.assertEqual(static_offsets[1], QWEN3_30B_A3B_DECODE.static_slot_size)
@@ -192,7 +196,9 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
         self.assertEqual(static_tokens[1], 1)
 
     def test_static_slot_size_rejects_non_positive_override(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import fused_moe_forward_spec
+        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+            fused_moe_forward_spec,
+        )
         from ck_dsl.instances import FusedMoeForward
 
         spec = fused_moe_forward_spec()
@@ -206,7 +212,10 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             QWEN3_30B_A3B_DECODE_MOE,
         )
-        from ck_dsl.instances.common.batched_gemm import build_batched_gemm, is_valid_spec
+        from ck_dsl.instances.common.batched_gemm import (
+            build_batched_gemm,
+            is_valid_spec,
+        )
         from ck_dsl.instances.common.fused_moe_e2e import FusedMoeForward
 
         shape = QWEN3_30B_A3B_DECODE_MOE
@@ -228,8 +237,12 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         self.assertEqual(gemm.block_size, 32)
         self.assertEqual(
             (
-                gemm.tile.tile_m, gemm.tile.tile_n, gemm.tile.tile_k,
-                gemm.tile.warp_tile_m, gemm.tile.warp_tile_n, gemm.tile.warp_tile_k,
+                gemm.tile.tile_m,
+                gemm.tile.tile_n,
+                gemm.tile.tile_k,
+                gemm.tile.warp_tile_m,
+                gemm.tile.warp_tile_n,
+                gemm.tile.warp_tile_k,
             ),
             (16, 16, 32, 16, 16, 32),
         )
@@ -237,7 +250,9 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         self.assertEqual(gemm.trait.epilogue, "default")
         ok, why = is_valid_spec(gemm, arch="gfx1250")
         self.assertTrue(ok, why)
-        ll = lower_kernel_to_llvm(build_batched_gemm(gemm, arch="gfx1250"), arch="gfx1250")
+        ll = lower_kernel_to_llvm(
+            build_batched_gemm(gemm, arch="gfx1250"), arch="gfx1250"
+        )
         self.assertIn("llvm.amdgcn.wmma.f32.16x16x32.bf16", ll)
 
     def test_dynamic_prefill_sort_contract(self):
@@ -255,7 +270,11 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         self.assertEqual(sort_spec.block_size, 128)
         ok, why = is_valid_spec(sort_spec, arch="gfx1250")
         self.assertTrue(ok, why)
-        for build in (build_moe_sort_histogram, build_moe_sort_scan, build_moe_sort_scatter):
+        for build in (
+            build_moe_sort_histogram,
+            build_moe_sort_scan,
+            build_moe_sort_scatter,
+        ):
             ll = lower_kernel_to_llvm(build(sort_spec, arch="gfx1250"), arch="gfx1250")
             self.assertIn("define amdgpu_kernel", ll)
 
@@ -281,13 +300,23 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
             self.assertIn("define amdgpu_kernel", ll)
 
         sq = MoeSmoothQuantSpec(
-            n_per_block=shape.hidden, topk=shape.topk, experts=shape.experts,
-            dtype="bf16", out_dtype="i8", block_size=256, vec=8, tokens=shape.tokens,
+            n_per_block=shape.hidden,
+            topk=shape.topk,
+            experts=shape.experts,
+            dtype="bf16",
+            out_dtype="i8",
+            block_size=256,
+            vec=8,
+            tokens=shape.tokens,
         )
         ok, why = is_valid_moe_smoothquant_spec(sq, arch="gfx1250")
         self.assertTrue(ok, why)
-        self.assertEqual(moe_smoothquant_grid(shape.tokens, sq), (shape.active_pairs, 1, 1))
-        ll = lower_kernel_to_llvm(build_moe_smoothquant(sq, arch="gfx1250"), arch="gfx1250")
+        self.assertEqual(
+            moe_smoothquant_grid(shape.tokens, sq), (shape.active_pairs, 1, 1)
+        )
+        ll = lower_kernel_to_llvm(
+            build_moe_smoothquant(sq, arch="gfx1250"), arch="gfx1250"
+        )
         self.assertIn("define amdgpu_kernel", ll)
 
     def test_graph_capture_api_dynamic_smoke(self):
@@ -296,11 +325,18 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         )
         from ck_dsl.instances.common.fused_moe_e2e import FusedMoeForward
 
-        spec = QWEN3_30B_A3B_DECODE_MOE.to_fused_moe_forward_spec(use_static_offsets=False)
+        spec = QWEN3_30B_A3B_DECODE_MOE.to_fused_moe_forward_spec(
+            use_static_offsets=False
+        )
         fwd = FusedMoeForward(spec)
         with self.assertRaisesRegex(RuntimeError, "requires static-offset mode"):
             fwd.capture_graph(
-                routing_logits=None, X=None, W_gate=None, W_up=None, W_down=None, Y=None,
+                routing_logits=None,
+                X=None,
+                W_gate=None,
+                W_up=None,
+                W_down=None,
+                Y=None,
             )
         with self.assertRaisesRegex(RuntimeError, "before capture_graph"):
             fwd.replay_graph()
@@ -317,8 +353,12 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         )
 
         low_bit = BlockScaleGemmSpec(
-            M=16, N=16, K=64, quant_mode="abquant",
-            mantissa_dtype="fp8e4m3", group_size_mnk=(1, 1, 64),
+            M=16,
+            N=16,
+            K=64,
+            quant_mode="abquant",
+            mantissa_dtype="fp8e4m3",
+            group_size_mnk=(1, 1, 64),
         )
         ok, why = is_valid_spec(low_bit, arch="gfx1250")
         self.assertFalse(ok)
@@ -327,11 +367,18 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         mfma_only = FusedInterleavedGateUpSiluGemmSpec(
             name="gfx1250_gap",
             tile=TileSpec(
-                tile_m=16, tile_n=16, tile_k=32, warp_m=1, warp_n=1,
-                warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+                tile_m=16,
+                tile_n=16,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
             ),
             trait=TraitSpec(pipeline="mem", epilogue="default", pad_m=True, pad_n=True),
-            wave_size=32, dtype="bf16",
+            wave_size=32,
+            dtype="bf16",
         )
         with self.assertRaisesRegex(NotImplementedError, "MFMA-only.*WMMA"):
             build_moe_interleaved_gate_up_silu_gemm(mfma_only, arch="gfx1250")
@@ -341,7 +388,9 @@ class TestGfx1250Fp8MoeDriver(unittest.TestCase):
     def test_spec_static_offset_layout(self):
         from ck_dsl.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8MoeSpec
 
-        spec = Gfx1250Fp8MoeSpec(tokens=2, experts=128, topk=8, hidden=2048, intermediate=768)
+        spec = Gfx1250Fp8MoeSpec(
+            tokens=2, experts=128, topk=8, hidden=2048, intermediate=768
+        )
         # slot_size rounds T*K=16 up to a multiple of the 16x16 WMMA tile.
         self.assertEqual(spec.slot_size, 16)
         self.assertEqual(spec.rows, 128 * 16)
@@ -351,29 +400,61 @@ class TestGfx1250Fp8MoeDriver(unittest.TestCase):
             BlockScaledGemmSpec,
             build_block_scaled_gemm,
         )
-        from ck_dsl.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8MoeSpec, _block_k_for
+        from ck_dsl.instances.gfx1250.fused_moe_fp8 import (
+            Gfx1250Fp8MoeSpec,
+            _block_k_for,
+        )
 
-        spec = Gfx1250Fp8MoeSpec(tokens=2, experts=4, topk=2, hidden=256, intermediate=128)
+        spec = Gfx1250Fp8MoeSpec(
+            tokens=2, experts=4, topk=2, hidden=256, intermediate=128
+        )
         gu = BlockScaledGemmSpec(
-            name="t_gu", M=spec.slot_size, N=spec.intermediate, K=spec.hidden,
-            dtype_a="fp8e4m3", dtype_b="fp8e4m3", dtype_c="bf16",
+            name="t_gu",
+            M=spec.slot_size,
+            N=spec.intermediate,
+            K=spec.hidden,
+            dtype_a="fp8e4m3",
+            dtype_b="fp8e4m3",
+            dtype_c="bf16",
             block_k=_block_k_for(spec.hidden),
         )
         down = BlockScaledGemmSpec(
-            name="t_down", M=spec.slot_size, N=spec.hidden, K=spec.intermediate,
-            dtype_a="fp8e4m3", dtype_b="fp8e4m3", dtype_c="bf16",
+            name="t_down",
+            M=spec.slot_size,
+            N=spec.hidden,
+            K=spec.intermediate,
+            dtype_a="fp8e4m3",
+            dtype_b="fp8e4m3",
+            dtype_c="bf16",
             block_k=_block_k_for(spec.intermediate),
         )
         for g in (gu, down):
-            ll = lower_kernel_to_llvm(build_block_scaled_gemm(g, arch="gfx1250"), arch="gfx1250")
+            ll = lower_kernel_to_llvm(
+                build_block_scaled_gemm(g, arch="gfx1250"), arch="gfx1250"
+            )
             self.assertIn("llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32", ll)
 
     def test_full_driver_compiles_for_gfx1250(self):
-        from ck_dsl.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8Moe, Gfx1250Fp8MoeSpec
+        from ck_dsl.instances.gfx1250.fused_moe_fp8 import (
+            Gfx1250Fp8Moe,
+            Gfx1250Fp8MoeSpec,
+        )
+        from ck_dsl.runtime.comgr import resolved_lib_rocm_version
+
+        # gfx1250 codegen requires comgr >= 7.2; when the resolved comgr is older
+        # (e.g. a system ROCm 7.0 with no torch-bundled 7.2 loaded in the process)
+        # set_isa rejects the gfx1250 ISA. Skip cleanly rather than fail -- the
+        # compile path is covered wherever a gfx1250-capable comgr is active
+        # (e.g. the ROCm 7.2 venv with torch imported).
+        ver = resolved_lib_rocm_version()
+        if ver is None or ver < (7, 2):
+            self.skipTest(f"comgr {ver} cannot target gfx1250 (needs >= 7.2)")
 
         # Compiling the whole driver exercises every component-kernel build for
         # gfx1250 and the per-expert GEMM specs (no GPU needed to compile).
-        spec = Gfx1250Fp8MoeSpec(tokens=2, experts=4, topk=2, hidden=256, intermediate=128)
+        spec = Gfx1250Fp8MoeSpec(
+            tokens=2, experts=4, topk=2, hidden=256, intermediate=128
+        )
         moe = Gfx1250Fp8Moe(spec)
         self.assertEqual(moe.arch, "gfx1250")
         self.assertEqual(moe._gu_spec.K, 256)

@@ -529,6 +529,7 @@ static const char* const ckc_opcode_names[CKC_OP__COUNT] = {
     "tile.buffer_rsrc",
     "tile.buffer_load_f16",
     "tile.buffer_load_vN_f16",
+    "tile.buffer_load_vN",
     "tile.buffer_store_f16",
     "tile.buffer_store_vN_f16",
 
@@ -726,6 +727,7 @@ static const bool ckc_opcode_pure[CKC_OP__COUNT] = {
     /* buffer_rsrc                */ false,
     /* buffer_load_f16            */ false,
     /* buffer_load_vN_f16         */ false,
+    /* buffer_load_vN             */ false,
     /* buffer_store_f16           */ false,
     /* buffer_store_vN_f16        */ false,
 

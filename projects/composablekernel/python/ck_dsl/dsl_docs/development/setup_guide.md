@@ -67,8 +67,8 @@ Create a venv and install the ROCm 7.2 PyTorch wheel (the wheel **bundles its ow
 version effectively selects the build toolchain):
 
 ```bash
-python3.12 -m venv ~/ckdsl-venv
-source ~/ckdsl-venv/bin/activate
+python3.12 -m venv ~/.venv
+source ~/.venv/bin/activate
 pip install --upgrade pip
 # ROCm 7.2 PyTorch wheel (adjust the index URL to the rocm7.2 channel):
 pip install torch --index-url https://download.pytorch.org/whl/rocm7.2
@@ -133,8 +133,8 @@ compiler the DSL loads) and the HIP runtime. Note the install root, e.g.
 ### 4.2 Python + PyTorch
 
 ```bat
-py -3.12 -m venv %USERPROFILE%\ckdsl-venv
-%USERPROFILE%\ckdsl-venv\Scripts\activate
+py -3.12 -m venv %USERPROFILE%\.venv
+%USERPROFILE%\.venv\Scripts\activate
 pip install --upgrade pip
 :: Install a ROCm-on-Windows PyTorch build if available for your HIP SDK;
 :: otherwise the build/lowering path still works without torch on the GPU.

@@ -2140,7 +2140,7 @@ class IRBuilder:
 
         This is the gfx950-friendly equivalent of RDNA's ``v_permlanex16``
         XMASK DPP mode (which is RDNA-only — gfx950 rejects the encoding,
-        verified in ``/tmp/probe_dpp.ll``). The data sheet calls the
+        verified empirically on gfx950). The data sheet calls the
         encoding "FFT mode": ``offset = 0x8000 | (0x1F << 10) | xor_mask``
         which selects ``and_mask=0x1F or_mask=0 xor_mask=k`` —
         ``lane_dst = (lane_src & 0x1F) | 0 ^ k`` = ``lane_src ^ k`` modulo
@@ -3251,6 +3251,26 @@ class IRBuilder:
             [ptr, idx, value],
             attrs={"elem_type": "f16", "align": 2},
         )
+
+    def store(
+        self,
+        value: Value,
+        ptr: Value,
+        idx: Optional[Value] = None,
+        *,
+        align: Optional[int] = None,
+    ) -> None:
+        """Store a scalar ``value`` of any type to ``ptr[idx]`` (default idx 0).
+
+        Unlike :meth:`store_f16` (hardcoded ``half``), this derives the element
+        type from ``value`` and lowers through ``memref.global_store_typed``.
+        """
+        if idx is None:
+            idx = self.const_i32(0)
+        attrs: Dict[str, Any] = {}
+        if align is not None:
+            attrs["align"] = int(align)
+        self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
 
     def ret(self) -> None:
         self._op("cf.return")

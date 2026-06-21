@@ -119,7 +119,7 @@ The ROCm `bin/` directory isn't on `PATH`. Add it.
 The synced repo and the virtualenv live on shared storage that only exists on
 specific nodes; a job that lands elsewhere mounts an empty home. Constrain the
 job to the nodes where your inputs actually are (the submit script does this with
-a node constraint) — see `ck_dsl_c/ci/alola/`.
+a node constraint) — see the engine CI directory.
 
 ### A whole architecture is "missing" from results
 Some arches are scarce and queue longer; some share a generic container image

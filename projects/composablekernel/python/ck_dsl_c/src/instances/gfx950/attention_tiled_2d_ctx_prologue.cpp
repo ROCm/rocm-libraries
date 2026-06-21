@@ -361,7 +361,7 @@ bool ckc_gfx950_attn2d_build_ctx_init(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ctx->Q_BYTES               = Q_BYTES;
     ctx->K_LDS_ELEM_BYTES      = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES           = K_BUF_BYTES;
-    /* #69: K single-buffer -> 1 slot (halves K_lds so T=64 fits 2 WG/CU). */
+    /* K single-buffer -> 1 slot (halves K_lds so T=64 fits 2 WG/CU). */
     ctx->K_BUFS        = ctx->K_SINGLE_BUFFER ? 1 : 2;
     ctx->K_TOTAL_BYTES = K_TOTAL_BYTES;
 
@@ -372,7 +372,7 @@ bool ckc_gfx950_attn2d_build_ctx_init(ckc_gfx950_attn2d_build_ctx_t* ctx,
 
     /* ---- K_lds smem_alloc (line 1038) ---- */
     {
-        int shp[3] = {ctx->K_BUFS, T, HD}; /* #69: 1 slot when K single-buffer */
+        int shp[3] = {ctx->K_BUFS, T, HD}; /* 1 slot when K single-buffer */
         ctx->K_lds = ckc_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "Klds");
     }
 

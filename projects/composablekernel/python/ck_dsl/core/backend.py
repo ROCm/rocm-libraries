@@ -70,6 +70,7 @@ agrees.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -149,6 +150,14 @@ def resolve_backend(backend: Optional[str] = None) -> str:
 # lower under the C++ engine and why. Empty on a clean run.
 _CPP_FALLBACKS: List[Tuple[str, str]] = []
 
+# A cpp->python fallback is LOUD by default (see _record_fallback). De-dup the
+# stderr warning per (kernel, reason) so a repeatedly-lowered kernel doesn't
+# spam, while still surfacing every distinct gap. Set CK_DSL_CPP_QUIET_FALLBACK=1
+# to silence (for callers that legitimately expect fallback, e.g. an arch the
+# C++ engine does not implement), or CK_DSL_CPP_STRICT=1 to make it an error.
+_WARNED_FALLBACKS: set = set()
+_ENV_QUIET_FALLBACK = "CK_DSL_CPP_QUIET_FALLBACK"
+
 
 def cpp_fallbacks() -> List[Tuple[str, str]]:
     """Return the recorded ``(kernel_name, reason)`` cpp-engine fallbacks.
@@ -164,10 +173,34 @@ def cpp_fallbacks() -> List[Tuple[str, str]]:
 def reset_cpp_fallbacks() -> None:
     """Clear the recorded cpp-engine fallback log (test/sweep helper)."""
     _CPP_FALLBACKS.clear()
+    _WARNED_FALLBACKS.clear()
 
 
 def _record_fallback(kernel_name: str, reason: str) -> None:
+    """Record a cpp->python fallback AND warn about it LOUDLY by default.
+
+    A fallback means the C++ engine could not lower this kernel and the result
+    came from the Python lowerer instead. That is a real gap (e.g. an opcode the
+    family-agnostic ``lower_serialized_ir`` does not implement) and must NOT pass
+    silently — a silent fallback let a broken cpp path masquerade as working.
+    So emit a stderr warning (once per distinct ``(kernel, reason)``). Escalate
+    to a hard error with ``CK_DSL_CPP_STRICT=1``; silence with
+    ``CK_DSL_CPP_QUIET_FALLBACK=1`` only when fallback is genuinely expected.
+    """
     _CPP_FALLBACKS.append((kernel_name, reason))
+    if os.environ.get(_ENV_QUIET_FALLBACK, "").strip() in ("", "0"):
+        key = (kernel_name, reason)
+        if key not in _WARNED_FALLBACKS:
+            _WARNED_FALLBACKS.add(key)
+            print(
+                f"[ck_dsl] WARNING: backend='cpp' fell back to the Python "
+                f"lowerer for kernel '{kernel_name}': {reason}. The C++ engine "
+                f"could not lower this kernel; the emitted IR is the Python "
+                f"engine's. Set CK_DSL_CPP_STRICT=1 to treat this as an error, "
+                f"or CK_DSL_CPP_QUIET_FALLBACK=1 to silence.",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 # When set, the cpp path does NOT silently fall back to Python: an engine
@@ -213,7 +246,18 @@ def _lower_via_cpp_engine(
         from .lower_llvm import _resolve_llvm_flavor
 
         flavor = _resolve_llvm_flavor()
-    return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
+    try:
+        return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
+    except Exception as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+        msg = str(e)
+        if "unknown opcode" in msg:
+            so = getattr(engine, "__file__", "<unknown>")
+            raise type(e)(
+                f"{msg}\n[ck_dsl] hint: if this opcode exists in the current "
+                f"ck_dsl source, the loaded ckc_engine binary is STALE — rebuild "
+                f"it (the .so predates the opcode). Loaded from: {so}"
+            ) from e
+        raise
 
 
 def lower_kernel_via_backend(
@@ -233,10 +277,13 @@ def lower_kernel_via_backend(
       - ``"python"`` -> native lowerer, byte-identical to historical behaviour.
       - ``"cpp"``    -> serialize the kernel and lower through the C++ engine.
         On engine unavailability or an engine-side rejection, fall back to the
-        native lowerer and record the reason (unless ``CK_DSL_CPP_STRICT`` is
-        set, which re-raises). The fallback keeps the user-facing guarantee
-        ("all examples and tests work") intact for any case the C++ engine
-        cannot serve.
+        native lowerer. The fallback keeps the user-facing guarantee ("all
+        examples and tests work") intact for any case the C++ engine cannot
+        serve, but it is **LOUD by default**: every fallback emits a stderr
+        warning (de-duped per kernel+reason) so a broken cpp path cannot
+        masquerade as working. ``CK_DSL_CPP_STRICT=1`` re-raises instead;
+        ``CK_DSL_CPP_QUIET_FALLBACK=1`` silences the warning when fallback is
+        genuinely expected.
       - ``"both"``   -> lower with both and assert byte-equality, returning the
         Python result (the differential oracle). A mismatch raises
         :class:`BackendMismatch`.

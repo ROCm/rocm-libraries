@@ -137,14 +137,14 @@ bool ckc_unified_attn_enable_transposed_half_local_pv(const ckc_unified_attn_pro
 bool ckc_unified_attn_enable_register_pv(const ckc_unified_attn_problem_t* p);
 
 /* Python: _enable_single_batch_combo(problem) -- single-batch (num_seqs==1)
- * d128/d64 prefill full-combo cohort (#52). */
+ * d128/d64 prefill full-combo cohort. */
 bool ckc_unified_attn_enable_single_batch_combo(const ckc_unified_attn_problem_t* p);
 /* Python: _enable_transposed_subflags(problem) -- the no-SW transposed-softmax
  * VALU sub-flag stack (scalar_state + mask_once + mask_limit + skip_legacy_qreg)
  * for the whole no-SW transposed-32x32 cohort. */
 bool ckc_unified_attn_enable_transposed_subflags(const ckc_unified_attn_problem_t* p);
-/* Python: _enable_d128_small_tile(problem) -- #66 d128 occupancy lever
- * (T=block_size + nw=2 -> 2 WG/CU). #67 DEFAULT-ON for the gfx950 single-batch
+/* Python: _enable_d128_small_tile(problem) -- d128 occupancy lever
+ * (T=block_size + nw=2 -> 2 WG/CU). DEFAULT-ON for the gfx950 single-batch
  * d128 no-FP8 combo; HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
 bool ckc_unified_attn_enable_d128_small_tile(const ckc_unified_attn_problem_t* p);
 /* Python: _enable_v_double_buffer(problem) -- short single-batch combo prefill. */

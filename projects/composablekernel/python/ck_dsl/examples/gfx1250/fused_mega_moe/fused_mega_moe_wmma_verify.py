@@ -23,6 +23,9 @@ import struct
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--tokens", type=int, default=16)
@@ -51,7 +54,7 @@ def main() -> int:
     )
     from ck_dsl.runtime.hip_module import Runtime
 
-    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout
+    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout  # noqa: E741
     TILE_M = args.tile_m
     if T % TILE_M:
         raise SystemExit(f"tokens={T} must be a multiple of {TILE_M}")
@@ -105,7 +108,9 @@ def main() -> int:
         double_buffer=args.double_buffer,
         waves_per_eu=args.waves_per_eu,
     )
-    art = compile_kernel(build_moe_fused_mega_wmma(spec, arch=args.arch), arch=args.arch)
+    art = compile_kernel(
+        build_moe_fused_mega_wmma(spec, arch=args.arch), arch=args.arch
+    )
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})")
 
     rt = Runtime()
@@ -152,9 +157,24 @@ def main() -> int:
     # 8 pointers + 10 i32 scalars (signature order).
     packed = struct.pack(
         "<8Q10i",
-        ad, wgd, wud, wdd, stid, swd, beid, yd,
-        M, N, K, H_out, 0, stride_b_gate, stride_b_up, stride_b_down,
-        slot_size, tokens,
+        ad,
+        wgd,
+        wud,
+        wdd,
+        stid,
+        swd,
+        beid,
+        yd,
+        M,
+        N,
+        K,
+        H_out,
+        0,
+        stride_b_gate,
+        stride_b_up,
+        stride_b_down,
+        slot_size,
+        tokens,
     )
     rt.launch(fn, grid, block, packed)
     rt.sync()

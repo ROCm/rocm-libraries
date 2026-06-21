@@ -13,8 +13,8 @@ three families are buildable here, covering the full Qwen3.5-9B MatMulNBits set:
 
 The WMMA families share one source (``instances/common/_matmul_nbits_large_n.py``)
 and branch the fragment ABI per arch, so this only differs from the gfx1151
-driver in the manifest atom tag. Must run on a gfx1201 device (alola Navi 48 /
-MARKHAM node) for the verify step; ``--no-verify`` only builds + writes.
+driver in the manifest atom tag. Must run on a gfx1201 device (Navi 48) for the
+verify step; ``--no-verify`` only builds + writes.
 
 Real Qwen3.5-9B shapes (int4 / g32), pick via ``--family`` + ``--n/--k``:
   large_n:   N=4096/K=4096, 12288/4096, 4096/12288, 8192/4096, 1024/4096
@@ -52,22 +52,40 @@ _WMMA_ATOM = {
 _FAMILY_TILE = {
     # 64x128x16, 2x2 warps -> block_size 128.
     "large_n": TileSpec(
-        tile_m=64, tile_n=128, tile_k=16,
-        warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        tile_m=64,
+        tile_n=128,
+        tile_k=16,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
     ),
     # 64x32x16, 2x1 warps -> block_size 64. Narrow N tile for N=32.
     "skinny_n": TileSpec(
-        tile_m=64, tile_n=32, tile_k=16,
-        warp_m=2, warp_n=1, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        tile_m=64,
+        tile_n=32,
+        tile_k=16,
+        warp_m=2,
+        warp_n=1,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
     ),
     # Scalar GEMV: 1x8 warps -> block_size 256 (one thread per output column).
     # tile_m/tile_n/tile_k are not load-bearing for the scalar body.
     "decode_gemv": TileSpec(
-        tile_m=1, tile_n=256, tile_k=16,
-        warp_m=1, warp_n=8, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        tile_m=1,
+        tile_n=256,
+        tile_k=16,
+        warp_m=1,
+        warp_n=8,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
     ),
 }
 
@@ -75,14 +93,25 @@ _FAMILY_TILE = {
 # Combined-opt large_n needs tile_k == group_size (32) so the scale is constant
 # across the K tile (scale-on-accumulator). Same 64x128 output tile, 2x2 warps.
 _OPT_TILE = TileSpec(
-    tile_m=64, tile_n=128, tile_k=32,
-    warp_m=2, warp_n=2, warp_k=1,
-    warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+    tile_m=64,
+    tile_n=128,
+    tile_k=32,
+    warp_m=2,
+    warp_n=2,
+    warp_k=1,
+    warp_tile_m=16,
+    warp_tile_n=16,
+    warp_tile_k=16,
 )
 
 
 def _spec(
-    name: str, family: str, n: int, k: int, group: int, scale_dtype: str,
+    name: str,
+    family: str,
+    n: int,
+    k: int,
+    group: int,
+    scale_dtype: str,
     optimized: bool = False,
 ) -> MatMulNBitsSpec:
     tile = _OPT_TILE if optimized else _FAMILY_TILE[family]
@@ -115,12 +144,16 @@ def main() -> int:
     p.add_argument("--n", type=int, default=4096)
     p.add_argument("--k", type=int, default=4096)
     p.add_argument("--group-size", type=int, default=32)
-    p.add_argument("--family", default="large_n",
-                   choices=["large_n", "skinny_n", "decode_gemv"])
-    p.add_argument("--opt", action="store_true",
-                   help="Build the combined-optimization large_n body "
-                        "(LDS-staged A + tile_k=group scale-on-acc + LDS "
-                        "epilogue transpose). Requires family=large_n.")
+    p.add_argument(
+        "--family", default="large_n", choices=["large_n", "skinny_n", "decode_gemv"]
+    )
+    p.add_argument(
+        "--opt",
+        action="store_true",
+        help="Build the combined-optimization large_n body "
+        "(LDS-staged A + tile_k=group scale-on-acc + LDS "
+        "epilogue transpose). Requires family=large_n.",
+    )
     p.add_argument("--seq-len-tile", type=int, default=64)
     p.add_argument("--scale-dtype", default="fp16")
     p.add_argument("--output-dir", default=None)

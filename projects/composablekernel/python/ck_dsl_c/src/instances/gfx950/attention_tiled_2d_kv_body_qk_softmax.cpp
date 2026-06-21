@@ -465,7 +465,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     const int M_ATOMS_PER_WARP    = ctx->M_ATOMS_PER_WARP;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
-    /* nxt_buf = 1 - cur_buf (double-buffer); #69 single slot -> const 0. */
+    /* nxt_buf = 1 - cur_buf (double-buffer); K single-buffer single slot -> const 0. */
     ctx->nxt_buf_v = ctx->K_SINGLE_BUFFER ? ckc_b_const_i32(b, 0)
                                           : ckc_b_sub(b, ckc_b_const_i32(b, 1), ctx->cur_buf);
 
@@ -798,7 +798,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             l_local[r] = st_l_sum;
         }
 
-        /* Lever 3 (#51): fence the QK MFMA cluster from the post-QK prefetch
+        /* Lever 3 (CK-Tile-derived): fence the QK MFMA cluster from the post-QK prefetch
          * VMEM (mirrors Python attention_tiled_2d.py:3141). */
         if(ctx->USE_SCHED_BARRIER)
             ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
@@ -817,7 +817,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         }
         else if(ctx->K_SINGLE_BUFFER)
         {
-            /* #69 single K slot: issue V[i] now; DEFER the next-K prefetch to
+            /* single K slot: issue V[i] now; DEFER the next-K prefetch to
              * after the PV-wait barrier (avoids WAR-racing QK[i] ds_reads). */
             ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
         }
@@ -864,7 +864,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             S32_n[n] = acc32;
         }
 
-        /* Lever 3 (#51): sched_barrier fence before the post-QK prefetch. */
+        /* Lever 3 (CK-Tile-derived): sched_barrier fence before the post-QK prefetch. */
         if(ctx->USE_SCHED_BARRIER)
             ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
 
@@ -883,7 +883,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             }
             else if(ctx->K_SINGLE_BUFFER)
             {
-                /* #69 single K slot: V[i] now; defer next-K to post-PV barrier. */
+                /* single K slot: V[i] now; defer next-K to post-PV barrier. */
                 ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
             }
             else
@@ -1040,7 +1040,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 S_n[atom][n] = acc_per_atom[atom];
         }
 
-        /* Lever 3 (#51): sched_barrier fence before the post-QK prefetch. */
+        /* Lever 3 (CK-Tile-derived): sched_barrier fence before the post-QK prefetch. */
         if(ctx->USE_SCHED_BARRIER)
             ckc_b_sched_barrier(b, ctx->SCHED_BARRIER_MASK);
 
@@ -1058,7 +1058,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         }
         else if(ctx->K_SINGLE_BUFFER)
         {
-            /* #69 single K slot: issue V[i] now; DEFER the next-K prefetch to
+            /* single K slot: issue V[i] now; DEFER the next-K prefetch to
              * after the PV-wait barrier (avoids WAR-racing QK[i] ds_reads). */
             ckc_gfx950_attn2d_issue_v(ctx, ctx->kv_tile_iv, cur_buf);
         }
@@ -1218,7 +1218,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         pv_in.cur_buf        = ctx->cur_buf;
         pv_in.nxt_buf        = ctx->nxt_buf_v;
         pv_in.safe_tile1     = safe_tile1;
-        pv_in.safe_next_tile = safe_next_tile; /* #69 deferred K prefetch */
+        pv_in.safe_next_tile = safe_next_tile; /* deferred K prefetch */
         ckc_gfx950_attn2d_emit_pv_bucket(ctx, &pv_in);
     }
 

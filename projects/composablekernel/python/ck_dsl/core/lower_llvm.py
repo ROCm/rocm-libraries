@@ -2691,7 +2691,7 @@ class _Lowerer:
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
-        Encoding (verified empirically with /tmp/test_swap.cpp on gfx950):
+        Encoding (verified empirically on gfx950):
             offset = (xor_mask << 10) | 0x1F
 
         This corresponds to LLVM's pretty-printed

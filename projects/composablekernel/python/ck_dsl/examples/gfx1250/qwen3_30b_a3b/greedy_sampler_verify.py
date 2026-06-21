@@ -14,6 +14,9 @@ import struct
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--tokens", type=int, default=8)
@@ -47,7 +50,9 @@ def main() -> int:
     ref = np.argmax(logits.astype(np.float32), axis=1).astype(np.int32)
 
     spec = Qwen3GreedySamplerSpec(logits_dtype=args.dtype, block_size=args.block_size)
-    art = compile_kernel(build_qwen3_greedy_sampler(spec, arch=args.arch), arch=args.arch)
+    art = compile_kernel(
+        build_qwen3_greedy_sampler(spec, arch=args.arch), arch=args.arch
+    )
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")
 
     rt = Runtime()

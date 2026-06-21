@@ -1701,7 +1701,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b_cols = [_read_b(kk, ni) for ni in range(mfmas_n)]
             _mma_cluster(a_rows, b_cols)
 
-        # Quantitative two-stage HotLoop schedule (E3 #1/#6, E6 L1).
+        # Quantitative two-stage HotLoop schedule (E3, E6 L1).
         #
         # The flat per-kk hint (one DS-read group + one all-MFMA group) left
         # ds_write / buffer-load placement entirely to the backend. The

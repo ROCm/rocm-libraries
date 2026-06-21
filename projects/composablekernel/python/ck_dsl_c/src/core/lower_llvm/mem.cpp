@@ -800,6 +800,79 @@ static void op_tile_buffer_load_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
     }
 }
 
+/* Dtype-generic vectorised buffer load (Python _op_tile_buffer_load_vN):
+ * loads <dwords x i32> via the matching intrinsic and bitcasts to <n x elem>.
+ * f16/bf16 (2-byte): n = dwords*2; f32/i32 (4-byte): n = dwords. */
+static void op_tile_buffer_load_vN(ckc_lower_t* L, const ckc_op_t* op)
+{
+    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* voffset = op->operands[1];
+    const ckc_value_t* soffset = op->operands[2];
+    int64_t dwords             = ll_attr_int(op, "dwords", 0);
+    const char* elem           = ll_attr_str(op, "elem_type", "f16");
+    const char* llvm_elem;
+    int64_t n;
+    if(strcmp(elem, "f16") == 0)
+    {
+        llvm_elem = "half";
+        n         = dwords * 2;
+    }
+    else if(strcmp(elem, "bf16") == 0)
+    {
+        llvm_elem = "bfloat";
+        n         = dwords * 2;
+    }
+    else if(strcmp(elem, "f32") == 0)
+    {
+        llvm_elem = "float";
+        n         = dwords;
+    }
+    else
+    {
+        llvm_elem = "i32";
+        n         = dwords;
+    }
+    if(dwords == 1)
+    {
+        const char* tmp;
+        ckc_ll_need(L, "raw.ptr.buffer.load.i32");
+        tmp = ckc_ll_fresh(L, "bli32");
+        ckc_ll_emitf(L,
+                     "  %s = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                     "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                     tmp,
+                     ckc_ll_operand(L, rsrc),
+                     ckc_ll_operand(L, voffset),
+                     ckc_ll_operand(L, soffset));
+        ckc_ll_emitf(
+            L, "  %s = bitcast i32 %s to <%lld x %s>", ll_res(op), tmp, (long long)n, llvm_elem);
+    }
+    else
+    {
+        const char* intr =
+            ckc_arena_printf(&L->arena, "raw.ptr.buffer.load.v%lldi32", (long long)dwords);
+        const char* tmp;
+        ckc_ll_need(L, intr);
+        tmp = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "blv%lld", (long long)dwords));
+        ckc_ll_emitf(L,
+                     "  %s = call <%lld x i32> @llvm.amdgcn.raw.ptr.buffer.load.v%lldi32("
+                     "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                     tmp,
+                     (long long)dwords,
+                     (long long)dwords,
+                     ckc_ll_operand(L, rsrc),
+                     ckc_ll_operand(L, voffset),
+                     ckc_ll_operand(L, soffset));
+        ckc_ll_emitf(L,
+                     "  %s = bitcast <%lld x i32> %s to <%lld x %s>",
+                     ll_res(op),
+                     (long long)dwords,
+                     tmp,
+                     (long long)n,
+                     llvm_elem);
+    }
+}
+
 static void op_tile_buffer_load_f16(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* rsrc    = op->operands[0];
@@ -998,6 +1071,7 @@ void ckc_ll_register_mem(void)
 
     ckc_ll_set_handler(CKC_OP_TILE_BUFFER_RSRC, op_tile_buffer_rsrc);
     ckc_ll_set_handler(CKC_OP_TILE_BUFFER_LOAD_VN_F16, op_tile_buffer_load_vN_f16);
+    ckc_ll_set_handler(CKC_OP_TILE_BUFFER_LOAD_VN, op_tile_buffer_load_vN);
     ckc_ll_set_handler(CKC_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
     ckc_ll_set_handler(CKC_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     ckc_ll_set_handler(CKC_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);

@@ -235,7 +235,7 @@ def build_img2col(spec: Img2ColSpec, arch: str = "gfx950") -> KernelDef:
     y_rsrc = b.buffer_rsrc(Y, Y_bytes)
 
     # Input load via CK Tile ``load_tile`` + a 2D tile_distribution over the
-    # ``(block_tile_m, block_tile_k)`` block (A6 idiom #2 load side). This is
+    # ``(block_tile_m, block_tile_k)`` block (A6 idiom, load side). This is
     # the DSL counterpart of ``image_to_column_kernel.hpp::
     # MakeBlockTileDistribution`` (`:158`) feeding the body's bare
     # ``load_tile(image_tile)`` (`:203`): the thread's ``(m_local,

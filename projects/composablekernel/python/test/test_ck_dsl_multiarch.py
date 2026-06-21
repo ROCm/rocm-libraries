@@ -621,6 +621,8 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from ck_dsl.core.lower_llvm import (
             _datalayout_for_flavor,
             _detect_llvm_flavor,
+            _flavor_for_rocm,
+            _system_rocm_version,
         )
         from ck_dsl.helpers.compile import emit_device_llvm_ir_via_hipcc
 
@@ -632,7 +634,17 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             attrs={},
         )
 
-        detected_flavor = _detect_llvm_flavor()
+        # Validate the constant for the flavor of the REFERENCE toolchain -- the
+        # `hipcc` on PATH (the system /opt/rocm) that emits the IR below. That can
+        # be a DIFFERENT LLVM vintage than the comgr lib `_detect_llvm_flavor()`
+        # resolves at runtime (e.g. a torch-bundled comgr 7.2/llvm22 alongside a
+        # system hipcc 7.0/llvm20). We can only statically validate the constant
+        # whose toolchain is actually present; the comgr flavor is exercised
+        # dynamically by every GPU compile (a wrong datalayout aborts codegen).
+        sys_ver = _system_rocm_version()
+        detected_flavor = (
+            _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
+        )
         ckdsl_dl = _datalayout_for_flavor(detected_flavor)
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant

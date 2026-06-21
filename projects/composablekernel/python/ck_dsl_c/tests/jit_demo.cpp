@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // jit_demo.cpp -- end-to-end proof that the pure-C ck_dsl_c engine wires into
-// the RFC's runtime JIT path with ZERO Python:
+// the runtime JIT path with ZERO Python:
 //
 //   ckc_* (C engine)  ->  .ll text  ->  ck_dsl::Compiler (libamd_comgr)  ->
 //   HSACO  ->  hipModuleLoadData + launch (gfx950)  ->  numeric verify.

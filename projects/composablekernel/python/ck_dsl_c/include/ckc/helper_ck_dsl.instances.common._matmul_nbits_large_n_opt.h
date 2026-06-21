@@ -13,13 +13,13 @@
  * (gfx1201). It folds three optimizations into one kernel so their combination
  * can be measured on hardware against the baseline body:
  *
- *   #1  LDS-staged A: the tile_m x tile_k activation tile is staged once per
+ *   (1) LDS-staged A: the tile_m x tile_k activation tile is staged once per
  *       K-group into LDS, then every wave reads its A fragments from LDS.
- *   #2  tile_k == group_size: the per-group scale is constant across the tile;
+ *   (2) tile_k == group_size: the per-group scale is constant across the tile;
  *       B fragments are dequantised UNSCALED (raw int4 -> f16), contracted into
  *       a group-local f32 accumulator, then scaled once per output column with a
  *       single vector_fma into the main accumulator.
- *   #3  LDS epilogue transpose: the column-distributed WMMA accumulator is
+ *   (3) LDS epilogue transpose: the column-distributed WMMA accumulator is
  *       written to LDS, then stored to global cooperatively as coalesced b128.
  *
  * Preconditions (asserted by the builder / caller): gfx1201, tile_k ==

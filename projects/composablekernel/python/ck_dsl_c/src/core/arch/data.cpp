@@ -304,6 +304,90 @@ static void _mfma_b_32x32x8(
         *out1 = n_in_atom;
 }
 
+/* MFMA 16x16x32 A operand: (lane % 16, k_blk*8 + slot). K-packed CDNA3 atom;
+ * the lane's <8 x half> covers the contiguous block K=[k_blk*8 : k_blk*8+8]
+ * (per MfmaAtom.f16_16x16x32, hardware-verified to 1e-3; the flat-concat
+ * alternative validates only to 1e-2). */
+static void _mfma_a_16x16x32(
+    ckc_ir_builder_t* b, ckc_value_t* lane, int slot, ckc_value_t** out0, ckc_value_t** out1)
+{
+    ckc_value_t *c16, *m_in_atom, *k_blk, *k;
+    CKC_ATI_COORD_GUARD(b, out0, out1);
+    c16       = ckc_b_const_i32(b, 16);
+    m_in_atom = ckc_b_mod(b, lane, c16);
+    k_blk     = ckc_b_div(b, lane, c16);
+    /* k = b.add(b.mul(k_blk, b.const_i32(8)), b.const_i32(slot)). Pin the mul
+     * (with its const 8) before const(slot) to match Python's left-to-right
+     * arg evaluation (C call-arg order is unspecified). */
+    {
+        ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
+        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+    }
+    if(out0)
+        *out0 = m_in_atom;
+    if(out1)
+        *out1 = k;
+}
+
+/* MFMA 16x16x32 B operand: (k_blk*8 + slot, lane % 16). */
+static void _mfma_b_16x16x32(
+    ckc_ir_builder_t* b, ckc_value_t* lane, int slot, ckc_value_t** out0, ckc_value_t** out1)
+{
+    ckc_value_t *c16, *n_in_atom, *k_blk, *k;
+    CKC_ATI_COORD_GUARD(b, out0, out1);
+    c16       = ckc_b_const_i32(b, 16);
+    n_in_atom = ckc_b_mod(b, lane, c16);
+    k_blk     = ckc_b_div(b, lane, c16);
+    {
+        ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
+        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+    }
+    if(out0)
+        *out0 = k;
+    if(out1)
+        *out1 = n_in_atom;
+}
+
+/* MFMA 32x32x16 A operand: (lane % 32, k_blk*8 + slot). The K=16 sibling of
+ * _mfma_a_32x32x8; same CDNA3 K-packing (contiguous 8-K block per k_blk) as
+ * the verified 16x16x32 atom (per MfmaAtom.f16_32x32x16). */
+static void _mfma_a_32x32x16(
+    ckc_ir_builder_t* b, ckc_value_t* lane, int slot, ckc_value_t** out0, ckc_value_t** out1)
+{
+    ckc_value_t *c32, *m_in_atom, *k_blk, *k;
+    CKC_ATI_COORD_GUARD(b, out0, out1);
+    c32       = ckc_b_const_i32(b, 32);
+    m_in_atom = ckc_b_mod(b, lane, c32);
+    k_blk     = ckc_b_div(b, lane, c32);
+    {
+        ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
+        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+    }
+    if(out0)
+        *out0 = m_in_atom;
+    if(out1)
+        *out1 = k;
+}
+
+/* MFMA 32x32x16 B operand: (k_blk*8 + slot, lane % 32). */
+static void _mfma_b_32x32x16(
+    ckc_ir_builder_t* b, ckc_value_t* lane, int slot, ckc_value_t** out0, ckc_value_t** out1)
+{
+    ckc_value_t *c32, *n_in_atom, *k_blk, *k;
+    CKC_ATI_COORD_GUARD(b, out0, out1);
+    c32       = ckc_b_const_i32(b, 32);
+    n_in_atom = ckc_b_mod(b, lane, c32);
+    k_blk     = ckc_b_div(b, lane, c32);
+    {
+        ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
+        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+    }
+    if(out0)
+        *out0 = k;
+    if(out1)
+        *out1 = n_in_atom;
+}
+
 /* MFMA 16x16x4 fp32 A operand (#8348): scalar float per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
 static void _mfma_a_16x16x4_f32(
@@ -605,7 +689,10 @@ static const ckc_layout_map_t lm_mfma_16x16x16_a = {CKC_MMA_ROLE_A, 4, 64, _mfma
 static const ckc_layout_map_t lm_mfma_16x16x16_b = {CKC_MMA_ROLE_B, 4, 64, _mfma_b_16x16};
 static const ckc_layout_map_t lm_mfma_16x16x16_c = {CKC_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 
-/* --- mfma_f32_16x16x32_{f16,bf16,fp8,bf8}: only c map (frag 8/8/4, wave64) --- */
+/* --- mfma_f32_16x16x32_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/4, wave64).
+ * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
+static const ckc_layout_map_t lm_mfma_16x16x32_a = {CKC_MMA_ROLE_A, 8, 64, _mfma_a_16x16x32};
+static const ckc_layout_map_t lm_mfma_16x16x32_b = {CKC_MMA_ROLE_B, 8, 64, _mfma_b_16x16x32};
 static const ckc_layout_map_t lm_mfma_16x16x32_c = {CKC_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 
 /* --- mfma_f32_32x32x8_f16: a/b/c present (frag 4/4/16, wave64) --- */
@@ -613,7 +700,10 @@ static const ckc_layout_map_t lm_mfma_32x32x8_a = {CKC_MMA_ROLE_A, 4, 64, _mfma_
 static const ckc_layout_map_t lm_mfma_32x32x8_b = {CKC_MMA_ROLE_B, 4, 64, _mfma_b_32x32x8};
 static const ckc_layout_map_t lm_mfma_32x32x8_c = {CKC_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
 
-/* --- mfma_f32_32x32x16_{f16,bf16,fp8,bf8}: only c map (frag 8/8/16) --- */
+/* --- mfma_f32_32x32x16_{f16,bf16,fp8,bf8}: a/b/c present (frag 8/8/16, wave64).
+ * fp8/bf8 share the f16 operand lane layout (same a_per_lane=8, K-packing). --- */
+static const ckc_layout_map_t lm_mfma_32x32x16_a = {CKC_MMA_ROLE_A, 8, 64, _mfma_a_32x32x16};
+static const ckc_layout_map_t lm_mfma_32x32x16_b = {CKC_MMA_ROLE_B, 8, 64, _mfma_b_32x32x16};
 static const ckc_layout_map_t lm_mfma_32x32x16_c = {CKC_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
 
 /* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
@@ -835,8 +925,8 @@ static const ckc_mma_op_t k_mma_gfx942[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp8e4m3",
@@ -850,8 +940,8 @@ static const ckc_mma_op_t k_mma_gfx942[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf8e5m2",
@@ -865,8 +955,8 @@ static const ckc_mma_op_t k_mma_gfx942[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf8e5m2",
@@ -880,8 +970,8 @@ static const ckc_mma_op_t k_mma_gfx942[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
 };
 
@@ -944,8 +1034,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp16",
@@ -974,8 +1064,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf16",
@@ -1004,8 +1094,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf16",
@@ -1034,8 +1124,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "fp8e4m3",
@@ -1049,8 +1139,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "fp8e4m3",
@@ -1064,8 +1154,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
     {"mma",
      "bf8e5m2",
@@ -1079,8 +1169,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      4,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
      &lm_mfma_16x16x32_c},
     {"mma",
      "bf8e5m2",
@@ -1094,8 +1184,8 @@ static const ckc_mma_op_t k_mma_gfx950[] = {
      8,
      16,
      64,
-     NULL,
-     NULL,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
     /* fp4/fp6 pass through normalize_dtype unchanged; op_ids carry frag lengths
      * only (no verified maps), per _MMA_FRAGMENT_INFO. */

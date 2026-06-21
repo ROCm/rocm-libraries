@@ -273,7 +273,7 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
     }
     else if(ctx->K_SINGLE_BUFFER)
     {
-        /* #69 single K slot. Only V[i] is in flight here (next-K was deferred).
+        /* single K slot. Only V[i] is in flight here (next-K was deferred).
          * Fully drain it for PV, then s_barrier. After the barrier all QK[i]
          * K_lds reads are retired, so re-issue the next-K prefetch into the
          * single slot (overlaps PV[i]; the next iter-start full drain makes it

@@ -168,7 +168,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | `instance_<arch>_<name>.c`, `helper_ck_dsl.instances.<arch>.<name>.c` | `src/instances/<arch>/<name>.c` |
 
 **Tasks (DONE).**
-- T0.1 ✅ Script-generated old→new path map (`/tmp/ws0_map.tsv`): 220 files, 0 unmapped, 0 collisions after disambiguating the 2 `instance_`/`helper_` same-base pairs (`gemm_multi_d`, `img2col`) with a `_helpers` suffix.
+- T0.1 ✅ Script-generated old→new path map (220 files): 0 unmapped, 0 collisions after disambiguating the 2 `instance_`/`helper_` same-base pairs (`gemm_multi_d`, `img2col`) with a `_helpers` suffix.
 - T0.2 ✅ Moved every file with plain `mv` (git is handled out-of-band by the owner). No content edits except build-glob references.
 - T0.3 ✅ CMake `file(GLOB …)` → `file(GLOB_RECURSE … CONFIGURE_DEPENDS src/*.c)`; updated `run_parity.sh` / `run_gemm_parity.sh` from `src/*.c` to `$(find "$CKC/src" -name '*.c')`.
 - T0.4 ✅ No `#include` changes needed (all includes are `ckc/`-prefixed; 0 relative includes).
@@ -212,7 +212,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 - T2.2 **L1 verifier-parity**, **L2 IR-diff**, **L3 `.ll` sha-identity** lanes (CPU-only; run on every PR). L3 extends the current 63-pair harness to full enumeration + all arches + identical-rejection accounting.
 - T2.3 **L4 fuzzer**: random *valid* spec generator (constrained by `is_valid_spec`) → assert L1+L2+L3 agreement, no crash, under **ASan/UBSan**. Seed-logged for reproducibility.
 - T2.4 **L5 golden/regression gate**: lock current known-good `.ll`/HSACO digests (extend `_golden/`); changes must match or be explicitly blessed.
-- T2.5 **L6 numeric on-GPU** (per §7): reference impls + tolerance table + cross-backend bit-identity + backend-vs-reference. Arch runners gfx942/gfx950/RDNA (alola cluster).
+- T2.5 **L6 numeric on-GPU** (per §7): reference impls + tolerance table + cross-backend bit-identity + backend-vs-reference. Arch runners gfx942/gfx950/RDNA (multi-arch GPU CI cluster).
 - T2.6 **Parity dashboard**: JSON + human report, per-family/arch/backend status over time; consumed by the soak (WS8).
 - T2.7 **Example repeatability framework** (§7.5): every file under `examples/` becomes deterministic (fixed seeds), single-command, golden-recorded, registered, CI-smoked.
 
@@ -391,7 +391,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS19 — Build/config/artifact hygiene: make staleness loud-failing [defense-in-depth]
 
-**Premise.** *Every* false failure this session was a stale/wrong artifact used silently — the stale `ck_dsl_c/build` archive (`CKC_LIB` defaulted to it → "Conv C-JIT broken"), `alola_sync` shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
+**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `ck_dsl_c/build` archive (`CKC_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
 
 **Key constraint:** stamp **artifacts, not the emitted `.ll`** — a hash comment in the `.ll` would break the byte-identity differential gate (Python doesn't emit it). Stamps live in the archive/HSACO/manifest metadata; consumers validate those.
 
@@ -410,7 +410,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Premise.** A comprehensive review + hardening of **all** code this program produced/touched — broader than WS3-hardening (which was `-Werror`+sanitizers on the C engine alone). Run as **dynamic workflows**: fan out finders per (dimension × area) → **adversarially verify** each finding (independent refuters, default-refuted, majority vote — kills noise) → synthesize confirmed issues → fix → re-verify. Every fix harness-gated (`run_diff`/golden/numeric unchanged, tests green).
 
-**Areas (all):** the C++ engine (`core/ir`, lowerers, instances, helpers), Python `ck_dsl` (core, helpers, instances, dispatch, heuristics, `backend.py`, `ir_serialize`/`verify`), the provider (runtime, engines, plans, dispatcher, comgr, ml_heuristic), the `ckc_engine` bindings, the differential harness itself, the alola CI scripts.
+**Areas (all):** the C++ engine (`core/ir`, lowerers, instances, helpers), Python `ck_dsl` (core, helpers, instances, dispatch, heuristics, `backend.py`, `ir_serialize`/`verify`), the provider (runtime, engines, plans, dispatcher, comgr, ml_heuristic), the `ckc_engine` bindings, the differential harness itself, the GPU CI cluster scripts.
 
 **Dimensions (one workflow wave each, fanned across areas, adversarially verified):** (1) correctness/logic (esp. the recent conv rename/3d, sched-suppression, datalayout, atoms, agpr_alloc); (2) memory/resource/lifetime safety (arena ownership, leaks, UAF, the RAII conversion); (3) error-handling + edge cases + OOM + boundary shapes; (4) **security/input-validation** (comgr `.ll` feed, kernarg packing bounds, the IR parser, provider ParamParsers, C-JIT); (5) API/ABI correctness (`extern "C"` boundary, exceptions-across-ABI shims, version gating); (6) concurrency/reentrancy (launcher FIFO, multi-stream, runtime cache, harness parallelism); (7) byte-identity + determinism invariants (the `vsnprintf` core, arena-order determinism); (8) perf/quality (non-blocking).
 
@@ -465,7 +465,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 - **Compile-only CPU strategy:** CPU refs for *semantics* (numpy/torch/hipDNN-CPU/tiny KernelDef interpreter for scalar ops); LLVM-IR *structural* validation or IR checksum for compiler evidence; HIP-debug lowering as a readable cross-check only (**never** run AMDGPU IR on CPU as correctness).
 - **Filters:** op / arch / dtype / family / smoke|full / numeric|perf / integration-target. **Split** must-pass-per-PR (T0 + targeted T1) vs nightly GPU/perf.
 
-**WS15 — alola multi-arch execution.** Run the tiers across **gfx942/gfx950/gfx1151/gfx1201/gfx1250** on the alola SLURM cluster (passwordless ssh + `~/.alola.sh` + per-arch nodes). SLURM job scripts per tier per arch (T0/T1 on ROCm-no-GPU nodes; T2-T4 on per-arch GPU nodes; T5 cohorts); HSACO cache across runs (stable key) to cut GPU-node dependency; stratified scheduling (T0/T1 per-PR, T2-T4 nightly/arch, T5 scheduled); aggregate multi-arch dashboard.
+**WS15 — multi-arch execution.** Run the tiers across **gfx942/gfx950/gfx1151/gfx1201/gfx1250** on the multi-arch GPU CI SLURM cluster (per-arch nodes). SLURM job scripts per tier per arch (T0/T1 on ROCm-no-GPU nodes; T2-T4 on per-arch GPU nodes; T5 cohorts); HSACO cache across runs (stable key) to cut GPU-node dependency; stratified scheduling (T0/T1 per-PR, T2-T4 nightly/arch, T5 scheduled); aggregate multi-arch dashboard.
 
 **Success.** A helper-only PR gets high confidence from T0 + targeted T1; GPU CI used only where genuinely required; perf regressions carry enough metadata to separate source-regression from environment drift. The WS8 soak runs over this multi-arch surface.
 
@@ -495,7 +495,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS12 — IR-seam collapse: shrink the dual-builder drift tax [resolves D3]
 
-**Premise (proven this session).** The dual *builders* drift silently — the 42-family arg-eval-order finding (WS5) showed it's structural, recurring, and invisible to `.ll`. The harness makes it *survivable*, not *cheap*. WS12 shrinks the tax at the root: make **`ck.dsl.ir/v1` the runtime interchange** so there is **one lowerer of record** (C++) consuming serialized IR. For baked/shipped instances this **eliminates the C builder** — no C builder, no arg-eval drift. The instance **builders stay dual and per-instance selectable** (Python authoring + C++ runtime-JIT): the collapse is at the *lowerer*, not the builders. Byte-identity is then required only for the **flex set** (instances that need a C builder for runtime arbitrary-shape JIT), and there the gate is **IR-level** (cheaper, upstream of `.ll` text). Foundation already built: WS1 serializer + `ckc_ir_parse`, WS4 `CK_DSL_BACKEND` frontend flag, the differential harness.
+**Premise (proven empirically).** The dual *builders* drift silently — the 42-family arg-eval-order finding (WS5) showed it's structural, recurring, and invisible to `.ll`. The harness makes it *survivable*, not *cheap*. WS12 shrinks the tax at the root: make **`ck.dsl.ir/v1` the runtime interchange** so there is **one lowerer of record** (C++) consuming serialized IR. For baked/shipped instances this **eliminates the C builder** — no C builder, no arg-eval drift. The instance **builders stay dual and per-instance selectable** (Python authoring + C++ runtime-JIT): the collapse is at the *lowerer*, not the builders. Byte-identity is then required only for the **flex set** (instances that need a C builder for runtime arbitrary-shape JIT), and there the gate is **IR-level** (cheaper, upstream of `.ll` text). Foundation already built: WS1 serializer + `ckc_ir_parse`, WS4 `CK_DSL_BACKEND` frontend flag, the differential harness.
 
 **Wave A — IR-artifact lowering pipeline.** End-to-end `Python KernelDef → serialize ck.dsl.ir/v1 → C ckc_ir_parse → C lower → comgr → HSACO`. Cross-engine equivalence test: **Python-built IR lowered by C == Python's own lower** (byte-identical) across families (extends WS1's C round-trip to the cross-engine direction). Deliver a `lower-from-IR` entry + test.
 
@@ -609,7 +609,7 @@ The "very high" complexity families (conv, attention, MoE) get the deepest numer
 | `examples` | every PR (smoke), nightly (full) | `examples/run_all.py --check` | yes |
 | `soak-nightly` | nightly | `both` full matrix → dashboard | tracked (WS8 exit) |
 
-GPU runners: the alola cluster (gfx942/gfx950/RDNA nodes) provides the arch lanes; jobs scheduled to avoid cross-thermal-state measurement (numeric correctness is thermal-independent; any perf assertions use same-session ratios only).
+GPU runners: the multi-arch GPU CI cluster (gfx942/gfx950/RDNA nodes) provides the arch lanes; jobs scheduled to avoid cross-thermal-state measurement (numeric correctness is thermal-independent; any perf assertions use same-session ratios only).
 
 ---
 
@@ -648,7 +648,7 @@ Phase 5  (proof)                         WS8 differential soak → default flip
 | SSA-id drift recurs | high | IR serialization carries explicit ids (seam a); L2 IR-diff catches it upstream of `.ll` |
 | GCC arg-eval-order UB | medium | UBSan in test build (T3.5); sequencing audit (T3.6); warnings-as-errors |
 | Dual instance maintenance burden long-term | medium | Accepted trade per owner; differential harness makes it safe; seam (b) reachable later via existing bindings |
-| GPU runner availability for L6 | medium | alola cluster scheduling; nightly cadence; CPU lanes carry per-PR load |
+| GPU runner availability for L6 | medium | GPU CI cluster scheduling; nightly cadence; CPU lanes carry per-PR load |
 | Scope is very large | high | Strict phasing; each WS independently shippable; fan-out with a shared gate |
 | pybind surface (225 methods) churn | medium | Generate bindings mechanically; bind the stable IR/lower entry points, not every internal |
 | Provider ABI break during WS3 | medium | `extern "C"` shims (R3.4) keep the ABI stable until WS7 |
@@ -686,7 +686,7 @@ Phase 5  (proof)                         WS8 differential soak → default flip
 
 ## Appendix A — Folder reorg map (canonical)
 
-The authoritative old→new path table is `/tmp/ws0_map.tsv` (220 rows), generated from the dot-names by the WS0 script. Pattern summary (faithful 1:1 with the Python package — no family grouping):
+The authoritative old→new path table (220 rows) is generated from the dot-names by the WS0 script. Pattern summary (faithful 1:1 with the Python package — no family grouping):
 - `helper_ck_dsl.<pkg>.<mod>.c` → `src/<pkg-as-dirs>/<mod>.c` (dot-to-slash; e.g. `helper_ck_dsl.helpers.atoms.c` → `src/helpers/atoms.c`; `helper_ck_dsl.instances.common.fuse.c` → `src/instances/common/fuse.c`).
 - `instance_<name>.c` → `src/instances/common/<name>.c`; `instance_<arch>_<name>.c` → `src/instances/<arch>/<name>.c` (arch ∈ gfx942/gfx950/gfx1151/gfx1201). C part-files (the port split single Python modules) cluster by name prefix within `common/`.
 - Same-base `instance_X.c` + `helper_…instances.common.X.c` collisions (only `gemm_multi_d`, `img2col`) → the helper-origin TU gets `<name>_helpers.c`.

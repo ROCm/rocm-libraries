@@ -509,26 +509,26 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
 
 
 def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
-    """#66 d128 occupancy lever: select T = block_size (small tile) + nw=2 for
+    """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
     the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
 
-    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured #66; re-verified #67 on
-    the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
+    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured same-session; re-verified
+    on the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
     K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB at T=2*block_size -> only 1 workgroup
     fits the 64 KB/CU budget; the register file already admits 2 waves/SIMD
     (V+A=229 <= 256). Halving the tile to T=block_size makes LDS=24 KB and
     VGPR=173 -> 2 WG/CU (measured via llvm-readelf on the produced HSACO:
     OFF VGPR=229/256, LDS=48 KB -> 1 WG/CU; ON VGPR=173, AGPR=0, LDS=24 KB
     -> 2 WG/CU, for S=1024/2048/4096 alike). Same-session vs torch SDPA FLASH
-    (#67 apples-to-apples, OFF vs ON on this exact tree):
+    (apples-to-apples, OFF vs ON on this exact tree):
       bf16: S1024 1.333x->1.437x, S2048 0.968x->1.059x (CROSS 1.0),
             S4096 0.916x->0.974x (DSL 0.789->0.741 ms, +6% faster kernel).
       fp16: S1024 1.312x->1.436x, S2048 0.973x->1.061x (CROSS 1.0),
             S4096 0.918x->0.975x. Correctness rel ~4.4e-3 bf16 / ~5.5e-4 fp16
             (IDENTICAL to baseline at every S).
 
-    **#67 RECONCILIATION + DEFAULT-ON.** The small-tile win REQUIRES nw=2 for
-    ALL seqlens (the #64 nw=4-at-S>=2048 rule + T=32 is occupancy-WORSE: 56 KB
+    **RECONCILIATION + DEFAULT-ON.** The small-tile win REQUIRES nw=2 for
+    ALL seqlens (the prior nw=4-at-S>=2048 rule + T=32 is occupancy-WORSE: 56 KB
     LDS -> back to 1 WG/CU), so when this gate fires the num_warps selector
     forces nw=2. Verified C-twin selector output == Python for the whole cohort
     and that NO non-cohort shape changes (3826 trace records across the three
@@ -539,7 +539,7 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
     existing tile_size value, byte-identical to the old code path).
 
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SMALL_TILE=0`` (or off/no/false) force-
-    DISABLES the lever, restoring the #64 routing (T=64, nw=2/4). Any other
+    DISABLES the lever, restoring the prior routing (T=64, nw=2/4). Any other
     value (or unset) -> default-ON for the cohort.
     """
     env = (
@@ -558,15 +558,16 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
-    """#69 d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
+    """d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
 
     For the same single-batch d128 cohort that ``_enable_d128_small_tile`` gates,
     keep the LARGER T=64 tile (better long-context per-iter amortisation) but
     halve K_lds via K single-buffer so LDS stays at 32 KB -> 2 WG/CU. The
     next-K prefetch is re-issued after the PV-wait barrier (no WAR race). This
     crosses flash at the S4096 holdout (0.976x -> 1.020x bf16+fp16) and beats
-    the #66 T=32 pick at every measured shape (gfx950 MI355X, same-session vs
-    torch SDPA FLASH, GPU-idle; see #69 report). Occupancy proof (llvm-readelf):
+    the small-tile T=32 pick at every measured shape (gfx950 MI355X, same-session
+    vs torch SDPA FLASH, GPU-idle; see the long-context analysis). Occupancy proof
+    (llvm-readelf):
     T=64 + K-single -> VGPR=215 AGPR=0 LDS=32 KB -> 2 WG/CU.
 
     Scoped to the EXACT V-single-buffer combo path the gfx950 emitter wires K
@@ -653,7 +654,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
-    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort (#52).
+    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
     # Autotuner-proven KV tile per shape (gfx950, no-SW):
     #   * d128 -> T = 2 * block_size (32). The d128 winners all kept the
     #     default 2x tile; wider tiles over-allocated LDS without amortising.
@@ -663,12 +664,13 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     if _enable_single_batch_combo(problem):
         if problem.head_size == 64:
             return 128
-        # #69 d128 occupancy lever (supersedes the #66 small-tile pick for the
+        # d128 occupancy lever (supersedes the small-tile pick for the
         # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound
-        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU). #66
-        # halved the TILE (T=block_size=32) to drop LDS 48->24 KB -> 2 WG/CU,
-        # but at T=32 the long-context S4096 path runs 128 outer iters whose
-        # per-iter overhead under-amortises -> only 0.976x flash. #69 instead
+        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU). The
+        # small-tile lever halved the TILE (T=block_size=32) to drop LDS
+        # 48->24 KB -> 2 WG/CU, but at T=32 the long-context S4096 path runs
+        # 128 outer iters whose per-iter overhead under-amortises -> only
+        # 0.976x flash. The K-single-buffer lever instead
         # keeps the LARGER T=64 tile (64 iters at S4096) and halves K_lds via
         # ``use_k_single_buffer`` (K_lds[1,T,HD]=16 KB + V_lds[1,T,HD]=16 KB =
         # 32 KB -> 2 WG/CU, VGPR=215 AGPR=0). This crosses flash at S4096
@@ -802,7 +804,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         return max(1, target)
     if _enable_single_batch_combo(problem):
         # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort
-        # (#52, re-tuned by the joint num_warps x schedule sweep). Per shape
+        # (re-tuned by the joint num_warps x schedule sweep). Per shape
         # (gfx950, no-SW), same-session vs flash:
         #   * d128 (BLOCK_M = 32 * nw): S<=1024 -> nw=2 (nw=1 is occupancy-
         #     starved on the tiny single-seq grid; nw=2 with V-double-buffer
@@ -812,14 +814,14 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         #   * d64: nw=4 paired with T=128 (the wider tile + 4 warps was the
         #     winner for both MHA and GQA-8 d64 S2048).
         #
-        # #66 RECONCILIATION: the d128 SMALL-TILE occupancy win (T=block_size
-        # -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens. The #64 nw=4-at-
+        # RECONCILIATION: the d128 SMALL-TILE occupancy win (T=block_size
+        # -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens. The prior nw=4-at-
         # S>=2048 choice combined with T=block_size is occupancy-WORSE
         # (nw=4 + T=32 -> 56 KB LDS -> back to 1 WG/CU); the measured 2-WG/CU
         # crossing (S=2048 1.06x, S=4096 1.02x flash) only holds at nw=2 + T=32
         # (V+A=173, LDS=24 KB). So when the small-tile cohort is active, force
         # nw=2 here, overriding the S>=2048 -> nw=4 rule. When the small-tile
-        # gate is OFF this branch is byte-for-byte the #64 behavior.
+        # gate is OFF this branch is byte-for-byte the prior behavior.
         if problem.head_size == 64:
             target = 4
         elif _enable_d128_small_tile(problem):
@@ -996,7 +998,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
-        # Transposed-softmax VALU sub-flags + V-prefetch schedule (#52). These
+        # Transposed-softmax VALU sub-flags + V-prefetch schedule. These
         # vary with max_seqlen_q within the single-batch cohort independently of
         # num_warps/wpe/tile, so they MUST be in the key to avoid a launcher
         # collision between two seqlens that share the same geometry but differ
@@ -1039,12 +1041,12 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
         return problem.waves_per_eu
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
-    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort (#52,
-    # re-tuned by the joint num_warps x schedule sweep): wpe=2 across all
+    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort
+    # (re-tuned by the joint num_warps x schedule sweep): wpe=2 across all
     # seqlens. The prior wpe=3-at-S>=4096 rule REGRESSED the single-batch
     # cohort (d128 S4096: nw=4 wpe=2 = 0.881 vs nw=4 wpe=3 = 0.856). Checked
     # before the combo wpe=4 rule because the single-batch geometry is
-    # smaller-grid and prefers fewer waves. (#66 small-tile uses nw=2 + T=32
+    # smaller-grid and prefers fewer waves. (The small-tile lever uses nw=2 + T=32
     # which is 2 WG/CU at wpe=2; wpe=2 is correct for that cohort too.)
     if _enable_single_batch_combo(problem):
         return 2
@@ -1122,7 +1124,7 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
 def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
     """Single-batch (num_seqs == 1) d128/d64 prefill -> full 32x32 combo.
 
-    The combinatorial autotuner (#52, ``/tmp/autotune_vidya_attn``) proved
+    The combinatorial autotuner proved
     that for SINGLE-BATCH (num_seqs == 1) long prefill the production
     selector was routing d128 and d64 to the legacy 16x16x32 path, which is
     ~1.5-2.7x SLOWER than the full 32x32 transposed "combo" and the combo is
@@ -1192,7 +1194,7 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem) -> bool:
     occupancy-starved nw=1 baseline). Turning vdbuf off for d128 also
     auto-disables the lever-3 ``use_sched_barrier`` (it gates on this
     predicate), which was only patching the symptom of the unwanted prefetch.
-    (#66 small-tile keeps d128 vdbuf OFF too: its 2-WG/CU LDS budget = K_lds[2]
+    (The small-tile lever keeps d128 vdbuf OFF too: its 2-WG/CU LDS budget = K_lds[2]
     24 KB + V_lds[1] 8 KB; a V[i+1] prefetch would re-inflate LDS and drop back
     to 1 WG/CU.)
 
@@ -1213,14 +1215,14 @@ def _enable_v_double_buffer(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_sched_barrier(problem: UnifiedAttentionProblem) -> bool:
-    """Enable the lever-3 sched_barrier fence (CK-Tile-derived, #51/#57).
+    """Enable the lever-3 sched_barrier fence (CK-Tile-derived).
 
     A ``__builtin_amdgcn_sched_barrier`` is placed between the QK MFMA cluster
     and the post-QK async prefetch issue so the LLVM post-RA scheduler keeps the
     QK MFMAs packed instead of interleaving the next-tile ``buffer_load_lds``
     into the MFMA window. Bit-identical numerics (pure scheduler hint).
 
-    Same-session A/B on MI355X (gfx950, LLVM backend; #57 ``/tmp/ck57/ab.py``):
+    Same-session A/B on MI355X (gfx950, LLVM backend):
       * SINGLE-BATCH d128 S<=1024 (num_warps==1 + V-double-buffer): +35.6-36.0%
         on bf16 AND fp16 (0.152 -> 0.112 ms) -> DSL/flash ~0.67x -> ~0.92x. The
         lone resident wave cannot hide the prefetch-in-MFMA-window cost, so
@@ -1246,8 +1248,7 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem) -> bool:
     issues the V load earlier in the iteration so the long KV loop overlaps the
     V DMA with the QK MFMA + softmax window. Bit-identical to the no-flag path.
 
-    Scoped to d64-LONG by the same-session ablation
-    (``/tmp/sb_combo_verify/ablate.py``, MI355X gfx950 LLVM):
+    Scoped to d64-LONG by same-session ablation (MI355X gfx950 LLVM):
       * d64 GQA-8 S2048: T128 + early-V 104.3us is the best (vs T128 none
         108.1, T64 none 112.2) -> ON for d64 long.
       * d128 S2048/S4096: early-V REGRESSES (e.g. fp16 S2048 187us vs none
@@ -1300,7 +1301,7 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     beyond those silently breaks the post-init validation in the spec
     dataclass.
 
-    **Single-batch (num_seqs == 1) update (#52):** the combinatorial
+    **Single-batch (num_seqs == 1) update:** the combinatorial
     autotuner proved the FULL combo is 1.5-2.7x FASTER than the legacy
     16x16x32 path for single-batch d128/d64 long prefill (and
     correctness-equal). The old gate refused num_seqs == 1 based on a
@@ -1335,7 +1336,7 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if _enable_combo_2d(problem):
         return True
-    # Single-batch d128/d64 prefill full-combo cohort (#52). This is the
+    # Single-batch d128/d64 prefill full-combo cohort. This is the
     # routing fix: num_seqs == 1 now gets the 32x32 transposed combo.
     if _enable_single_batch_combo(problem):
         return True
@@ -1768,7 +1769,7 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
     path AND no sliding window (spec ``__post_init__`` enforces both).
 
     Historically these only fired for the narrow ``_enable_combo_2d`` family
-    (bf16 / block_size==32 / GQA-8). The combinatorial autotuner (#52) showed
+    (bf16 / block_size==32 / GQA-8). The combinatorial autotuner showed
     the SAME stack is the proven winner for:
       * single-batch (num_seqs == 1) d128/d64 prefill (``_enable_single_batch_combo``);
       * the multi-batch (num_seqs >= 2) transposed d128/d64 prefill path -- the
@@ -1869,7 +1870,7 @@ def _tiled_spec_from_problem(
             # Port the fp16 flash family's conflict-free V store (cfvst) to bf16
             # (byte-size driven: bf16 == 2 bytes == fp16, the perm_b32 transpose
             # rides raw i32 words, the K=8 atom is gfx942-legal). Measured ~3%
-            # win on D64 prefill (the #44 residual naive-V bottleneck); D128 and
+            # win on D64 prefill (the residual naive-V bottleneck); D128 and
             # decode keep the naive-V feed (cfvst nw=4 overflows LDS there and
             # the sliced-K ring that would make it fit regressed -- see
             # _gfx942_bf16_wide_use_cfvst).
@@ -1942,7 +1943,7 @@ def _tiled_spec_from_problem(
         )
     if "use_sched_barrier" in _spec_field_names:
         _gfx950_schedule_fields["use_sched_barrier"] = _enable_sched_barrier(problem)
-    # #69 d128 long-context lever: K single-buffer lets the larger T=64 tile fit
+    # d128 long-context lever: K single-buffer lets the larger T=64 tile fit
     # the 2-WG/CU LDS budget at HD=128 (see _select_2d_tile_size). Gated on the
     # same d128 small-tile cohort + opt-in env so default/production routing is
     # byte-identical. Field-presence guarded (gfx942/gfx1250 spec classes lack
@@ -2003,7 +2004,7 @@ def _tiled_spec_from_problem(
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
-        # CK-Tile-derived sched_barrier steering (lever 3 from #51). Fences the
+        # CK-Tile-derived sched_barrier steering (lever 3 from the CK Tile ISA analysis). Fences the
         # QK MFMA cluster from the post-QK async prefetch VMEM so the LLVM
         # scheduler keeps the MFMAs packed. Additive perf knob (no routing
         # change); enabled only for the single-batch d128 short-prefill cohort
@@ -2251,7 +2252,7 @@ def _resolve_gfx1250_tiled3d(problem: UnifiedAttentionProblem) -> _ResolvedTiled
     num_waves = _gfx1250_3d_num_waves()
     if num_waves == -1:  # auto: policy picks the wave count from the shape
         num_waves = 1
-    # #1 default-on (transposed V + wide ds_load); auto-off when an incompatible
+    # lever 1, default-on (transposed V + wide ds_load); auto-off when an incompatible
     # lever (multi-wave / double-buffer / register-P) is on.
     use_wide_lds_reads = (
         num_waves == 1
@@ -3211,14 +3212,34 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
         and not _enable_combo_2d(problem)
     ):
         return "llvm"
-    # Single-batch (num_seqs == 1) d128/d64 prefill combo cohort (#52): pin to
+    # Single-batch (num_seqs == 1) d128/d64 prefill combo cohort: pin to
     # LLVM-direct. The hipcc scheduler's heavier unrolled-loop pass only pays
     # off on the LARGE multi-batch grid; for the single-seq grid it is a big
-    # REGRESSION (same-session A/B ``/tmp/sb_combo_verify/ablate2.py``: d128
+    # REGRESSION (same-session A/B: d128
     # S1024 none_hipcc 95us vs none_llvm 49us; d128 S2048 hipcc ~174us vs llvm
     # 143us). The total_work rule below would otherwise pick hipcc for these
     # long single-seq shapes, so gate them to LLVM explicitly.
     if _enable_single_batch_combo(problem):
+        return "llvm"
+    # P_LDS transposed-read PV path correctness pin. When the 2D
+    # kernel lands on the legacy 16x16x32 path with neither the register-P
+    # migration (``_enable_register_pv``) nor the 32x32 transposed combo
+    # (``_enable_mfma_32x32``), the PV stage publishes the softmax
+    # probabilities to LDS as 16-bit and reads them back transposed via
+    # ``ds_read_tr16``. The shipped system hipcc (ROCm 7.0 / LLVM 20)
+    # MISCOMPILES that transposed-LDS-read sequence: the output is ~0.84
+    # max-abs wrong (bad != 0) versus the fp32 reference, while the
+    # LLVM-direct (comgr / LLVM 22) build of the *same* IR is correct
+    # (rounding tol, bad == 0). The miscompile is path-specific, not
+    # dtype-specific -- it reproduces on bf16 too when register-P is forced
+    # off -- but the only production config that still routes onto this path
+    # is head_size==256 (the 32x32 combo excludes hd256 and register-P is
+    # bf16-only), so in practice this pins fp16 d256 long-prefill (which auto
+    # would otherwise compile via hipcc). Pin it to the proven LLVM-direct
+    # backend until the system hipcc is upgraded / the path is moved onto
+    # register-P for hd256. The perf delta is the ~5% hipcc-scheduler edge,
+    # which correctness strictly outranks.
+    if not _enable_register_pv(problem) and not _enable_mfma_32x32(problem):
         return "llvm"
     total_work = problem.num_seqs * max(problem.max_seqlen_q, 1)
     if problem.max_seqlen_q > 512 and total_work > 1024:

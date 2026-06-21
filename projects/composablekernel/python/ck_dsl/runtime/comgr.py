@@ -167,6 +167,29 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     return None
 
 
+def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
+    """Entrypoint hook: make LLVM-flavor selection import-order-independent.
+
+    The resolver never imports torch as a side effect (a library must not), so it
+    only prefers torch's bundled (newest) ``libamd_comgr`` when torch is ALREADY
+    in the process -- see :func:`hip_module._torch_bundled_lib`. A CLI / runner
+    that lowers IR should call this ONCE at startup, BEFORE the first lowering, so
+    the bundled comgr (e.g. ROCm 7.2 / llvm22) is in the process and the LLVM
+    flavor cannot be locked to a stale ``/opt/rocm`` by import order.
+
+    Best-effort: a no-op when torch is absent (the system comgr is then the only
+    one available anyway). Returns the resolved comgr ROCm ``(major, minor)`` so
+    the caller can log/verify the vintage it pinned. Idempotent and cheap once
+    torch is imported.
+    """
+    if "torch" not in sys.modules:
+        try:
+            import torch  # noqa: F401 -- pulls the bundled (newest) comgr into the process
+        except Exception:
+            pass
+    return resolved_lib_rocm_version()
+
+
 def _ir_flavor_is_llvm22(ir_text: str) -> Optional[bool]:
     """Infer an IR module's LLVM flavor from its ``target datalayout`` p8 field.
 

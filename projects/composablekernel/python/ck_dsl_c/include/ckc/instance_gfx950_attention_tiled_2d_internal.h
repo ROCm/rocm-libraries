@@ -126,10 +126,10 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     bool SKIP_LEGACY_QREG, TRANSPOSED_MASK_LIMIT, GROUPED_KV2;
     bool FAST_PAGED_KV_DESC, I64_KV_ADDR, EARLY_V_SCHEDULE;
     bool AGPR_ALLOC_ZERO;
-    /* #69: K single-buffer (1 K slot) so T=64 fits the 2-WG/CU LDS budget at
+    /* K single-buffer (1 K slot) so T=64 fits the 2-WG/CU LDS budget at
      * HD=128. The next-K prefetch is deferred to after the PV-wait barrier. */
     bool K_SINGLE_BUFFER;
-    /* Lever-3 (#51) sched_barrier fence after the QK MFMA cluster. */
+    /* Lever-3 (CK-Tile-derived) sched_barrier fence after the QK MFMA cluster. */
     bool USE_SCHED_BARRIER;
     int SCHED_BARRIER_MASK;
     /* fp8 K/V cache predicates */
@@ -536,7 +536,7 @@ typedef struct ckc_gfx950_attn2d_pv_inputs
     ckc_value_t* safe_tile1;
     ckc_value_t* nxt_buf;
     ckc_value_t* cur_buf;
-    /* #69: clamped next tile index for the deferred K single-buffer prefetch. */
+    /* clamped next tile index for the deferred K single-buffer prefetch. */
     ckc_value_t* safe_next_tile;
 } ckc_gfx950_attn2d_pv_inputs_t;
 

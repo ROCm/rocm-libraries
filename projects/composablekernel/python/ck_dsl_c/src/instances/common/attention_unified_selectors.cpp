@@ -112,7 +112,7 @@ static bool enable_combo_2d(const ckc_unified_attn_problem_t* p)
 }
 
 /* Python: _enable_single_batch_combo(problem). Single-batch (num_seqs == 1)
- * d128/d64 prefill -> full 32x32 combo (#52). The combinatorial autotuner proved
+ * d128/d64 prefill -> full 32x32 combo. The combinatorial autotuner proved
  * the full combo is 1.5-2.7x faster than the legacy 16x16x32 path for this cohort
  * and correctness-equal; the old gate's num_seqs>=2 restriction was stale (it was
  * measured on the bare transposed path, not the full combo). */
@@ -157,12 +157,12 @@ static bool enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
     return true;
 }
 
-/* Python: _enable_d128_small_tile(problem). #66 d128 occupancy lever: select
+/* Python: _enable_d128_small_tile(problem). d128 occupancy lever: select
  * T = block_size (small tile) + nw=2 for the single-batch d128 combo so the
  * kernel drops from 1 -> 2 WG/CU (the d128 combo is purely LDS-bound; halving
  * the tile takes LDS 48->24 KB and crosses flash on S=2048/S=4096).
  *
- * #67 DEFAULT-ON: enabled by default for the gfx950 single-batch d128 no-FP8
+ * DEFAULT-ON: enabled by default for the gfx950 single-batch d128 no-FP8
  * combo. This is a production ROUTING change (per-spec golden emit unchanged --
  * T=block_size is an existing tile_size value). ESCAPE HATCH:
  * HIPDNN_GFX950_D128_SMALL_TILE=0 (or off/no/false) force-DISABLES it. Mirrors
@@ -202,7 +202,7 @@ static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
     {
         return true;
     }
-    /* Single-batch d128/d64 prefill full-combo cohort (#52): the routing fix.
+    /* Single-batch d128/d64 prefill full-combo cohort: the routing fix.
        num_seqs == 1 now gets the 32x32 transposed combo. */
     if(enable_single_batch_combo(p))
     {
@@ -371,7 +371,7 @@ static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
     {
         return p->block_size;
     }
-    /* Single-batch d128/d64 prefill full-combo cohort (#52): d128 -> 2*BS,
+    /* Single-batch d128/d64 prefill full-combo cohort: d128 -> 2*BS,
        d64 -> 128 (paired with num_warps=4). */
     if(enable_single_batch_combo(p))
     {
@@ -379,8 +379,8 @@ static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
         {
             return 128;
         }
-        /* #66 d128 occupancy lever: halve the tile to T=block_size (one paged
-           block per iter) -> LDS 48->24 KB -> 2 WG/CU. #67 DEFAULT-ON;
+        /* d128 occupancy lever: halve the tile to T=block_size (one paged
+           block per iter) -> LDS 48->24 KB -> 2 WG/CU. DEFAULT-ON;
            HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
         if(enable_d128_small_tile(p))
         {
@@ -452,7 +452,7 @@ int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
         }
         return (t2 > 1) ? t2 : 1;
     }
-    /* Single-batch d128/d64 prefill full-combo cohort (#52, re-tuned by the
+    /* Single-batch d128/d64 prefill full-combo cohort (re-tuned by the
        joint num_warps x schedule sweep): d64 -> nw=4 (T=128); d128 -> nw=2
        (S<=1024, nw=2 + V-double-buffer OFF = 1.30x flash) / nw=4 (S>=2048,
        nw=4 wpe=2 lifts S=4096 to 0.885x). Subject to the same step-down. */
@@ -466,7 +466,7 @@ int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
         {
             t2 = 4;
         }
-        /* #66 RECONCILIATION: the d128 small-tile occupancy win (T=block_size
+        /* RECONCILIATION: the d128 small-tile occupancy win (T=block_size
            -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens; nw=4 + T=32 is
            occupancy-WORSE (56 KB LDS -> 1 WG/CU). Override the S>=2048 -> nw=4
            rule when the small-tile cohort is active. */
@@ -630,7 +630,7 @@ bool ckc_unified_attn_select_2d_waves_per_eu(const ckc_unified_attn_problem_t* p
     int wpe = 2;
     if(enable_single_batch_combo(p))
     {
-        /* Single-batch combo (#52, re-tuned by the joint num_warps x schedule
+        /* Single-batch combo (re-tuned by the joint num_warps x schedule
            sweep): wpe=2 across all seqlens. The prior wpe=3-at-S>=4096 rule
            regressed the cohort (d128 S4096 nw=4: wpe=2 0.881 > wpe=3 0.856). */
         wpe = 2;

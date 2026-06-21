@@ -872,6 +872,67 @@ static ckc_status_t _op_tile_buffer_load_vN_f16(ckc_h_lowerer_t* lw, const ckc_o
     return lw->status;
 }
 
+/* Python _op_tile_buffer_load_vN (dtype-generic): raw buffer load + memcpy into
+ * the <n x elem> result. f16/bf16 (2-byte): n = dwords*2; f32/i32: n = dwords. */
+static ckc_status_t _op_tile_buffer_load_vN(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+{
+    ckc_value_t *rsrc, *voffset, *soffset;
+    const char *res, *b_suffix, *raw_t, *tmp, *elem, *prefix;
+    int64_t dwords, n;
+    if(!ckc_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return ckc_h_fail(lw, CKC_ERR_VALUE, "tile.buffer_load_vN: bad operand/result count");
+    }
+    rsrc    = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    dwords  = mem_attr_int(op, "dwords", 0);
+    elem    = mem_attr_str(op, "elem_type", "f16");
+    prefix  = ckc_h_vec_prefix(elem, /*full_map=*/false);
+    n       = (strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0) ? dwords * 2 : dwords;
+    if(dwords == 1)
+    {
+        b_suffix = "_b32";
+    }
+    else if(dwords == 2)
+    {
+        b_suffix = "_b64";
+    }
+    else if(dwords == 4)
+    {
+        b_suffix = "_b128";
+    }
+    else
+    {
+        return ckc_h_fail(
+            lw, CKC_ERR_KEY, "tile.buffer_load_vN: unsupported dwords=%lld", (long long)dwords);
+    }
+    raw_t = (dwords == 1) ? "int" : ckc_arena_printf(&lw->b->arena, "i32x%lld", (long long)dwords);
+    res   = ckc_h_name(lw, op->results[0]);
+    tmp   = ckc_arena_printf(&lw->b->arena, "_blraw_%s", res);
+    ckc_h_emitf(lw,
+                "%s %s = __builtin_amdgcn_raw_buffer_load%s(%s, %s, %s, 0);",
+                raw_t,
+                tmp,
+                b_suffix,
+                ckc_h_name(lw, rsrc),
+                ckc_h_name(lw, voffset),
+                ckc_h_name(lw, soffset));
+    ckc_h_emitf(lw,
+                "%s%lld %s; __builtin_memcpy(&%s, &%s, %lld);",
+                prefix,
+                (long long)n,
+                res,
+                res,
+                tmp,
+                (long long)dwords * 4);
+    return lw->status;
+}
+
 /* ============================== buffer store ============================ */
 
 /* Python _op_tile_buffer_store_f16 */
@@ -1083,6 +1144,7 @@ const ckc_h_handler_entry_t* ckc_h_handlers_mem(void)
         /* buffer load/store */
         {CKC_OP_TILE_BUFFER_LOAD_F16, _op_tile_buffer_load_f16},
         {CKC_OP_TILE_BUFFER_LOAD_VN_F16, _op_tile_buffer_load_vN_f16},
+        {CKC_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
         {CKC_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
         {CKC_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
         /* async DRAM->LDS */

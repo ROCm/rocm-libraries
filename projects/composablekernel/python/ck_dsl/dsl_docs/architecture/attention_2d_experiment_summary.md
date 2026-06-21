@@ -6,7 +6,7 @@ Scope: bf16 prefill-2D unified attention, primarily `d64_b32_h64kv8` with sinks 
 
 > **Backend-validity note.** Perf and register/occupancy numbers are
 > backend-sensitive. Production is **llvm22 + comgr 7.2** (torch imported
-> first). Several of this session's pre-2026-06-19 d128 measurements were
+> first). Several pre-2026-06-19 d128 measurements were
 > taken on an **llvm20 + comgr 7.0.1** backend, where the d128 body falsely
 > read as 256 VGPR + spills / 1 WG/CU and the prefill gap looked far worse
 > (the small-tile / K-single-buffer occupancy story and the `sched_barrier`
