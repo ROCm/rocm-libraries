@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# roll_coverage.py -- tiered rolling status across representative kernels.
+#
+# For each tier it records concrete traces from an UNMODIFIED production builder,
+# rolls over one structural axis, and verifies the parametric recipe with the
+# recipe_expand oracle at sampled AND held-out shapes. Reports ROLLED (with
+# compression) or, for kernels beyond the current roller, a precise FALLBACK
+# reason -- the roller is safe-by-construction (the oracle rejects any bad roll),
+# so a fallback is "not compressed", never "wrong".
+#
+#   T1 small op       : qk_block (vec8 head dot)              over head_size D
+#   T2 GEMM           : gemm_universal (k-atom nest)          over tile_k
+#   T3 attention      : unified-attention 2D (the Section-3 kernel) over head_size
+#   T4 deep fused conv: deep_fused_conv_pool (conv0->conv1->pool) over pool tile
+#
+#   python3 -m ck_dsl.portable_ir.roll_coverage
+
+from typing import Any, Dict, List
+
+from ck_dsl.portable_ir.roll import roll, roll_report
+
+
+def _tiers():
+    from ck_dsl.instances.common.deep_fused_conv_pool import (
+        build_deep_fused_conv_pool, make_deep_fused_conv_pool_spec)
+    from ck_dsl.instances.common.gemm_universal import (
+        DataSpec, TileSpec, TraitSpec, UniversalGemmSpec, build_universal_gemm)
+    from ck_dsl.portable_ir import export_mha, qk_block
+
+    def gemm_tn(tn):
+        # CShuffle GEMM over tile_n: the mfma accumulator fan + CShuffle epilogue
+        # scale with tile_n (rolled via lane-label segmentation + type params).
+        spec = UniversalGemmSpec(
+            name=f"g{tn}", tile=TileSpec(16, tn, 16, 1, 1, 1, 16, 16, 16),
+            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+            data=DataSpec(), wave_size=64, block_size=64)
+        return build_universal_gemm(spec, arch="gfx950")
+
+    def conv_pool_pw(pw):
+        spec = make_deep_fused_conv_pool_spec(
+            n=1, h=64, w=128, c=8, k0=16, k1=16, r=3, s=3,
+            pool_tile_h=4, pool_tile_w=pw, tile_n=16, tile_k=16, warp_m=2, warp_n=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16, wave_size=64)
+        return build_deep_fused_conv_pool(spec, arch="gfx950")
+
+    dstr = [{"name": "D", "kind": "int"}, {"name": "dtype", "kind": "str"}]
+    return [
+        ("T1", "qk_block",
+         dict(build_at=lambda D: qk_block.build_qk_block(D, "f16"), axis="D",
+              sample_points=[64, 128], holdout_points=[256, 192, 96],
+              spec_decl=dstr, extra_spec={"dtype": "f16"})),
+        ("T2", "gemm_universal (CShuffle)",
+         dict(build_at=gemm_tn, axis="TN",
+              sample_points=[32, 64], holdout_points=[128, 256])),
+        ("T3", "unified-attention-2d",
+         dict(build_at=lambda D: export_mha.build("fp16", D, 2048, 1, 32, 1),
+              axis="D", sample_points=[64, 128], holdout_points=[256, 192, 96, 512],
+              spec_decl=dstr, extra_spec={"dtype": "fp16"})),
+        ("T4", "deep_fused_conv_pool",
+         dict(build_at=conv_pool_pw, axis="pool_tile_w",
+              sample_points=[4, 8], holdout_points=[16])),
+    ]
+
+
+def run_coverage() -> List[Dict[str, Any]]:
+    rows = []
+    for tier, label, kw in _tiers():
+        try:
+            r = roll(**kw)
+            rows.append({"tier": tier, "label": label, "ok": r.ok,
+                         "report": roll_report(r), "result": r, "error": None})
+        except Exception as e:  # noqa: BLE001 - record, don't abort the matrix
+            rows.append({"tier": tier, "label": label, "ok": False,
+                         "report": f"ERROR: {type(e).__name__}: {e}",
+                         "result": None, "error": e})
+    return rows
+
+
+def main() -> int:
+    rows = run_coverage()
+    for row in rows:
+        print(f"  [{row['tier']}] {row['label']:<24} {row['report']}")
+    rolled = sum(1 for r in rows if r["ok"])
+    print("-" * 76)
+    print(f"rolled+verified: {rolled}/{len(rows)}   "
+          f"(fallbacks are safe: the oracle rejects any non-byte-identical roll)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -5,8 +5,11 @@
  * a runtime spec, lower the emitted kernel to AMDGPU LLVM IR, and print the .ll.
  *
  *   usage: recipe_run <recipe.json> [--arch gfx950] [--int K=V]... [--str K=V]...
+ *          recipe_run <recipe.cbor>   --cbor        [--arch ...] [--int ...]...
+ *          recipe_run <bundle.cbor>   --bundle KEY  [--arch ...] [--int ...]...
  *
  * One recipe + a runtime spec produces the specialized kernel with no CPython.
+ * The CBOR forms are the compact shipping artifacts the runtime actually loads.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +18,7 @@
 #include "ckc/lower_llvm.h"
 #include "ckc/recipe_vm.h"
 
-static char* read_file(const char* path)
+static char* read_file(const char* path, size_t* out_len)
 {
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -29,6 +32,8 @@ static char* read_file(const char* path)
     size_t rd = fread(buf, 1, (size_t)n, f);
     buf[rd] = '\0';
     fclose(f);
+    if (out_len)
+        *out_len = rd;
     return buf;
 }
 
@@ -54,6 +59,8 @@ int main(int argc, char** argv)
     }
     const char* path = argv[1];
     const char* arch = "gfx950";
+    int use_cbor = 0;
+    const char* bundle_key = NULL;
 
     ckc_recipe_spec_int_t ints[32];
     ckc_recipe_spec_str_t strs[32];
@@ -62,6 +69,11 @@ int main(int argc, char** argv)
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--arch") == 0 && i + 1 < argc) {
             arch = argv[++i];
+        } else if (strcmp(argv[i], "--cbor") == 0) {
+            use_cbor = 1;
+        } else if (strcmp(argv[i], "--bundle") == 0 && i + 1 < argc) {
+            bundle_key = argv[++i];
+            use_cbor = 1;
         } else if (strcmp(argv[i], "--int") == 0 && i + 1 < argc && n_ints < 32) {
             char* val;
             char* key = split_kv(argv[++i], &val);
@@ -77,7 +89,8 @@ int main(int argc, char** argv)
         }
     }
 
-    char* text = read_file(path);
+    size_t blen = 0;
+    char* text = read_file(path, &blen);
     if (!text)
         return 1;
 
@@ -85,8 +98,18 @@ int main(int argc, char** argv)
     ckc_kernel_def_t* kernel = NULL;
     char err[CKC_ERR_MSG_CAP];
     err[0] = '\0';
-    ckc_status_t st =
-        ckc_recipe_run_from_json(text, ints, n_ints, strs, n_strs, &b, &kernel, err, sizeof err);
+    ckc_status_t st;
+    if (bundle_key) {
+        st = ckc_recipe_run_from_bundle_cbor((const unsigned char*)text, blen, bundle_key, arch,
+                                             ints, n_ints, strs, n_strs, &b, &kernel, err,
+                                             sizeof err);
+    } else if (use_cbor) {
+        st = ckc_recipe_run_from_cbor((const unsigned char*)text, blen, ints, n_ints, strs, n_strs,
+                                      &b, &kernel, err, sizeof err);
+    } else {
+        st = ckc_recipe_run_from_json(text, ints, n_ints, strs, n_strs, &b, &kernel, err,
+                                      sizeof err);
+    }
     free(text);
     if (st != CKC_OK || !kernel) {
         fprintf(stderr, "recipe run failed: %s\n", err);

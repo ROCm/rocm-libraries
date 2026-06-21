@@ -50,6 +50,36 @@ ckc_status_t ckc_recipe_run_from_json(const char* text,
                                       char* err,
                                       size_t err_cap);
 
+/* Same as ckc_recipe_run_from_json but the recipe is a CBOR blob (the compact
+ * shipping form). Decodes into the same DOM and runs identically. */
+ckc_status_t ckc_recipe_run_from_cbor(const unsigned char* data,
+                                      size_t len,
+                                      const ckc_recipe_spec_int_t* ints,
+                                      int n_ints,
+                                      const ckc_recipe_spec_str_t* strs,
+                                      int n_strs,
+                                      ckc_ir_builder_t* out_builder,
+                                      ckc_kernel_def_t** out_kernel,
+                                      char* err,
+                                      size_t err_cap);
+
+/* Run one recipe out of a CBOR BUNDLE (schema "ck.dsl.bundle/v1"), selected by
+ * `key` and optionally `arch` (NULL matches any arch). The bundle packs many
+ * concrete/rolled recipes into one blob the runtime can load once and serve by
+ * key, with no per-recipe files. */
+ckc_status_t ckc_recipe_run_from_bundle_cbor(const unsigned char* data,
+                                             size_t len,
+                                             const char* key,
+                                             const char* arch,
+                                             const ckc_recipe_spec_int_t* ints,
+                                             int n_ints,
+                                             const ckc_recipe_spec_str_t* strs,
+                                             int n_strs,
+                                             ckc_ir_builder_t* out_builder,
+                                             ckc_kernel_def_t** out_kernel,
+                                             char* err,
+                                             size_t err_cap);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
