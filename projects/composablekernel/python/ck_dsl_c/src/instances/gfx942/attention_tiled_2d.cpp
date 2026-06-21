@@ -284,9 +284,12 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
                 b, CKC_ERR_VALUE, "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive");
             return false;
         }
-        if(!ckc_streq(s->dtype, "fp16"))
+        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
         {
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "gfx942 use_mfma_32x32x8 is fp16-only");
+            /* The gfx942-legal K=8 32x32x8 atom exists for both f16 and bf16
+             * (mfma_f32_32x32x8_{f16,bf16}); only the K=16 bf16 atom is
+             * gfx950-only. Mirrors the Python use_mfma_32x32x8 dtype gate. */
+            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma_32x32x8 requires fp16 or bf16");
             return false;
         }
         if(s->block_m_per_warp != 32)
@@ -357,9 +360,9 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
                 b, CKC_ERR_VALUE, "use_k_single_buffer requires the transposed-x8 path");
             return false;
         }
-        if(!ckc_streq(s->dtype, "fp16"))
+        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
         {
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_k_single_buffer is fp16-only");
+            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_k_single_buffer requires fp16 or bf16");
             return false;
         }
         block_m = ckc_attention_tiled_2d_spec_block_m(s);
@@ -378,6 +381,21 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         ckc_attn2d_set_err(
             b, CKC_ERR_VALUE, "use_k_sliced_ring requires the transposed-x8 cfvst path");
         return false;
+    }
+    if(s->use_k_sliced_ring)
+    {
+        /* The 32-wide K slices need HD %% 32 == 0; the ring is byte-size driven
+         * so fp16 and bf16 (both 2-byte) are legal. Mirrors the Python gate. */
+        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")) ||
+           !(s->head_size == 64 || s->head_size == 128) || (s->head_size % 32 != 0) ||
+           !(t_eff == 64 || t_eff == 128))
+        {
+            ckc_attn2d_set_err(b,
+                               CKC_ERR_VALUE,
+                               "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
+                               "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}");
+            return false;
+        }
     }
     if(s->use_k_sliced_ldsseq && !s->use_k_sliced_ring)
     {

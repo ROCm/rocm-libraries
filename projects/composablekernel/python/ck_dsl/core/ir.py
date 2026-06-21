@@ -1711,6 +1711,23 @@ class IRBuilder:
         """
         return self.mma("mfma_f32_32x32x8_f16", a, b, c)
 
+    def mfma_f32_32x32x8_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """The 32x32x8 bf16 MFMA atom (the ``.1k`` intrinsic) — CDNA3-legal.
+
+        Unlike ``mfma_f32_32x32x16_bf16`` (CDNA4 / gfx950-only; the gfx942
+        backend ``Cannot select`` it), the K=8 bf16 32x32 atom IS present on
+        gfx942 (it lowers to ``llvm.amdgcn.mfma.f32.32x32x8bf16.1k`` ->
+        ``v_mfma_f32_32x32x8_bf16``). It is the wide-fragment double-rate bf16
+        path for gfx942 flash attention.
+
+        Wave64 per-lane layout (identical C distribution to the f16 32x32x8 /
+        32x32x16 atoms; only K-per-atom differs):
+          - A: ``<4 x bfloat>`` (32 rows × 8 K / 64 lanes = 4 cells)
+          - B: ``<4 x bfloat>``
+          - C/D: ``<16 x float>`` (32×32 / 64 lanes = 16 outputs per lane)
+        """
+        return self.mma("mfma_f32_32x32x8_bf16", a, b, c)
+
     def mfma_f32_32x32x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 32x32x16 f16 MFMA atom (gfx950 only).
 
@@ -2297,11 +2314,7 @@ class IRBuilder:
         All three operands must be ``i32`` (bitcast/pack f16 pairs to i32
         first). Returns the permuted ``i32``.
         """
-        if (
-            src0.type.name != "i32"
-            or src1.type.name != "i32"
-            or sel.type.name != "i32"
-        ):
+        if src0.type.name != "i32" or src1.type.name != "i32" or sel.type.name != "i32":
             raise ValueError("perm_b32 requires i32 operands")
         return self._op(
             "tile.perm_b32",
@@ -2455,9 +2468,7 @@ class IRBuilder:
         if v.type.name != "f32":
             raise ValueError("vop2_f32_dpp_xor requires f32 data")
         if not (1 <= xor_mask <= 15):
-            raise ValueError(
-                f"vop2_f32_dpp_xor xor_mask must be 1..15, got {xor_mask}"
-            )
+            raise ValueError(f"vop2_f32_dpp_xor xor_mask must be 1..15, got {xor_mask}")
         if mnemonic not in ("v_max_f32", "v_add_f32"):
             raise ValueError(
                 f"vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32, "
@@ -2468,8 +2479,13 @@ class IRBuilder:
             f"row_xmask:{xor_mask} row_mask:0xf bank_mask:0xf bound_ctrl:1"
         )
         return self.inline_asm(
-            tmpl, "=v,v", [v], result_type=F32,
-            sideeffect=False, convergent=True, result_name_hint="dppr",
+            tmpl,
+            "=v,v",
+            [v],
+            result_type=F32,
+            sideeffect=False,
+            convergent=True,
+            result_name_hint="dppr",
         )
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:

@@ -515,8 +515,14 @@ bool ckc_gfx942_attn2d_build_ctx_init(ckc_gfx942_attn2d_build_ctx_t* ctx,
     const bool TRANSPOSED_V = (ctx->CONFLICT_FREE_V || CONFLICT_FREE_V_STORE) && USE_MFMA_32X32X8 &&
                               ctx->TRANSPOSED_QK_32X32 && !FP8_MFMA_PV && !FP8_MFMA_QK && !KV_FP8 &&
                               !ctx->FAST_PAGED_KV_DESC && ckc_type_eq(V_LDS_DTYPE, dtype) &&
-                              ckc_type_eq(dtype, ckc_f16()) && (HD == 64 || HD == 128) &&
-                              (HD % 8 == 0) && ((T * HD) % THREADS == 0) && _v_t_fits_eff;
+                              /* cfv/cfvst is byte-size driven: fp16 and bf16 are
+                               * both 2-byte, the perm_b32 2x2 transpose + ds_read_b64
+                               * feed are layout-identical, and the K=8 32x32x8 atom is
+                               * gfx942-legal for bf16 (the K=16 bf16 atom is gfx950-
+                               * only). Mirrors the Python TRANSPOSED_V gate. */
+                              (ckc_type_eq(dtype, ckc_f16()) || ckc_type_eq(dtype, ckc_bf16())) &&
+                              (HD == 64 || HD == 128) && (HD % 8 == 0) &&
+                              ((T * HD) % THREADS == 0) && _v_t_fits_eff;
     const bool TRANSPOSED_V_STORE = TRANSPOSED_V && CONFLICT_FREE_V_STORE && (T % 2 == 0);
     ctx->TRANSPOSED_V             = TRANSPOSED_V;
     ctx->TRANSPOSED_V_STORE       = TRANSPOSED_V_STORE;

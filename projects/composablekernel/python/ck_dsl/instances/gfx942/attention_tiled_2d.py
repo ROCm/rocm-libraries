@@ -440,6 +440,14 @@ class UnifiedAttention2DTiledSpec:
         # transposed-softmax VALU knobs (scalar_state/mask_once/...) remain
         # gfx950-only here. So gate the transposed flag below (allow only the
         # x8 pairing) rather than blanket-rejecting it.
+        # ``use_mfma_32x32`` (the K=16 32x32x16 atom) stays rejected on gfx942.
+        # Although arch_specs.json lists ``mfma_f32_32x32x16_bf16`` under gfx942
+        # (#8348) and the LLVM lowerer emits the intrinsic, the gfx942 backend
+        # (ROCm 7.2) ``Cannot select`` ``llvm.amdgcn.mfma.f32.32x32x16.bf16`` --
+        # it is a CDNA4/gfx950-only instruction (the catalog entry is wrong).
+        # The gfx942-legal wide bf16/fp16 path is the K=8 ``use_mfma_32x32x8``
+        # atom (``mfma_f32_32x32x8_{f16,bf16}`` -> ``v_mfma_f32_32x32x8_*``,
+        # both verified-selectable on gfx942), gated separately below.
         _unsupported = [
             name
             for name, on in (
@@ -456,19 +464,16 @@ class UnifiedAttention2DTiledSpec:
         if _unsupported:
             raise ValueError(
                 "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
-                "default path; these gfx950-only knobs are not available on "
-                f"gfx942: {', '.join(_unsupported)}"
+                "default path and the K=8 32x32x8 wide path; these are not "
+                f"available on gfx942: {', '.join(_unsupported)}"
             )
-        # gfx942 transposed orientation is legal ONLY in the x8 pairing
-        # (S^T = K @ Q^T via the 32x32x8 atom + register P^T -> PV). The
-        # x16 pairing needs ds_read_tr16_b64, a gfx950-only transpose read,
-        # so it stays rejected. Mask/softmax VALU sub-knobs and the bf16
-        # path are likewise excluded on gfx942 (see the x8-transposed gate
-        # further below).
+        # gfx942 transposed orientation is legal in the x8 pairing (S^T = K @ Q^T
+        # via the 32x32x8 f16/bf16 atom + register P^T -> PV). The x16 pairing is
+        # rejected above (the K=16 atom can't select on gfx942).
         if self.use_transposed_qk_32x32 and not self.use_mfma_32x32x8:
             raise ValueError(
                 "gfx942: use_transposed_qk_32x32 requires use_mfma_32x32x8 "
-                "(the x16 transposed path uses gfx950-only transpose reads)"
+                "(the K=8 f16/bf16 wide atom)"
             )
         if self.kv_storage_dtype is not None:
             raise ValueError(
@@ -510,16 +515,18 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32x8:
             # gfx942-legal 32x32x8 wide-fragment path. Same 32x32 C layout as
             # the (gfx950-only) 32x32x16 path, but K=8 per atom -- the atom IS
-            # present on gfx942. fp16-only; bf16 stays on 16x16x16.
+            # present on gfx942 for BOTH fp16 (mfma_f32_32x32x8_f16) and bf16
+            # (mfma_f32_32x32x8_bf16, the .1k intrinsic -> v_mfma_f32_32x32x8_bf16,
+            # selectable on CDNA3; verified on ROCm 7.2 gfx942). The K=16 bf16
+            # atom (mfma_f32_32x32x16_bf16) is CDNA4/gfx950-only, so bf16 wide
+            # flash on gfx942 uses THIS K=8 atom.
             if self.use_mfma_32x32:
                 raise ValueError(
                     "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive "
                     "(K=8 gfx942 atom vs K=16 gfx950-only atom)"
                 )
-            if self.dtype != "fp16":
-                raise ValueError(
-                    "use_mfma_32x32x8 is fp16-only (gfx942 has no bf16 32x32x8 atom)"
-                )
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_mfma_32x32x8 requires fp16 or bf16")
             if self.block_m_per_warp != 32:
                 raise ValueError(
                     "use_mfma_32x32x8 requires block_m_per_warp=32: "
@@ -541,10 +548,10 @@ class UnifiedAttention2DTiledSpec:
                 # state / mask-once / mask-limit VALU rewrites are pure register
                 # scheduling and are legal for the x8 path too; half-local PV
                 # remains excluded because x8 already consumes P^T registers.
-                if self.dtype != "fp16":
+                if self.dtype not in ("fp16", "bf16"):
                     raise ValueError(
                         "x8-transposed (use_transposed_qk_32x32 + "
-                        "use_mfma_32x32x8) is fp16-only"
+                        "use_mfma_32x32x8) requires fp16 or bf16"
                     )
                 if self.head_size % 32 != 0:
                     raise ValueError(
@@ -620,8 +627,8 @@ class UnifiedAttention2DTiledSpec:
                     "use_k_single_buffer requires the transposed-x8 PV orientation "
                     "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
                 )
-            if self.dtype != "fp16":
-                raise ValueError("use_k_single_buffer is fp16-only")
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_k_single_buffer requires fp16 or bf16")
             _block_m = self.num_warps * self.block_m_per_warp
             _t = self.tile_size if self.tile_size is not None else self.block_size
             if _block_m > _t:
@@ -640,13 +647,13 @@ class UnifiedAttention2DTiledSpec:
                     "use_k_sliced_ring requires the transposed-x8 cfvst path"
                 )
             if (
-                self.dtype != "fp16"
+                self.dtype not in ("fp16", "bf16")
                 or self.head_size not in (64, 128)
                 or self.head_size % 32 != 0
                 or self.tile_size_eff not in (64, 128)
             ):
                 raise ValueError(
-                    "use_k_sliced_ring requires fp16, head_size in {64,128} "
+                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
                     "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
                 )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
@@ -1639,7 +1646,12 @@ def build_unified_attention_2d_tiled(
         and not KV_FP8
         and not FAST_PAGED_KV_DESC
         and V_LDS_DTYPE == dtype
-        and dtype == F16
+        # Conflict-free V (cfv/cfvst) is legal for both 2-byte element types:
+        # the in-register 2x2 transpose (perm_b32 on raw i32 words) and the
+        # ds_read_b64 / ds_write_b{32,64} LDS feed are byte-identical for fp16
+        # and bf16. (The K=16 bf16 atom is gfx950-only, but cfvst rides the
+        # gfx942-legal K=8 32x32x8 path, so bf16 is fine here.)
+        and dtype in (F16, BF16)
         and HD in (64, 128)
         and (HD % 8 == 0)
         and (T * HD) % THREADS == 0

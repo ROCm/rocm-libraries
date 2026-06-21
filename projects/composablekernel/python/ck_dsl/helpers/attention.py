@@ -625,13 +625,18 @@ def mfma_32x32x8_for_dtype(
 
     The C output lane layout is **identical** to the 32x32x16 atom (only K
     per atom differs), so the shared ``_C32_DIST`` / ``_mfma_32x32_c_*``
-    distribution drives both. Only fp16 is wired: gfx942 has the
-    ``mfma_f32_32x32x8_f16`` atom; the bf16 32x32 atom on gfx942 is
-    32x32x16-only in the catalog, so bf16 stays on the narrow 16x16x16 path.
+    distribution drives both. Both fp16 and bf16 are gfx942-legal here:
+    ``mfma_f32_32x32x8_f16`` and ``mfma_f32_32x32x8_bf16`` (the ``.1k``
+    intrinsic) both select on CDNA3. (The wider K=16 bf16 atom
+    ``mfma_f32_32x32x16_bf16`` is CDNA4/gfx950-only -- the gfx942 backend
+    ``Cannot select`` it -- so the gfx942 wide-bf16 flash path uses THIS K=8
+    atom, not 32x32x16.)
     """
     if dtype.name == "f16":
         return b.mfma_f32_32x32x8_f16(a, bv, c)
-    raise ValueError(f"unsupported MFMA 32x32x8 dtype {dtype.name} (fp16 only)")
+    if dtype.name == "bf16":
+        return b.mfma_f32_32x32x8_bf16(a, bv, c)
+    raise ValueError(f"unsupported MFMA 32x32x8 dtype {dtype.name} (fp16/bf16 only)")
 
 
 def mfma_32x32x16_for_dtype(

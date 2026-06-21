@@ -409,6 +409,32 @@ def supports_native_unified_attention_tiled(
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
+    gfx942_bf16_wide = _enable_gfx942_bf16_flash(problem)
+    if gfx942_bf16_wide:
+        # bf16 wide-K (32x32x8) transposed flash path mirrors the build spec
+        # in _tiled_spec_from_problem (T=64, mw=32, transposed-x8 bf16; D64 nw=4
+        # double-K, D128 nw=2 single-K).
+        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        return supports_tiled_2d(
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_queries_per_kv=problem.num_queries_per_kv,
+            use_alibi=problem.use_alibi,
+            use_qq_bias=problem.use_qq_bias,
+            use_fp8=problem.use_fp8,
+            q_dtype=problem.q_dtype,
+            num_warps=nw,
+            block_m_per_warp=32,
+            kv_storage_dtype=_kv_storage_dtype(problem),
+            tile_size=64,
+            arch=arch,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+            use_k_single_buffer=single_k,
+            use_conflict_free_v_store=use_cfvst,
+        )
     gfx942_flash = _enable_gfx942_fp16_flash(problem)
     num_warps = (
         _select_gfx942_flash_num_warps(problem)
@@ -1074,6 +1100,97 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
+    """Gate the gfx942 **bf16** wide-K (32x32x8) transposed flash path.
+
+    The wide bf16 MFMA atom that is actually legal on CDNA3/gfx942 is the K=8
+    ``mfma_f32_32x32x8_bf16`` (the ``.1k`` intrinsic ->
+    ``v_mfma_f32_32x32x8_bf16``; selectable on ROCm 7.2 gfx942). The K=16
+    ``mfma_f32_32x32x16_bf16`` advertised by the catalog is in fact CDNA4/gfx950-
+    only -- the gfx942 backend ``Cannot select`` it -- so bf16 wide flash uses the
+    SAME 32x32x8 path the fp16 flash family uses, just with the bf16 atom.
+
+    The transposed 32x32 orientation feeds QK from strided LDS + a register P^T
+    operand and PV from ordinary strided LDS reads, so it needs NONE of the
+    gfx950-only transpose reads. Routing bf16 prefill onto this wide atom replaces
+    the narrow 16x16x16 path (half-rate compute, ~63 KB LDS => 1 WG/CU) with a
+    wide path (the transposed PV consumes P from registers, dropping the P_lds
+    round-trip), addressing both throughput and occupancy.
+
+    OPT-IN / DEFAULT-OFF: gated behind ``HIPDNN_GFX942_BF16_WIDE=1`` so the
+    default dispatch (and every shipped kernel's byte-identity) is unchanged
+    while the path is being validated/tuned. The fp16 flash path
+    (``use_mfma_32x32x8``) is unaffected and takes precedence for fp16.
+    """
+    env = __import__("os").environ.get("HIPDNN_GFX942_BF16_WIDE", "").strip().lower()
+    if env not in ("1", "on", "enable", "enabled", "yes", "true"):
+        return False
+    return (
+        _resolve_attention_arch() == "gfx942"
+        and problem.head_size in (64, 128)
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and not problem.use_sinks
+        and problem.softcap == 0
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
+        # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
+        and problem.max_seqlen_q > 1
+        and not _enable_gfx942_small_q_narrow(problem)
+    )
+
+
+def _gfx942_bf16_wide_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the conflict-free V store (cfvst) on the gfx942 bf16 wide path.
+
+    The fp16 transposed-x8 flash family feeds the PV B-operand (V^T) through a
+    conflict-free LDS layout: V is stored TRANSPOSED ``[HD, T+pad]`` via an
+    in-register 2x2 ``perm_b32`` transpose + one contiguous ``ds_write``, then
+    read with a wide bank-spread ``ds_read_b64`` (vs the naive 4x strided
+    ``ds_read_u16`` that collapses 32 lanes onto one bank set). This is
+    byte-size driven, not fp16-specific (bf16 is also 2 bytes, the perm_b32
+    transpose works on raw i32 words, and the K=8 32x32x8 atom is gfx942-legal
+    for bf16), so it ports unchanged to bf16.
+
+    MEASURED (MI300X, graph, same-session steady-state, 3% median over 6 runs):
+    cfvst is a small consistent WIN on D64 (S1024 ~0.106->0.104ms, S2048
+    ~0.309->0.301ms, S4096 ~1.027->0.997ms = ~3% each). On D128 cfvst-only
+    cannot fit the nw=4/BLOCK_M=128 geometry within the 64 KB LDS cap (it needs
+    the sliced-K ring to fit, and the ring's per-slice sync overhead is NOT
+    amortised by the bf16 K=8 atom on this path -- it regressed every config
+    that compiled), so D128 stays on the naive-V wide geometry. So cfvst is
+    enabled for D64 prefill only.
+
+    OPT-IN: only fires under HIPDNN_GFX942_BF16_WIDE (the caller already gated
+    that). HIPDNN_GFX942_BF16_CFVST=0 forces the legacy naive-V feed for A/B.
+    """
+    env = __import__("os").environ.get("HIPDNN_GFX942_BF16_CFVST", "").strip().lower()
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    # D64 prefill only (the measured win); D128 nw=4 cfvst overflows LDS and the
+    # ring that would make it fit regresses. q==1 routes to the 3D/narrow path.
+    return problem.head_size == 64 and problem.max_seqlen_q > 1
+
+
+def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, bool]:
+    """(num_warps, use_k_single_buffer) for the gfx942 bf16 wide-K path.
+
+    D64: nw=4 (BLOCK_M=128). With cfvst (the default; see
+    _gfx942_bf16_wide_use_cfvst) the conflict-free transposed V_lds replaces the
+    naive strided-V feed; K stays double-buffered (single_buffer=False).
+    D128: nw=2 (BLOCK_M=64 == T=64) + K single-buffer; the nw=4 double-buffered
+    form is 80 KB (> 64 KB cap), so D128 trades the second K buffer + half the
+    BLOCK_M to land at 48 KB. K single-buffer requires BLOCK_M <= tile_size.
+    cfvst is not enabled on D128 (it needs nw=4, which only fits with the
+    sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
+    """
+    if problem.head_size == 128:
+        return 2, True
+    return 4, False
+
+
 def _enable_gfx942_d128_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """D128 subset used by the legacy L4 geometry helpers."""
     return _enable_gfx942_fp16_flash(problem) and problem.head_size == 128
@@ -1321,6 +1438,46 @@ def _tiled_spec_from_problem(
             kv_storage_dtype=_kv_storage_dtype(problem),
             tile_size=_select_2d_tile_size(problem),
             block_m_per_warp=16,
+        )
+    if _enable_gfx942_bf16_flash(problem):
+        # gfx942 bf16 wide-K (32x32x8) transposed flash path. OPT-IN
+        # (HIPDNN_GFX942_BF16_WIDE=1); default dispatch is byte-identical.
+        # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
+        # gfx950-only). The transposed orientation consumes V from strided LDS +
+        # P^T from registers (no P_lds, no gfx950-only transpose reads). Geometry:
+        #   * D64  -> nw=4 (BLOCK_M=128), double-buffered K: LDS=32 KB => 2 WG/CU.
+        #   * D128 -> nw=2 (BLOCK_M=64=T) + K single-buffer: LDS=48 KB (the
+        #     double-buffered nw=4 form is 80 KB and overflows the 64 KB cap).
+        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        return UnifiedAttention2DTiledSpec(
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            use_sinks=problem.use_sinks,
+            sliding_window=problem.sliding_window,
+            has_softcap=problem.softcap > 0,
+            use_alibi=problem.use_alibi,
+            use_qq_bias=problem.use_qq_bias,
+            num_seqs=problem.num_seqs,
+            num_warps=nw,
+            waves_per_eu=_select_2d_waves_per_eu(problem),
+            kv_storage_dtype=_kv_storage_dtype(problem),
+            tile_size=64,
+            block_m_per_warp=32,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+            use_k_single_buffer=single_k,
+            # Port the fp16 flash family's conflict-free V store (cfvst) to bf16
+            # (byte-size driven: bf16 == 2 bytes == fp16, the perm_b32 transpose
+            # rides raw i32 words, the K=8 atom is gfx942-legal). Measured ~3%
+            # win on D64 prefill (the #44 residual naive-V bottleneck); D128 and
+            # decode keep the naive-V feed (cfvst nw=4 overflows LDS there and
+            # the sliced-K ring that would make it fit regressed -- see
+            # _gfx942_bf16_wide_use_cfvst).
+            use_conflict_free_v_store=use_cfvst,
         )
     if _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
