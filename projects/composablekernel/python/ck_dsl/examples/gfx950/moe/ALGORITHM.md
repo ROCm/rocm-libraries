@@ -84,29 +84,42 @@ Two structural decisions make the chain efficient at decode:
 
 ## 3. From spec to pipeline: who computes what
 
-`FusedMoeForward.forward()` issues, in declaration order on one stream:
+`FusedMoeForward.forward()` issues, in declaration order on one stream. There are
+two paths — a **dynamic** path (the default for larger batches) and a **static
+offset** path (decode / small batch, §7) — and both default to a *fused* GEMM
+schedule: SiLU is folded into the gate/up GEMM epilogue and the topk-weighted
+reduce is folded into the down GEMM (the `use_experimental_interleaved_gate_up_silu`
+and `use_experimental_fused_down_reduce` flags, both default `True`).
+
+**Dynamic path** (`use_grouped_gemm=True`, the default):
 
 ```
 router (topk_softmax)            1 kernel    logits -> topk_ids, topk_weights
   -> sort (hist + scan + scatter)  3 kernels   bucket tokens by expert
   -> gather                        1 kernel    pull X rows into bucket order
-  -> gate/up GEMM (+ SiLU)         per-expert  fused gate+up+silu per bucket
-  -> silu_mul                      1 kernel    (packed path: activation post-pass)
-  -> down GEMM                     per-expert  Hidden · Wd^T per bucket
-  -> topk-weighted reduce          1 kernel    w_{t,e}-scaled atomic-add into Y
+                                                — 5 above chained in one launch_kernel —
+  -> gate/up+SiLU GEMM (grouped)   1 kernel    silu(gate)⊙up, SiLU in epilogue
+  -> down+reduce GEMM (grouped)    1 kernel    Hidden·Wd^T then w-scaled atomic-add into Y
+                                                — 2 above chained in one launch_kernel —
 ```
 
-For `E` experts the total launch count is `5 + 3·E` (5 fixed streaming kernels +
-per-expert gate/up/down GEMMs). The five fixed kernels go out through one
-`launch_kernel` call; the per-expert GEMMs go through `GroupedGemmLauncher`, which
-loops in Python and issues one HIP launch per expert (its HSACO / module / function
-are cached, so the per-call cost is args-packing + `hipModuleLaunchKernel`).
+The two grouped GEMMs are **single-launch** kernels over a flat M-block grid: the
+routed tokens are packed into a dense `tile_m`-aligned per-expert layout
+(`_dispatch_grouped_gemm`) and each M-block looks up its expert from a host-built
+`BlockExpertIds` array. So the total launch count is a constant **7 launches**,
+independent of `E` — not `5 + 3·E`. (A legacy per-expert dispatch through
+`GroupedGemmLauncher` — one HIP launch per expert in a Python loop — still exists
+and is warmed up, but is not on the default path; the dynamic path returns from
+`_dispatch_grouped_gemm` before it is ever invoked.)
 
-**Per-expert dispatch detail.** The per-expert GEMMs need `(M = count[e], …)`,
-where `count[e]` / `offsets[e]` come from the sort scan as device i32 buffers. To
-dispatch from the host, the chain copies those two `(E,)` arrays back to CPU once
-after the sort. This small D→H copy is the chain's irreducible host stall — and
-the reason static-offset / HIP-graph mode exists (§7).
+**Per-expert dispatch detail.** The de-padding packer needs `(count[e], offsets[e])`,
+which come from the sort scan as device i32 buffers. To pack on the host, the chain
+copies those two `(E,)` arrays back to CPU once after the sort. This small D→H copy
+is the dynamic path's irreducible host stall — and the reason static-offset /
+HIP-graph mode exists (§7). The **static path** eliminates it entirely: it drops
+the histogram + scan kernels and the host roundtrip, running router → scatter →
+gather → gate/up+SiLU → down+reduce as **5 launches** in a single `launch_kernel`
+chain.
 
 **Activation barrier.** The gate and up GEMMs and the SiLU activation can be
 combined three ways; `tune_gate_up_silu.py` is the harness that compares them:
@@ -160,15 +173,21 @@ down += MFMA( Hidden[:, k-block],  Wd_e[:, k-block] )           # f32, [count, H
 `down` is the per-expert FFN output for this bucket's tokens.
 
 ### 4.4 — Weight and reduce
-The `topk_reduce` kernel scales each bucket row by its routing weight and
-atomic-adds into the f32 `Y` accumulator:
+Each bucket row is scaled by its routing weight and atomic-added into the f32 `Y`
+accumulator:
 
 ```
 Y_f32[t, :] += w_{t,e} · down[r, :]      for each bucket row r with token t
 ```
 
-The atomic add merges the `K` experts a token was routed to, in any order. After
-the chain, `Y_f32` is cast (dtype-aware `copy_`) into the user's `f16`/`bf16` `Y`.
+By default (`use_experimental_fused_down_reduce=True`) this is **fused into the
+down GEMM**: the down-reduce kernel performs the weighted f32 atomic-add directly
+from the MFMA accumulator, with no separate `DownOut` buffer or `topk_reduce`
+launch. (Setting the flag `False` restores the legacy two-kernel path: a plain down
+GEMM into `DownOut` followed by a separate `topk_reduce` streaming kernel.) The
+atomic add merges the `K` experts a token was routed to, in any order; the
+down-reduce skips rows whose `SortedTokenIds == -1`. After the chain, `Y_f32` is
+cast (dtype-aware `copy_`) into the user's `f16`/`bf16` `Y`.
 
 ---
 
@@ -237,18 +256,21 @@ count, offsets   = buckets.counts()                    # device i32 -> host copy
 Y_f32 = 0
 for e in range(E):                                     # per-expert (skipped if inactive)
     Xb   = gather(X, buckets[e])                       # [count[e], H], contiguous
-    gate = Xb @ Wg_e^T ;  up = Xb @ Wu_e^T             # gate/up GEMM (preshuffled B)
-    Hb   = silu(gate) * up                             # SiLU activation
-    down = Hb @ Wd_e^T                                 # down GEMM (preshuffled B)
+    gate = Xb @ Wg_e^T ;  up = Xb @ Wu_e^T             # gate/up GEMM (preshuffled B if enabled)
+    Hb   = silu(gate) * up                             # SiLU (folded into the gate/up epilogue)
+    down = Hb @ Wd_e^T                                 # down GEMM (preshuffled B if enabled)
     for r, t in bucket rows:                           # weighted reduce
         if t != -1:
             atomic_add(Y_f32[t, :], topk_w[t,e] * down[r, :])
 Y = cast(Y_f32)                                        # f32 -> f16 / bf16
 ```
 
-Every line maps to a stage in §3–§4. The `decode` shapes skip most of the `for e`
-body via §6; the GEMM B-loads are wide via §5; the whole loop is one replayed
-HIP graph via §7.
+This is the *math-level* per-expert view; the default implementation fuses SiLU
+into the gate/up GEMM epilogue and the weighted reduce into the down GEMM, and
+dispatches each as one grouped single-launch kernel rather than a Python `for e`
+loop (§3). The `decode` shapes skip most inactive expert work via §6; the GEMM
+B-loads become wide when the preshuffle-B knobs are enabled (§5, opt-in); the whole
+loop is one replayed HIP graph via §7.
 
 ---
 

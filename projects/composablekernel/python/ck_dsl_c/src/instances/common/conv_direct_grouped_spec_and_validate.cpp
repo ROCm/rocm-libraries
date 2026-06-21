@@ -39,6 +39,63 @@
 #include "ckc/helper_ck_dsl.core.arch.h"    /* ckc_archtarget_from_gfx, has_shape */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, sig entry   */
 
+/* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
+ *
+ *   Python _build_target: raise KeyError(
+ *     f"unknown gfx target {gfx!r}; known: {sorted(specs)}. "
+ *     f"Add a row to {_DATA_FILE.name}.")
+ *   is_valid_spec: except KeyError as e: return False, str(e)
+ *
+ * str(KeyError(msg)) == repr(msg); the single quotes make Python DOUBLE-quote
+ * the whole message. sorted(specs) renders as ['gfx...', 'gfx...'].
+ * ckc_known_arches() == tuple(sorted(_load_specs())). Mirrors fmha_arch.cpp. */
+static void ckc_dconv__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+{
+    int count = 0;
+    const char* const* arches;
+    int i;
+    size_t pos = 0;
+    int wrote;
+
+    if(out == NULL || out_cap == 0)
+    {
+        return;
+    }
+
+    arches = ckc_known_arches(&count);
+
+    wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
+    if(wrote < 0)
+    {
+        out[0] = '\0';
+        return;
+    }
+    pos += (size_t)wrote;
+    if(pos >= out_cap)
+    {
+        out[out_cap - 1] = '\0';
+        return;
+    }
+
+    for(i = 0; i < count; ++i)
+    {
+        wrote = snprintf(out + pos, out_cap - pos, "%s'%s'", (i == 0) ? "" : ", ", arches[i]);
+        if(wrote < 0)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+        pos += (size_t)wrote;
+        if(pos >= out_cap)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+    }
+
+    snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
+}
+
 /* ===================================================================== *
  *  DirectConvProblem
  * ===================================================================== */
@@ -245,11 +302,9 @@ bool ckc_direct_conv_16c_is_valid_spec(const ckc_direct_conv_16c_spec_t* spec,
     target = ckc_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        /* Python str(KeyError) carries the full "...; known: [...]" message; the
-         * C arch API does not expose the known-list, so we emit a faithful-shape
-         * prefix.
-         * TODO(port): reproduce the exact "; known: [...]" known-list suffix. */
-        CK_DCONV16C_REJECT("unknown gfx target '%s'", arch);
+        /* Full Python str(KeyError) text, reproduced verbatim. */
+        ckc_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
     }
 
     p = &spec->problem;
@@ -429,8 +484,9 @@ bool ckc_direct_conv_4c_is_valid_spec(const ckc_direct_conv_4c_spec_t* spec,
     target = ckc_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        /* TODO(port): reproduce the exact "; known: [...]" known-list suffix. */
-        CK_DCONV4C_REJECT("unknown gfx target '%s'", arch);
+        /* Full Python str(KeyError) text, reproduced verbatim. */
+        ckc_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
     }
 
     p = &spec->problem;

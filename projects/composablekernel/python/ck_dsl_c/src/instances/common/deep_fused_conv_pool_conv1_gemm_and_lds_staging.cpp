@@ -17,11 +17,11 @@
  *
  * BYTE-IDENTICAL BUILDER SEQUENCE. Every ckc_b_* call below mirrors the Python
  * builder call order one-for-one. Where the Python reaches a peer helper that is
- * NOT yet a public C symbol the body either (a) inlines the peer's exact
- * builder-op sequence with ported primitives (this is possible for the cshuffle
- * store loop and load_smem_frag_contiguous_f16, whose op sequences use only
- * ported ckc_b_* ops) or (b) calls the peer by its known C symbol via a local
- * forward declaration (resolved at link; marked TODO(port)).
+ * NOT directly includable as a public C symbol the body either (a) inlines the
+ * peer's exact builder-op sequence with ported primitives (this is possible for
+ * the cshuffle store loop and load_smem_frag_contiguous_f16, whose op sequences
+ * use only ported ckc_b_* ops) or (b) calls the peer by its stable C-ABI symbol
+ * via a local forward declaration (resolved at link; see the NAMED GAP below).
  *
  * PEER NOTES.
  *   - _cshuffle_acc_distribution(c_frag_len) + LoadStoreTraits(vector_dim_y=1,
@@ -36,8 +36,10 @@
  *     sequence is pure ported primitives.
  *   - _apply_accumulator_epilogue is a conv_implicit_gemm peer; its C symbol
  *     ckc_conv_apply_accumulator_epilogue lives in a peer-private header whose
- *     ConvAccumulatorEpilogue struct collides with this TU's, so it is called via
- *     a local forward declaration (link-resolved). TODO(port).
+ *     ConvAccumulatorEpilogue struct collides with this TU's. NAMED GAP (blocked
+ *     on a non-conflicting shared header): it is called via a local forward
+ *     declaration (link-resolved) until the peer epilogue type is exposed through
+ *     a header that does not clash with this TU's struct of the same name.
  *   - conv_spec.warp_tile_k is read from spec->warp_tile_k: spec.conv_spec()
  *     constructs the ImplicitGemmConvSpec with warp_tile_k=self.warp_tile_k, so
  *     the two are equal by construction and spec is the non-opaque handle here.
@@ -56,7 +58,9 @@
  * Peer forward declaration (link-resolved; see PEER NOTES).
  * _apply_accumulator_epilogue(b, epilogue, accs[n], out_accs[n]).
  * ------------------------------------------------------------------ */
-/* TODO(port): expose this through a non-conflicting public/internal header. */
+/* NAMED GAP: expose this through a non-conflicting public/internal header so the
+ * forward declaration can be dropped (the peer ConvAccumulatorEpilogue struct
+ * currently clashes with this TU's struct of the same name). Link-resolved. */
 /* C++ build: cross-TU C-ABI helper; forward decl must be extern "C" so the
  * reference is not mangled. No effect in C. */
 #ifdef __cplusplus

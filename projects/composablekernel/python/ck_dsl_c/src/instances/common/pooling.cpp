@@ -15,14 +15,17 @@
  * The build entry reproduces the Python build_pooling2d() op-by-op so the
  * downstream IR stream is byte-identical.
  *
- * STORE-EPILOGUE DEPENDENCY: make_buffer_resource / make_buffer_view /
- * make_static_distributed_tensor / store_tile and the StaticDistributedTensor
- * .set / TensorView .tile methods from ck_dsl.helpers.{tensor_view,distribution}
- * are NOT yet ported to C. They are forward-declared below as a TODO(port)
- * surface (the encoding constructor + make_static_tile_distribution ARE ported
- * and used directly). The build entry emits the byte-identical call sequence
- * against these prototypes; the verify+fix loop wires them once the helpers
- * land.
+ * STORE-EPILOGUE (NAMED GAP): make_buffer_resource / make_buffer_view /
+ * store_tile and the StaticDistributedTensor .set / TensorView .tile methods
+ * from ck_dsl.helpers.{tensor_view,distribution} are ported here as fully-wired,
+ * file-local helpers (defined below) that emit the byte-identical SSA op stream
+ * -- they are NOT stubs (make_static_distributed_tensor + the encoding
+ * constructor + make_static_tile_distribution come from the shared helper layer
+ * and are used directly). The gap is purely organisational: these file-local
+ * buffer-view helpers duplicate what should eventually live in the shared
+ * tensor_view / distribution C ports, and can be deleted once those expose a
+ * buffer-space TensorView. The store dtype guards (f16 only in buffer space)
+ * faithfully mirror the Python NotImplementedError reject paths (see below).
  */
 #include "ckc/instance_pooling.h"
 
@@ -707,10 +710,13 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
     dt_ty  = w->view->dtype;
     tyname = (dt_ty != NULL) ? dt_ty->name : NULL;
 
-    /* store_tile dtype guard (Python: NotImplementedError for unsupported). */
+    /* store_tile dtype guard. Faithful mirror of tensor_view.py:
+     * TensorView.store_vec_from_f32, which raises NotImplementedError(
+     *   f"store_vec_from_f32 not wired for {dtype}; cast manually and use
+     *    store_vec") for any dtype outside {f16, bf16}. Byte-faithful reject
+     * behaviour: only dtypes Python also rejects reach here, message verbatim. */
     if(tyname == NULL || (strcmp(tyname, "f16") != 0 && strcmp(tyname, "bf16") != 0))
     {
-        /* store_vec_from_f32 only wires f16/bf16; other dtypes raise. */
         ckc_i_set_err(b,
                       CKC_ERR_NOTIMPL,
                       "store_vec_from_f32 not wired for %s; "
@@ -772,8 +778,13 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
         }
         else
         {
+            /* Faithful mirror of tensor_view.py:store_scalar_at, which wires
+             * only f16 in buffer space and raises NotImplementedError(
+             *   f"buffer store_scalar_at not wired for dtype {dtype}") otherwise
+             * (bf16 passes the store_vec_from_f32 gate above, then rejects here,
+             * exactly as in Python). Message text matched verbatim. */
             ckc_i_set_err(
-                b, CKC_ERR_NOTIMPL, "buffer scalar store not yet wired for dtype %s", tyname);
+                b, CKC_ERR_NOTIMPL, "buffer store_scalar_at not wired for dtype %s", tyname);
         }
         return;
     }
@@ -796,8 +807,11 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
         }
         else
         {
-            ckc_i_set_err(
-                b, CKC_ERR_NOTIMPL, "buffer vec store not yet wired for dtype %s", tyname);
+            /* Faithful mirror of tensor_view.py:store_vec_at, which wires only
+             * f16 in buffer space and raises NotImplementedError(
+             *   f"buffer store_vec_at not wired for dtype {dtype}") otherwise.
+             * Message text matched verbatim to Python. */
+            ckc_i_set_err(b, CKC_ERR_NOTIMPL, "buffer store_vec_at not wired for dtype %s", tyname);
         }
     }
 }

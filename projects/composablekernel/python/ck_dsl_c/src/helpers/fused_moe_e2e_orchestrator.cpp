@@ -279,9 +279,19 @@ ckc_status_t ckc_fused_moe_forward_init(ckc_fused_moe_forward_t* self,
      * absent arch resolves to the documented "gfx950" fallback. */
     self->arch = (arch != NULL) ? arch : "gfx950";
 
-    /* TODO(port): arch-aware default-tile swap (is_bf16 / large-hidden /
-     * sparse-vs-dense density / gfx942 narrow-atom fallback). Requires the
-     * _default_gemm_tile() == probes; the caller-supplied tile is kept. */
+    /* NAMED GAP (port): the arch-aware default-tile swap (is_bf16 / large-hidden
+     * / sparse-vs-dense density / gfx942 narrow-atom fallback) is NOT applied on
+     * this legacy standalone surface; the caller-supplied tile is taken as-is.
+     *
+     * The authoritative, golden-verified implementation of that policy already
+     * lives in ckc_fmoe_build_ctx_init (instances/common/fused_moe_e2e_ctx_init)
+     * and drives the byte-identity-checked emission path. This module is the
+     * older bounded mirror (its own reduced ckc_fmoe_forward_spec uses a dtype
+     * ENUM and omits spec.arch / spec.name / the experimental knobs), so the
+     * density branch (T*K/E <= 24) and the seven tile factories cannot be reached
+     * here without reimplementing the policy. Duplicating it into this superseded
+     * surface would risk a second, drifting copy. BLOCKED until this legacy
+     * orchestrator is either retired or re-pointed at the ctx-based policy. */
 
     /* Python: _use_static_offsets = tokens * topk * experts <= 512
      * (the docstring's 256 is stale; the code uses 512). */

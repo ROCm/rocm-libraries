@@ -89,8 +89,13 @@ static const ckc_type_t* gemm_dtype_ir(ckc_ir_builder_t* b, const char* name)
  * mismatch we route through ckc_b_io_ir_type with the offending A-dtype: for the
  * (already-validated upstream) GEMM call sites the dtypes are homogeneous fp16 /
  * bf16 with fp32 acc + RCR, so this reduces to io_ir_type(dtype_a) exactly as
- * Python. TODO(port): if a dedicated _storage_dtype validator lands in a shared
- * header, call it here so the ValueError messages match byte-for-byte. */
+ * Python and the emitted IR is byte-identical. NAMED GAP (blocked on shared
+ * infra): the heterogeneous-dtype ValueError text is NOT reproduced here because
+ * no public _storage_dtype validator exists in a shared header; the ck_gemm_
+ * storage_dtype validator in gemm_spec.cpp is the host-side reject surface and is
+ * reached before emission, so these emit-path call sites only need the resolved
+ * IR type. When a shared _storage_dtype validator lands, call it here so the
+ * ValueError messages match byte-for-byte. */
 static const ckc_type_t* gemm_storage_dtype(ckc_ir_builder_t* b,
                                             const ckc_gemm_universal_spec_t* spec)
 {

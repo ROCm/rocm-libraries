@@ -80,9 +80,11 @@ $$
 
 The rescale $\alpha$ re-bases everything accumulated under the old max to the new
 max; the result is **exact**, not approximate. As in all of CK DSL, exponentials
-are computed in base 2 — the GPU has a hardware $2^x$ but no $e^x$ — by folding
-$\log_2 e$ into the scale once on the host (`scale_log2 = \tau \log_2 e`), so
-every `exp2(s - m)` is one instruction. Softcap, ALiBi, and QQ-bias are likewise
+are computed in base 2 — the GPU has a hardware $2^x$ but no $e^x$. The tiled
+2D/3D kernels take the raw softmax scale $\tau$ as a runtime param and fold
+$\log_2 e$ into it once per kernel on the device
+(`qk_scale = scale * 1.4426950408889634`, i.e. $\tau \log_2 e$), so every
+`exp2(s - m)` is one instruction. Softcap, ALiBi, and QQ-bias are likewise
 applied in the $\log_2$ domain (e.g. `apply_softcap_log2`).
 
 Where the two paths differ is **who owns which keys**, which is dictated entirely
@@ -93,16 +95,25 @@ by occupancy — how many CTAs the shape can keep the device busy with.
 ## 3. CDNA mapping: wave64 + MFMA
 
 The matrix unit on gfx950 is `v_mfma_*` over wave64 (64 lanes), with native
-$A \cdot B$ accumulation (no transpose, unlike RDNA's WMMA $A B^\top$). Both
-kernels use the `16x16x16` MFMA atom; the transposed-32x32 prefill path
-additionally uses `16x16x32` and the `32x32` family. The flash-attention building
+$A \cdot B$ accumulation (no transpose, unlike RDNA's WMMA $A B^\top$). The
+default (non-transposed) path runs QK/PV on the wide-K `16x16x32` atom
+(`mfma_f32_16x16x32_{f16,bf16}`), falling back to `16x16x16` only for a K=16
+head-dim tail step in PV. The transposed-32x32 prefill "combo" path runs
+QK/PV on gfx950's wide-K `32x32x16` atom (`mfma_f32_32x32x16_{f16,bf16}`, the
+gfx950-only 32x32 family). The flash-attention building
 blocks ported from CK Tile's `BlockFmhaPipelineQRKSVSAsync` are:
 
-- **Q staged in LDS once** per CTA, reused across the whole K-loop.
+- **Q staged in LDS once** per CTA, reused across the whole K-loop. (The
+  transposed combo additionally hoists Q into VGPRs — `Q32_reg` — to drop
+  Q's permanent LDS allocation.)
 - **K and V streamed cache → LDS each tile**, with the global load issued early
-  so the QK MFMA starts the moment the LDS write retires (async DMA, see §6).
-- **`m`, `l` in registers**; the per-row max/sum reductions are `ds_bpermute`
-  XOR butterflies (`block_tile_reduce_xor_sync`) — no LDS round-trip.
+  so the QK MFMA starts the moment the LDS write retires (async DMA, see §7.1).
+- **`m`, `l` in registers**; the per-row max/sum reductions are XOR
+  butterflies (CK Tile's `block_tile_reduce_xor_sync` pattern) — no LDS
+  round-trip. The intra-16-lane / intra-32-lane stages lower to
+  `ds_swizzle_b32` SWAP mode (not `ds_bpermute`); only a cross-half (mask 32)
+  stage — e.g. the split-KV reduce's wave64 fold, or the transposed scalar
+  state's alpha broadcast — uses `ds_bpermute`.
 - **`o_acc` in MFMA-accumulator distribution** (per-lane `<4×f32>` per N-tile of
   the head dim), truncated to the output dtype through an LDS-staged shuffle
   epilogue with 16-byte stores.
@@ -160,10 +171,13 @@ Static ISA inspection shows the combo kernel is **VALU/SALU-bound** (~800 VALU +
    default `waves_per_eu=2`); `waves_per_eu=3` reaches 4 WG/CU (+15%), and
    `waves_per_eu=4` adds ~5% more on full-attention shapes.
 2. **Lighten the prelude for sliding window.** SW prunes the K-loop to a handful
-   of tiles, so the per-CTA prelude (Q→LDS, binary search, sink init) dominates
-   — `num_warps=2` (BLOCK_M=64, half the prelude, 2× the CTAs) and a finer
-   `tile_size = block_size` win there, while the compute-bound no-SW combo keeps
-   `num_warps=4` / `tile_size = 2·block_size`.
+   of tiles, so the per-CTA prelude (Q→LDS, binary search, sink init) dominates.
+   For **bf16** SW the combo drops to `num_warps=2` (BLOCK_M=64, half the
+   prelude, 2× the CTAs) but keeps `tile_size = 2·block_size`; fp8 SW is
+   dequant-bound rather than prelude-bound, so it stays at `num_warps=4` and is
+   the *only* SW case that also shrinks `tile_size = block_size` (one paged-KV
+   block per iter). The compute-bound no-SW combo keeps `num_warps=4` /
+   `tile_size = 2·block_size` for both dtypes.
 
 Reducing instruction count by splitting the loop into a no-mask phase + a masked
 boundary phase was byte-identical but **~7% slower** (I-cache / code-size cost on

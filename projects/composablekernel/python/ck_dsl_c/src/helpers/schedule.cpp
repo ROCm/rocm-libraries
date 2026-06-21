@@ -499,11 +499,13 @@ void ckc_schedule_policy_emit_compv4_hotloop(const ckc_schedule_policy_t* p,
     ckc_b_sched_barrier(b, 0);
 }
 
-/* SchedulePolicy.assert_expected_ir(stats) checks the lowered LlvmIrStats and
- * raises AssertionError when emit_hints is set but no sched_group_barrier ops
- * were produced. LlvmIrStats (ck_dsl.analysis.ir) is not part of this phase's
- * ported surface, so the check is intentionally left unported. */
-/* TODO(port): implement once ckc LlvmIrStats lands; signature would be
+/* NAMED GAP (assert_expected_ir): SchedulePolicy.assert_expected_ir(stats)
+ * checks the lowered LlvmIrStats and raises AssertionError when emit_hints is
+ * set but no sched_group_barrier ops were produced. This is a host-side
+ * post-lowering assertion (NOT on the IR-emission path, so no byte-identity
+ * impact). It is BLOCKED on the LlvmIrStats analysis surface
+ * (ck_dsl.analysis.ir): the C engine has no ported IR-statistics type, so there
+ * is nothing to inspect. When that lands the signature would be:
  *   bool ckc_schedule_policy_assert_expected_ir(const ckc_schedule_policy_t* p,
  *                                               const ckc_llvm_ir_stats_t* stats);
  */

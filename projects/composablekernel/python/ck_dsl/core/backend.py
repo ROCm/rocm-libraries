@@ -31,27 +31,40 @@ The active backend is chosen, in order of precedence:
 
   1. an explicit ``backend=`` argument to the dispatch entry point,
   2. the ``CK_DSL_BACKEND`` environment variable, else
-  3. ``"python"`` (the default; no behaviour change when nothing is set).
+  3. ``_DEFAULT_BACKEND`` — currently the **C++** engine (flipped from Python).
+     The Python engine stays available via ``backend="python"`` /
+     ``CK_DSL_BACKEND=python``; the cpp path auto-falls back to Python when the
+     binding is unavailable, unless ``CK_DSL_CPP_STRICT=1`` is set.
 
 Engine coverage
 ---------------
 
-The C++ engine binding today covers the **universal GEMM** family only.
-Other op families fall back to the Python engine automatically: the
-dispatch layer raises a clear, structured error if ``"cpp"``/``"both"``
-is requested for a family the binding does not yet implement, so a caller
-that has not opted in never sees a silent behaviour change.
+The default cpp path lowers Python-authored IR through
+``lower_serialized_ir`` (the serialized-IR seam), which is family-agnostic:
+any kernel the Python frontend builds can be lowered by the C++ engine. The
+standalone C++ instance emitters (used by the hipDNN provider / C-JIT, no
+Python) cover the broad instance set exercised by the byte-identity gate —
+GEMM variants, convolution, attention/FMHA, MoE, norm/reduce/elementwise —
+with some host-orchestration islands still stubbed (notably the fused-MoE
+end-to-end launch chain; grep ``TODO(port)`` / ``CKC_ERR_NOTIMPL``). For
+anything not covered, dispatch falls back to the Python engine, or raises a
+clear, structured error under ``CK_DSL_CPP_STRICT=1`` so an opted-in caller
+never sees a silent behaviour change.
 
 Spec equivalence caveat
 -----------------------
 
-The C++ engine tracks the merge-target codegen, which can legitimately
-differ from this branch's Python for families that were reconciled on the
-target (e.g. the convolution family and GEMM configurations whose
-scheduler hints were adjusted on the target). For those, ``"both"`` will
-correctly report a mismatch until the target is merged in. ``"both"`` is
-meant to be run on configurations where the two engines are expected to
-agree today.
+The earlier reconciliation drifts where the C++ engine tracked the
+merge-target codegen ahead of this branch's Python — the convolution
+filter-dim naming, the GEMM ``sched.group.barrier`` scheduler hints, the
+bf16 32x32 MFMA-catalog breadth, the llvm22 datalayout — have since merged
+in, so the two engines now agree across families on the default gate. The
+general principle still holds: ``"both"`` compares the two engines and is
+meant for configurations where they are expected to agree, and it will
+correctly report a mismatch if a kernel is mid-reconciliation (e.g. while a
+correctness fix is being applied to both engines and one side has not yet
+caught up). The byte-identity gate is the authority on what currently
+agrees.
 """
 
 from __future__ import annotations

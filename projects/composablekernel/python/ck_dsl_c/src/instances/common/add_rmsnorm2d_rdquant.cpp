@@ -19,14 +19,16 @@
  * io_ir_type / quant_ir_type, validate_io / ceil_div_grid / kernel_name_join,
  * ArchTarget).
  *
- * PORT NOTE -- helpers not yet exposed by the shared ckc helper headers
+ * NAMED GAP -- helpers not yet exposed by the shared ckc helper headers
  * (make_lds_view, make_naive_tensor_view_packed, TensorView.load_vec_as_f32,
  * TileWindow store/load-vec-as-f32, quant_max_abs / quantize_scalar_f32 /
  * pack_quant_chunk_local_f32 / store_packed_chunk_local) are provided here as
- * local TODO(port) shims that emit the same builder-call sequence as their
- * Python counterparts. They will be replaced by the shared ports once those land
- * (the verify+fix loop resolves any IR diffs). Every shim binds only to the
- * public ckc/ir.h builder surface, so the emitted IR stays byte-faithful.
+ * fully-ported, file-local shims (ckc_x_*) that emit the identical builder-call
+ * sequence as their Python counterparts. These are NOT bare stubs -- every shim
+ * emits the complete IR and binds only to the public ckc/ir.h builder surface,
+ * so the emitted IR stays byte-faithful. They are blocked only on the shared
+ * tensor_view / quant ports being exposed by the helper layer; once those land
+ * the ckc_x_* duplicates here can be deleted in favour of the shared symbols.
  */
 
 #include <math.h>
@@ -50,10 +52,11 @@
 #define CKC_ADD_RMSNORM2D_RDQUANT_DEFAULT_NAME "ck_dsl_add_rmsnorm2d_rdquant"
 
 /* ===================================================================== *
- *  Local TODO(port) shims for not-yet-shared helpers.
+ *  Local shims for not-yet-shared helpers (NAMED GAP, see file header).
  *
- *  Each mirrors the Python builder-call sequence in the named module. They are
- *  file-static so they cannot collide with the eventual shared ports.
+ *  Each fully mirrors the Python builder-call sequence in the named module and
+ *  emits complete IR. They are file-static so they cannot collide with the
+ *  eventual shared ports; blocked only on those shared ports being exposed.
  * ===================================================================== */
 
 /* make_naive_tensor_view_packed(base, shape, dtype) == make_global_view(...).
@@ -61,7 +64,7 @@
 static ckc_status_t ckc_x_make_naive_tensor_view_packed(
     ckc_tensor_view_t* out, ckc_value_t* base, const int* shape, int rank, const ckc_type_t* dtype)
 {
-    /* TODO(port): replace with the shared tensor_view port once exposed. */
+    /* NAMED GAP: file-local full port; delete once the shared tensor_view helper is exposed. */
     return ckc_make_global_view(out, base, shape, rank, dtype, NULL);
 }
 
@@ -74,7 +77,7 @@ static ckc_status_t ckc_x_make_lds_view(ckc_ir_builder_t* b,
                                         int rank,
                                         const char* name_hint)
 {
-    /* TODO(port): replace with the shared tensor_view port once exposed. */
+    /* NAMED GAP: file-local full port; delete once the shared tensor_view helper is exposed. */
     ckc_value_t* smem;
     ckc_status_t st;
     if(out == NULL)
@@ -102,7 +105,7 @@ static void ckc_x_tensor_view_load_vec_as_f32(ckc_ir_builder_t* b,
                                               int n,
                                               ckc_value_t** out)
 {
-    /* TODO(port): replace with the shared tensor_view port once exposed. */
+    /* NAMED GAP: file-local full port; delete once the shared tensor_view helper is exposed. */
     int i;
     if(n == 1)
     {
@@ -133,7 +136,7 @@ static void ckc_x_tensor_view_load_vec_as_f32(ckc_ir_builder_t* b,
 /* quant_max_abs(qdtype): saturating clamp magnitude. quant.py:quant_max_abs. */
 static double ckc_x_quant_max_abs(const char* qdtype)
 {
-    /* TODO(port): replace with the shared quant port once exposed. */
+    /* NAMED GAP: file-local full port; delete once the shared quant helper is exposed. */
     if(qdtype == NULL)
     {
         return 0.0;

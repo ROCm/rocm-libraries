@@ -70,6 +70,15 @@ static int make_spec(int idx, ckc_unified_attention_3d_tiled_spec_t *s) {
         s->use_alibi = true; s->use_qq_bias = false;
         s->kv_storage_dtype = NULL;
         break;
+    case 5:
+        /* 64-bit paged-KV addressing (caches > 2 GiB). Decode-shaped MHA. */
+        s->head_size = 128; s->block_size = 16;
+        s->num_query_heads = 16; s->num_kv_heads = 16;
+        s->dtype = "fp16"; s->num_segments = 16;
+        s->use_sinks = false; s->sliding_window = 0; s->has_softcap = false;
+        s->kv_storage_dtype = NULL;
+        s->use_i64_kv_addr = true;
+        break;
     default:
         return -1;
     }

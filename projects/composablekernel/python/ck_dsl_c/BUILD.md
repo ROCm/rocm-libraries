@@ -164,11 +164,20 @@ exactly two ways:
 
 There is intentionally no path that uses a checked-in `build/` archive.
 
-## Freshness stamps (planned)
+## Freshness stamps
 
-A follow-on adds explicit freshness stamps so a consumer can *detect* a
-mismatch rather than rely on rebuild discipline: an engine build-id embedded in
-the archive, a manifest/bundle version, and provider-side validation that the
-loaded bundle matches the engine it was built against. This section will be
-filled in when that lands; the hygiene guards above are the first line of
-defense in the meantime.
+The engine carries an explicit freshness stamp so a consumer can *detect* a
+mismatch rather than rely on rebuild discipline. At CMake configure time
+`cmake/ckc_build_id.cmake` computes a deterministic, git-independent content
+hash of the engine sources and injects it (plus a human `engine_version`) into
+`src/core/ckc_build_id.cpp` as compile definitions — scoped to that single TU
+so no emission object is touched (the `.ll` byte-identity contract holds). The
+stamp is exposed by `ckc_build_id()` / `ckc_engine_version()`
+(`include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.sh` on
+every run, and surfaced through the pybind `build_id` attribute. The change to
+any tracked source byte changes the build-id, so a stale or mixed-build archive
+is detectable.
+
+Remaining follow-on: a manifest/bundle version + provider-side validation that a
+loaded prebuilt-HSACO bundle matches the engine build-id it was built against
+(today the C-JIT path sidesteps this by building from the engine on demand).

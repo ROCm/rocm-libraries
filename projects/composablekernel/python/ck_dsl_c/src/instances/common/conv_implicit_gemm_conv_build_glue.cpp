@@ -26,15 +26,15 @@
  * one K-loop driver Python would (unroll_k / sync / async) and runs the epilogue
  * phase, returning b->kernel.
  *
- * STUB NOTES (peers not yet landed as headers):
- *   - WarpGrid.from_atom(...).bind(...) has no C helper yet; the compile-time
- *     grid geometry is filled here and the bound SSA values are left for the
- *     grid peer port (TODO(port)). The descriptor/epilogue phases read
- *     ctx->grid / ctx->tid / ... so they pick up the bound values once the peer
- *     populates them.
- *   - spec.atom (the legacy MfmaAtom) has no public accessor yet; ctx->atom is
- *     left NULL pending that accessor port (TODO(port)). It is NULL on the WMMA
- *     path regardless.
+ * PEER NOTES (helpers reached without a dedicated public C symbol):
+ *   - WarpGrid.from_atom(...).bind(...) has no standalone C helper, so its exact
+ *     builder-op sequence is INLINED below in byte-identical order (the
+ *     max_workgroup_size kernel attr, the wave/warp consts, the tid/lane/warp
+ *     decomposition, and the block_*_off muls). ctx->grid and ctx->tid/lane/
+ *     warp_* are populated with the bound SSA the descriptor/epilogue phases read.
+ *   - spec.atom (the legacy MfmaAtom) is resolved via ckc_mfma_atom into the same
+ *     immutable static catalog the epilogues use, so ctx->atom matches spec.atom
+ *     exactly. It is NULL on the WMMA family, matching Python.
  *   - spec.effective_lds_layout() is ported (LdsLayout peer in the
  *     spec_descriptors TU): ckc_implicit_gemm_conv_spec_effective_lds_layout
  *     fills ctx->lds_layout and ckc_conv_lds_layout_validate_for_async runs the
@@ -211,10 +211,9 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
 
     /* ---- block/warp/lane decomposition (WarpGrid.from_atom().bind()) ----
      * (826-841). Fill the compile-time geometry the epilogues read; the bound
-     * SSA (tid/lane/warp_*_idx/block_*_off) is produced by WarpGrid.bind.
-     * TODO(port): WarpGrid.from_atom/bind has no C helper yet -- the bound SSA
-     * values are left NULL for the grid peer to populate, including the
-     * max_workgroup_size kernel attr the bind emits. */
+     * SSA (tid/lane/warp_*_idx/block_*_off) is produced by inlining WarpGrid.bind
+     * directly below in its byte-identical builder-call order (no standalone C
+     * helper), including the max_workgroup_size kernel attr the bind emits. */
     ctx->grid.tile_m      = ctx->block_m;
     ctx->grid.tile_n      = ctx->block_n;
     ctx->grid.tile_k      = ctx->block_k;

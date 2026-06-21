@@ -144,14 +144,27 @@ length either way; the kernel is faster), and `01` checks the BF16 result agains
 an f32 reference (`max|err|` gate).
 
 ### Why bf16 *correctness* is load-bearing here
-gfx950 BF16 MFMA exists only for the `(16,16,16)` and `(16,16,32)` atoms — there
-is **no `(32,32,16)` BF16 atom**. The default tile in the generic GEMM/MoE specs
-used a `32×32×16` atom, which is F16-only; feeding it bf16 bits produces *finite*
-garbage (~1e36, not NaN — so a naive `isfinite` check passes). This is why both
-`build_gemm_kernel` and the MoE spec pin a `(16,16,32)` warp tile, and why `06`
-documents the matching "FP16/BF16 dtype mismatch" bug as a correctness fix. The
-lesson recurs across the example: a wrong MFMA atom for the dtype is a *silent*
-correctness bug on gfx950, not a crash.
+gfx950 now ships a full bf16 MFMA family — `(16,16,16)`, `(16,16,32)`,
+`(32,32,8)`, and `(32,32,16)` — wired into the atom catalog
+(`helpers/atoms.py:MFMA_BF16_ATOMS`), the layout map
+(`core/arch/target.py`), and the LLVM lowerer (`core/lower_llvm.py` emits
+`llvm.amdgcn.mfma.f32.32x32x16.bf16`). The inner-GEMM atom selector
+(`helpers/mfma_gemm_inner.py`) returns the matching `bf16_*` atom for the
+requested `(m, n)` and dtype, so a correctly-tagged bf16 GEMM lowers to a real
+bf16 MFMA on every tile shape.
+
+The silent-correctness trap is therefore **not** a missing atom — it is a
+**dtype-tag mismatch**. `BatchedGemmSpec.to_universal_spec()` previously left
+`DataSpec` at its `dtype_a=dtype_b=dtype_c="fp16"` default; reading bf16 bits
+through an *f16* MFMA produces *finite* garbage (~1e36, not NaN — so a naive
+`isfinite` check passes). `06` documents this as its "FP16/BF16 dtype mismatch"
+fix, and every GEMM spec class now threads an explicit `dtype` field through
+`DataSpec` (`build_gemm_kernel` pins `dtype_a/b/c="bf16"` directly). The MoE
+spec's bf16 default tile pins `warp_tile=(16,16,32)` (`_default_bf16_gemm_tile`)
+not because the 32×32 bf16 atom is missing but to satisfy a `load_vec ≥ 2`
+constraint on that path. The lesson recurs across the example: a wrong *dtype
+tag* — feeding bf16 bits through an f16 atom — is a *silent* correctness bug on
+gfx950, not a crash.
 
 ---
 
@@ -240,10 +253,12 @@ fused sort: three launches, three HBM round-trips. The README records this as a
 ~0.22× ratio and labels it a **deliberate design choice, documenting the fallback
 cost** — because in decode the sort is **not on the hot path at all** (see §7).
 
-**Hard A3B-specific constraint, verified in the source:** `MoeSortingSpec`
-requires `sort_block_size ≥ experts`. The default is 64; A3B has `E = 128`, so
-`05` (and `06`, and `07`) must set `sort_block_size = 128` or the sort kernel
-asserts at launch. The histogram and scatter phases **atomic-add** into their
+**Hard A3B-specific constraint, verified in the source:** `MoeSortingSpec`'s
+support gate rejects `experts > block_size` (the LDS scan holds one expert count
+per lane). `FusedMoeForwardSpec.sort_block_size` defaults to **64** and is passed
+straight through as the sort spec's `block_size`; A3B has `E = 128 > 64`, so `05`
+(and `06`, and `07`) must set `sort_block_size = 128` or the sort spec fails its
+validity check at build time. The histogram and scatter phases **atomic-add** into their
 `Hist` / `Counter` workspaces, so `05` zeroes both before every chain — the
 launcher does not own that lifetime.
 
@@ -277,9 +292,11 @@ choices, both verified in `06`'s `FusedMoeForwardSpec` / runtime flags:
    decode cost.
 2. **Active-tile skip (`active_tile_skip_gemms=True`).** With 16 active pairs out
    of 128 expert slots, ~87.5 % of the per-expert GEMM tiles are empty. The kernel
-   uses a `SortedTokenIds == -1` sentinel to skip launching the thread blocks for
-   all-empty tiles entirely — so it does work proportional to the *real* routing,
-   not the worst case.
+   uses a `SortedTokenIds == -1` sentinel and a single `scf.if` at CTA entry: a CTA
+   whose `(expert, m-tile)` slot has no valid token id short-circuits — skipping all
+   MFMAs, LDS reads, and HBM stores — instead of running the dense GEMM. (The CTAs
+   are still launched; the empty ones just exit immediately.) So it does work
+   proportional to the *real* routing, not the worst case.
 
 Together these two are "do only the work the sparse routing needs," the same
 structural idea (size the launched work to real tokens) that recurs throughout the
@@ -296,8 +313,9 @@ what produces the win; the graph is what makes it *visible* by removing the
 multi-launch dispatch floor. `06` therefore captures the whole pipeline into one
 HIP graph and times `replay`.
 
-The two bf16 correctness fixes from §3 (the `(16,16,32)` tile, the threaded dtype)
-are what make this kernel *correct* on gfx950 bf16 in the first place; `06`
+The bf16 correctness fix from §3 (the threaded explicit `dtype`, so the GEMM
+lowers through a real bf16 MFMA atom instead of an f16 one) is what makes this
+kernel *correct* on gfx950 bf16 in the first place; `06`
 documents them as the first two of its six steps.
 
 ---
@@ -361,5 +379,6 @@ And one structural theme cuts across both: **size the launched work to the real
 tokens.** At `T = 2` the static-offset sort skip, the active-tile skip, and the
 skinny tile all express the same principle — do work proportional to 2 tokens and
 16 routed pairs, not to the model's worst case. The single largest end-to-end
-risk is the opposite mistake (a wrong MFMA atom for bf16) producing *silent*
-finite garbage; the correctness gates in `01`/`02`/`04`/`06` exist to catch it.
+risk is the opposite mistake (a wrong *dtype tag* — feeding bf16 bits through an
+f16 MFMA atom) producing *silent* finite garbage; the correctness gates in
+`01`/`02`/`04`/`06` exist to catch it.

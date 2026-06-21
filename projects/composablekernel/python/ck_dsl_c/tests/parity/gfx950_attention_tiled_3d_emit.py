@@ -97,6 +97,20 @@ _CONFIGS = {
         use_qq_bias=False,
         kv_storage_dtype=None,
     ),
+    5: dict(
+        # 64-bit paged-KV addressing (caches > 2 GiB). Decode-shaped MHA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=16,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_i64_kv_addr=True,
+    ),
 }
 
 

@@ -26,7 +26,7 @@ heart of the study.
 | `warp_m × warp_n` | the warp grid inside the macro-tile: `4 × 4` (warp_k = 1) |
 | atom | the matrix instruction `v_mfma_f32_16x16x32` (wave64, K = 32 halves) |
 | half | one `fp16` element (2 bytes); the LDS unit of accounting |
-| bank | one of the 32 LDS banks on gfx950; a bank-word is 4 bytes = 2 halves |
+| bank | one of the 64 LDS banks on gfx950 (CDNA4); a bank-word is 4 bytes = 2 halves. The wide `ds_read_b128` the MFMA operand reads use has a 64-dword conflict period on gfx950 (vs 32 on gfx942/gfx90a) |
 | WG/CU | workgroups resident per compute unit (occupancy) |
 
 The accumulator is `fp32` throughout; inputs and output are `fp16`. Layout is
@@ -50,9 +50,11 @@ the matrix unit**.
 The matrix unit on CDNA4 is `v_mfma_f32_16x16x32`: it multiplies two `16×32`
 `fp16` fragments and accumulates into a `16×16` `fp32` tile, with `K = 32` halves
 contracted per instruction. The macro-tile's `64`-half K-step is therefore two
-atom K-passes, and the `4×4` warp grid issues one `16×16` output tile per warp per
-pass. Pad_m / pad_n / pad_k are all on, so the kernel is correct for any `S`; the
-fixed `8192³` shape divides evenly.
+atom K-passes. The `4×4` warp grid splits the `256×256` macro-tile into `64×64`
+per-warp regions, so each warp owns a `4×4` block of `16×16` atoms
+(`mfmas_per_warp_m × mfmas_per_warp_n = 256/(4·16) × 256/(4·16) = 4 × 4`) and
+issues those `16` output-tile MFMAs per K-pass. Pad_m / pad_n / pad_k are all on,
+so the kernel is correct for any `S`; the fixed `8192³` shape divides evenly.
 
 ## 2. Why this geometry, and why one workgroup per CU
 
@@ -64,9 +66,9 @@ makes the rest of the schedule (especially §4's single barrier) the right desig
   B-column feeds a full `256`-wide strip of MFMAs before it is evicted. Smaller
   tiles re-read the same operands more often.
 - A `64`-half (`tile_k`) K-step gives the K-loop enough MFMA work per trip
-  (two atom passes × the 4×4 grid) that per-trip overhead — waitcnts, barriers,
-  loop control — is amortized. A `32`-half step halves the MFMAs per trip and the
-  fixed per-trip cost dominates.
+  (two atom K-passes × each warp's `4×4` atom block = `32` MFMAs/warp/trip) that
+  per-trip overhead — waitcnts, barriers, loop control — is amortized. A `32`-half
+  step halves the MFMAs per trip and the fixed per-trip cost dominates.
 - The two together fill the register file and LDS so completely that only **one**
   workgroup fits per CU. Higher-occupancy alternatives (smaller tiles → 2+ WG/CU)
   all measure *slower* (README's measured-negatives table), because the reuse loss
@@ -150,42 +152,48 @@ climb, and it is pure arithmetic — no layout change, bit-exact.
 
 ### 5.1 Why the conflict exists (a stride alias)
 
-The A tile is row-major `[M][K]` with `K = 64` halves = `128` bytes. gfx950 has
-`32` banks of `4`-byte words, so `128` bytes = **exactly `32` bank-words** — one
-full sweep of all banks per row. The bank an element hits is
+The A tile is row-major `[M][K]` with `K = 64` halves = `128` bytes = `32`
+`4`-byte bank-words. gfx950 has `64` LDS banks, and the wide `ds_read_b128` the
+MFMA operand reads use has a `64`-dword (bank-word) conflict period on CDNA4. So
+a row spans exactly **half** the conflict period, and the bank a dword hits is
 
 ```
-bank = (row·K + col)·2 / 4  mod 32          (·2 bytes/half, /4 bytes/bank-word)
-     = (row·64 + col)/2      mod 32
-     = (row·32 + col/2)      mod 32
-     = (col/2)               mod 32          ← the row·32 term is ≡ 0 (mod 32)
+bank = (row·K + col)·2 / 4  mod 64          (·2 bytes/half, /4 bytes/bank-word)
+     = (row·64 + col)/2      mod 64
+     = (row·32 + col/2)      mod 64          ← row·32 alternates 0 / 32 (mod 64)
 ```
 
-Because the row stride (`64` halves) is a multiple of the bank count, the `row`
-term **vanishes mod 32**. Every one of the `16` M-rows that an atom reads in
-parallel lands on the *same* bank set determined only by `col`. That is a
-deterministic 16-way conflict baked into the stride — a *stride alias*, not a
-random layout accident.
+Because the row stride (`32` bank-words) divides the conflict period, the `row`
+term collapses to a two-state value — `0` for even rows, `32` for odd rows — so
+all even M-rows of an atom land on one bank half and all odd M-rows on the other,
+each determined only by `col`. The `16` M-rows an atom reads in parallel therefore
+collapse onto just two bank sets — a deterministic, heavily-conflicting *stride
+alias* baked into the row stride, not a random layout accident. The measured cost
+is a **52% `LDSBankConflict`** counter (§5 intro).
 
 ### 5.2 The tool is a swizzle, not padding
 
 XOR a function of the row into the column address before computing the bank:
 
 ```
-bank = (col ^ f(row))/2  mod 32
+bank = (col ^ f(row))/2  mod 64
 ```
 
 Now `f(row)` re-introduces a row-dependent term that the modulo cannot erase, so
 different rows scatter across different banks. Two properties make this *free* and
 *exact*:
 
-- **It is a bijection (bit-exact).** The direct-to-LDS write lays the half down at
-  `col ^ f(row)`, and the MFMA read asks for `col ^ f(row)` — the same XOR on both
-  sides cancels (XOR is its own inverse). The data that comes back is identical to
-  what would have come back without the swizzle. No layout reinterpretation, no
-  correction pass: every rung in the ladder is `bad=0`.
-- **It costs zero LDS.** Unlike padding the row stride (§5.4), the swizzle moves
-  elements *within* the existing buffer; it does not widen it.
+- **It is a bijection (bit-exact).** On the direct-to-LDS path the swizzle is
+  applied to the *global element address* the loader fetches into each
+  lane-linear LDS slot (`col ^ f(row)`, see `gemm_universal.py` `_swz_col` at the
+  A/B `async_buffer_load_lds_addr` sites), and the MFMA `ds_read` then asks LDS for
+  the same `col ^ f(row)` — the identical XOR on both sides cancels (XOR is its own
+  inverse). The data that comes back is identical to what would have come back
+  without the swizzle. No layout reinterpretation, no correction pass: every rung
+  in the ladder is `bad=0`.
+- **It costs zero LDS.** Unlike padding the row stride (§5.4), the swizzle only
+  permutes *which* element occupies each existing LDS slot; it does not widen the
+  buffer.
 
 Two parameters decide how far rows spread:
 
@@ -198,11 +206,12 @@ Two parameters decide how far rows spread:
 
 ### 5.3 Rung D vs rung E — wrong bits vs right bits
 
-**Rung D — a coarse 4-way swizzle on the wrong bits.** Toggling a *high* row bit
-into a *high* column bit (`CK_SWZ_R/W/L = 3,1,4`, i.e. `col ^= ((row>>3)&1)<<4`)
+**Rung D — a coarse swizzle on the wrong bits.** Toggling a *high* row bit into a
+*high* column bit (`CK_SWZ_R/W/L = 3,1,4`, i.e. `col ^= ((row>>3)&1)<<4`)
 distinguishes warp groups, not the `16` rows inside an atom. With only 2 slots
-against a `16`-row alias it is 4-way by construction: it cuts `LDSBankConflict`
-`52% → 25%` and lifts `MfmaUtil`, but cannot go further.
+(one toggle) against a `16`-row stride alias it can only partially decorrelate
+the rows: it cuts the measured `LDSBankConflict` `52% → 25%` and lifts `MfmaUtil`,
+but cannot go further.
 
 **Rung E — element-granular, low-bit, all-slots → 0%.** Derive the parameters
 from the geometry instead of guessing: granularity `L = log2(8) = 3`, use all
@@ -212,9 +221,10 @@ slots `W = log2(block_k / 8) = 3`, key on the low row bits `R = 0`:
 col ^= (row & 7) << 3        # permute all 8 b128 slots by the low row bits
 ```
 
-This spreads the low `3` row bits across all `8` slots, which is exactly the
-permutation that breaks the 16-way alias down to 0. `LDSBankConflict` drops to
-**0.0%** and `MfmaUtil` rises to ~54%, still bit-exact (verified race-free across
+This spreads the low `3` row bits across all `8` `ds_read_b128` slots, which is
+exactly the permutation that fully decorrelates the 16 aliasing M-rows. The
+measured `LDSBankConflict` drops to **0.0%** and `MfmaUtil` rises to ~54%, still
+bit-exact (verified race-free across
 a K-sweep of 1…13 tiles, rectangular shapes, and large shapes). This is the
 auto-derived default `lds_swizzle` form: with `CK_SWZ_*` unset the spec computes
 `L/W/R` from the atom and `block_k` and produces exactly this; the env vars exist
@@ -222,8 +232,9 @@ only to force the coarse rung-D form for the A/B comparison.
 
 ### 5.4 Why not just pad the LDS row?
 
-Widening the row stride (`lds_k_pad`) also breaks the alias — `row·(64+pad)` is no
-longer a multiple of 32. But it spends LDS that the 1-WG/CU tile cannot give up
+Widening the row stride (`lds_k_pad`) also breaks the alias — a padded row stride
+of `(64+pad)` halves no longer divides the 64-bank-word conflict period. But it
+spends LDS that the 1-WG/CU tile cannot give up
 (the macro-tile already approaches the 160 KB/CU limit), and it measured
 net-negative: the padding either pushes occupancy below 1 WG/CU or simply costs
 more than it saves. The swizzle achieves the same de-aliasing for **zero** LDS, so
@@ -275,13 +286,19 @@ double-buffered — confirmed by mining the Tensile solution), drives bank confl
 to **0%**, and emits the same direct-to-LDS + double-buffer skeleton. The residual
 gap is **instruction scheduling**, and it traces to one structural limit:
 
-- **direct-to-LDS** gives 0 `ds_write` but only depth-1 prefetch — the fused load
-  cannot be register-staged.
+- **direct-to-LDS** gives 0 `ds_write`, and the shipped kernel does double-buffer
+  it (rung C's `dtl_prefetch` ping-pongs two LDS half-buffers, §4) — but that is an
+  *LDS-buffer* depth-2 prefetch; the fused `buffer_load … lds` cannot also be
+  *register*-staged, so operands never sit in VGPRs ahead of the MFMA the way
+  rocBLAS stages them.
 - **register-staged depth-2 prefetch** (the rocBLAS PGR2 lever) *requires* an
-  explicit `ds_write` to LDS. That path was built end-to-end here; it is
-  numerically exact but lands at ~0.42× because `comgr` does not place the
-  `ds_write` into an MFMA issue slot, so its cost is fully exposed and competes
-  with the operand `ds_read`s.
+  explicit `ds_write` to LDS, and so cannot coexist with the 0-`ds_write`
+  direct-to-LDS path. An offline experiment (not shipped in this example, and not
+  built by `scripts/ladder.py`) implemented it numerically-exact but measured it
+  *slower* — roughly half the direct-to-LDS path — because `comgr` does not place
+  the `ds_write` into an MFMA issue slot, so its cost is fully exposed and competes
+  with the operand `ds_read`s. (The README records the figure; it is an offline
+  measurement, not reproducible from this example's code.)
 
 rocBLAS gets **both** depth-2 prefetch *and* hidden `ds_write`s only because
 hand-written assembly places each `ds_write` into a specific MFMA issue slot. That

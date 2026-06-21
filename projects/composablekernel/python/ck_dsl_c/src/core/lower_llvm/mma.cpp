@@ -10,8 +10,9 @@
  *     called via the internal header by other buckets too)
  *   - scaled f8f6f4, fp4, fp6, and the unscaled fp8-128 hero atom
  *   - register_p_from_qk_c register-fragment reshape
- *   - WMMA-routing stubs (CDNA targets reject WMMA, mirroring the Python
- *     ISABackend.emit_wmma NotImplementedError)
+ *   - WMMA routing: real RDNA3/RDNA4 emission (Gfx11/Gfx12RdnaBackend.emit_wmma)
+ *     plus faithful CDNA rejection (CDNA targets reject WMMA, mirroring the
+ *     Python ISABackend.emit_wmma NotImplementedError)
  *
  * The ISA-named MFMA handlers are NOT distinct opcodes in the frozen ir.h
  * (only CKC_OP_TILE_MMA and CKC_OP_TILE_REGISTER_P_FROM_QK_C exist). They are
@@ -163,7 +164,7 @@ static void _op_tile_mma(ckc_lower_t* L, const ckc_op_t* op)
 }
 
 /* ====================================================================== */
-/* WMMA stubs (Python ISABackend.emit_wmma raises on CDNA targets)        */
+/* WMMA on CDNA: faithful rejection (Python ISABackend.emit_wmma raises)   */
 /* ====================================================================== */
 
 static void _op_tile_wmma_f32_16x16x16_f16(ckc_lower_t* L, const ckc_op_t* op)
@@ -337,9 +338,22 @@ static void _emit_wmma(ckc_lower_t* L, const ckc_op_t* op, const char* op_id)
     }
     if(spec == NULL)
     {
+        /* NAMED GAP (not a port stub): the WMMA_SPECS / WMMA_INT_SPECS tables
+         * above cover exactly the Python _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA
+         * (gfx12) and _RDNA_WMMA_INT op_ids -- i.e. the full set reachable on
+         * the only RDNA backends ckc_ll_backend_for resolves (gfx1151 / gfx1201
+         * / gfx11-generic). The Python isa backend additionally has the
+         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 families (16x16x32 f16/bf16,
+         * 16x16x64 fp8/bf8), but there is NO gfx1250 entry in
+         * ckc_ll_backend_for, so a gfx1250 build is rejected up front with
+         * CKC_ERR_KEY ("unknown arch backend") and those op_ids never reach
+         * here. Wiring them is blocked on porting the gfx1250 ISA backend
+         * (split wait-counters + 57-bit SRD word3) into the C lowerer's
+         * backend table first; until then this is an unreachable-but-faithful
+         * rejection for an unsupported RDNA WMMA op_id. */
         ckc_ll_fail(L,
                     CKC_ERR_NOTIMPL,
-                    "WMMA op 'tile.%s' not yet wired for %s",
+                    "unsupported RDNA WMMA op 'tile.%s' for %s",
                     op_id,
                     L->backend ? L->backend->gfx : "(rdna)");
     }

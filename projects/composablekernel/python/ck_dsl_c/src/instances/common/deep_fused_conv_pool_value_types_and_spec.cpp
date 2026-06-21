@@ -28,10 +28,13 @@
  * builder-emit helpers live in peer part-files). It depends only on the
  * conv_implicit_gemm value-type port (ConvProblem) and the spec helper
  * (kernel_name_join / SignatureBuilder). The leading underlying-conv gate
- * (is_valid_conv_spec via spec.conv_spec()) is reached through the not-yet-public
- * ImplicitGemmConvSpec peer; until that lands the conv-gate delegation is a
- * documented TODO(port) and the deep-fusion-specific checks are byte-faithful.
- */
+ * (is_valid_conv_spec via spec.conv_spec()) is a NAMED GAP: the conv validator
+ * ckc_implicit_gemm_conv_is_valid_spec is now public, but spec.conv_spec()'s C
+ * port (ckc_deep_fused_conv_pool_spec_conv_spec) requires an ir_builder_t for
+ * kernel_name_join, while this is_valid_spec entry is a pure-compute validator
+ * with no builder; wiring one in would change the validator's contract. The
+ * deep-fusion-specific checks below are byte-faithful; the conv-gate delegation
+ * is deferred until a builder-free conv_spec()/validate path exists. */
 #include "ckc/instance_deep_fused_conv_pool_internal.h"
 
 /* INTEGRATION: spec.conv_spec() builds a full ImplicitGemmConvSpec value; the
@@ -564,15 +567,18 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
         return reject(reason, reason_cap, "spec is NULL");
     }
 
-    /* TODO(port): the Python prologue first runs
+    /* NAMED GAP (blocked on a builder-free conv_spec()): the Python prologue first
+     * runs
      *   conv_spec = spec.conv_spec()
      *   ok, why = is_valid_conv_spec(conv_spec, arch=arch)
      *   if not ok: return False, why
-     * spec.conv_spec() builds an ImplicitGemmConvSpec and is_valid_conv_spec is
-     * the per-family atom/pipeline/epilogue gate -- both live in the
-     * conv_implicit_gemm peer port (opaque ckc_implicit_gemm_conv_spec_t here).
-     * Once that peer exposes a public C gate, prepend its (ok, why) here. The
-     * deep-fusion-specific checks below are ported byte-faithfully. */
+     * The per-family gate is_valid_conv_spec IS public now
+     * (ckc_implicit_gemm_conv_is_valid_spec), but spec.conv_spec()'s only C port
+     * (ckc_deep_fused_conv_pool_spec_conv_spec) takes an ir_builder_t* for
+     * kernel_name_join; this validator has no builder and constructing one would
+     * change its pure-compute contract. Prepend the (ok, why) delegation here once
+     * a builder-free conv_spec()/validate path exists. The deep-fusion-specific
+     * checks below are ported byte-faithfully. */
 
     p = &spec->problem;
     c = &p->conv;

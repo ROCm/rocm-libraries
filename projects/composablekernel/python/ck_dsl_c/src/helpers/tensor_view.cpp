@@ -200,9 +200,19 @@ ckc_value_t* ckc_tensor_view_load_scalar(ckc_ir_builder_t* b,
     }
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer address space needs BufferResource, which is out
-         * of this phase's scope. Python raises NotImplementedError for all but
-         * f16 here; the f16 path is intentionally left unported. */
+        /* NAMED GAP (buffer-view load_scalar): Python's buffer branch reads
+         * self.buffer, a BufferResource carrying {rsrc, soffset, num_bytes},
+         * then emits b.buffer_load_f16(rsrc.rsrc, byte_off, rsrc.soffset). The
+         * builder prims exist (ckc_b_buffer_rsrc / ckc_b_buffer_load_f16), but
+         * ckc_tensor_view_t.base is a bare ckc_value_t* with no soffset/
+         * num_bytes slots, so there is nowhere to hold the BufferResource. A
+         * faithful port REQUIRES adding buffer-resource fields to the shared
+         * ckc_tensor_view_t struct (a header change in
+         * helper_ck_dsl.helpers.tensor_view.h, included by many TUs). No
+         * producer in the current C scope ever builds a CKC_ADDR_BUFFER view
+         * through this shared path (instances roll private buffer-resource
+         * structs), so this branch is unreachable; left unported to avoid a
+         * cross-TU header change for dead code. */
         return NULL;
     }
     /* global */
@@ -249,7 +259,11 @@ void ckc_tensor_view_store_scalar(ckc_ir_builder_t* b,
     }
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer store needs BufferResource (out of phase scope). */
+        /* NAMED GAP (buffer-view store_scalar): mirrors load_scalar. Python
+         * emits b.buffer_store_f16(rsrc.rsrc, byte_off, rsrc.soffset, value)
+         * from self.buffer (a BufferResource). Blocked on the same missing
+         * buffer-resource fields in the shared ckc_tensor_view_t struct (would
+         * require a cross-TU header change). Unreachable in current C scope. */
         return;
     }
     off = ckc_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -282,7 +296,12 @@ ckc_value_t* ckc_tensor_view_load_vec(ckc_ir_builder_t* b,
     }
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer vec load (out of phase scope). */
+        /* NAMED GAP (buffer-view load_vec): Python emits
+         * b.buffer_load_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, dwords=n/2)
+         * for f16 (n in {2,4,8}) from self.buffer. Builder prim
+         * ckc_b_buffer_load_vN_f16 exists; blocked on the missing
+         * buffer-resource fields in shared ckc_tensor_view_t (cross-TU header
+         * change). Unreachable in current C scope. */
         return NULL;
     }
     off = ckc_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -330,7 +349,11 @@ void ckc_tensor_view_store_vec(ckc_ir_builder_t* b,
     }
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer vec store (out of phase scope). */
+        /* NAMED GAP (buffer-view store_vec): Python emits
+         * b.buffer_store_vN_f16(rsrc.rsrc, byte_off, rsrc.soffset, ...) from
+         * self.buffer. Builder prim ckc_b_buffer_store_vN_f16 exists; blocked
+         * on the missing buffer-resource fields in shared ckc_tensor_view_t
+         * (cross-TU header change). Unreachable in current C scope. */
         return;
     }
     off = ckc_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
@@ -351,7 +374,11 @@ ckc_value_t* ckc_tensor_view_load_vec_at(ckc_ir_builder_t* b,
 
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer load_vec_at (out of phase scope). */
+        /* NAMED GAP (buffer-view load_vec_at): the buffer branch additionally
+         * carries the bounds-checked mask path keyed on the BufferResource.
+         * Blocked on the missing buffer-resource fields in shared
+         * ckc_tensor_view_t (cross-TU header change). Unreachable in current C
+         * scope. */
         return NULL;
     }
     if(v->addr_space == CKC_ADDR_LDS)
@@ -383,7 +410,9 @@ void ckc_tensor_view_store_vec_at(ckc_ir_builder_t* b,
         return;
     if(v->addr_space == CKC_ADDR_BUFFER)
     {
-        /* TODO(port): buffer store_vec_at (out of phase scope). */
+        /* NAMED GAP (buffer-view store_vec_at): mirrors load_vec_at. Blocked on
+         * the missing buffer-resource fields in shared ckc_tensor_view_t
+         * (cross-TU header change). Unreachable in current C scope. */
         return;
     }
     ckc_b_global_store_vN(b, v->base, elem_off, value, n, 0);

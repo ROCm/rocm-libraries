@@ -183,6 +183,13 @@ typedef struct ckc_unified_attention_3d_tiled_spec
 
     bool use_invariant_hoist; /* False (gfx942-only knob; ignored on gfx950) */
     bool use_wide_kv_load;    /* False (gfx942-only knob; ignored on gfx950) */
+    /* 64-bit paged-KV addressing for caches > 2 GiB. When set, the per-block
+     * byte base (physical_block * block_stride) is folded into a 64-bit buffer
+     * base (a wave-uniform per-block make_buffer_rsrc) and only the within-block
+     * byte offset stays in the i32 buffer voffset -- mirrors the 2D tiled
+     * kernel's use_i64_kv_addr. Default false => byte-identical small-cache
+     * build. */
+    bool use_i64_kv_addr; /* False */
 } ckc_unified_attention_3d_tiled_spec_t;
 
 ckc_unified_attention_3d_tiled_spec_t ckc_unified_attention_3d_tiled_spec_default(void);

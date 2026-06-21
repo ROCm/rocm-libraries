@@ -29,6 +29,7 @@
 #include "ckc/instance_fused_moe_internal.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"             /* ckc_io_ir_type           */
 #include "ckc/helper_ck_dsl.helpers.gather_scatter.h" /* ckc_b_load_sorted_token_id*/
+#include "ckc/ir_internal.h"                          /* ckc_i_set_err            */
 
 /* ===================================================================== *
  *  PROLOGUE  (build_moe_gather, lines 368-415)
@@ -47,11 +48,11 @@ bool ckc_moe_gather_prologue(ckc_moe_stream_ctx_t* ctx)
     char why[CKC_ERR_MSG_CAP];
     if(!ckc_fused_moe_is_valid_spec(spec, why, sizeof(why)))
     {
-        /* Mirror: raise ValueError(f"invalid fused_moe spec: {why}") via the
-         * sticky-error builder. Subsequent builder calls are no-ops; the driver
-         * reports failure through b's status / NULL kernel. */
-        /* TODO(port): set a precise "invalid fused_moe spec: {why}" message on
-         * the builder once a shared spec-reject helper is available. */
+        /* Mirror: raise ValueError(f"invalid fused_moe spec: {why}"). The build
+         * entry calls this prologue inside a ckc::guard_builder boundary, so the
+         * throwing ckc_i_set_err records the exact Python message text + status
+         * on the builder; the bare return below is dead after the throw. */
+        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid fused_moe spec: %s", why);
         return false;
     }
 

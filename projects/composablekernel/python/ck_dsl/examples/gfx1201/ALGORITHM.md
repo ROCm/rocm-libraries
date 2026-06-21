@@ -58,8 +58,13 @@ RDNA4.
 ## 2. The RDNA4 fragment layout (what differs from RDNA3/3.5)
 
 The gfx12 WMMA ABI differs from the gfx11 (RDNA3/3.5) one in three concrete
-ways, all encoded in `core/arch/target.py::_wmma_gfx12_*` and the GEMM epilogue
-in `instances/gfx1201/wmma_gemm.py`:
+ways. The operand/accumulator lane maps (§2.1, §2.3) live in
+`core/arch/target.py::_wmma_gfx12_*` and are walked by the GEMM operand loads
+and epilogue in `instances/gfx1201/wmma_gemm.py`; the distinct intrinsic (§2.2)
+is selected by op_id there but mapped to its builtin in `core/lower_hip.py`
+(`__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`) and to the
+`@llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16` intrinsic in
+`core/lower_llvm.py`:
 
 ### 2.1 — No cross-half operand duplication
 
@@ -162,9 +167,13 @@ covers the **full Qwen3.5-9B `MatMulNBits` set** with three families, selected b
 
 The two WMMA families share one source
 (`instances/common/_matmul_nbits_large_n.py`) and **branch the fragment ABI per
-arch**, so the only difference between the gfx1151 and gfx1201 builds is which
-WMMA op_id the manifest tags (`wmma_f32_16x16x16_f16` vs
-`wmma_gfx12_f32_16x16x16_f16`).
+arch** (the `_WmmaParams` table): the gfx1201 build emits a genuinely different
+kernel — `<8 × half>` operands with the half-`K` split and the
+column-distributed accumulator epilogue, versus gfx1151's `<16 × half>`
+operands and row-distributed epilogue — selecting the `wmma_gfx12_..._f16`
+op_id rather than `wmma_f32_16x16x16_f16`. The *driver script* is what differs
+only in the manifest atom tag (`wmma_f32_16x16x16_f16` vs
+`wmma_gfx12_f32_16x16x16_f16`); the shared body does the real per-arch work.
 
 ### 4.1 — The `--opt` combined-optimization body (`large_n` only)
 

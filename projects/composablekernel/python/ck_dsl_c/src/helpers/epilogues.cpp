@@ -437,15 +437,30 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
      * ds_write_b16 per accumulator slot at the [ld_m, ld_n] coordinate, which we
      * emit directly here.
      *
-     * TODO(port): route through store_tile_cshuffle once the distribution
-     * tile-window machinery is ported, to keep the publish path byte-identical
-     * to the StaticDistributedTensor spelling. */
+     * NAMED GAP (cshuffle publish routing): the byte-identical IR is already
+     * emitted here directly (acc_h extracts -> tile bases -> per-slot coord +
+     * ds_write, in the exact SSA order store_tile_cshuffle produces). What is
+     * NOT ported is the StaticDistributedTensor / store_tile_cshuffle code path
+     * itself (distribution.py make_static_distributed_tensor + LoadStoreTraits +
+     * store_tile_cshuffle, none of which exist in the C engine yet). Routing
+     * through it is a code-organization change with no IR effect; deferred until
+     * the distribution tile-window machinery is ported. The direct emission
+     * below is the contract. */
     if(epi->out_dtype != NULL && epi->out_dtype[0] != '\0' &&
        !(epi->out_dtype[0] == 'f' && epi->out_dtype[1] == '1' && epi->out_dtype[2] == '6' &&
          epi->out_dtype[3] == '\0'))
     {
-        /* TODO(port): bf16 / fp8e4m3 / bf8e5m2 staging element types are not yet
-         * wired; only the default f16 path is emitted. */
+        /* NAMED GAP (cshuffle out_dtype): the bf16 / fp8e4m3 / bf8e5m2 staging
+         * element types are not wired; only the default f16 path is emitted.
+         * NOTE: in the Python original (epilogues.py) out_dtype is a declared
+         * dataclass field but emit() never reads it -- Python always emits the
+         * f16 staging path regardless of out_dtype. So this guard is strictly
+         * MORE conservative than Python (it errors instead of silently emitting
+         * f16). Byte-identity is unaffected because the only value ever passed
+         * is the "f16" default. A faithful non-f16 port is blocked on missing
+         * bf16/fp8 staging-store builder prims (bf16 ds_write + 1-byte
+         * global_store_vN fp8 stores) AND the lds-view dtype plumbing; deferred
+         * until a producer actually requests a non-f16 cshuffle out_dtype. */
         ckc_i_set_err(b,
                       CKC_ERR_NOTIMPL,
                       "CShuffleEpilogue out_dtype=%s not yet ported (f16 only)",

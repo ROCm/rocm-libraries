@@ -320,7 +320,8 @@ the appropriate dequant), and the only approximation anywhere is f16/f32 roundin
 in the accumulator/store. What the README explores is **throughput**, not
 correctness:
 
-- these are no-LDS, one-tile-per-wave *reference* kernels at 4–15 % of peak; the
+- these are no-LDS, one-tile-per-wave *reference* kernels far from peak (the
+  committed §05 int8 suite lands at ~4–11 % of the gfx1151 ceilings); the
   headline is the **A/B ratio**, not the absolute rate;
 - the central result is that **K, not arithmetic intensity, drives Path A's win**
   (K-heavy shapes amortize the fixed per-wave overhead, where Path A's true-int8

@@ -17,7 +17,7 @@ shape.
 | symbol | shape | meaning |
 |---|---|---|
 | $A$ | $M \times K$ | activations (the decode tokens) |
-| $B$ | $N \times K$ | weight matrix, stored row-major (`RCR` layout) |
+| $B$ | $N \times K$ | weight matrix; the `C` of `RCR` is B's layout (column-major operand, stored $[N,K]$) |
 | $C$ | $M \times N$ | output |
 | $M$ | scalar | tokens in the batch — **2** for this decode shape |
 | $N$ | scalar | output features — **4096** |
@@ -85,8 +85,10 @@ streaming $B$'s 32 MiB as fast as the part allows, and nothing else moves the
 needle.**
 
 The hard floor: $33.5\ \text{MB} / 8\ \text{TB/s} \approx 4.2\ \mu s$. The
-sustained-bf16 streaming ceiling on this part is ~3.5 TB/s ≈ 44 % of peak, which
-is where the tuned kernel and rocBLAS both land (~10.3 µs).
+sustained-bf16 streaming ceiling the tuned kernel reaches on this part is
+~3.3 TB/s ≈ 40 % of peak (the winning config: 33.6 MB / 10.30 µs ≈ 3.26 TB/s,
+matching the README's measured ~40 % HBM), which is where it and rocBLAS both
+land (DSL 10.30 µs vs rocBLAS 10.18 µs best — within noise; `data/22_confirm_winner.json`).
 
 ---
 
@@ -210,9 +212,12 @@ deep-K is what cuts the K-loop trip count. DTLA is enabling, not directly winnin
 MI355X has **8 XCDs**, each with its own L2. The default WG dispatch scatters
 consecutive CTAs across XCDs, so each XCD's L2 sees uncorrelated traffic. At
 $M=2$ the **same 16 KiB $A$ tile is reused by every CTA in the M-row** — exactly
-the cross-CTA reuse an L2 can hold. The swizzle (`chiplet_aware_super_tile`)
-remaps WGIDs so consecutive WGs land on the *same* XCD, keeping $A$ resident in
-one L2. The win is small (~2.6 %) because $A$ is only 16 KiB, but it is real and
+the cross-CTA reuse an L2 can hold. The swizzle (`chiplet_aware_super_tile_dynamic`,
+the runtime-WGID variant the emitter calls in `gemm_universal.py`) remaps WGIDs so
+consecutive WGs land on the *same* XCD, keeping $A$ resident in
+one L2. The win is small (~2.1 % in the step-21 sweep, ~2.4 % in the cleaner
+step-22 serial re-measure; `data/21_chiplet.json` / `data/22_confirm_winner.json`)
+because $A$ is only 16 KiB, but it is real and
 above the noise floor — and it only appears at a shape with many CTAs per M-row
 (at the small-tile-count shapes of the earlier `extra_levers` step, the swizzle
 remapped a single chunk and was a no-op).
@@ -278,7 +283,7 @@ The sum of §1 is exact and invariant; the README's 24 steps change only the
 *schedule* — which never alters what is computed (every variant is correctness-
 gated bit-exact, or `rel < 5e-2` for the split-K f32-workspace path, before any
 timing). The honest result is that the tuned single-pass kernel reaches the
-part's sustained-bf16 ceiling (~44 % HBM, on par with rocBLAS), and split-K is the
+part's sustained-bf16 ceiling (~40 % HBM, on par with rocBLAS), and split-K is the
 one structural change that extends past a saturated single config by recruiting
 the idle CUs the decode grid leaves behind.
 

@@ -48,6 +48,7 @@
 #include "ckc/instance_fused_moe_internal.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"             /* ckc_io_ir_type, ckc_b_load_scalar_as_f32 */
 #include "ckc/helper_ck_dsl.helpers.gather_scatter.h" /* ckc_b_load_sorted_token_id/topk_weight   */
+#include "ckc/ir_internal.h" /* ckc_i_set_err                             */
 
 /* ===================================================================== *
  *  STATIC_SCATTER_GATHER PROLOGUE  (lines 759-803)
@@ -66,8 +67,11 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
     char why[CKC_ERR_MSG_CAP];
     if(!ckc_fused_moe_is_valid_spec(spec, why, sizeof(why)))
     {
-        /* TODO(port): set a precise "invalid fused_moe spec: {why}" message on
-         * the builder once a shared spec-reject helper is available. */
+        /* raise ValueError(f"invalid fused_moe spec: {why}") -- this prologue
+         * runs inside a ckc::guard_builder boundary, so the throwing
+         * ckc_i_set_err records the exact Python message text + status; the bare
+         * return below is dead after the throw. */
+        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid fused_moe spec: %s", why);
         return false;
     }
 
@@ -368,7 +372,11 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
     char why[CKC_ERR_MSG_CAP];
     if(!ckc_fused_moe_is_valid_spec(spec, why, sizeof(why)))
     {
-        /* TODO(port): set "invalid fused_moe spec: {why}" on the builder. */
+        /* raise ValueError(f"invalid fused_moe spec: {why}") -- this prologue
+         * runs inside a ckc::guard_builder boundary, so the throwing
+         * ckc_i_set_err records the exact Python message text + status; the bare
+         * return below is dead after the throw. */
+        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid fused_moe spec: %s", why);
         return false;
     }
 

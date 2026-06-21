@@ -33,7 +33,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
@@ -47,6 +49,7 @@ extern "C" {
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/instance_gfx942_attention_tiled_2d.h"
 #include "ckc/instance_gfx950_attention_tiled_2d.h"
+#include "ckc/instance_gfx950_attention_tiled_3d.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
 }
@@ -155,6 +158,44 @@ struct CEngine {
     // is outside the tiled gate (caller falls back to build_sdpa); throws the
     // base runtime_error on a genuine build/lower failure.
     static CEngineResult build_sdpa_tiled(const SdpaProblem& p);
+
+    // ---- Split-KV 3D decode (segment + reduce, two launches) -------------
+    //
+    // For decode-class shapes (seqlen_q == 1) the single 2D kernel under-uses
+    // the device: it launches only (num_kv_heads * a few q-blocks) workgroups
+    // over the whole KV range. The split-KV 3D path slices the KV range into
+    // `num_segments` independent chunks, runs a per-(q,head,segment) SEGMENT
+    // kernel that writes partial (m, l, acc) into a workspace, then a REDUCE
+    // kernel that merges the segments per (q_token, q_head). This is the
+    // optimal decode path the Python dispatcher takes (use_2d_kernel == false).
+    //
+    // These mirror attention_unified.py's 3D-prepared path geometry:
+    //   segment kernel: grid {total_num_q_blocks, num_kv_heads, num_segments}
+    //                   ABI = 12 ptrs (segm_output/max/expsum, q, k_cache,
+    //                   v_cache, sink, block_tables, seq_lens, alibi, qq_bias,
+    //                   query_start_len) + 7 scalars (scale, k_scale, v_scale,
+    //                   softcap, num_seqs, block_table_stride, qq_bias_stride_0)
+    //   reduce kernel : grid {total_q, num_query_heads, 1}
+    //                   ABI = 5 ptrs (output, segm_output, segm_max,
+    //                   segm_expsum, seq_lens)
+    //   both blocks = 64 threads (single wave on gfx950).
+    //
+    // Throws TiledUnsupported when the 3D gate declines the problem (caller
+    // falls back to the 2D tiled / scalar path); base runtime_error on a
+    // genuine build/lower failure. `num_segments` of the SdpaProblem is honored
+    // when >0, otherwise defaults to a decode-stable value.
+    static CEngineResult build_sdpa_3d_segment(const SdpaProblem& p, int num_segments);
+    static CEngineResult build_sdpa_3d_reduce(const SdpaProblem& p, int num_segments);
+
+    // Mirror attention_unified.py select_path(): true == the optimal split-KV
+    // 3D decode path should run (use_2d_kernel == false). num_sms feeds the
+    // target-program heuristic (CU count); pass the device's
+    // multiProcessorCount.
+    static bool prefer_3d_decode(const SdpaProblem& p, int num_sms);
+    // num_segments for the split-KV decode (mirrors _num_segments /
+    // select_3d_config). Returns the segment count the segment + reduce kernels
+    // and the workspace are sized for.
+    static int num_segments_for(const SdpaProblem& p, int num_sms);
 
    private:
     // Common manifest header for every op.
@@ -610,6 +651,222 @@ inline CEngineResult CEngine::build_sdpa_tiled(const SdpaProblem& p) {
     const long total_q = p.total_q;
     const int gy = static_cast<int>(total_q / std::max(block_q, 1) + p.num_seqs);
     const int g[3] = {p.num_kv_heads, gy, 1};
+    r.grid = {static_cast<unsigned>(g[0]), static_cast<unsigned>(g[1]),
+              static_cast<unsigned>(g[2])};
+    r.manifest.grid_explicit = std::array<int, 3>{g[0], g[1], g[2]};
+    return r;
+}
+
+// ==========================================================================
+// Split-KV 3D decode selection helpers (mirror attention_unified.py).
+// ==========================================================================
+
+inline int CEngine::num_segments_for(const SdpaProblem& p, int num_sms) {
+    // select_3d_config: num_segments = ceil(target / num_2d_prgms), rounded to
+    // a power of two, clamped to [min_segments, 128]. target = num_sms * 4.
+    // num_2d_prgms = total_num_q_blocks_upper_bound * num_kv_heads.
+    auto next_pow2 = [](int x) {
+        if (x <= 1) return 1;
+        int p2 = 1;
+        while (p2 < x) p2 <<= 1;
+        return p2;
+    };
+    const int nqpk = p.num_kv_heads > 0 ? p.num_query_heads / p.num_kv_heads : 1;
+    const int block_m = nqpk <= 16 ? 16 : next_pow2(nqpk);
+    const int block_q = block_m / (nqpk > 0 ? nqpk : 1);
+    const int num_seqs = p.num_seqs > 0 ? p.num_seqs : 1;
+    const long total_q = p.total_q > 0 ? p.total_q : 1;
+    const long tnqb = total_q / (block_q > 0 ? block_q : 1) + num_seqs;
+    const long num_2d = tnqb * (p.num_kv_heads > 0 ? p.num_kv_heads : 1);
+    const int target = (num_sms > 0 ? num_sms : 1) * 4;
+    int num_segments = static_cast<int>((target + num_2d - 1) / (num_2d > 0 ? num_2d : 1));
+    num_segments = next_pow2(num_segments);
+    if (num_segments > 128) num_segments = 128;
+    const int block_size = p.block_q > 0 ? p.block_q : p.block_size;
+    const int tile_size = block_size;  // gfx950 tile_size == block_size
+    const int min_segments = tile_size <= 16 ? 16 : 8;
+    if (num_segments < min_segments) num_segments = min_segments;
+    return num_segments;
+}
+
+inline bool CEngine::prefer_3d_decode(const SdpaProblem& p, int num_sms) {
+    // use_2d_kernel(): 2D when sliding_window>0 || max_seqlen_k<=512 ||
+    // num_2d_prgms > target. Otherwise 3D. We only route decode (seqlen_q==1).
+    if (p.max_seqlen_q != 1) return false;
+    if (p.sliding_window > 0) return false;
+    if (p.max_seqlen_k <= 512) return false;
+    auto next_pow2 = [](int x) {
+        if (x <= 1) return 1;
+        int p2 = 1;
+        while (p2 < x) p2 <<= 1;
+        return p2;
+    };
+    const int nqpk = p.num_kv_heads > 0 ? p.num_query_heads / p.num_kv_heads : 1;
+    const int block_m = nqpk <= 16 ? 16 : next_pow2(nqpk);
+    const int block_q = block_m / (nqpk > 0 ? nqpk : 1);
+    const int num_seqs = p.num_seqs > 0 ? p.num_seqs : 1;
+    const long total_q = p.total_q > 0 ? p.total_q : 1;
+    const long tnqb = total_q / (block_q > 0 ? block_q : 1) + num_seqs;
+    const long num_2d = tnqb * (p.num_kv_heads > 0 ? p.num_kv_heads : 1);
+    const long target = (long)(num_sms > 0 ? num_sms : 1) * 4;
+    if (num_2d > target) return false;
+    return true;
+}
+
+// ==========================================================================
+// Split-KV 3D SEGMENT kernel (gfx950 wide-K MFMA).
+//   ABI (19 args): segm_output,segm_max,segm_expsum : ptr<f32>:8 ;
+//     query,key_cache,value_cache,sink : ptr<f16>:8 ;
+//     block_tables,seq_lens : ptr<i32>:8 ; alibi_slopes,qq_bias : ptr<f32>:8 ;
+//     query_start_len : ptr<i32>:8 ;
+//     scale,k_scale,v_scale,softcap : f32:4 ;
+//     num_seqs,block_table_stride,qq_bias_stride_0 : i32:4
+//   grid {total_num_q_blocks, num_kv_heads, num_segments}; block = 64.
+// ==========================================================================
+inline CEngineResult CEngine::build_sdpa_3d_segment(const SdpaProblem& p, int num_segments) {
+    const char* arch = p.arch ? p.arch : "gfx950";
+    if (std::string(arch) != "gfx950")
+        throw TiledUnsupported(std::string("split-KV 3D decode requires gfx950, got ") + arch);
+    if (p.num_kv_heads <= 0) throw TiledUnsupported("num_kv_heads must be positive");
+    const int nqpk = p.num_query_heads / p.num_kv_heads;
+    if (nqpk <= 0 || p.num_query_heads % p.num_kv_heads != 0)
+        throw TiledUnsupported("num_query_heads must be a positive multiple of num_kv_heads");
+    if (p.dtype == nullptr) throw TiledUnsupported("dtype must be set");
+    const std::string dt = p.dtype;
+    if (dt != "fp16" && dt != "bf16")
+        throw TiledUnsupported(std::string("unsupported dtype '") + p.dtype + "'");
+
+    const int block_size = p.block_q > 0 ? p.block_q : p.block_size;
+
+    const char* reason = nullptr;
+    if (!ckc_gfx950_attention_tiled_3d_supports(p.head_size, block_size, dt.c_str(), nqpk,
+                                                /*use_alibi=*/false, /*use_qq_bias=*/false,
+                                                /*use_fp8=*/false, /*q_dtype=*/nullptr,
+                                                /*kv_storage_dtype=*/nullptr, arch, &reason))
+        throw TiledUnsupported(reason ? reason : "gfx950 3D supports gate rejected");
+
+    ckc_unified_attention_3d_tiled_spec_t spec = ckc_unified_attention_3d_tiled_spec_default();
+    spec.head_size = p.head_size;
+    spec.block_size = block_size;
+    spec.num_query_heads = p.num_query_heads;
+    spec.num_kv_heads = p.num_kv_heads;
+    spec.dtype = (dt == "bf16") ? "bf16" : "fp16";
+    spec.use_sinks = false;
+    spec.sliding_window = p.sliding_window;
+    spec.has_softcap = p.softcap != 0.0;
+    spec.num_segments = num_segments;
+    spec.num_seqs = p.num_seqs;
+
+    // Resolve the kernel name (== the kernel entry symbol) from the spec, and
+    // build+lower via the convenience entry (it inits/owns its own IRBuilder).
+    char kbuf[256] = {0};
+    if (ckc_gfx950_unified_attention_3d_tiled_spec_kernel_name(&spec, kbuf, sizeof kbuf) < 0)
+        fail("sdpa_3d_segment", "kernel_name encode failed");
+    const std::string kname = kbuf;
+    const int threads = CKC_GFX950_ATTN_TILED_3D_THREADS;  // single wave (64)
+
+    char* ll = nullptr;
+    char err[CKC_ERR_MSG_CAP] = {0};
+    const ckc_status_t st = ckc_build_unified_attention_3d_tiled_gfx950_lower_to_llvm(
+        &spec, arch, CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    if (st != CKC_OK || !ll) fail("sdpa_3d_segment", err[0] ? err : "lower_to_llvm failed");
+
+    CEngineResult r;
+    r.llvm_ir.assign(ll);
+    free(ll);
+
+    const char* io = (dt == "bf16") ? "ptr<bf16, global>" : "ptr<f16, global>";
+    r.manifest = base_manifest("attention_unified", kname, threads);
+    r.manifest.grid_order = "MN";
+    r.manifest.sig_has_bytes = false;
+    r.manifest.args_signature = {
+        arg("segm_output_ptr", "ptr<f32, global>", 8),
+        arg("segm_max_ptr", "ptr<f32, global>", 8),
+        arg("segm_expsum_ptr", "ptr<f32, global>", 8),
+        arg("query_ptr", io, 8),
+        arg("key_cache_ptr", io, 8),
+        arg("value_cache_ptr", io, 8),
+        arg("sink_ptr", io, 8),
+        arg("block_tables_ptr", "ptr<i32, global>", 8),
+        arg("seq_lens_ptr", "ptr<i32, global>", 8),
+        arg("alibi_slopes_ptr", "ptr<f32, global>", 8),
+        arg("qq_bias_ptr", "ptr<f32, global>", 8),
+        arg("query_start_len_ptr", "ptr<i32, global>", 8),
+        arg("scale", "f32", 4),
+        arg("k_scale", "f32", 4),
+        arg("v_scale", "f32", 4),
+        arg("softcap", "f32", 4),
+        arg("num_seqs", "i32", 4),
+        arg("block_table_stride", "i32", 4),
+        arg("qq_bias_stride_0", "i32", 4),
+    };
+    r.block = static_cast<unsigned>(threads);
+
+    // Grid: {total_num_q_blocks, num_kv_heads, num_segments}.
+    const int block_m = ckc_gfx950_unified_attention_3d_tiled_spec_block_m(&spec);
+    const int block_q = block_m / nqpk;
+    const int num_seqs = p.num_seqs > 0 ? p.num_seqs : 1;
+    const long total_q = p.total_q > 0 ? p.total_q : 1;
+    const int gx = static_cast<int>(total_q / std::max(block_q, 1) + num_seqs);
+    const int g[3] = {gx, p.num_kv_heads, num_segments};
+    r.grid = {static_cast<unsigned>(g[0]), static_cast<unsigned>(g[1]),
+              static_cast<unsigned>(g[2])};
+    r.manifest.grid_explicit = std::array<int, 3>{g[0], g[1], g[2]};
+    return r;
+}
+
+// ==========================================================================
+// Split-KV 3D REDUCE kernel (arch-neutral f32 combine).
+//   ABI (5 ptrs): output,segm_output,segm_max,segm_expsum,seq_lens.
+//   grid {total_q, num_query_heads, 1}; block = 64.
+// ==========================================================================
+inline CEngineResult CEngine::build_sdpa_3d_reduce(const SdpaProblem& p, int num_segments) {
+    const char* arch = p.arch ? p.arch : "gfx950";
+    if (std::string(arch) != "gfx950")
+        throw TiledUnsupported(std::string("split-KV 3D decode requires gfx950, got ") + arch);
+    if (p.dtype == nullptr) throw TiledUnsupported("dtype must be set");
+    const std::string dt = p.dtype;
+    if (dt != "fp16" && dt != "bf16")
+        throw TiledUnsupported(std::string("unsupported dtype '") + p.dtype + "'");
+
+    ckc_unified_attention_reduce_tiled_spec_t spec =
+        ckc_unified_attention_reduce_tiled_spec_default();
+    spec.head_size = p.head_size;
+    spec.num_query_heads = p.num_query_heads;
+    spec.num_kv_heads = p.num_kv_heads;
+    spec.dtype = (dt == "bf16") ? "bf16" : "fp16";
+    spec.num_segments = num_segments;
+
+    char kbuf[256] = {0};
+    if (ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(&spec, kbuf, sizeof kbuf) < 0)
+        fail("sdpa_3d_reduce", "kernel_name encode failed");
+    const std::string kname = kbuf;
+    const int threads = CKC_GFX950_ATTN_TILED_3D_THREADS;  // single wave (64)
+
+    char* ll = nullptr;
+    char err[CKC_ERR_MSG_CAP] = {0};
+    const ckc_status_t st = ckc_build_unified_attention_reduce_tiled_gfx950_lower_to_llvm(
+        &spec, arch, CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    if (st != CKC_OK || !ll) fail("sdpa_3d_reduce", err[0] ? err : "lower_to_llvm failed");
+
+    CEngineResult r;
+    r.llvm_ir.assign(ll);
+    free(ll);
+
+    const char* io = (dt == "bf16") ? "ptr<bf16, global>" : "ptr<f16, global>";
+    r.manifest = base_manifest("attention_unified", kname, threads);
+    r.manifest.grid_order = "MN";
+    r.manifest.sig_has_bytes = false;
+    r.manifest.args_signature = {
+        arg("output_ptr", io, 8),
+        arg("segm_output_ptr", "ptr<f32, global>", 8),
+        arg("segm_max_ptr", "ptr<f32, global>", 8),
+        arg("segm_expsum_ptr", "ptr<f32, global>", 8),
+        arg("seq_lens_ptr", "ptr<i32, global>", 8),
+    };
+    r.block = static_cast<unsigned>(threads);
+
+    const int g[3] = {static_cast<int>(p.total_q > 0 ? p.total_q : 1), p.num_query_heads, 1};
     r.grid = {static_cast<unsigned>(g[0]), static_cast<unsigned>(g[1]),
               static_cast<unsigned>(g[2])};
     r.manifest.grid_explicit = std::array<int, 3>{g[0], g[1], g[2]};

@@ -1724,6 +1724,7 @@ def _tiled_3d_spec_from_problem(
         tile_size_override=tile_size_override,
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
 
 
@@ -1747,6 +1748,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_3d_invariant_hoist(problem),
         _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
+        _enable_i64_kv_addr(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
@@ -2207,6 +2209,25 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         env = (
             __import__("os").environ.get("HIPDNN_GFX1250_3D_GRAPH", "").strip().lower()
         )
+        return env in ("1", "on", "enable", "enabled", "yes", "true")
+    if arch == "gfx950":
+        # The 3D split-KV decode launch is host/dispatch bound here: the two
+        # kernels (segment + reduce) device-execute in ~26-35us but the eager
+        # Python dispatch adds a ~17us flat floor, so the wall time is ~43us and
+        # does not scale with context length. Capturing the (segment + reduce)
+        # launch sequence into a hipGraph and replaying it removes that
+        # per-launch host cost and roughly halves decode latency (43->21us at
+        # k=2048), producing bitwise-identical output. Gated to the decode /
+        # short-q regime (``max_seqlen_q <= 768``) so prefill routing is never
+        # affected, and feature-flagged shapes are excluded. Opt-in via
+        # ``HIPDNN_GFX950_3D_GRAPH=1`` until broadly validated across traces.
+        if problem.max_seqlen_q > 768:
+            return False
+        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
+            return False
+        if problem.sliding_window > 0 or problem.use_fp8:
+            return False
+        env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     return False
 

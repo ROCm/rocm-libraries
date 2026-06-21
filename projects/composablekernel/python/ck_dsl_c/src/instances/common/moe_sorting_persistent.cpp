@@ -25,6 +25,7 @@
 #include "ckc/instance_moe_sorting.h"
 #include "ckc/helper_ck_dsl.helpers.scan.h" /* ckc_lds_zero_i32, ckc_block_exclusive_scan_i32 */
 #include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  Prologue (Python lines 639-682).
@@ -68,11 +69,12 @@ bool ckc_moe_sort_persistent_prologue(ckc_moe_sort_ctx_t* ctx)
     char reason[CKC_ERR_MSG_CAP];
     if(!ckc_moe_sort_is_valid_spec_impl(ctx->spec, ctx->arch, reason, sizeof(reason), NULL))
     {
-        /* raise ValueError(f"invalid moe_sorting spec: {why}") -- route through
-         * the sticky-error builder so callers observe the rejection. */
-        b->status = CKC_ERR_VALUE;
-        /* TODO(port): byte-identical "invalid moe_sorting spec: {why}"
-         * formatting once the shared error-string convention is finalised. */
+        /* raise ValueError(f"invalid moe_sorting spec: {why}") -- the build
+         * entries call this prologue inside a ckc::guard_builder boundary, so
+         * the throwing ckc_i_set_err records the exact Python message text and
+         * status on the builder; the bare return below is dead after the throw,
+         * mirroring the other instance build paths. */
+        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid moe_sorting spec: %s", reason);
         return false;
     }
 

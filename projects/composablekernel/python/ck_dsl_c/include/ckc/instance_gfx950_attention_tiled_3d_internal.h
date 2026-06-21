@@ -132,6 +132,7 @@ typedef struct ckc_gfx950_attn_tiled_3d_config
     bool USE_ALIBI;     /* spec.use_alibi                                       */
     bool USE_QQ_BIAS;   /* spec.use_qq_bias                                     */
     bool KV_FP8;        /* kv_storage_dtype == "fp8e4m3"                        */
+    bool I64_KV_ADDR;   /* spec.use_i64_kv_addr (64-bit paged-KV, caches > 2 GiB) */
     int KV_BYTES;       /* 1 if KV_FP8 else 2                                   */
 
     /* wide-K loop trip counts (lines 293-298). */
@@ -293,14 +294,15 @@ typedef struct ckc_gfx950_attention_tiled_3d_build_ctx
     ckc_value_t* P_lds; /* [BLOCK_M, T]                              */
 
     /* ---------- async DMA infra (lines 565-585) ---------- */
-    ckc_value_t* big_bytes;      /* const_i32(0x7FFF0000)                     */
-    ckc_value_t* key_rsrc;       /* buffer_rsrc(key, big_bytes)               */
-    ckc_value_t* value_rsrc;     /* buffer_rsrc(value, big_bytes)             */
-    ckc_value_t* lane_half_base; /* tid * 8                                   */
-    ckc_value_t* K_lds_addr;     /* smem_addr_of(K_lds)                       */
-    ckc_value_t* V_lds_addr;     /* smem_addr_of(V_lds)                       */
-    ckc_value_t* zero_soff;      /* const_i32(0)                              */
-    ckc_value_t* seq_base;       /* seq_idx * bt_stride_p                     */
+    ckc_value_t* big_bytes;        /* const_i32(0x7FFF0000)                     */
+    ckc_value_t* key_rsrc;         /* buffer_rsrc(key, big_bytes)               */
+    ckc_value_t* value_rsrc;       /* buffer_rsrc(value, big_bytes)             */
+    ckc_value_t* lane_half_base;   /* tid * 8                                   */
+    ckc_value_t* K_lds_addr;       /* smem_addr_of(K_lds)                       */
+    ckc_value_t* V_lds_addr;       /* smem_addr_of(V_lds)                       */
+    ckc_value_t* zero_soff;        /* const_i32(0)                              */
+    ckc_value_t* seq_base;         /* seq_idx * bt_stride_p                     */
+    ckc_value_t* kv_block_bytes_c; /* const_i32(kv_stride_blk_b): 1-block buffer bound (i64 path) */
 
     /* ---------- online-softmax loop init carry (lines 536-562, 717-718) ---------- *
      * m_inits/l_inits: 4 regs. acc_inits: PV_N_TILES entries. cur_buf_init = 0.

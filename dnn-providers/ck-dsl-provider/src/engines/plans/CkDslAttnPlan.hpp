@@ -27,12 +27,19 @@ namespace ck_dsl_plugin {
 // documented follow-on.)
 class CkDslAttnPlan : public hipdnn_plugin_sdk::IPlan<CkDslHandle> {
    public:
+    // Single 2D kernel plan (prefill / short-KV decode).
     CkDslAttnPlan(CkDslAttnParamParser::ParsedAttnParams params,
                   std::unique_ptr<ck_dsl::Kernel> kernel);
+    // Two-launch split-KV 3D decode plan: segment kernel -> reduce kernel, with
+    // a per-(q,head,segment) (m, l, acc) workspace. The explicit launch grids
+    // are taken from each kernel's manifest grid_explicit (set by the C engine).
+    CkDslAttnPlan(CkDslAttnParamParser::ParsedAttnParams params,
+                  std::unique_ptr<ck_dsl::Kernel> segment_kernel,
+                  std::unique_ptr<ck_dsl::Kernel> reduce_kernel, int num_segments);
     ~CkDslAttnPlan() override;
 
     size_t getWorkspaceSize(const CkDslHandle& handle) const override {
-        return 0;
+        return workspace_bytes_;
     }
     void execute(const CkDslHandle& handle, const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers, void* workspace) const override;
@@ -44,9 +51,27 @@ class CkDslAttnPlan : public hipdnn_plugin_sdk::IPlan<CkDslHandle> {
    private:
     static void* findBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t* bufs, uint32_t count);
     std::array<unsigned, 3> grid() const;
+    // Per-kernel explicit grid from the manifest grid_explicit.
+    static std::array<unsigned, 3> explicit_grid(const ck_dsl::Kernel& k);
+    void synthesize_paged_kv_meta();  // shared ctor body (metadata upload)
+    void execute_2d(const CkDslHandle& handle, void* q, void* kc, void* vc, void* o) const;
+    void execute_3d(const CkDslHandle& handle, void* q, void* kc, void* vc, void* o,
+                    void* workspace) const;
 
     CkDslAttnParamParser::ParsedAttnParams params_;
-    std::unique_ptr<ck_dsl::Kernel> kernel_;
+    std::unique_ptr<ck_dsl::Kernel> kernel_;         // 2D, or 3D segment kernel
+    std::unique_ptr<ck_dsl::Kernel> reduce_kernel_;  // 3D reduce kernel (else null)
+    bool is_3d_ = false;
+    int num_segments_ = 0;
+    size_t workspace_bytes_ = 0;
+    // Sub-offsets into the single workspace blob (segm_output | segm_max | segm_expsum).
+    size_t ws_off_output_ = 0, ws_off_max_ = 0, ws_off_expsum_ = 0;
+    // hipGraph capture of the two-launch decode pipeline (lazily captured in
+    // execute_3d on the first launch with a given workspace pointer).
+    mutable hipGraph_t graph_ = nullptr;
+    mutable hipGraphExec_t graph_exec_ = nullptr;
+    mutable void* graph_workspace_ = nullptr;  // workspace ptr the graph was captured against
+    mutable void* graph_output_ = nullptr;     // output ptr the graph was captured against
     // Synthesized paged-KV metadata (device), owned by the plan.
     void* d_block_tables_ = nullptr;
     void* d_seq_lens_ = nullptr;

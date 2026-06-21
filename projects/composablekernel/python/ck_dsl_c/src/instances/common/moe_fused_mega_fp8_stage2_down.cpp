@@ -94,6 +94,11 @@ static void ckc_moe_fp8_atom_lane_to_output(ckc_ir_builder_t* b,
         *out_col                   = lane_in_batch;
         return;
     }
+    /* Faithful mirror of atoms.py:AtomLayout.lane_to_output, which raises
+     * NotImplementedError("no lane_to_output dispatch for atom {m}x{n}") for any
+     * MFMA shape other than the three dispatched above (16x16, 32x32, 4x4). This
+     * is byte-faithful reject behaviour (not unported C work): only atom shapes
+     * Python also rejects reach here, and the message text matches verbatim. */
     ckc_i_set_err(
         b, CKC_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
 }

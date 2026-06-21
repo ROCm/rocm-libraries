@@ -148,12 +148,41 @@ bool ckc_moe_sort_is_valid_spec_impl(const ckc_moe_sorting_spec_t* spec,
         arch = "gfx950"; /* Python default: arch="gfx950" */
     }
 
-    /* try: ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
+    /* try: ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e)
+     *
+     * str(KeyError(msg)) wraps the message in double-quotes, and _build_target
+     * raises KeyError(
+     *   f"unknown gfx target {gfx!r}; known: {sorted(specs)}. "
+     *   f"Add a row to {_DATA_FILE.name}.")
+     * -> reproduce the double-quoted repr with the sorted known-arch list. */
     target = ckc_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        /* TODO(port): reproduce the exact KeyError "...; known: [...]" suffix. */
-        CK_MOE_SORT_REJECT("unknown gfx target '%s'", arch);
+        char known[512];
+        const char* const* arches;
+        int count = 0;
+        int k;
+        size_t pos = 0;
+
+        arches       = ckc_known_arches(&count);
+        known[pos++] = '[';
+        for(k = 0; k < count && arches != NULL && pos + 8 < sizeof(known); ++k)
+        {
+            int wrote = snprintf(
+                known + pos, sizeof(known) - pos, "%s'%s'", (k == 0) ? "" : ", ", arches[k]);
+            if(wrote < 0)
+            {
+                break;
+            }
+            pos += (size_t)wrote;
+        }
+        if(pos + 1 < sizeof(known))
+        {
+            known[pos++] = ']';
+        }
+        known[pos] = '\0';
+        CK_MOE_SORT_REJECT(
+            "\"unknown gfx target '%s'; known: %s. Add a row to arch_specs.json.\"", arch, known);
     }
 
     /* if tokens <= 0 or topk <= 0 or experts <= 0: ... */

@@ -176,13 +176,25 @@ unit**. The harness selects between them in `_build_spec`.
 
 ### 6.1 The narrow default (`16x16x16`)
 
-Every shape that is *not* D128 fp16 uses the default narrow path: the
-`mfma_16x16x16` atom, with `num_warps` keyed on `block_size` (D64 ships
-`num_warps=4` + `block_m_per_warp=32`; D128 bf16 stays `num_warps=2`). Scores
-$S = \tau Q K^\top$ are produced as the MFMA accumulator, the softmax recurrence
-runs over them, the probabilities $P$ are staged to LDS (`P_lds`), and the
-PV matmul reads them back as the A-operand. This is the general-purpose path and
-the one whose LDS footprint the `supports_tiled_2d` gate models.
+In **this harness's** `_build_spec`, every shape that is *not* D128 fp16 uses the
+default narrow path: the `mfma_16x16x16` atom, with `num_warps` keyed on
+`block_size` (D64 ships `num_warps=4` + `block_m_per_warp=32`; D128 bf16 stays
+`num_warps=2`). Scores $S = \tau Q K^\top$ are produced as the MFMA accumulator,
+the softmax recurrence runs over them, the probabilities $P$ are staged to LDS
+(`P_lds`), and the PV matmul reads them back as the A-operand. This is the
+general-purpose path and the one whose LDS footprint the `supports_tiled_2d` gate
+models.
+
+> **Note — harness vs production dispatcher.** This narrow/flash split is the
+> *harness's* explicit choice (`parity_unified_attention.py::_build_spec` routes
+> only D128 fp16 to the flash regime). The production dispatcher's gfx942 fp16
+> flash family is broader: `_enable_gfx942_fp16_flash` now admits **D64 fp16 too**
+> (`head_size in (64, 128)`), running the same gfx942-legal `32x32x8` atom plus a
+> sliced-K / cfvst stack. So when `final_shapes_check.py` runs through the
+> production dispatcher (Sections 8–9), a D64 fp16 prefill shape is *not* on the
+> narrow path described here — it takes the dispatcher's D64 flash path. The
+> bf16 fallback to narrow (Section 6.2) holds in both the harness and the
+> dispatcher.
 
 ### 6.2 The transposed-x8 flash regime (D128 fp16)
 
@@ -194,8 +206,8 @@ $$
 S^{\top} = K\,Q^{\top}
 $$
 
-via the gfx942-legal `mfma_f32_32x32x8_f16` atom (a wider-M MFMA available only
-in fp16 on this part). The payoff: the probabilities come out already in the
+via the gfx942-legal `mfma_f32_32x32x8_f16` atom (a wider-M MFMA: M=32, N=32,
+K-step 8, `<16 x f32>` accumulator). The payoff: the probabilities come out already in the
 orientation the PV matmul needs as its B-operand, so $P^{\top}$ stays
 **register-resident** and feeds the PV MFMA directly — **no `P_lds` round-trip**.
 The output accumulator's LDS region (`Acc_lds`) is epilogue-only and is
@@ -211,9 +223,13 @@ provider account for:
   comgr be the arbiters — mirroring the provider's accurate
   transposed-x8 LDS model. The generic gate is applied only to the narrow path.
 
-`use_mfma_32x32x8` is **fp16-only** — gfx942 has no bf16 `32x32x8` atom — which
-is exactly why D128 **bf16** falls back to the narrow `16x16x16` path (Section
-6.1) rather than the flash regime.
+`use_mfma_32x32x8` is **fp16-only** on this kernel path — the gfx942 spec's
+`__post_init__` rejects it for bf16 ("use_mfma_32x32x8 is fp16-only"). Note this
+is a *kernel-path* restriction, not a hardware one: gfx942 does have the bf16
+`32x32x8` atom (`mfma_f32_32x32x8_bf16` is in the gfx942 MMA catalog and lowers
+through the `..._1k` builtin), but the transposed-x8 attention path is only wired
+and validated for fp16. That is why D128 **bf16** falls back to the narrow
+`16x16x16` path (Section 6.1) rather than the flash regime.
 
 ---
 
@@ -234,7 +250,7 @@ lands on L4 (WG=64). So `parity_unified_attention.py` sets `num_warps=4` (+
 `use_mfma_32x32x8` / `use_transposed_qk_32x32` / `use_k_single_buffer=False`)
 *explicitly* to reproduce the shipped peak; `HIPDNN_GFX942_FLASH_WIDE=0` selects
 the L4 geometry for an A/B. `HIPDNN_GFX942_FLASH_WIDE=2` selects an intermediate
-WG=64 wide2 (`BLOCK_M = 64 ≤ T`, so K single-buffers).
+wide2 (`num_warps=2`, WG=128, `BLOCK_M = 32·2 = 64 ≤ T`, so K single-buffers).
 
 ---
 

@@ -1519,8 +1519,8 @@ ckc_status_t ckc_gemm_universal_lower_to_llvm(const ckc_gemm_universal_spec_t* s
  *  signature for it (a streaming generator does not translate to a single C
  *  call), so there is no contract to bind to in this chunk.
  *
- *  TODO(port): when the dispatcher front-end needs this in C, the natural shape
- *  is a callback-driven walker:
+ *  NAMED GAP (blocked on a public-header symbol): when the dispatcher front-end
+ *  needs this in C, the natural shape is a callback-driven walker:
  *
  *      typedef void (*ckc_gemm_config_fn)(const ckc_gemm_universal_spec_t*, void*);
  *      void ckc_gemm_all_dispatcher_configs(<axis arrays...>,
@@ -1531,8 +1531,9 @@ ckc_status_t ckc_gemm_universal_lower_to_llvm(const ckc_gemm_universal_spec_t* s
  *  warp_n x warp_k x warp_tile x pipeline x scheduler x epilogue x pad x
  *  persistent), finalising each spec and invoking the callback only for specs
  *  that pass ckc_gemm_universal_is_valid_spec. That entry point must be added to
- *  the PUBLIC header first (out of this body chunk's edit scope), so it is left
- *  as a documented stub here rather than introducing an unheadered symbol.
+ *  the PUBLIC header first (ckc/instance_gemm_universal.h), so it is left as a
+ *  documented gap here rather than introducing an unheadered symbol. This is a
+ *  host-side enumerator that emits NO IR, so it is off the byte-identity path.
  */
 
 /* Self-contained file-local helper used by the acc-name formatting above.

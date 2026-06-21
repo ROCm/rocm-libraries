@@ -3,6 +3,8 @@
 
 #include "CkDslAttnPlanBuilder.hpp"
 
+#include <hip/hip_runtime.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -161,6 +163,113 @@ std::unique_ptr<ck_dsl::Kernel> make_c_jit_attn_kernel(
     return std::make_unique<ck_dsl::Kernel>(
         ck_dsl::Kernel::from_llvm_ir(std::move(r.llvm_ir), std::move(r.manifest), isa));
 }
+
+// Device CU count (multiProcessorCount), memoized. Feeds the split-KV decode
+// program-count heuristic (target_num_prgms = num_sms * 4). Defaults to a
+// large CDNA value when the query fails so the heuristic never spuriously
+// routes a decode shape back to the under-utilized 2D path.
+int device_num_sms() {
+    static const int n = [] {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess) return 304;
+        hipDeviceProp_t prop;
+        if (hipGetDeviceProperties(&prop, dev) != hipSuccess) return 304;
+        return prop.multiProcessorCount > 0 ? prop.multiProcessorCount : 304;
+    }();
+    return n;
+}
+
+// Fill a CEngine::SdpaProblem from parsed attention params (shared by the 2D
+// and 3D C-JIT build paths).
+ck_dsl::CEngine::SdpaProblem make_sdpa_problem(const CkDslAttnParamParser::ParsedAttnParams& params,
+                                               const std::string& arch) {
+    ck_dsl::CEngine::SdpaProblem prob;
+    prob.total_q = static_cast<int>(params.batch * params.seqlen_q);
+    prob.num_seqs = static_cast<int>(params.batch);
+    prob.num_query_heads = static_cast<int>(params.nhead_q);
+    prob.num_kv_heads = static_cast<int>(params.nhead_k);
+    prob.head_size = static_cast<int>(params.hdim_q);
+    prob.block_size = 16;
+    prob.max_seqlen_q = static_cast<int>(params.seqlen_q);
+    prob.max_seqlen_k = static_cast<int>(params.seqlen_k);
+    prob.dtype = params.dtype == "bf16" ? "bf16" : "fp16";
+    prob.sliding_window = 0;
+    prob.softcap = 0.0;
+    prob.arch = arch.c_str();
+    return prob;
+}
+
+// True when the optimal split-KV 3D decode path should run for this problem on
+// the C-JIT path (mirrors attention_unified.py select_path / use_2d_kernel).
+// gfx950-only (the only arch with a ported 3D LLVM backend in this build).
+bool should_run_3d_decode(const CkDslAttnParamParser::ParsedAttnParams& params,
+                          const std::string& arch) {
+    // Kill-switch: CK_DSL_ATTN_NO_3D=1 forces the single 2D kernel even for
+    // decode-class shapes (operational fallback + 2D-vs-3D A/B measurement).
+    static const bool no_3d = [] {
+        const char* v = std::getenv("CK_DSL_ATTN_NO_3D");
+        return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
+    }();
+    if (no_3d) return false;
+    if (arch != "gfx950") return false;
+    if (params.seqlen_q != 1) return false;  // decode only
+    ck_dsl::CEngine::SdpaProblem prob = make_sdpa_problem(params, arch);
+    // The 3D decode kernel's KV-block tile knob defaults to 16; the selector
+    // uses tile_size == block_size for the segment count, but the use_2d gate
+    // itself only reads seqlen_q/k, sliding_window and the program counts.
+    return ck_dsl::CEngine::prefer_3d_decode(prob, device_num_sms());
+}
+
+// Build the split-KV 3D decode kernel pair (segment + reduce) from the C
+// engine. Returns false (without throwing) when the 3D gate declines so the
+// caller can fall back to the 2D path.
+bool make_c_jit_attn_3d_kernels(const CkDslHandle& handle,
+                                const CkDslAttnParamParser::ParsedAttnParams& params,
+                                const std::string& arch, const std::string& isa,
+                                std::unique_ptr<ck_dsl::Kernel>& out_segment,
+                                std::unique_ptr<ck_dsl::Kernel>& out_reduce,
+                                int& out_num_segments) {
+    const bool dbg = debug_enabled();
+    ck_dsl::CEngine::SdpaProblem prob = make_sdpa_problem(params, arch);
+    const int num_sms = device_num_sms();
+    const int num_segments = ck_dsl::CEngine::num_segments_for(prob, num_sms);
+    try {
+        ck_dsl::CEngineResult seg = ck_dsl::CEngine::build_sdpa_3d_segment(prob, num_segments);
+        ck_dsl::CEngineResult red = ck_dsl::CEngine::build_sdpa_3d_reduce(prob, num_segments);
+
+        // Inject attention_config into the segment manifest so the plan reads
+        // block_size/block_q identically to the 2D path.
+        const int block_size = prob.block_q > 0 ? prob.block_q : prob.block_size;
+        ck_dsl::json::Object cfg;
+        cfg["block_size"] = ck_dsl::json::Value(static_cast<double>(block_size));
+        cfg["block_q"] = ck_dsl::json::Value(static_cast<double>(block_size));
+        ck_dsl::json::Object root;
+        root["attention_config"] = ck_dsl::json::Value(std::move(cfg));
+        seg.manifest.raw = ck_dsl::json::Value(std::move(root));
+
+        out_segment = std::make_unique<ck_dsl::Kernel>(
+            ck_dsl::Kernel::from_llvm_ir(std::move(seg.llvm_ir), std::move(seg.manifest), isa));
+        out_reduce = std::make_unique<ck_dsl::Kernel>(
+            ck_dsl::Kernel::from_llvm_ir(std::move(red.llvm_ir), std::move(red.manifest), isa));
+        out_num_segments = num_segments;
+        if (dbg)
+            fprintf(stderr,
+                    "[ckdsl-attn] 3D split-KV decode: B=%d Hq=%d Hkv=%d Sq=%d Sk=%d D=%d "
+                    "num_segments=%d num_sms=%d\n",
+                    prob.num_seqs, prob.num_query_heads, prob.num_kv_heads, prob.max_seqlen_q,
+                    prob.max_seqlen_k, prob.head_size, num_segments, num_sms);
+        return true;
+    } catch (const ck_dsl::TiledUnsupported& e) {
+        if (dbg)
+            fprintf(stderr, "[ckdsl-attn] 3D decode declined (%s); falling back to 2D\n", e.what());
+        return false;
+    } catch (const std::exception& e) {
+        if (dbg)
+            fprintf(stderr, "[ckdsl-attn] 3D decode build failed (%s); falling back to 2D\n",
+                    e.what());
+        return false;
+    }
+}
 }  // namespace
 
 bool CkDslAttnPlanBuilder::isApplicable(
@@ -228,9 +337,29 @@ bool CkDslAttnPlanBuilder::isApplicable(
 }
 
 size_t CkDslAttnPlanBuilder::getMaxWorkspaceSize(
-    const CkDslHandle&, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
+    const CkDslHandle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const CkDslSettings&) const {
-    return 0;  // dense->paged metadata workspace TODO (see CkDslAttnPlan note)
+    // Only the split-KV 3D decode path needs scratch (the per-segment
+    // (segm_output | segm_max | segm_expsum) f32 workspace). The 2D path and the
+    // paged-KV metadata need none. Size it exactly as CkDslAttnPlan lays it out.
+    if (!c_jit_enabled()) return 0;  // 3D path is C-JIT only in this build
+    try {
+        auto params = CkDslAttnParamParser::parseSdpaGraph(opGraph);
+        if (!should_run_3d_decode(params, handle.gfxArch())) return 0;
+        auto prob = make_sdpa_problem(params, handle.gfxArch());
+        const int num_segments = ck_dsl::CEngine::num_segments_for(prob, device_num_sms());
+        const long total_q = params.batch * params.seqlen_q;
+        const long nqh = params.nhead_q;
+        const long hd = params.hdim_q;
+        const size_t n_out = (size_t)total_q * nqh * num_segments * hd;
+        const size_t n_ml = (size_t)total_q * nqh * num_segments;
+        auto align64 = [](size_t b) { return (b + 63) & ~size_t(63); };
+        size_t off_max = align64(n_out * sizeof(float));
+        size_t off_expsum = align64(off_max + n_ml * sizeof(float));
+        return align64(off_expsum + n_ml * sizeof(float));
+    } catch (const std::exception&) {
+        return 0;
+    }
 }
 
 void CkDslAttnPlanBuilder::initializeExecutionSettings(
@@ -244,6 +373,26 @@ void CkDslAttnPlanBuilder::buildPlan(
 
     std::unique_ptr<ck_dsl::Kernel> kernel;
     if (c_jit_enabled()) {
+        // Optimal split-KV 3D decode path: for decode-class shapes (seqlen_q==1,
+        // long KV) the single 2D kernel under-uses the device. Build the
+        // segment + reduce kernel pair from the C engine and emit a two-launch
+        // plan with a per-segment workspace. Declines (3D gate / build failure)
+        // fall through to the single-kernel path below.
+        if (should_run_3d_decode(params, handle.gfxArch())) {
+            std::unique_ptr<ck_dsl::Kernel> seg, red;
+            int num_segments = 0;
+            if (make_c_jit_attn_3d_kernels(handle, params, handle.gfxArch(), handle.isa(), seg, red,
+                                           num_segments)) {
+                {
+                    ck_dsl::ScopedTimer t("attn3d", ck_dsl::ScopedTimer::Unit::Ms);
+                    seg->ensure_compiled();
+                    red->ensure_compiled();
+                }
+                ctx.setPlan(std::make_unique<CkDslAttnPlan>(std::move(params), std::move(seg),
+                                                            std::move(red), num_segments));
+                return;
+            }
+        }
         // C-JIT path: build the attention kernel .ll + manifest directly from
         // the pure-C engine (no ArtifactStore, no Python, no shipped HSACO).
         kernel = make_c_jit_attn_kernel(handle, params, handle.gfxArch(), handle.isa());

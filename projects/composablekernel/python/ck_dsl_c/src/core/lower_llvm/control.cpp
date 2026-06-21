@@ -3,8 +3,7 @@
 /*
  * lower_llvm_control.c -- BUCKET 6 of the C99 port of ck_dsl.core.lower_llvm.
  *
- * The vector / control-flow / sync handler group. Faithful (or correct-shaped
- * TODO-stubbed) translation of:
+ * The vector / control-flow / sync handler group. Faithful translation of:
  *
  *   vector.*  : add/sub/mul/and/or/shl/lshr/smax/smin/max/fma/sum/reduce_max/
  *               splat/select/cmp/trunc/sext/trunc_f32_to_f16/trunc_f32_to/

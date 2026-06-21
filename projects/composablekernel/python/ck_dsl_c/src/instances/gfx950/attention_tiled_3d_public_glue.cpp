@@ -197,6 +197,7 @@ ckc_unified_attention_3d_tiled_spec_t ckc_unified_attention_3d_tiled_spec_defaul
     s.tile_size_override     = 0;
     s.use_invariant_hoist    = false;
     s.use_wide_kv_load       = false;
+    s.use_i64_kv_addr        = false;
     return s;
 }
 
@@ -347,6 +348,10 @@ int ckc_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     {
         snprintf(kv_part, sizeof(kv_part), "kv%s", s->kv_storage_dtype);
         parts[np++] = kv_part;
+    }
+    if(s->use_i64_kv_addr)
+    {
+        parts[np++] = "i64kv";
     }
     if(s->use_sinks)
     {
@@ -609,7 +614,8 @@ bool ckc_gfx950_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
     out->USE_QQ_BIAS    = spec->use_qq_bias;
     out->KV_FP8 =
         (spec->kv_storage_dtype != NULL && ckc_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
-    out->KV_BYTES = out->KV_FP8 ? 1 : 2;
+    out->I64_KV_ADDR = spec->use_i64_kv_addr;
+    out->KV_BYTES    = out->KV_FP8 ? 1 : 2;
 
     nqk = out->NQK;
 

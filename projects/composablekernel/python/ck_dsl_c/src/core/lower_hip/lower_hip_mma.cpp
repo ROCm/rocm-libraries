@@ -13,11 +13,19 @@
  * ckc_vector_type) are DEFINED elsewhere (bucket 0); only called here.
  *
  * The simple handlers reproduce every _emit() format string byte-for-byte.
- * The complex matrix-engine handlers (tile.mma re-dispatch into the concrete
- * MFMA/WMMA atoms, register-permutation shim) and the few handlers that need
- * IR side-table machinery not yet wired in C (ds_read transpose loads,
- * scf.yield's enclosing-for walk, inline asm payloads) are REGISTERED with a
- * marked TODO stub so no opcode is dropped from the dispatch table.
+ * The complex matrix-engine handlers are fully ported too:
+ *   - tile.mma re-dispatches into the concrete MFMA/WMMA atoms (ckc_h_op_tile_mma),
+ *     and the register-permutation shim (register_p_from_qk_c) emits its 8-lane
+ *     copy loop;
+ *   - the IR side-table machinery is wired: the ds_read transpose loads
+ *     (ds_read_tr16_b64/b128) resolve their LDS storage via ckc_h_smem_storage,
+ *     and scf.yield walks the enclosing scf.for via h_find_enclosing_for.
+ * The remaining CKC_ERR_NOTIMPL handlers here are NOT stubs but FAITHFUL parity
+ * with Python's own NotImplementedError: tile.inline_asm and tile.ds_read_tr_b8
+ * have no _op_ method in lower_hip.py (the HIP source backend deliberately does
+ * not lower raw inline-asm payloads nor the 8-bit transpose read), so Python's
+ * getattr-dispatch raises immediately and we reproduce that same rejection.
+ * Every opcode is registered in the dispatch table; none is dropped.
  */
 #include "ckc/ir.h"
 #include "ckc/lower_hip.h"

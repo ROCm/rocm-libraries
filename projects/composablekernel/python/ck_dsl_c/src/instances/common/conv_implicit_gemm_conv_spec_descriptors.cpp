@@ -50,6 +50,63 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"       /* ckc_kernel_name_join, ckc_choose_load_vec */
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* descriptor DAG + transforms */
 
+/* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
+ *
+ *   Python _build_target: raise KeyError(
+ *     f"unknown gfx target {gfx!r}; known: {sorted(specs)}. "
+ *     f"Add a row to {_DATA_FILE.name}.")
+ *   is_valid_spec: except KeyError as e: return False, str(e)
+ *
+ * str(KeyError(msg)) == repr(msg); the single quotes in the message make Python
+ * wrap it in DOUBLE quotes. sorted(specs) renders as ['gfx...', 'gfx...'].
+ * ckc_known_arches() == tuple(sorted(_load_specs())). Mirrors fmha_arch.cpp. */
+static void ckc_cspec__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+{
+    int count = 0;
+    const char* const* arches;
+    int i;
+    size_t pos = 0;
+    int wrote;
+
+    if(out == NULL || out_cap == 0)
+    {
+        return;
+    }
+
+    arches = ckc_known_arches(&count);
+
+    wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
+    if(wrote < 0)
+    {
+        out[0] = '\0';
+        return;
+    }
+    pos += (size_t)wrote;
+    if(pos >= out_cap)
+    {
+        out[out_cap - 1] = '\0';
+        return;
+    }
+
+    for(i = 0; i < count; ++i)
+    {
+        wrote = snprintf(out + pos, out_cap - pos, "%s'%s'", (i == 0) ? "" : ", ", arches[i]);
+        if(wrote < 0)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+        pos += (size_t)wrote;
+        if(pos >= out_cap)
+        {
+            out[out_cap - 1] = '\0';
+            return;
+        }
+    }
+
+    snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
+}
+
 /* ===================================================================== *
  *  ConvAccumulatorEpilogue   (Python lines 142-181)
  * ===================================================================== */
@@ -623,8 +680,9 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
     target = ckc_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        /* TODO(port): reproduce the exact KeyError "; known: [...]" suffix. */
-        CKC_CONVVS_REJECT("unknown gfx target '%s'", arch);
+        /* Full Python str(KeyError) text, reproduced verbatim. */
+        ckc_cspec__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
     }
 
     /* Geometry divisibility (mirrors spec.validate). */

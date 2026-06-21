@@ -59,9 +59,13 @@ K=128 MFMA atom (§8.1) aligns perfectly with the scale granularity: one MFMA =
 one block = one dequant.
 
 The intermediate `Hidden` is produced in f32 and must be fp8 to feed the down
-GEMM, so it is **dynamically quantized** (§5.4): per (row, 128-inter-block) take
-`amax`, set `s = max(amax, ε)/448`, store `q = round(h / s)`, and keep `s` for
-the down dequant.
+GEMM, so it is **dynamically quantized** (§5.4): per 128-inter-block take the
+`amax` over **all `tile_m` rows of the block** (one scale per block, row-uniform,
+NOT per row), set `s = max(amax, ε)/448`, store `q = round(h / s)`, and keep `s`
+for the down dequant. The block (row-uniform) granularity is mandatory: the
+down-GEMM dequant fold applies a single per-lane scalar to output slots that span
+several different rows, so only a row-uniform block scale stays correct under that
+fold.
 
 ## 3. The fusion idea (the heart)
 
@@ -95,22 +99,29 @@ A threadgroup `(bx, by)` handles intermediate slice `bx` and m-block `by`.
 
 | state | location |
 |---|---|
-| X tile `[tile_m, H]` | LDS (loaded once, reused by gate and up) |
+| X tile `[tile_m, H]` | global→VGPR load (cheap, reused across the up/gate of a K-group; **not** LDS-staged by default) |
+| gate / up weight tiles `Wg/Wu` | staged global→LDS→MFMA (direct-to-LDS, the dominant weight stream; default `use_dtla=True`) |
 | gate / up accumulators | f32 registers (AGPR/VGPR) |
 | `Hidden` slice `[tile_m, tile_n]` | LDS (fp8, after dynamic quant) |
 | down accumulator | f32 registers |
-| `Y` | HBM, written by atomic add |
+| `Y` | HBM, written by atomic add (f32) |
 
 ## 5. One threadgroup, step by step
 
 Let `e = BlockExpertIds[by]`, the expert this block serves. The contraction `H`
 is walked in `GROUP_K=128` chunks.
 
-### 5.1 — Load the X tile to LDS
-Stream the `[tile_m, H]` activation tile straight from HBM into LDS with
-direct-to-LDS loads (`buffer_load … lds`), bypassing the VGPR round-trip, and
-read it back in the MFMA-input layout. X is loaded **once** and reused by both
-the gate and up GEMMs.
+### 5.1 — Load the X fragment
+The `[tile_m, H]` activation is a small, repeatedly-reused operand, so by default
+it is a cheap global→VGPR load: per K-group each lane loads its `a_per_lane` fp8
+bytes once and reuses that fragment across **both** the gate and the up MFMAs (and
+across every intermediate-column cell `ni` of the row). The dominant traffic — the
+gate/up **weight** tiles (§4) — is what goes through the direct-to-LDS path
+(`use_dtla`, default on): staged HBM→LDS with `global_load_lds`, ping-pong
+double-buffered over `ni`, then read back with `ds_read` to feed the MFMA. (An
+*X*-via-LDS variant
+exists behind the `CKDSL_FP8_X_DTLA` flag but is default-off — it measured slower
+because the extra LDS round-trip adds a drain the scheduler cannot hide.)
 
 ### 5.2 — Gate and up GEMMs (shared A)
 For each 128-block `c` along `H`:
@@ -131,16 +142,26 @@ h = silu(gate_acc) · up_acc          # [tile_m, tile_n], f32
 ```
 
 ### 5.4 — Dynamic-quantize `Hidden` to fp8
-Per (row, 128-inter-block): `amax = max|h|` (computed by a cross-lane reduction
-of the values already live in registers — no LDS re-read), `s_h = max(amax, ε)/448`,
-`q = round(h / s_h)`. Stage `q` (fp8) into the `Hidden` LDS buffer and keep `s_h`
-for the down dequant. (Folding the amax into this pass — rather than a separate
-sweep over LDS — is one of the kept levers.)
+Per 128-inter-block (one scale per block, reduced over **all `tile_m` rows** of
+the block — row-uniform, NOT per-row; §2): `amax = max|h|` is folded into the
+SiLU·up pass — each lane returns the abs-max over the cells it owns, a 64-lane
+butterfly collapses that to the warp amax, and the warps sharing a block are
+combined (no separate LDS re-read sweep for the amax itself). Then
+`s_h = max(amax, ε)/448`, `q = round(h / s_h)`, broadcast to every row of the
+scale scratch. The quantize itself re-reads the f32 `Hidden` from an LDS scratch
+(`HiddenF32_smem`) in a separate packed pass (`cvt_pk_fp8_f32x4`, 4 columns/iter)
+and stores `q` (fp8) into the `Hidden` LDS buffer, keeping `s_h` for the down
+dequant. (Folding the amax into the SiLU·up pass — rather than a separate sweep
+over LDS — is one of the kept levers.)
 
-### 5.5 — Reshape `Hidden` in LDS
-The gate/up MFMA leaves `Hidden` in the MFMA **C-output** lane layout, but the
-down GEMM needs it as an MFMA **A-input**. A small LDS transpose (a swizzled
-write/read pair) reshapes it so the down GEMM can read it directly.
+### 5.5 — `Hidden` LDS hand-off (implicit reshape, no transpose)
+There is **no explicit LDS transpose or swizzle**. The dynamic-quant pass writes
+each fp8 `Hidden` value at the logical `(m, inter)` cell, and the down GEMM reads
+its A operand from that *same* `(m, inter)` cell of the LDS buffer — the quant
+write address equals the down-MFMA A-read address. The reshape from the gate/up
+MFMA C-output layout into the down-GEMM A-input layout is therefore *implicit* in
+the addressing (BUILD_SPEC_FP8 §3.5), accomplished by the write/read addressing
+itself rather than by a separate swizzled write/read pair.
 
 ### 5.6 — Down GEMM (contract the I-slice this block owns)
 For each 128-block `c` along this threadgroup's `tile_n` slice of `I`:
@@ -165,9 +186,12 @@ and (b) the contributions of the other experts the token was routed to.
 
 ## 6. The output / epilogue
 
-There is no separate reduction kernel. `Y` is zeroed once before the launch;
+There is no separate reduction kernel. `Y` is an **f32** buffer (the atomic
+epilogue is reused unchanged from the f16 kernel), zeroed once before the launch;
 every threadgroup atomic-adds its weighted partial. After the launch `Y` holds
-`Σ_{e∈topk} w_{t,e} · FFN_{t,e}` exactly. A final cast produces the bf16 output.
+`Σ_{e∈topk} w_{t,e} · FFN_{t,e}` exactly. The mega-kernel itself emits f32 — it
+does **not** contain an in-kernel bf16 cast; producing a bf16 result is a
+downstream cast outside this kernel.
 
 ## 7. The sorted, active-block grid (the structural win)
 
@@ -204,22 +228,22 @@ pure scheduling change that amortizes per-launch overhead.
 Y = 0
 for each threadgroup (bx, by):                  # grid = (I/tile_n, num_active_m_blocks)
     e   = BlockExpertIds[by]
-    Xs  = load X[block by rows, :] -> LDS        # [tile_m, H], reused
     gate_acc = up_acc = 0
     for c in range(0, H, 128):                    # gate + up, shared A
-        gate_acc += MFMA(Xs[:,c], Wg[e, bx-slice, c]);  dequant by s_X·s_Wg
-        up_acc   += MFMA(Xs[:,c], Wu[e, bx-slice, c]);  dequant by s_X·s_Wu
+        Xc = load X[block by rows, c] -> VGPR     # cheap global->VGPR, reused by gate+up (Wg/Wu go via LDS)
+        gate_acc += MFMA(Xc, Wg[e, bx-slice, c]);  dequant by s_X·s_Wg
+        up_acc   += MFMA(Xc, Wu[e, bx-slice, c]);  dequant by s_X·s_Wu
     h   = silu(gate_acc) * up_acc                 # f32, [tile_m, tile_n]
-    s_h = max(amax_per_block(h), eps)/448         # in-register amax
-    Hs  = quantize(h, s_h) -> LDS (fp8); reshape Hs to MFMA-A layout
+    s_h = max(amax_per_block(h), eps)/448         # in-register amax, one scale/128-block over ALL rows
+    Hs  = quantize(h, s_h) -> LDS (fp8)           # written at logical (m,inter); down reads same cell (no transpose)
     down_acc = 0
     for c in range(0, tile_n, 128):               # down: contract this I-slice
         down_acc += MFMA(Hs[:,c], Wd[e, :, bx·tile_n + c]); dequant by s_h·s_Wd
     for r in range(tile_m):                        # weight + scatter
         t = SortedTokenIds[by*tile_m + r]
         if t != -1:
-            atomic_add(Y[t, :], SortedWeights[...] * down_acc[r, :])
-cast Y -> bf16
+            atomic_add(Y[t, :], SortedWeights[...] * down_acc[r, :])   # Y is f32
+# (a bf16 result, if needed, is a downstream cast outside this kernel)
 ```
 
 ## 10. Where the algorithm ends and tuning begins

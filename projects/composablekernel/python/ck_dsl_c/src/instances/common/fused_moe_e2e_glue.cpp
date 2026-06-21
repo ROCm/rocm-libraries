@@ -51,6 +51,8 @@
 #include "ckc/helper_ck_dsl.helpers.fused_moe_e2e_spec.h"
 #include "ckc/instance_topk_softmax.h"
 #include "ckc/instance_batched_gemm.h"
+#include "ckc/instance_moe_sorting.h" /* sort hist/scan/scatter spec + lower    */
+#include "ckc/instance_fused_moe.h"   /* gather/silu_mul/topk_reduce spec+lower */
 #include "ckc/lower_llvm.h"
 #include "ckc/ir.h"
 
@@ -78,6 +80,35 @@ static void ckc_fmoe_set_err(char* err, size_t err_cap, const char* msg)
     }
     memcpy(err, msg, n);
     err[n] = '\0';
+}
+
+/* to_sort_spec() (Python lines 616-622): MoeSortingSpec(tokens, topk, experts,
+ * block_size=sort_block_size). Other fields keep the dataclass defaults. */
+static ckc_moe_sorting_spec_t ckc_fmoe_to_sort_spec(const ckc_fmoe_forward_spec_t* spec)
+{
+    ckc_moe_sorting_spec_t s = ckc_moe_sorting_spec_default();
+    s.tokens                 = spec->tokens;
+    s.topk                   = spec->topk;
+    s.experts                = spec->experts;
+    s.block_size             = spec->sort_block_size;
+    return s;
+}
+
+/* to_fused_moe_spec() (Python lines 624-634): FusedMoeSpec(tokens, experts, topk,
+ * hidden, intermediate, dtype, block_size=streaming_block_size,
+ * vec=streaming_vec). Other fields keep the dataclass defaults. */
+static ckc_fused_moe_spec_t ckc_fmoe_to_fused_moe_spec_local(const ckc_fmoe_forward_spec_t* spec)
+{
+    ckc_fused_moe_spec_t s = ckc_fused_moe_spec_default();
+    s.tokens               = spec->tokens;
+    s.experts              = spec->experts;
+    s.topk                 = spec->topk;
+    s.hidden               = spec->hidden;
+    s.intermediate         = spec->intermediate;
+    s.dtype                = spec->dtype;
+    s.block_size           = spec->streaming_block_size;
+    s.vec                  = spec->streaming_vec;
+    return s;
 }
 
 /* ===================================================================== *
@@ -385,10 +416,10 @@ void ckc_fused_moe_forward_free(ckc_kernel_def_t* kernel)
  *  to the selected sub-kernel spec and delegate to that sub-kernel's own
  *  build->lower convenience.
  *
- *  Stages whose sub-kernel spec converter is not part of this port's header
- *  surface (sort hist/scan/scatter, gather, silu_mul, topk_reduce -- the
- *  fmoe -> sort/fused_moe spec converters are not exposed) are TODO(port) and
- *  return CKC_ERR_NOTIMPL with a diagnostic.
+ *  Every pipeline stage lowers via its own sub-kernel build->lower convenience:
+ *  router (topk_softmax), gate-up / down (batched_gemm), sort hist/scan/scatter
+ *  (MoeSortingSpec via to_sort_spec), and gather / silu_mul / topk_reduce
+ *  (FusedMoeSpec via to_fused_moe_spec).
  * ===================================================================== */
 ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* spec,
                                                  const char* arch,
@@ -460,16 +491,51 @@ ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* 
     }
     case CKC_FMOE_STAGE_SORT_HISTOGRAM:
     case CKC_FMOE_STAGE_SORT_SCAN:
-    case CKC_FMOE_STAGE_SORT_SCATTER:
+    case CKC_FMOE_STAGE_SORT_SCATTER: {
+        /* The 3-phase sort stages: spec.to_sort_spec() -> MoeSortingSpec, then
+         * the matching sort sub-kernel's own build->lower convenience. */
+        ckc_moe_sorting_spec_t ss = ckc_fmoe_to_sort_spec(&adj_spec);
+        if(stage == CKC_FMOE_STAGE_SORT_HISTOGRAM)
+        {
+            st = ckc_build_moe_sort_histogram_lower_to_llvm(
+                &ss, resolved_arch, flavor, out_ll, err, err_cap);
+        }
+        else if(stage == CKC_FMOE_STAGE_SORT_SCAN)
+        {
+            st = ckc_build_moe_sort_scan_lower_to_llvm(
+                &ss, resolved_arch, flavor, out_ll, err, err_cap);
+        }
+        else
+        {
+            st = ckc_build_moe_sort_scatter_lower_to_llvm(
+                &ss, resolved_arch, flavor, out_ll, err, err_cap);
+        }
+        break;
+    }
     case CKC_FMOE_STAGE_GATHER:
     case CKC_FMOE_STAGE_SILU_MUL:
-    case CKC_FMOE_STAGE_TOPK_REDUCE:
-        /* TODO(port): the fmoe -> sort / fused_moe spec converters are not
-         * part of this port's header surface; these stages lower via their
-         * own sub-kernel convenience once those converters are exposed. */
-        ckc_fmoe_set_err(err, err_cap, "lower_to_llvm: stage not yet wired (TODO port)");
-        st = CKC_ERR_NOTIMPL;
+    case CKC_FMOE_STAGE_TOPK_REDUCE: {
+        /* The streaming fused-MoE stages: spec.to_fused_moe_spec() ->
+         * FusedMoeSpec, then the matching sub-kernel build->lower convenience.
+         * The orchestrator's dynamic path uses the unpacked silu_mul (the packed
+         * variant is a separate static-path stage), so SILU_MUL maps to
+         * build_moe_silu_mul. */
+        ckc_fused_moe_spec_t fs = ckc_fmoe_to_fused_moe_spec_local(&adj_spec);
+        if(stage == CKC_FMOE_STAGE_GATHER)
+        {
+            st = ckc_moe_gather_lower_to_llvm(&fs, resolved_arch, flavor, out_ll, err, err_cap);
+        }
+        else if(stage == CKC_FMOE_STAGE_SILU_MUL)
+        {
+            st = ckc_moe_silu_mul_lower_to_llvm(&fs, resolved_arch, flavor, out_ll, err, err_cap);
+        }
+        else
+        {
+            st = ckc_moe_topk_weighted_reduce_lower_to_llvm(
+                &fs, resolved_arch, flavor, out_ll, err, err_cap);
+        }
         break;
+    }
     default:
         ckc_fmoe_set_err(err, err_cap, "lower_to_llvm: unknown stage");
         st = CKC_ERR_VALUE;

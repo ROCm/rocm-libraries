@@ -5,13 +5,20 @@
  *
  * Byte-identical builder-call sequence vs the Python build_smoothquant: same op
  * order / attrs. Higher-level helpers this instance leans on that are not yet in
- * the C helper set (distribution.load_tile / store_tile /
+ * the shared C helper set (distribution.load_tile / store_tile /
  * make_static_distributed_tensor; tensor_view.make_naive_tensor_view_packed /
- * make_lds_view; the F32-view load_vec_as_f32) are wired through local shims; the
- * heaviest distribution paths are STUBBED with TODO(port) markers that the
- * verify+fix loop resolves once those helpers land. The pass arithmetic (the
- * _tree_fmax amax fold, the block_lds_reduce, the yscale recipe, and the
- * quantize_scalar_f32 chain) is ported faithfully.
+ * make_lds_view; the F32-view load_vec_as_f32) are wired through fully-ported,
+ * file-local shims (ckc_sq_*) that emit the identical builder-call sequence
+ * against the public ckc/ir.h surface -- there are no stubbed / NOTIMPL paths.
+ *
+ * NAMED GAP: those file-local shims duplicate logic that should eventually live
+ * in the shared helper layer. They are NOT bare stubs (the load/store/quantize
+ * IR is emitted in full); they are blocked only on the shared
+ * distribution.load_tile / store_tile / make_static_distributed_tensor and
+ * tensor_view.make_naive_tensor_view_packed / make_lds_view / load_vec_as_f32
+ * ports being exposed, after which the ckc_sq_* duplicates can be deleted. The
+ * pass arithmetic (the _tree_fmax amax fold, the block_lds_reduce, the yscale
+ * recipe, and the quantize_scalar_f32 chain) is ported faithfully.
  */
 #include "ckc/instance_smoothquant.h"
 

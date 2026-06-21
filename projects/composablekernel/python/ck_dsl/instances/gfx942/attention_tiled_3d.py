@@ -118,8 +118,20 @@ class UnifiedAttention3DTiledSpec:
     # instructions -> less VMEM issue pressure on the memory-bound decode segment.
     # fp16/bf16 only (the fp8 path already loads wide). Signature-tracked.
     use_wide_kv_load: bool = False
+    # 64-bit paged-KV addressing for caches > 2 GiB. Accepted for signature
+    # parity with the shared dispatch spec builder and the gfx950 spec; the
+    # gfx942 narrow segment loaders do not key on it yet (the gfx942 >2 GiB
+    # decode path is a separate follow-on), so a True value here would be a
+    # no-op on gfx942 -- guard it so the dispatcher cannot silently build an
+    # uncorrected gfx942 kernel for an oversized cache.
+    use_i64_kv_addr: bool = False
 
     def __post_init__(self):
+        if self.use_i64_kv_addr:
+            raise NotImplementedError(
+                "gfx942 tiled 3D kernel does not support use_i64_kv_addr "
+                "(paged KV cache > 2 GiB) yet"
+            )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -139,7 +151,11 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def tile_size(self) -> int:
-        return self.tile_size_override if self.tile_size_override is not None else self.block_size
+        return (
+            self.tile_size_override
+            if self.tile_size_override is not None
+            else self.block_size
+        )
 
     @property
     def dtype_ir(self) -> Type:
@@ -575,7 +591,9 @@ def build_unified_attention_3d_tiled(
     )
     if T == BS:
         paged_kv_desc = _kv_base.transform(
-            indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
+            indirect(
+                "tile_idx", into="physical_block", table=block_tables, base=seq_base
+            ),
             unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
         )
     else:
@@ -614,7 +632,9 @@ def build_unified_attention_3d_tiled(
                 kv_head=kv_head_idx,
             )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, ASYNC_LDS_DWORDS)
+            b.async_buffer_load_lds_addr(
+                key_rsrc, k_dst, voff, zero_soff, ASYNC_LDS_DWORDS
+            )
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
@@ -629,7 +649,9 @@ def build_unified_attention_3d_tiled(
                 kv_head=kv_head_idx,
             )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS)
+            b.async_buffer_load_lds_addr(
+                value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS
+            )
 
     # Wide KV feed (opt-in): 8-half (16-byte / b128) synchronous global->register
     # ->LDS loads, mirroring the in-kernel fp8 loader and the 2D cfvst V store.
@@ -883,13 +905,16 @@ def build_unified_attention_3d_tiled(
             v_n_col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
             v_k_chunk_base = b.mul(lane_rg, b.const_i32(4))
 
-            def _strided_v_b_operand(k_iter: int, v_n_col=v_n_col,
-                                     v_k_chunk_base=v_k_chunk_base) -> Value:
+            def _strided_v_b_operand(
+                k_iter: int, v_n_col=v_n_col, v_k_chunk_base=v_k_chunk_base
+            ) -> Value:
                 bv = b.zero_vec(dtype, 4)
                 for j in range(4):
                     v_row = b.add(b.const_i32(k_iter * 16 + j), v_k_chunk_base)
                     elem = b.vec_extract(
-                        b.smem_load_vN(V_lds, cur_buf, v_row, v_n_col, dtype=dtype, n=1),
+                        b.smem_load_vN(
+                            V_lds, cur_buf, v_row, v_n_col, dtype=dtype, n=1
+                        ),
                         0,
                     )
                     bv = b.vec_insert(bv, elem, j)
@@ -955,7 +980,9 @@ def build_unified_attention_3d_tiled(
         else:
             row = _mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-            qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+            qh_r = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+            )
             row_ok = b.land(
                 b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
             )

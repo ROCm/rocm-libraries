@@ -141,8 +141,12 @@ the small CU slice (see §9 and the case study's persistent-kernel discussion).
 
 ## 5. The matrix unit and the two convolutions as GEMMs
 
-The only matrix intrinsic on gfx1151 is the WMMA atom `wmma_f32_16x16x16_f16`
-(K=16, f32 accumulator). Both convolutions are mapped to implicit GEMM:
+gfx1151 exposes three 16×16×16 (K=16) WMMA atoms in the catalog: the f16 atom
+`wmma_f32_16x16x16_f16` (f32 accumulator) used by the fp16-emulation fallback,
+and the native integer atoms `wmma_i32_16x16x16_iu8` / `wmma_i32_16x16x16_iu4`
+(i32 accumulator) used by the default native-int regime. The f16 atom is also
+the shape source for the shared warp grid in both regimes. Both convolutions are
+mapped to implicit GEMM:
 
 - **conv0** is a 3×3 contraction over `K_gemm = R*S*C = 72` channels — five
   16-wide K-atoms (last partial). The A operand is the input footprint, the B

@@ -496,13 +496,17 @@ void ckc_gfx950_attention_tiled_3d_emit_async_infra(ckc_gfx950_attention_tiled_3
     const int NUM_KV = CFG.NUM_KV;
 
     /* ---- async DMA infra (lines 565-585) ---- */
-    ctx->big_bytes      = ckc_b_const_i32(B, 0x7FFF0000);
-    ctx->key_rsrc       = ckc_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
-    ctx->value_rsrc     = ckc_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
-    ctx->lane_half_base = ckc_b_mul(B, ctx->tid, ckc_b_const_i32(B, CFG.HALVES_PER_LANE));
-    ctx->K_lds_addr     = ckc_b_smem_addr_of(B, ctx->K_lds);
-    ctx->V_lds_addr     = ckc_b_smem_addr_of(B, ctx->V_lds);
-    ctx->zero_soff      = ckc_b_const_i32(B, 0);
+    ctx->big_bytes  = ckc_b_const_i32(B, 0x7FFF0000);
+    ctx->key_rsrc   = ckc_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
+    ctx->value_rsrc = ckc_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+    /* kv_block_bytes_c = const_i32(kv_stride_blk_b): one-block buffer bound for
+     * the i64-addressing path (Python creates it unconditionally right after the
+     * byte strides; unused in the i32 path, where it is DCE'd). */
+    ctx->kv_block_bytes_c = ckc_b_const_i32(B, CFG.kv_stride_blk_b);
+    ctx->lane_half_base   = ckc_b_mul(B, ctx->tid, ckc_b_const_i32(B, CFG.HALVES_PER_LANE));
+    ctx->K_lds_addr       = ckc_b_smem_addr_of(B, ctx->K_lds);
+    ctx->V_lds_addr       = ckc_b_smem_addr_of(B, ctx->V_lds);
+    ctx->zero_soff        = ckc_b_const_i32(B, 0);
 
     /* seq_base = seq_idx * bt_stride_p (line 592) */
     ctx->seq_base = ckc_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
@@ -679,11 +683,38 @@ void ckc_gfx950_attention_tiled_3d_issue_k_load(ckc_gfx950_attention_tiled_3d_bu
     {
         ckc_value_t* linear_half =
             ckc_b_add(B, ckc_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        ckc_value_t* voff = ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+        ckc_value_t* call_rsrc = ctx->key_rsrc;
+        ckc_value_t* voff      = NULL;
+        if(CFG.I64_KV_ADDR)
+        {
+            /* offset_i64_split folds the per-block byte base into a 64-bit
+             * buffer base (no 2 GiB i32-voffset overflow); only the within-block
+             * byte offset stays in the i32 voffset. */
+            const char* in_names[3]   = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
+            ckc_value_t* base_i64     = NULL;
+            ckc_value_t* valid        = NULL;
+            if(!ckc_transforms_descriptor_offset_i64_split(B,
+                                                           ctx->paged_kv_desc,
+                                                           "physical_block",
+                                                           in_names,
+                                                           in_values,
+                                                           3,
+                                                           &base_i64,
+                                                           &voff,
+                                                           &valid))
+                return;
+            call_rsrc = ckc_b_buffer_rsrc(
+                B, ckc_b_global_ptr_add(B, ctx->key, base_i64), ctx->kv_block_bytes_c);
+        }
+        else
+        {
+            voff = ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+        }
         ckc_value_t* k_dst =
             ckc_b_smem_ptr_add(B, K_buf_base, ckc_b_const_i64(B, (int64_t)call * bytes_per_call));
         ckc_b_async_buffer_load_lds_addr(
-            B, ctx->key_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CKC_CACHE_ALL);
+            B, call_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CKC_CACHE_ALL);
     }
 }
 
@@ -707,11 +738,35 @@ void ckc_gfx950_attention_tiled_3d_issue_v_load(ckc_gfx950_attention_tiled_3d_bu
     {
         ckc_value_t* linear_half =
             ckc_b_add(B, ckc_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        ckc_value_t* voff = ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+        ckc_value_t* call_rsrc = ctx->value_rsrc;
+        ckc_value_t* voff      = NULL;
+        if(CFG.I64_KV_ADDR)
+        {
+            const char* in_names[3]   = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
+            ckc_value_t* base_i64     = NULL;
+            ckc_value_t* valid        = NULL;
+            if(!ckc_transforms_descriptor_offset_i64_split(B,
+                                                           ctx->paged_kv_desc,
+                                                           "physical_block",
+                                                           in_names,
+                                                           in_values,
+                                                           3,
+                                                           &base_i64,
+                                                           &voff,
+                                                           &valid))
+                return;
+            call_rsrc = ckc_b_buffer_rsrc(
+                B, ckc_b_global_ptr_add(B, ctx->value, base_i64), ctx->kv_block_bytes_c);
+        }
+        else
+        {
+            voff = ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+        }
         ckc_value_t* v_dst =
             ckc_b_smem_ptr_add(B, V_buf_base, ckc_b_const_i64(B, (int64_t)call * bytes_per_call));
         ckc_b_async_buffer_load_lds_addr(
-            B, ctx->value_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CKC_CACHE_ALL);
+            B, call_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, CKC_CACHE_ALL);
     }
 }
 
@@ -748,6 +803,13 @@ void ckc_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
         ckc_value_t* col     = ckc_b_mul(B, col_mod, ckc_b_const_i32(B, fp8_elems_per_chunk));
         ckc_value_t* lhf_mul = ckc_b_mul(B, row, ckc_b_const_i32(B, HD));
         ckc_value_t* linear_half_first = ckc_b_add(B, lhf_mul, col);
+        /* I64_KV_ADDR fp8: the Python fp8 sync loader uses the full per-lane
+         * offset_i64 here (caches > 2 GiB). That non-split i64 paged variant is
+         * not yet on the frozen C transforms surface (same limitation the 2D C
+         * fp8 twin documents), so the C fp8 path resolves through the i32 offset
+         * regardless. The byte-identity gate never pairs fp8 with i64 KV, so this
+         * does not affect the gate; the fp16/bf16 i64 async loaders above are the
+         * shipping correctness fix and are fully mirrored. */
         ckc_value_t* voff =
             ckc__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
         ckc_value_t* fp8_vec = ckc_b_global_load_vN(
