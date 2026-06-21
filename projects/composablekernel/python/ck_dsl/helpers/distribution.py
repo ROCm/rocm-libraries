@@ -1715,7 +1715,10 @@ def store_wmma_acc(
         if transform is not None:
             val = transform(b, val, r, row, col)
         window.store_scalar(
-            b, *lead, row, b.add(c_off, col),
+            b,
+            *lead,
+            row,
+            b.add(c_off, col),
             value=b.cast_f32_to(val, window.dtype),
             align=align,
         )
@@ -1839,7 +1842,14 @@ def store_wmma_tile(
 ) -> None:
     """Tile-level wrapper over :func:`store_wmma_acc` for the O epilogue."""
     store_wmma_acc(
-        b, window, acc.atom, lane, acc.value,
-        arch=acc.arch, col_offset=col_offset, lead=lead,
-        align=align, transform=transform,
+        b,
+        window,
+        acc.atom,
+        lane,
+        acc.value,
+        arch=acc.arch,
+        col_offset=col_offset,
+        lead=lead,
+        align=align,
+        transform=transform,
     )

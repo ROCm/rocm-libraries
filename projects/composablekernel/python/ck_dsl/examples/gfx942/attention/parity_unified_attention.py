@@ -620,7 +620,9 @@ def mismatch_summary(reference, out, tol: float, limit: int) -> dict:
     sign_mismatch = (torch.signbit(a) != torch.signbit(b)) & bad
     n_bad = int(bad.sum().item())
     n_sign = int(sign_mismatch.sum().item())
-    worst_vals, worst_flat = torch.topk(abs_diff.flatten(), k=min(limit, abs_diff.numel()))
+    worst_vals, worst_flat = torch.topk(
+        abs_diff.flatten(), k=min(limit, abs_diff.numel())
+    )
     samples = []
     for rank, flat in enumerate(worst_flat.cpu().tolist()):
         idx = list(torch.unravel_index(torch.tensor(flat), abs_diff.shape))

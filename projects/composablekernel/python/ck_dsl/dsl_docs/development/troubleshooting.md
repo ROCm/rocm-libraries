@@ -57,6 +57,14 @@ run_diff --mode ll --only <family>
 Then look at whether the two engines diverged in the lowering (most likely if you
 edited `lower_llvm`) or in the builder.
 
+### `--mode ll` went red right after a lint or format pass
+A `ruff check --fix` (or an editor auto-fix) almost certainly **deleted a
+side-effecting builder call**: `F841` treats `c8 = b.const_i32(8)` as an unused
+variable and removes it, even though the call emits an op into the kernel. Restore
+the assignment (add `# noqa: F841` if the handle is intentionally unused) and
+re-run. **Never run `ruff check --fix` on `ck_dsl/core`, `helpers`, or
+`instances`** — see [`invariants.md`](./invariants.md) rule 9.
+
 ### `--mode ll` is green but `--mode ir` shows `STRUCT_DRIFT`
 The lowerer absorbed an upstream builder divergence (it renumbers SSA), so the
 final `.ll` matched by luck. The IR still diverged. Re-run with `--canonical`:

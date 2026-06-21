@@ -47,6 +47,14 @@ An engine change is done when **all** of these hold:
 Steps 2–3 are a single command (next section). Make it a habit; run it before you
 consider a change finished.
 
+> ⚠️ **Do not `ruff check --fix` emitter code.** The IR builder is
+> **side-effecting**: ruff's `F841` autofix deletes "unused" `b.const_i32(...)` /
+> `b.mul(...)` assignments that actually emit ops, silently breaking byte-identity.
+> Lint with `ruff check` (no `--fix`), add `# noqa: F841` for intentional handles,
+> and **re-run the gate below after any lint or format pass** — treat a lint pass
+> as a code change, never a safe no-op. (See [`invariants.md`](./invariants.md)
+> rule 9.)
+
 ## The gate: prove your change is byte-safe
 
 One script builds the C++ engine and runs the full cross-engine `.ll` diff:

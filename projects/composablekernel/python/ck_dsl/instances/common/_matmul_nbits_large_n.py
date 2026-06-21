@@ -57,8 +57,8 @@ class _WmmaParams:
         ``out_row = r0 + (lane//16)*8 + i``.
     """
 
-    wmma_op: str       # IRBuilder method name for the WMMA atom
-    frag_k: int        # fp16 elements per lane in one A/B fragment (16 | 8)
+    wmma_op: str  # IRBuilder method name for the WMMA atom
+    frag_k: int  # fp16 elements per lane in one A/B fragment (16 | 8)
     split_k_by_half: bool  # gfx12: K offset within a step = (lane//16)*frag_k
 
 
@@ -76,9 +76,7 @@ def _wmma_params(arch: str) -> _WmmaParams:
     )
 
 
-def build_large_n_matmul_nbits(
-    spec: MatMulNBitsSpec, arch: str = V1_ARCH
-) -> "object":
+def build_large_n_matmul_nbits(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> "object":
     """Build the large-N WMMA ``KernelDef`` for ``spec`` (validated by caller)."""
     wp = _wmma_params(arch)
     t = spec.tile
@@ -100,7 +98,9 @@ def build_large_n_matmul_nbits(
 
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
-    Sp = b.param("Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8)
+    Sp = b.param(
+        "Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8
+    )
     C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
     M = b.param("M", I32)
 

@@ -114,7 +114,9 @@ def build_qwen3_token_embedding(
     input_ids = b.param(
         "input_ids", PtrType(I32, "global"), noalias=True, readonly=True, align=16
     )
-    table = b.param("table", PtrType(dt, "global"), noalias=True, readonly=True, align=16)
+    table = b.param(
+        "table", PtrType(dt, "global"), noalias=True, readonly=True, align=16
+    )
     out = b.param("out", PtrType(dt, "global"), noalias=True, writeonly=True, align=16)
     num_tokens = b.param("num_tokens", I32)
 

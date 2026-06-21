@@ -76,6 +76,14 @@ pip install numpy ruff           # numpy for references; ruff for lint
 python -c "import torch; print(torch.__version__, torch.version.hip)"
 ```
 
+> ⚠️ **Lint with `ruff check` — never `ruff check --fix` — on emitter code**
+> (`ck_dsl/core`, `helpers`, `instances`). The IR builder is **side-effecting**:
+> `b.const_i32(8)` emits an op even when its handle is unused, so ruff's `F841`
+> autofix deletes the assignment and silently changes the emitted kernel. Use
+> `# noqa: F841` for intentional unused handles, and **re-run the byte-identity
+> gate after any lint/format pass**. See `dsl_docs/development/invariants.md`
+> (rule 9).
+
 ### 3.3 GPU access
 
 Kernel **lowering** (`comgr`) needs no GPU and runs anywhere. Kernel **launch**

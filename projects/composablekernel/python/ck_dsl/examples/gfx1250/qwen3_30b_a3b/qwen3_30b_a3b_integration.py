@@ -172,7 +172,9 @@ def _expected_shapes(config: Qwen3A3BConfig, *, kv_len: int) -> dict[str, QwenOp
     return {shape.name: shape for shape in layer_shapes(config, kv_len=kv_len)}
 
 
-def _shape_supported(shape: QwenOpShape, config: Qwen3A3BConfig, *, kv_len: int) -> bool:
+def _shape_supported(
+    shape: QwenOpShape, config: Qwen3A3BConfig, *, kv_len: int
+) -> bool:
     expected = _expected_shapes(config, kv_len=kv_len).get(shape.name)
     return expected is not None and dict(expected.dims) == dict(shape.dims)
 
@@ -312,7 +314,9 @@ def register_torch_custom_ops(namespace: str = "ck_dsl_gfx1250_qwen") -> bool:
     except Exception:
         return False
 
-    def rmsnorm_add_out(x, residual, weight, norm_out, residual_out, eps: float) -> None:
+    def rmsnorm_add_out(
+        x, residual, weight, norm_out, residual_out, eps: float
+    ) -> None:
         y = x + residual
         residual_out.copy_(y)
         inv = torch.rsqrt(torch.mean(y.float() * y.float(), dim=-1, keepdim=True) + eps)
@@ -382,12 +386,12 @@ class QwenOneLayerHarness:
         qkv_weight = torch.randn(cfg.qkv_width, cfg.hidden, dtype=dtype) / math.sqrt(
             cfg.hidden
         )
-        o_weight = torch.randn(cfg.hidden, cfg.attention_width, dtype=dtype) / math.sqrt(
-            max(1, cfg.attention_width)
-        )
-        router_weight = torch.randn(cfg.num_experts, cfg.hidden, dtype=dtype) / math.sqrt(
-            cfg.hidden
-        )
+        o_weight = torch.randn(
+            cfg.hidden, cfg.attention_width, dtype=dtype
+        ) / math.sqrt(max(1, cfg.attention_width))
+        router_weight = torch.randn(
+            cfg.num_experts, cfg.hidden, dtype=dtype
+        ) / math.sqrt(cfg.hidden)
         w_gate = torch.randn(
             cfg.num_experts, cfg.moe_intermediate, cfg.hidden, dtype=dtype
         ) / math.sqrt(cfg.hidden)
@@ -414,7 +418,9 @@ class QwenOneLayerHarness:
         }
 
 
-def _rmsnorm_add_ref(torch: Any, x: Any, residual: Any, weight: Any, *, eps: float) -> Any:
+def _rmsnorm_add_ref(
+    torch: Any, x: Any, residual: Any, weight: Any, *, eps: float
+) -> Any:
     y = x + residual
     inv = torch.rsqrt(torch.mean(y.float() * y.float(), dim=-1, keepdim=True) + eps)
     return y.float() * inv * weight, y

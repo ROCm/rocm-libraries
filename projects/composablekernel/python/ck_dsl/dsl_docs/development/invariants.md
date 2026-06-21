@@ -168,3 +168,28 @@ program; to a future reader they are noise that ages badly. The architecture RFC
 **What breaks if you ignore it.** Nothing functional — but the docs accrete
 references that no one can resolve, which is exactly the "tribal knowledge" problem
 this documentation set exists to fix.
+
+---
+
+## 9. Never auto-fix lint on emitter code — `ruff --fix` deletes side-effecting builder calls
+
+**The rule.** **Do NOT run `ruff check --fix`** (and do not let an editor
+auto-apply `F841` "unused variable" fixes) on emitter code — `ck_dsl/core/`,
+`ck_dsl/helpers/`, `ck_dsl/instances/`. Lint with `ruff check` *without* `--fix`;
+for a genuinely-intentional unused handle add `# noqa: F841`; and **always re-run
+the byte-identity gate after any lint or format pass** on those trees.
+
+**Why.** In this DSL the IR builder is *side-effecting*: a statement like
+`c8 = b.const_i32(8)` **emits an instruction into the kernel** even when the
+Python handle `c8` is never read again. ruff's `F841` only sees an "unused
+variable" and its autofix **deletes the whole assignment** — which removes the
+emitted op and silently changes the kernel. The same hazard applies to `F401`
+import removals when an import has load-time side effects.
+
+**What breaks if you ignore it.** The lint "passes," the module still imports and
+runs, but the emitted LLVM-IR is now different (a missing op / shifted SSA), so
+the kernel is subtly wrong and the byte-identity gate goes red. This has already
+bitten real kernels — a removed `b.const_i32(8)` and a removed
+`b.mul(ml_base, ...)` were caught only because the byte-identity gate happened to
+cover those families. Treat any lint/format pass on emitter trees as a change
+that must be re-verified against the gate, never as a safe no-op.

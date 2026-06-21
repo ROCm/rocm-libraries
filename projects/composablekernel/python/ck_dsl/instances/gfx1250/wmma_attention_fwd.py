@@ -174,7 +174,11 @@ def build_wmma_attention_fwd(
         raise ValueError(f"invalid wmma_attention_fwd spec: {why}")
 
     from ...core.arch import ArchTarget
-    from ...helpers.attention import apply_attention_mask, wave_reduce_max, wave_reduce_sum
+    from ...helpers.attention import (
+        apply_attention_mask,
+        wave_reduce_max,
+        wave_reduce_sum,
+    )
 
     target = ArchTarget.from_gfx(arch)
     op = target.mma.by_op_id(_WMMA_OP_ID)
@@ -214,7 +218,7 @@ def build_wmma_attention_fwd(
     stride_v_head = p["stride_v_head"]
     stride_o_token = p["stride_o_token"]
     stride_o_head = p["stride_o_head"]
-    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]
+    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]  # noqa: E741
     scale_log2 = p["scale_log2"]
 
     def causal_wmma_spacing():
@@ -278,9 +282,7 @@ def build_wmma_attention_fwd(
                 batch_off_k,
             )
             for d in range(n_dk):
-                k_addr = b.add(
-                    b.add(k_addr_row_base, b.const_i32(d * _WMMA_K)), half_k
-                )
+                k_addr = b.add(b.add(k_addr_row_base, b.const_i32(d * _WMMA_K)), half_k)
                 k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
                 score = b.mma(op, q_frags[d], k_frag, score)
                 causal_wmma_spacing()
@@ -358,9 +360,7 @@ def build_wmma_attention_fwd(
                 v_k = a_map.coord(b, lane, j)[1]  # half_k + j
                 v_row = b.add(k_tile_base, v_k)
                 v_row_base = b.add(
-                    b.add(
-                        b.mul(v_row, stride_v_token), b.mul(kv_head, stride_v_head)
-                    ),
+                    b.add(b.mul(v_row, stride_v_token), b.mul(kv_head, stride_v_head)),
                     batch_off_v,
                 )
                 v_elem = b.global_load(V, b.add(v_row_base, d_col), dtype_ir, align=2)

@@ -56,13 +56,23 @@ def _opt_configs(shape: Shape):
     if shape.seqlen_q % 32 == 0:
         bms.append(2)
     grid = itertools.product(
-        bms, ["lds"], ["gather", "lds_t"], [0, 1], [0, 1]  # bm, p, v, qpreload, fusek
+        bms,
+        ["lds"],
+        ["gather", "lds_t"],
+        [0, 1],
+        [0, 1],  # bm, p, v, qpreload, fusek
     )
     for bm, pm, vm, qp, fk in grid:
         yield SingleWaveCfg(
-            head_size=shape.head_size, num_query_heads=shape.heads,
-            num_kv_heads=shape.kv_heads, mask_mode=mask, bm_tiles=bm,
-            p_mode=pm, v_mode=vm, q_preload=bool(qp), fuse_k=bool(fk),
+            head_size=shape.head_size,
+            num_query_heads=shape.heads,
+            num_kv_heads=shape.kv_heads,
+            mask_mode=mask,
+            bm_tiles=bm,
+            p_mode=pm,
+            v_mode=vm,
+            q_preload=bool(qp),
+            fuse_k=bool(fk),
         )
 
 
@@ -70,9 +80,13 @@ def _sp_configs(shape: Shape):
     mask = "causal" if shape.causal else "none"
     for sched, xp, fk in itertools.product([0, 1], ["lds", "shuffle"], [0, 1]):
         yield PipelinedCfg(
-            head_size=shape.head_size, num_query_heads=shape.heads,
-            num_kv_heads=shape.kv_heads, mask_mode=mask,
-            sched=bool(sched), p_xpose=xp, fuse_k=bool(fk),
+            head_size=shape.head_size,
+            num_query_heads=shape.heads,
+            num_kv_heads=shape.kv_heads,
+            mask_mode=mask,
+            sched=bool(sched),
+            p_xpose=xp,
+            fuse_k=bool(fk),
         )
 
 
@@ -80,23 +94,30 @@ def _bn_configs(shape: Shape):
     mask = "causal" if shape.causal else "none"
     for bn, fk in itertools.product([2, 4], [0, 1]):
         yield BlockNCfg(
-            head_size=shape.head_size, num_query_heads=shape.heads,
-            num_kv_heads=shape.kv_heads, mask_mode=mask,
-            bn_tiles=bn, fuse_k=bool(fk),
+            head_size=shape.head_size,
+            num_query_heads=shape.heads,
+            num_kv_heads=shape.kv_heads,
+            mask_mode=mask,
+            bn_tiles=bn,
+            fuse_k=bool(fk),
         )
 
 
 def _tag(shape: Shape):
-    return (f"B{shape.batch} H{shape.heads}"
-            + (f"/{shape.kvh}" if shape.kvh != shape.heads else "")
-            + f" S{shape.seqlen_q} D{shape.head_size}"
-            + ("c" if shape.causal else ""))
+    return (
+        f"B{shape.batch} H{shape.heads}"
+        + (f"/{shape.kvh}" if shape.kvh != shape.heads else "")
+        + f" S{shape.seqlen_q} D{shape.head_size}"
+        + ("c" if shape.causal else "")
+    )
 
 
 def _label(kind, cfg):
     if kind == "opt":
-        return (f"opt bm{cfg.bm_tiles} p{cfg.p_mode} v{cfg.v_mode} "
-                f"qp{int(cfg.q_preload)} fk{cfg.fuse_k}")
+        return (
+            f"opt bm{cfg.bm_tiles} p{cfg.p_mode} v{cfg.v_mode} "
+            f"qp{int(cfg.q_preload)} fk{cfg.fuse_k}"
+        )
     if kind == "sp":
         return f"sp sched{int(cfg.sched)} xp{cfg.p_xpose} fk{cfg.fuse_k}"
     return f"bn bn{cfg.bn_tiles} fk{cfg.fuse_k}"
@@ -121,8 +142,10 @@ def sweep_shape(shape: Shape, objdump, *, verbose=True):
             tf = r.get("tflops", 0.0)
             if verbose:
                 flag = "Y" if ok else "N"
-                print(f"    {_label(kind, cfg):46s} {flag} {tf:7.2f} TF "
-                      f"spill={r.get('vspill','-')}")
+                print(
+                    f"    {_label(kind, cfg):46s} {flag} {tf:7.2f} TF "
+                    f"spill={r.get('vspill', '-')}"
+                )
             if ok and (best is None or tf > best[2]):
                 best = (kind, cfg, tf, r)
     return best
@@ -130,8 +153,9 @@ def sweep_shape(shape: Shape, objdump, *, verbose=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--quick", action="store_true",
-                    help="only the two compute-heavy D128 shapes")
+    ap.add_argument(
+        "--quick", action="store_true", help="only the two compute-heavy D128 shapes"
+    )
     ap.add_argument("--verbose", action="store_true", help="print every config")
     args = ap.parse_args()
 
@@ -153,8 +177,10 @@ def main():
         kind, cfg, tf, r = best
         pk = tf / PEAK_TF * 100.0
         rows.append((_tag(sh), kind, cfg, tf, pk))
-        print(f"  BEST {_tag(sh):30s} -> {tf:7.2f} TF ({pk:4.1f}%) "
-              f"[{_label(kind, cfg)}]  max_abs={r['max_abs']:.1e}")
+        print(
+            f"  BEST {_tag(sh):30s} -> {tf:7.2f} TF ({pk:4.1f}%) "
+            f"[{_label(kind, cfg)}]  max_abs={r['max_abs']:.1e}"
+        )
 
     if rows:
         print("\n==== best combination per shape ====")
@@ -163,8 +189,10 @@ def main():
         gbest = max(rows, key=lambda x: x[3])
         avg = sum(x[4] for x in rows) / len(rows)
         n20 = sum(1 for x in rows if x[4] >= 20.0)
-        print(f"\nglobal best: {gbest[0]} -> {gbest[3]:.2f} TF ({gbest[4]:.1f}%) "
-              f"[{_label(gbest[1], gbest[2])}]")
+        print(
+            f"\nglobal best: {gbest[0]} -> {gbest[3]:.2f} TF ({gbest[4]:.1f}%) "
+            f"[{_label(gbest[1], gbest[2])}]"
+        )
         print(f"avg of per-shape best: {avg:.1f}% of {PEAK_TF} peak")
         print(f"shapes >=20% peak: {n20}/{len(rows)}")
 

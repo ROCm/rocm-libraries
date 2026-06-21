@@ -85,8 +85,9 @@ class TestGfx1250WmmaLowering(unittest.TestCase):
             build_wmma_gemm,
         )
 
-        ll = lower_kernel_to_llvm(build_wmma_gemm(WmmaGemmSpec(), arch="gfx1250"),
-                                  arch="gfx1250")
+        ll = lower_kernel_to_llvm(
+            build_wmma_gemm(WmmaGemmSpec(), arch="gfx1250"), arch="gfx1250"
+        )
         # The 8-operand gfx1250 WMMA call (i1,A,i1,B,i16,C,i1,i1) and the
         # on-demand <16 x half> declaration must both be present.
         self.assertIn(
@@ -129,7 +130,9 @@ class TestGfx1250WmmaLowering(unittest.TestCase):
         frag = b.zero_vec(BF16, 16)
         acc = b.zero_vec_f32(8)
         result = b.wmma_gfx1250_f32_16x16x32_bf16(frag, frag, acc)
-        b.global_store(out, b.const_i32(0), b.trunc_f32_to_f16(b.vec_extract(result, 0)))
+        b.global_store(
+            out, b.const_i32(0), b.trunc_f32_to_f16(b.vec_extract(result, 0))
+        )
 
         hip = lower_kernel_to_hip(b.kernel, arch="gfx1250")
         self.assertIn("__builtin_amdgcn_wmma_f32_16x16x32_bf16", hip)
@@ -152,23 +155,50 @@ class TestQwen3A3BShapeTable(unittest.TestCase):
         self.assertEqual(cfg.moe_intermediate, 768)
         self.assertEqual(cfg.num_experts, 128)
         self.assertEqual(cfg.topk, 8)
-        self.assertEqual((cfg.num_query_heads, cfg.num_kv_heads, cfg.head_dim), (32, 4, 64))
+        self.assertEqual(
+            (cfg.num_query_heads, cfg.num_kv_heads, cfg.head_dim), (32, 4, 64)
+        )
         self.assertEqual(cfg.qkv_width, 2560)
 
         gemms = {shape.name: shape for shape in decode_gemm_shapes()}
-        self.assertEqual((gemms["qkv_decode_bf16"].m, gemms["qkv_decode_bf16"].n, gemms["qkv_decode_bf16"].k), (2, 2560, 2048))
-        self.assertEqual((gemms["o_decode_bf16"].m, gemms["o_decode_bf16"].n, gemms["o_decode_bf16"].k), (2, 2048, 2048))
-        self.assertEqual((gemms["router_decode_bf16"].m, gemms["router_decode_bf16"].n, gemms["router_decode_bf16"].k), (2, 128, 2048))
+        self.assertEqual(
+            (
+                gemms["qkv_decode_bf16"].m,
+                gemms["qkv_decode_bf16"].n,
+                gemms["qkv_decode_bf16"].k,
+            ),
+            (2, 2560, 2048),
+        )
+        self.assertEqual(
+            (
+                gemms["o_decode_bf16"].m,
+                gemms["o_decode_bf16"].n,
+                gemms["o_decode_bf16"].k,
+            ),
+            (2, 2048, 2048),
+        )
+        self.assertEqual(
+            (
+                gemms["router_decode_bf16"].m,
+                gemms["router_decode_bf16"].n,
+                gemms["router_decode_bf16"].k,
+            ),
+            (2, 128, 2048),
+        )
 
         attn = decode_attention_shapes()
-        self.assertEqual([shape.max_seqlen_k for shape in attn], [512, 1024, 2048, 4096])
+        self.assertEqual(
+            [shape.max_seqlen_k for shape in attn], [512, 1024, 2048, 4096]
+        )
         self.assertTrue(all(shape.max_seqlen_q == 1 for shape in attn))
         self.assertTrue(all(shape.block_size == 16 for shape in attn))
         self.assertTrue(all(shape.num_queries_per_kv == 8 for shape in attn))
 
         moe = moe_shape()
         self.assertEqual(moe.active_pairs, 16)
-        self.assertEqual((moe.experts, moe.topk, moe.hidden, moe.intermediate), (128, 8, 2048, 768))
+        self.assertEqual(
+            (moe.experts, moe.topk, moe.hidden, moe.intermediate), (128, 8, 2048, 768)
+        )
 
     def test_prefill_shapes_are_recorded(self):
         from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (

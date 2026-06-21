@@ -40,6 +40,7 @@ from ck_dsl.instances.common.conv_implicit_gemm import (
     build_implicit_gemm_conv,
 )
 
+
 def get_vector_sizes(C: int, K: int, dtype: str) -> tuple[int, int, int]:
     def _vec(n: int) -> int:
         sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
@@ -47,6 +48,7 @@ def get_vector_sizes(C: int, K: int, dtype: str) -> tuple[int, int, int]:
 
     vec_c = _vec(C)
     return vec_c, vec_c, _vec(K)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -74,24 +76,26 @@ def main() -> int:
     # ConvProblem parameters — shared between 2-D and 3-D.
     # Pass --Di and --Z to activate the 3-D path; omit for 2-D.
     conv = parser.add_argument_group("ConvProblem", "convolution shape parameters")
-    conv.add_argument("--N",  type=int, default=8,    help="batch size")
-    conv.add_argument("--Di", type=int, default=None, help="input depth  (3-D only; omit for 2-D)")
-    conv.add_argument("--Hi", type=int, default=56,   help="input height")
-    conv.add_argument("--Wi", type=int, default=56,   help="input width")
-    conv.add_argument("--C",  type=int, default=64,   help="input channels")
-    conv.add_argument("--K",  type=int, default=64,   help="output channels / filters")
-    conv.add_argument("--Z",  type=int, default=None, help="filter depth  (3-D only)")
-    conv.add_argument("--Y",  type=int, default=3,    help="filter height")
-    conv.add_argument("--X",  type=int, default=3,    help="filter width")
+    conv.add_argument("--N", type=int, default=8, help="batch size")
+    conv.add_argument(
+        "--Di", type=int, default=None, help="input depth  (3-D only; omit for 2-D)"
+    )
+    conv.add_argument("--Hi", type=int, default=56, help="input height")
+    conv.add_argument("--Wi", type=int, default=56, help="input width")
+    conv.add_argument("--C", type=int, default=64, help="input channels")
+    conv.add_argument("--K", type=int, default=64, help="output channels / filters")
+    conv.add_argument("--Z", type=int, default=None, help="filter depth  (3-D only)")
+    conv.add_argument("--Y", type=int, default=3, help="filter height")
+    conv.add_argument("--X", type=int, default=3, help="filter width")
     conv.add_argument("--sD", type=int, default=None, help="depth stride  (3-D only)")
-    conv.add_argument("--sH", type=int, default=1,    help="vertical stride")
-    conv.add_argument("--sW", type=int, default=1,    help="horizontal stride")
+    conv.add_argument("--sH", type=int, default=1, help="vertical stride")
+    conv.add_argument("--sW", type=int, default=1, help="horizontal stride")
     conv.add_argument("--pD", type=int, default=None, help="depth padding  (3-D only)")
-    conv.add_argument("--pH", type=int, default=1,    help="vertical padding")
-    conv.add_argument("--pW", type=int, default=1,    help="horizontal padding")
+    conv.add_argument("--pH", type=int, default=1, help="vertical padding")
+    conv.add_argument("--pW", type=int, default=1, help="horizontal padding")
     conv.add_argument("--dD", type=int, default=None, help="depth dilation  (3-D only)")
-    conv.add_argument("--dH", type=int, default=1,    help="vertical dilation")
-    conv.add_argument("--dW", type=int, default=1,    help="horizontal dilation")
+    conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
+    conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
 
     # ImplicitGemmConvSpec parameters
     spec_grp = parser.add_argument_group(
@@ -135,6 +139,7 @@ def main() -> int:
     arch = args.arch
     if args.isa is not None:
         from ck_dsl.core.arch import arch_from_isa
+
         arch = arch_from_isa(args.isa) or arch
     target = ArchTarget.from_gfx(arch)
 
@@ -145,10 +150,18 @@ def main() -> int:
     # while degrading cleanly to the narrow atom on gfx942 (no comgr crash).
     dtype = args.dtype
     atom = target.mma.select_largest_k(
-        a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=args.warp_tile_m, n=args.warp_tile_n, k_max=args.tile_k
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=args.warp_tile_m,
+        n=args.warp_tile_n,
+        k_max=args.tile_k,
     )
     if atom is None:
-        print(f"no {dtype} {args.warp_tile_m}x{args.warp_tile_n} MFMA atom for {arch}", file=sys.stderr)
+        print(
+            f"no {dtype} {args.warp_tile_m}x{args.warp_tile_n} MFMA atom for {arch}",
+            file=sys.stderr,
+        )
         return 2
     warp_tile_k = args.warp_tile_k if args.warp_tile_k is not None else atom.k
 
@@ -174,7 +187,9 @@ def main() -> int:
         dW=args.dW,
     )
 
-    vector_size_a, vector_size_b, vector_size_c = get_vector_sizes(C=args.C, K=args.K, dtype=dtype)
+    vector_size_a, vector_size_b, vector_size_c = get_vector_sizes(
+        C=args.C, K=args.K, dtype=dtype
+    )
 
     # Winning config from the sweep in `instances.conv_implicit_gemm`:
     #   tile (64, 64, 64)
@@ -218,37 +233,119 @@ def main() -> int:
     # For 3-D, `conv` holds 18 ints and `conv_layout` selects the parser:
     #   [N, Di, Hi, Wi, C, K, Z, Y, X, sD, sH, sW, pD, pH, pW, dD, dH, dW]
     if p.is_3d:
-        conv_field = [p.N, p.Di, p.Hi, p.Wi, p.C, p.K, p.Z, p.Y, p.X, p.sD, p.sH, p.sW, p.pD, p.pH, p.pW, p.dD, p.dH, p.dW]
+        conv_field = [
+            p.N,
+            p.Di,
+            p.Hi,
+            p.Wi,
+            p.C,
+            p.K,
+            p.Z,
+            p.Y,
+            p.X,
+            p.sD,
+            p.sH,
+            p.sW,
+            p.pD,
+            p.pH,
+            p.pW,
+            p.dD,
+            p.dH,
+            p.dW,
+        ]
         conv_layout = "implicit_gemm_3d"
         extra = {
             "dtype": dtype,
             "conv_3d": [
-                p.N, p.Di, p.Hi, p.Wi, p.C, p.K,
-                p.Z, p.Y, p.X,
-                p.sD, p.sH, p.sW,
-                p.pD, p.pH, p.pW,
-                p.dD, p.dH, p.dW,
+                p.N,
+                p.Di,
+                p.Hi,
+                p.Wi,
+                p.C,
+                p.K,
+                p.Z,
+                p.Y,
+                p.X,
+                p.sD,
+                p.sH,
+                p.sW,
+                p.pD,
+                p.pH,
+                p.pW,
+                p.dD,
+                p.dH,
+                p.dW,
             ],
             "default_shape": [p.M, p.N_gemm, p.K_gemm],
         }
     else:
-        conv_field = [p.N, p.Hi, p.Wi, p.C, p.K, p.Y, p.X, p.sH, p.sW, p.pH, p.pW, p.dH, p.dW]
+        conv_field = [
+            p.N,
+            p.Hi,
+            p.Wi,
+            p.C,
+            p.K,
+            p.Y,
+            p.X,
+            p.sH,
+            p.sW,
+            p.pH,
+            p.pW,
+            p.dH,
+            p.dW,
+        ]
         conv_layout = "implicit_gemm"
         extra = {
             "dtype": dtype,
             "default_shape": [p.M, p.N_gemm, p.K_gemm],
             "transform_dag": {
                 "A_nhwc": [
-                    {"transform": "unmerge", "upper": "m",    "into": ["n", "ho", "wo"], "dims": [p.N, p.Ho, p.Wo]},
-                    {"transform": "embed",   "upper": ["ho", "y"], "into": "hi", "strides": [p.sH, p.dH], "offset": -p.pH, "lo": 0, "hi": p.Hi},
-                    {"transform": "embed",   "upper": ["wo", "x"], "into": "wi", "strides": [p.sW, p.dW], "offset": -p.pW, "lo": 0, "hi": p.Wi},
-                    {"transform": "unmerge", "upper": "k",    "into": ["y", "x", "c"],   "dims": [p.Y, p.X, p.C]},
+                    {
+                        "transform": "unmerge",
+                        "upper": "m",
+                        "into": ["n", "ho", "wo"],
+                        "dims": [p.N, p.Ho, p.Wo],
+                    },
+                    {
+                        "transform": "embed",
+                        "upper": ["ho", "y"],
+                        "into": "hi",
+                        "strides": [p.sH, p.dH],
+                        "offset": -p.pH,
+                        "lo": 0,
+                        "hi": p.Hi,
+                    },
+                    {
+                        "transform": "embed",
+                        "upper": ["wo", "x"],
+                        "into": "wi",
+                        "strides": [p.sW, p.dW],
+                        "offset": -p.pW,
+                        "lo": 0,
+                        "hi": p.Wi,
+                    },
+                    {
+                        "transform": "unmerge",
+                        "upper": "k",
+                        "into": ["y", "x", "c"],
+                        "dims": [p.Y, p.X, p.C],
+                    },
                 ],
                 "B_kyxc": [
-                    {"transform": "unmerge", "upper": "k_gemm", "into": ["y", "x", "c"], "dims": [p.Y, p.X, p.C]},
+                    {
+                        "transform": "unmerge",
+                        "upper": "k_gemm",
+                        "into": ["y", "x", "c"],
+                        "dims": [p.Y, p.X, p.C],
+                    },
                 ],
                 "D_nhwk": [
-                    {"transform": "unmerge", "upper": "m", "into": ["n", "ho", "wo"], "dims": [p.N, p.Ho, p.Wo]},
+                    {
+                        "transform": "unmerge",
+                        "upper": "m",
+                        "into": ["n", "ho", "wo"],
+                        "dims": [p.N, p.Ho, p.Wo],
+                    },
                 ],
             },
         }

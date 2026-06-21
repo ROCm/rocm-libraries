@@ -1,5 +1,13 @@
 # ck_dsl
 
+> ⚠️ **Contributors — never run `ruff check --fix` on emitter code** (`ck_dsl/core`,
+> `helpers`, `instances`). The IR builder is **side-effecting**: `b.const_i32(8)`
+> emits an instruction even when its Python handle is unused, so ruff's `F841`
+> autofix **deletes the op and silently changes the kernel**. Lint with `ruff
+> check` (no `--fix`), use `# noqa: F841` for intentional handles, and re-run the
+> byte-identity gate after any lint/format pass. See
+> [`dsl_docs/development/invariants.md`](dsl_docs/development/invariants.md) rule 9.
+
 ## Why
 CK Tile kernels are expressive and fast, but editing them through C++
 templates can make iteration slow. `ck_dsl` keeps the CK Tile programming

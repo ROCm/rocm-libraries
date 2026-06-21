@@ -6,6 +6,7 @@ All calls pin the configured private key and BatchMode=yes so a missing
 key surfaces as an immediate error (never a password prompt). A persistent
 ssh ControlMaster is reused across calls to amortize handshake cost.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,18 +22,26 @@ _CTRL_DIR = Path(tempfile.gettempdir()) / f"ckdsl_ssh_{os.getuid()}"
 _CTRL_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 _CTRL_PATH = _CTRL_DIR / "cm-%r@%h:%p"
 
+
 def _ssh_base() -> List[str]:
     base: List[str] = ["ssh"]
     if config.REMOTE.ssh_key:
         base += ["-i", config.REMOTE.ssh_key]
     base += [
-        "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=15",
-        "-o", "ServerAliveInterval=30",
-        "-o", f"ControlPath={_CTRL_PATH}",
-        "-o", "ControlMaster=auto",
-        "-o", "ControlPersist=300",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        f"ControlPath={_CTRL_PATH}",
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        "ControlPersist=300",
     ]
     return base
 
@@ -106,8 +115,15 @@ def rsync_push(
 
 def rsync_pull(remote_path: str, local: Path, *, extra: Iterable[str] = ()) -> None:
     local.parent.mkdir(parents=True, exist_ok=True)
-    argv: List[str] = ["rsync", "-az", "-e", _rsync_ssh_opt(), *extra,
-                       f"{_target()}:{remote_path}", str(local)]
+    argv: List[str] = [
+        "rsync",
+        "-az",
+        "-e",
+        _rsync_ssh_opt(),
+        *extra,
+        f"{_target()}:{remote_path}",
+        str(local),
+    ]
     subprocess.run(argv, check=True)
 
 
@@ -126,7 +142,7 @@ def remote_home() -> str:
     not tilde-expand inside single quotes."""
     global _REMOTE_HOME
     if _REMOTE_HOME is None:
-        r = ssh_run("printf %s \"$HOME\"", capture=True)
+        r = ssh_run('printf %s "$HOME"', capture=True)
         _REMOTE_HOME = r.stdout.strip() or ""
         if not _REMOTE_HOME:
             raise RuntimeError("remote $HOME resolved to empty string")
