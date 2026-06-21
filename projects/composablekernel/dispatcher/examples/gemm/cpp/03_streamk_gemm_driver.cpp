@@ -116,9 +116,34 @@ int main(int argc, char** argv)
         ref.SetZero();
         ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(a_host, b_host, ref);
         const float maxv = *std::max_element(ref.mData.begin(), ref.mData.end());
-        const auto rtol  = ck_tile::get_relative_threshold<ADataType, CDataType, AccDataType>(K);
-        const auto atol =
-            ck_tile::get_absolute_threshold<ADataType, CDataType, AccDataType>(maxv, K);
+
+        // Stream-K splits K across CUs and reduces partials. Atomic reduction
+        // accumulates those partials directly into low-precision C, so the
+        // verification tolerance must account for the split-K accumulation
+        // error -- exactly as the tile_engine verifier does in
+        // tile_engine/include/utility/validation.hpp::calculate_rtol_atol.
+        // kbatch is the number of workgroups reducing into a single output
+        // tile, taken from the kernel's own tile partitioner so the driver and
+        // tile_engine agree on the split factor.
+        auto kargs = SelectedKernel::StreamKGemmKernel::MakeKernelArgs(args);
+        const ck_tile::index_t kbatch =
+            std::max<ck_tile::index_t>(1, kargs.tile_partitioner.estimate_num_wgs_per_tile());
+
+        using ComputeType =
+            std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
+        const ck_tile::index_t k_per_split = ck_tile::integer_divide_ceil(K, kbatch);
+        // single-pass (per-split) tolerance
+        const auto rtol_base =
+            ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(k_per_split);
+        const auto atol_base = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+            maxv / kbatch, k_per_split);
+        // error contributed by reducing kbatch partials in low-precision C
+        const auto rtol_split_k =
+            ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
+        const auto atol_split_k =
+            ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(maxv, kbatch);
+        const auto rtol = std::max(rtol_base, rtol_split_k);
+        const auto atol = std::max(atol_base, atol_split_k);
         pass = ck_tile::check_err(c_host, ref, "streamk", rtol, atol);
         std::cout << "Verification: " << (pass ? "PASS" : "FAIL") << "\n";
     }
