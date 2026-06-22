@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -139,8 +139,8 @@ void sparse_histogram(const Vector1& input, Vector2& histogram_values, Vector3& 
     data.end() - 1,
     data.begin() + 1,
     IndexType(1),
-    thrust::plus<IndexType>(),
-    thrust::not_equal_to<ValueType>());
+    _THRUST_STD::plus<IndexType>(),
+    _THRUST_STD::not_equal_to<ValueType>());
 
   // resize histogram storage
   histogram_values.resize(num_bins);

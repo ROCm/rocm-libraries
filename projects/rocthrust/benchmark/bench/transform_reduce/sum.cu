@@ -57,13 +57,13 @@ struct sum
   float64_t run(thrust::device_vector<T>& in, Policy policy)
   {
     bench_utils::do_not_optimize(
-      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, thrust::plus<T>{}));
+      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, _THRUST_STD::plus<T>{}));
 
     bench_utils::gpu_timer d_timer;
 
     d_timer.start(0);
     bench_utils::do_not_optimize(
-      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, thrust::plus<T>{}));
+      thrust::transform_reduce(policy, in.begin(), in.end(), square_t<T>{}, T{}, _THRUST_STD::plus<T>{}));
     d_timer.stop(0);
 
     return d_timer.get_duration();

@@ -92,7 +92,7 @@ uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size cou
 template <class Derived, class Iterator, class T>
 void THRUST_HOST_DEVICE uninitialized_fill(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& x)
 {
-  hip_rocprim::uninitialized_fill_n(policy, first, thrust::distance(first, last), x);
+  hip_rocprim::uninitialized_fill_n(policy, first, _THRUST_STD::distance(first, last), x);
 }
 
 } // namespace hip_rocprim

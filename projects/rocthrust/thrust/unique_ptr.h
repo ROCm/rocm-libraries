@@ -265,7 +265,7 @@ struct unique_ptr_deleter_sfinae
   using lval_ref_type        = const Deleter&;
   using good_rval_ref_type   = Deleter&&;
   using bad_rval_ref_type    = void;
-  using enable_rval_overload = thrust::detail::true_type;
+  using enable_rval_overload = _THRUST_STD::true_type;
 };
 
 template <class Deleter>
@@ -274,7 +274,7 @@ struct unique_ptr_deleter_sfinae<const Deleter&>
   using lval_ref_type        = const Deleter&;
   using good_rval_ref_type   = void;
   using bad_rval_ref_type    = const Deleter&&;
-  using enable_rval_overload = thrust::detail::false_type;
+  using enable_rval_overload = _THRUST_STD::false_type;
 };
 
 template <class Deleter>
@@ -283,7 +283,7 @@ struct unique_ptr_deleter_sfinae<Deleter&>
   using lval_ref_type        = Deleter&;
   using good_rval_ref_type   = void;
   using bad_rval_ref_type    = Deleter&&;
-  using enable_rval_overload = thrust::detail::false_type;
+  using enable_rval_overload = _THRUST_STD::false_type;
 };
 
 } // namespace detail

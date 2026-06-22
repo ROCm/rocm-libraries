@@ -76,7 +76,7 @@ tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, Tabul
 {
   using size_type = thrust::detail::it_difference_t<Iterator>;
 
-  size_type count = thrust::distance(first, last);
+  size_type count = _THRUST_STD::distance(first, last);
 
   using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
 

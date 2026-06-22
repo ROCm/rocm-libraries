@@ -129,8 +129,8 @@ void TestDeviceDereferenceTransformedCountingIterator()
 
   thrust::device_vector<int> output(5);
 
-  simple_copy(thrust::make_transform_iterator(first, thrust::negate<int>()),
-              thrust::make_transform_iterator(last, thrust::negate<int>()),
+  simple_copy(thrust::make_transform_iterator(first, _THRUST_STD::negate<int>()),
+              thrust::make_transform_iterator(last, _THRUST_STD::negate<int>()),
               output.begin());
 
   thrust::device_vector<int> ref{-1, -2, -3, -4, -5};

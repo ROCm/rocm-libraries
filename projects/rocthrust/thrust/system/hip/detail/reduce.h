@@ -168,7 +168,7 @@ THRUST_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, In
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
   return hip_rocprim::reduce_n(policy, first, num_items, init, binary_op);
 }
 

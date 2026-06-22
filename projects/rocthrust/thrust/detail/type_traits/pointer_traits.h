@@ -314,14 +314,14 @@ template <typename FromPtr, typename ToPtr>
 struct lazy_is_pointer_convertible
     : thrust::detail::eval_if<is_thrust_pointer<FromPtr>::value && is_thrust_pointer<ToPtr>::value,
                               is_pointer_convertible<FromPtr, ToPtr>,
-                              thrust::detail::identity_<thrust::detail::false_type>>
+                              thrust::detail::identity_<_THRUST_STD::false_type>>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct lazy_is_void_pointer_system_convertible
     : thrust::detail::eval_if<is_thrust_pointer<FromPtr>::value && is_thrust_pointer<ToPtr>::value,
                               is_void_pointer_system_convertible<FromPtr, ToPtr>,
-                              thrust::detail::identity_<thrust::detail::false_type>>
+                              thrust::detail::identity_<_THRUST_STD::false_type>>
 {};
 
 template <typename FromPtr, typename ToPtr, typename T = void>

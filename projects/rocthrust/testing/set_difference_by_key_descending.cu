@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ void TestSetDifferenceByKeyDescendingSimple()
     b_val.begin(),
     result_key.begin(),
     result_val.begin(),
-    thrust::greater<T>());
+    _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(result_key.end(), end.first);
   ASSERT_EQUAL_QUIET(result_val.end(), end.second);
@@ -59,8 +59,8 @@ void TestSetDifferenceByKeyDescending(const size_t n)
   thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + n);
   thrust::host_vector<T> h_b_key(temp.begin() + n, temp.end());
 
-  thrust::sort(h_a_key.begin(), h_a_key.end(), thrust::greater<T>());
-  thrust::sort(h_b_key.begin(), h_b_key.end(), thrust::greater<T>());
+  thrust::sort(h_a_key.begin(), h_a_key.end(), _THRUST_STD::greater<T>());
+  thrust::sort(h_b_key.begin(), h_b_key.end(), _THRUST_STD::greater<T>());
 
   thrust::host_vector<T> h_a_val = unittest::random_integers<T>(h_a_key.size());
   thrust::host_vector<T> h_b_val = unittest::random_integers<T>(h_b_key.size());
@@ -87,7 +87,7 @@ void TestSetDifferenceByKeyDescending(const size_t n)
     h_b_val.begin(),
     h_result_key.begin(),
     h_result_val.begin(),
-    thrust::greater<T>());
+    _THRUST_STD::greater<T>());
   h_result_key.erase(h_end.first, h_result_key.end());
   h_result_val.erase(h_end.second, h_result_val.end());
 
@@ -100,7 +100,7 @@ void TestSetDifferenceByKeyDescending(const size_t n)
     d_b_val.begin(),
     d_result_key.begin(),
     d_result_val.begin(),
-    thrust::greater<T>());
+    _THRUST_STD::greater<T>());
   d_result_key.erase(d_end.first, d_result_key.end());
   d_result_val.erase(d_end.second, d_result_val.end());
 

@@ -114,7 +114,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
   using namespace thrust::system::hip_rocprim::temp_storage;
   using size_type = thrust::detail::it_difference_t<InputIt>;
 
-  size_type num_items       = thrust::distance(first, last);
+  size_type num_items       = _THRUST_STD::distance(first, last);
   size_t temp_storage_bytes = 0;
   hipStream_t stream        = hip_rocprim::stream(policy);
   bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;
@@ -174,7 +174,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
   using namespace thrust::system::hip_rocprim::temp_storage;
   using size_type = thrust::detail::it_difference_t<InputIt>;
 
-  size_type num_items = thrust::distance(first, last);
+  size_type num_items = _THRUST_STD::distance(first, last);
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -218,7 +218,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt copy_if(
   using namespace thrust::system::hip_rocprim::temp_storage;
   using size_type = thrust::detail::it_difference_t<InputIt>;
 
-  size_type num_items       = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items       = static_cast<size_type>(_THRUST_STD::distance(first, last));
   size_t temp_storage_bytes = 0;
   hipStream_t stream        = hip_rocprim::stream(policy);
   bool debug_sync           = THRUST_HIP_DEBUG_SYNC_FLAG;

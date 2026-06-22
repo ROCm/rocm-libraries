@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,15 +33,15 @@ void TestAdvance()
 
   Iterator i = v.begin();
 
-  thrust::advance(i, 1);
+  _THRUST_STD::advance(i, 1);
 
   ASSERT_EQUAL(*i, T(1));
 
-  thrust::advance(i, 8);
+  _THRUST_STD::advance(i, 8);
 
   ASSERT_EQUAL(*i, T(9));
 
-  thrust::advance(i, -4);
+  _THRUST_STD::advance(i, -4);
 
   ASSERT_EQUAL(*i, T(5));
 }
@@ -58,18 +58,18 @@ void TestNext()
 
   Iterator const i0 = v.begin();
 
-  Iterator const i1 = thrust::next(i0);
+  Iterator const i1 = _THRUST_STD::next(i0);
 
   ASSERT_EQUAL(*i0, T(0));
   ASSERT_EQUAL(*i1, T(1));
 
-  Iterator const i2 = thrust::next(i1, 8);
+  Iterator const i2 = _THRUST_STD::next(i1, 8);
 
   ASSERT_EQUAL(*i0, T(0));
   ASSERT_EQUAL(*i1, T(1));
   ASSERT_EQUAL(*i2, T(9));
 
-  Iterator const i3 = thrust::next(i2, -4);
+  Iterator const i3 = _THRUST_STD::next(i2, -4);
 
   ASSERT_EQUAL(*i0, T(0));
   ASSERT_EQUAL(*i1, T(1));
@@ -89,18 +89,18 @@ void TestPrev()
 
   Iterator const i0 = v.end();
 
-  Iterator const i1 = thrust::prev(i0);
+  Iterator const i1 = _THRUST_STD::prev(i0);
 
   ASSERT_EQUAL_QUIET(i0, v.end());
   ASSERT_EQUAL(*i1, T(9));
 
-  Iterator const i2 = thrust::prev(i1, 8);
+  Iterator const i2 = _THRUST_STD::prev(i1, 8);
 
   ASSERT_EQUAL_QUIET(i0, v.end());
   ASSERT_EQUAL(*i1, T(9));
   ASSERT_EQUAL(*i2, T(1));
 
-  Iterator const i3 = thrust::prev(i2, -4);
+  Iterator const i3 = _THRUST_STD::prev(i2, -4);
 
   ASSERT_EQUAL_QUIET(i0, v.end());
   ASSERT_EQUAL(*i1, T(9));

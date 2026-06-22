@@ -79,7 +79,7 @@ void run_benchmark(
   thrust::detail::device_t policy{};
   // not a warm-up run, we need to run once to determine the size of the output
   const auto new_end             = thrust::unique_copy(policy(alloc), input.cbegin(), input.cend(), output.begin());
-  const std::size_t unique_items = thrust::distance(output.begin(), new_end);
+  const std::size_t unique_items = _THRUST_STD::distance(output.begin(), new_end);
 
   for (auto _ : state)
   {

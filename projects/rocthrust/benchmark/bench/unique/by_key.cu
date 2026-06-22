@@ -99,7 +99,7 @@ void run_benchmark(
   const auto [new_key_end, new_val_end] = thrust::unique_by_key_copy(
     policy(alloc), in_keys.cbegin(), in_keys.cend(), in_vals.cbegin(), out_keys.begin(), out_vals.begin());
 
-  const std::size_t unique_elements = thrust::distance(out_keys.begin(), new_key_end);
+  const std::size_t unique_elements = _THRUST_STD::distance(out_keys.begin(), new_key_end);
 
   for (auto _ : state)
   {

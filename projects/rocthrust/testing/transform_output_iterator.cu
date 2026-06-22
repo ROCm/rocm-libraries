@@ -35,7 +35,7 @@
 // ensure that we properly support thrust::reverse_iterator from _THRUST_STD
 void TestTransformOutputIteratorTraits()
 {
-  using func    = thrust::negate<int>;
+  using func    = _THRUST_STD::negate<int>;
   using base_it = thrust::host_vector<int>::iterator;
 
   using it        = thrust::transform_output_iterator<func, base_it>;
@@ -121,12 +121,12 @@ struct TestTransformOutputIteratorScan
     thrust::device_vector<T> d_result(n);
 
     // run on host
-    thrust::inclusive_scan(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                           thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()),
+    thrust::inclusive_scan(thrust::make_transform_iterator(h_data.begin(), _THRUST_STD::negate<T>()),
+                           thrust::make_transform_iterator(h_data.end(), _THRUST_STD::negate<T>()),
                            h_result.begin());
     // run on device
     thrust::inclusive_scan(
-      d_data.begin(), d_data.end(), thrust::make_transform_output_iterator(d_result.begin(), thrust::negate<T>()));
+      d_data.begin(), d_data.end(), thrust::make_transform_output_iterator(d_result.begin(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQUAL(h_result, d_result);
   }

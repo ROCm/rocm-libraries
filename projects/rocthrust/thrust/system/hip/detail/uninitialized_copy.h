@@ -95,7 +95,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HOST_DEVICE
 uninitialized_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  return hip_rocprim::uninitialized_copy_n(policy, first, thrust::distance(first, last), result);
+  return hip_rocprim::uninitialized_copy_n(policy, first, _THRUST_STD::distance(first, last), result);
 }
 
 } // namespace hip_rocprim

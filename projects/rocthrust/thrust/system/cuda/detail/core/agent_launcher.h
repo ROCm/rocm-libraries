@@ -247,7 +247,7 @@ struct AgentLauncher : Agent
   // don't compile other kernel which accepts pointer
   // and save on compilations
   template <class... Args>
-  void THRUST_RUNTIME_FUNCTION launch_impl(thrust::detail::true_type, Args... args) const
+  void THRUST_RUNTIME_FUNCTION launch_impl(_THRUST_STD::true_type, Args... args) const
   {
     assert(has_shmem && vshmem == nullptr);
     print_info(_kernel_agent<Agent, Args...>);
@@ -264,7 +264,7 @@ struct AgentLauncher : Agent
   // do actually have enough shared memory, the compilation time will double.
   //
   template <class... Args>
-  void THRUST_RUNTIME_FUNCTION launch_impl(thrust::detail::false_type, Args... args) const
+  void THRUST_RUNTIME_FUNCTION launch_impl(_THRUST_STD::false_type, Args... args) const
   {
     assert((has_shmem && vshmem == nullptr) || (!has_shmem && vshmem != nullptr && shmem_size == 0));
     print_info(_kernel_agent_vshmem<Agent, Args...>);
