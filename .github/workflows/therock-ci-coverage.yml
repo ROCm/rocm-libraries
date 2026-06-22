@@ -357,12 +357,19 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |
           set -x
-          if ! curl -Os https://cli.codecov.io/latest/linux/codecov; then
-            echo "Could not download the Codecov CLI; skipping upload."
+          # The standalone Codecov CLI binary is built against a newer glibc than
+          # the manylinux build container provides (it failed to load libpython
+          # with "GLIBC_2.29 not found"). Install via pip so it runs under the
+          # container's own Python interpreter instead.
+          if ! python3 -m pip install --quiet codecov-cli; then
+            echo "Could not install codecov-cli; skipping upload."
             exit 0
           fi
-          chmod +x codecov
-          ./codecov upload-process \
+          if [[ -z "${CODECOV_TOKEN:-}" ]]; then
+            echo "CODECOV_TOKEN is empty (expected for fork PRs, which do not receive"
+            echo "repository secrets); attempting a tokenless upload (public repo)."
+          fi
+          codecovcli upload-process \
             --disable-search \
             --file coverage-report/coverage.info \
             --flag "${{ inputs.cmake_target }}" \
@@ -385,4 +392,5 @@ jobs:
             fi
             echo "- Report artifact: \`${REPORT_ARTIFACT}\` (download from [run artifacts](${RUN_URL}))"
             echo "- Codecov: https://app.codecov.io/gh/${{ github.repository }}/pull/${{ github.event.pull_request.number }} (flag: ${{ inputs.cmake_target }})"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          # tee so the summary is also visible in this step's log, not only the job summary page.
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
