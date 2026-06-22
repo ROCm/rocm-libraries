@@ -297,6 +297,48 @@ class StreamK(Component):
             valuCOffset, width)
 
     @staticmethod
+    def _vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch):
+        """Clamp the workspace (partials / fixup) batch for VGPR-first MXF4 subtile.
+
+        Under the VGPR-first accumulator policy (MXF4 + UseSubtileImpl + StreamK)
+        the D-tile accumulators live in the VGPR file, but any tile that spilled to
+        AGPR must still be staged into a ValuC slot that AsmStoreState.
+        setupStoreElementsForBatch checks out ABOVE the live VGPR pool via
+        vgprPool.checkOutAligned (see AsmStoreState line ~838). The slot is checked
+        back in at the end of each batch, so the staging high-water mark scales with
+        the batch size. A whole-tile workspace batch therefore pushes that checkout
+        past MaxVgpr (v255 on gfx950) and the kernel fails to assemble
+        (register index out of range on the v_accvgpr_read / buffer_store).
+
+        Bound the batch to the free headroom below the VGPR ceiling so the staging
+        cannot cross MaxVgpr even in the worst case (no reusable freed holes, the
+        checkout starting at the current pool watermark). This is intentionally
+        scoped to the VGPR-first case only: AGPR-first kernels stage through the
+        compact per-batch AGPR window and keep their larger (faster) batch.
+
+        Returns numElementsPerBatch unchanged when the D-tile accumulators were not
+        actually placed in VGPR (the authoritative signal is the recorded register
+        allocation in d.tileInfo, not just the kernel data types).
+        """
+        dTileInfo = getattr(getattr(writer.states, 'd', None), 'tileInfo', None)
+        if not _has_any_vgpr_backed_accumulator(dTileInfo):
+            return numElementsPerBatch
+        if not ss.numVgprsPerElement:
+            return numElementsPerBatch
+        maxVgpr = writer.states.regCaps["MaxVgpr"]
+        # Worst-case staging start is the current pool watermark (size()); the batch
+        # must fit below MaxVgpr: size() + nElem * numVgprsPerElement <= MaxVgpr.
+        headroomElems = max(0, maxVgpr - writer.vgprPool.size()) // ss.numVgprsPerElement
+        miwt0 = max(1, int(kernel["MIWaveTile"][0])) if kernel.get("EnableMatrixInstruction") else 1
+        if miwt0 > 1:
+            # Keep MIWaveTile[0]-column alignment, matching the cap above.
+            headroomElems = (headroomElems // miwt0) * miwt0
+        # The epilogue VGPR reserve (Subtile/Kernel.py EPILOGUE_TEMP_MARGIN) guarantees
+        # at least one miwt0 column fits, so never shrink below that floor.
+        safeElems = max(miwt0, headroomElems)
+        return min(numElementsPerBatch, safeElems)
+
+    @staticmethod
     def _depthUForTc(kernel, tc):
         """Return the per-tensor-character DepthU (element count along unroll).
 
@@ -1220,6 +1262,10 @@ class StreamK(Component):
             elif miwt0 > 1 and numElementsPerBatch >= miwt0:
                 numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
 
+        # VGPR-first only: bound the workspace batch so the AGPR-spill staging
+        # (checked out above the VGPR-backed accumulators) cannot cross MaxVgpr.
+        numElementsPerBatch = self._vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch)
+
         # assert(writer.states.numVgprValuC % gwvw == 0) # sanity check
 
         numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
@@ -1823,6 +1869,10 @@ class StreamK(Component):
                 numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
             else:
                 numElementsPerBatch = len(elements[edgeI]) # max, do 'em all
+
+            # VGPR-first only: bound the fixup batch so the AGPR-spill staging
+            # (checked out above the VGPR-backed accumulators) cannot cross MaxVgpr.
+            numElementsPerBatch = self._vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch)
 
             # assert(self.numVgprValuC % gwvw == 0) # sanity check
 

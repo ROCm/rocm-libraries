@@ -378,6 +378,26 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
 # TileInfo — runtime tile state
 ################################################################################
 
+class VgprAccSplit(NamedTuple):
+  """Result of TileInfo.estimateVgprAccumulatorSplit (pure, no allocation).
+
+  Describes how the D-tile MMA accumulators are split between the VGPR and AGPR
+  files. The epilogue-ceiling locals are None on the AGPR-first path
+  (preferVgpr=False).
+  """
+  numMMATiles: int
+  numMMATilesPerReg: int
+  numDword: int
+  isDTile: bool
+  maxAgpr: int
+  preferVgpr: bool
+  vgprAccLimit: int
+  startVgprValu: Optional[int]
+  mainCeil: Optional[int]
+  epiCeil: Optional[int]
+  valuCStage: Optional[int]
+
+
 class TileInfo:
   """Runtime tile state combining frozen geometry with kernel/writer config.
 
@@ -688,10 +708,93 @@ class TileInfo:
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
-  def allocVgprTileRegisters_legacy(self, writer, kernel):
-    """Allocate data tile registers for A/B/D MMA operands.
+  def estimateSubtileMainLoopVgprs(self, writer, kernel):
+    """Estimate the main-loop A/B/scale working-set VGPR reserve (pure).
+
+    Builds the same LogicalScheduler the subtile main loop uses and asks
+    getNumVgpr() for the exact A/B/scale working-set size, walking the partition
+    candidates until the allocation fits under MaxVgpr. This is the
+    scheduler-sensitive reserve consumed by estimateVgprAccumulatorSplit's
+    main-loop ceiling: if a scheduler change shifts getNumVgpr(), this estimate
+    moves with it (which is exactly what the regression test pins).
+
+    When the real A/B tile info is unavailable (e.g. a unit-test writer stub
+    without states.a/b.tileInfo), falls back to a coarse upper bound on the
+    working set so the caller still gets a usable, conservative reserve.
     """
-    self.vgprTiles = []
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    numDword = int(math.ceil(self.mmaTileRegCount))
+
+    stateA = getattr(writer.states, "a", None)
+    stateB = getattr(writer.states, "b", None)
+    tiA = getattr(stateA, "tileInfo", None)
+    tiB = getattr(stateB, "tileInfo", None)
+    if tiA is None or tiB is None:
+      # Coarse fallback for the no-tile-info case (unit-test writer stub).
+      pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
+      return numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
+
+    stateMXSA = getattr(writer.states, "mxsa", None)
+    stateMXSB = getattr(writer.states, "mxsb", None)
+    scaleTiA = getattr(stateMXSA, "tileInfo", None) if kernel["ProblemType"].get("MXBlockA", 0) else None
+    scaleTiB = getattr(stateMXSB, "tileInfo", None) if kernel["ProblemType"].get("MXBlockB", 0) else None
+
+    if kernel.get("enableTDMA", False):
+      grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+    else:
+      grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
+      grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
+
+    if kernel.get("enableTDMB", False):
+      grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+    else:
+      grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
+      grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
+
+    lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
+    lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
+    grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
+    grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
+
+    M = tiA.localMMATileGrid[0]
+    N = tiB.localMMATileGrid[0]
+    pgr = int(kernel.get("PrefetchGlobalRead", 0))
+    candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+
+    for partSizeM, partSizeN in candidates:
+      cfg = MFMASchedulerConfig(
+          numMFMATilesM=M,
+          numMFMATilesN=N,
+          numSubIterK=tiA.localMMATileGrid[1],
+          lrA=ReadGranularity(mn=1, k=1),
+          lrB=ReadGranularity(mn=1, k=1),
+          grA=grAGran,
+          grB=grBGran,
+          lrSA=lrSAGran,
+          lrSB=lrSBGran,
+          grSA=grSAGran,
+          grSB=grSBGran,
+          partitionSizeM=partSizeM,
+          partitionSizeN=partSizeN,
+          pgr=pgr)
+      scheduler = LogicalScheduler(cfg)
+      scheduler.build()
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      if writer.vgprPool.size() + numVgpr <= maxVgpr:
+        return numVgpr
+    return numVgpr
+
+  def estimateVgprAccumulatorSplit(self, writer, kernel):
+    """Estimate the VGPR-first accumulator split decision WITHOUT allocating.
+
+    Pure (read-only on the register pools): computes how many D-tile MMA
+    accumulators may be kept in the VGPR file before spilling to AGPR, using the
+    live LogicalScheduler main-loop VGPR estimate and the epilogue staging
+    reserve. allocVgprTileRegisters_legacy consumes the result to perform the
+    actual register checkouts; unit tests call it directly to pin the estimate to
+    the VGPR/AGPR boundary observed in generated assembly (so a scheduler change
+    that shifts getNumVgpr() is caught as a regression).
+    """
     numMMATiles = int(self.localMMATileGrid[0] * self.localMMATileGrid[1])
     numMMATilesPerReg = max(1, int(1 // self.mmaTileRegCount))
     # Scale tiles: legacy MXSA/MXSB used bpe=1 (scale byte) which gives mmaTileRegCount=0.25
@@ -726,106 +829,35 @@ class TileInfo:
     #                         explicitly so the gate is self-documenting and
     #                         safe if the invariant ever changes)
     #
-    # The epiCeil below must subtract the main-loop VGPR cost (estimateSubtileMainLoopVgprs)
-    # because partialsWriteBatch runs while A/B tiles are still live in the pool.
-    # That subtraction is only correct when StreamK/UseSubtileImpl is active, so
-    # we narrow preferVgpr here rather than adding a conditional inside the block.
+    # This VGPR-first split is only valid for the StreamK subtile path, where we
+    # separately bound the main-loop A/B/scale working set and the post-loop store
+    # staging window before deciding how many accumulators can stay in VGPR.
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
         and isFloat4Type(dataTypeB) \
         and bool(kernel.get("UseSubtileImpl", False)) \
         and kernel.get("StreamK", 0) > 0
 
-    # Fallback only: a coarse upper bound on the main-loop A/B/scale working set
-    # used when the real A/B tile info is unavailable (e.g. the unit-test writer
-    # stub). The production path below uses the exact LogicalScheduler estimate.
-    def _fallbackMainLoopVgprReserve():
-      pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
-      return numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
-
-    # Production estimate: build the same LogicalScheduler the main loop uses and
-    # ask getNumVgpr() for the exact A/B/scale working-set size, walking the
-    # partition candidates until the allocation fits under MaxVgpr. This is the
-    # accurate reserve; the coarse fallback above is only for the no-tile-info case.
-    def estimateSubtileMainLoopVgprs():
-      stateA = getattr(writer.states, "a", None)
-      stateB = getattr(writer.states, "b", None)
-      tiA = getattr(stateA, "tileInfo", None)
-      tiB = getattr(stateB, "tileInfo", None)
-      if tiA is None or tiB is None:
-        return _fallbackMainLoopVgprReserve()
-
-      stateMXSA = getattr(writer.states, "mxsa", None)
-      stateMXSB = getattr(writer.states, "mxsb", None)
-      scaleTiA = getattr(stateMXSA, "tileInfo", None) if kernel["ProblemType"].get("MXBlockA", 0) else None
-      scaleTiB = getattr(stateMXSB, "tileInfo", None) if kernel["ProblemType"].get("MXBlockB", 0) else None
-
-      if kernel.get("enableTDMA", False):
-        grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
-      else:
-        grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
-        grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
-
-      if kernel.get("enableTDMB", False):
-        grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
-      else:
-        grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
-        grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
-
-      lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
-      lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
-      grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
-      grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
-
-      M = tiA.localMMATileGrid[0]
-      N = tiB.localMMATileGrid[0]
-      pgr = int(kernel.get("PrefetchGlobalRead", 0))
-      candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-
-      for partSizeM, partSizeN in candidates:
-        cfg = MFMASchedulerConfig(
-            numMFMATilesM=M,
-            numMFMATilesN=N,
-            numSubIterK=tiA.localMMATileGrid[1],
-            lrA=ReadGranularity(mn=1, k=1),
-            lrB=ReadGranularity(mn=1, k=1),
-            grA=grAGran,
-            grB=grBGran,
-            lrSA=lrSAGran,
-            lrSB=lrSBGran,
-            grSA=grSAGran,
-            grSB=grSBGran,
-            partitionSizeM=partSizeM,
-            partitionSizeN=partSizeN,
-            pgr=pgr)
-        scheduler = LogicalScheduler(cfg)
-        scheduler.build()
-        numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
-        if writer.vgprPool.size() + numVgpr <= maxVgpr:
-          return numVgpr
-      return numVgpr
+    # Predeclare epilogue-ceiling locals so the return below is valid even on the
+    # AGPR-first path (preferVgpr False); they are assigned in the block below.
+    startVgprValu = mainCeil = epiCeil = valuCStage = None
 
     # Large FP4 subtile tiles can exceed the VGPR file once accumulators are kept
     # in VGPR. The number of D accumulators we may keep in VGPR is bounded by two
-    # independent ceilings; we take the smaller so neither the main loop nor the
-    # epilogue references a register past v255:
+    # independent ceilings; we take the smaller so neither phase references a
+    # register past v255:
     #
     #   * main-loop ceiling: A/B/scale working-set VGPRs are checked out above the
     #     accumulators, so the accumulators must end low enough to leave room for
     #     that working set.
     #
-    #   * post-loop (epilogue) ceiling: the store stages accumulators into the
-    #     ValuC region, which AsmStoreState.setupStoreElementsForBatch checks out
-    #     of the VGPR pool ABOVE the VGPR-backed accumulators
-    #     (vgprPool.checkOutAligned). That staging window plus a margin for
-    #     C-load / conversion / address temps is bounded by numVgprValu, so the
-    #     VGPR accumulators must end below maxVgpr - numVgprValu - margin for the
-    #     whole window to stay in range. This is a safe upper bound (the realized
-    #     window is smaller because VGPR-backed accumulators are stored in place),
-    #     so the cap is conservative but never overflows.
+    #   * post-loop (epilogue) ceiling: after the main-loop working set is no
+    #     longer needed, the store may still stage AGPR-backed accumulators into
+    #     ValuC above the VGPR-backed accumulators. The accumulators must end low
+    #     enough for that staging window plus temporary store VGPRs to fit.
     if preferVgpr:
       startVgprValu = writer.vgprPool.size()
-      mainCeil = maxVgprBeforeAgpr - estimateSubtileMainLoopVgprs()
+      mainCeil = maxVgprBeforeAgpr - self.estimateSubtileMainLoopVgprs(writer, kernel)
 
       # Epilogue (post-loop) ceiling: the store stages accumulators into the ValuC
       # region, checked out of the VGPR pool ABOVE the VGPR-backed accumulators. The
@@ -907,16 +939,26 @@ class TileInfo:
         minStoreElems = 1
       stageElems = max(miwt0, minStoreElems)
       valuCStage = min(wholeTileStage, stageElems * perElem)
-      EPILOGUE_TEMP_MARGIN = 8  # coord0/1 + tmp scalars live during the store
-      # partialsWriteBatch runs while A/B tiles are still live in the VGPR pool
-      # (UseSubtileImpl+StreamK is always active here, see preferVgpr gate above).
-      # The staging VGPRs for AGPR tiles are therefore allocated above BOTH the
-      # accumulators AND the main-loop working set. Subtracting mainCeil's loop
-      # reserve from the epilogue ceiling ensures the staging window fits:
-      #   staging_start = acc_end + loop_vgprs
+      # Base overhead = tmpVgpr (6) + cvtVgpr (4, 1-aligned) ~ 8 for non-UseSubtileImpl.
+      # UseSubtileImpl BF16/FP16 checks out a 7-reg cvtVgprStruct with 2-alignment
+      # (see KernelWriterAssembly.py globalWriteElements, numCvtVgprs=7, cvtAlign=2),
+      # adding 3 data regs plus up to 1 alignment hole = +4 above the base.
+      # The StreamK deferred-partials write path (partialsWriteProcedure) would
+      # otherwise stage AGPR tiles ~4 VGPRs higher than the global-write path
+      # (it allocates a workspace address VGPR not present in the global path),
+      # which could push staging past v255 for VGPR-first kernels. That extra
+      # demand is bounded directly at the source by
+      # StreamK._vgprFirstWorkspaceBatchCap, which clamps the partials/fixup batch
+      # size for VGPR-first kernels, so the base margin is sufficient here.
+      EPILOGUE_TEMP_MARGIN = 8
+      # Post-loop store staging runs after the main-loop A/B/scale VGPRs are no
+      # longer needed. Its ceiling therefore only reserves room above the
+      # VGPR-backed accumulators themselves:
+      #   staging_start = acc_end
       #   staging_end   = staging_start + valuCStage - 1
-      #   constraint:   staging_end < maxVgpr  =>  epiCeil = mainCeil - valuCStage - margin
-      epiCeil = mainCeil - valuCStage - EPILOGUE_TEMP_MARGIN
+      #   constraint:   staging_end < maxVgpr
+      #               => epiCeil = maxVgpr - valuCStage - margin
+      epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
 
       vgprAccLimit = min(mainCeil, epiCeil)
 
@@ -934,6 +976,36 @@ class TileInfo:
         vgprAccLimit = maxVgpr
     else:
       vgprAccLimit = maxVgpr
+
+    return VgprAccSplit(
+        numMMATiles=numMMATiles,
+        numMMATilesPerReg=numMMATilesPerReg,
+        numDword=numDword,
+        isDTile=isDTile,
+        maxAgpr=maxAgpr,
+        preferVgpr=preferVgpr,
+        vgprAccLimit=vgprAccLimit,
+        startVgprValu=startVgprValu,
+        mainCeil=mainCeil,
+        epiCeil=epiCeil,
+        valuCStage=valuCStage,
+    )
+
+  def allocVgprTileRegisters_legacy(self, writer, kernel):
+    """Allocate data tile registers for A/B/D MMA operands.
+
+    Thin allocator: estimateVgprAccumulatorSplit() makes the (pure) VGPR/AGPR
+    split decision, this method performs the register checkouts accordingly.
+    """
+    self.vgprTiles = []
+    est = self.estimateVgprAccumulatorSplit(writer, kernel)
+    numMMATiles       = est.numMMATiles
+    numMMATilesPerReg = est.numMMATilesPerReg
+    numDword          = est.numDword
+    isDTile           = est.isDTile
+    maxAgpr           = est.maxAgpr
+    preferVgpr        = est.preferVgpr
+    vgprAccLimit      = est.vgprAccLimit
 
     for i in range(numMMATiles):
       nextVgprEnd = int(math.ceil(writer.vgprPool.size() / numDword)) * numDword + numDword
