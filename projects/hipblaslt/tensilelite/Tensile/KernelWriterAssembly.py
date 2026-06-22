@@ -65,7 +65,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
-  VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
+  VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMaxI32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
@@ -10175,6 +10175,152 @@ class KernelWriterAssembly(KernelWriter):
     return imod
 
   ##############################################################################
+  # Calc Max Global Read Offset for transpose loads (GLTr / DirectToVgpr).
+  #
+  # Transpose global loads (global_load_tr) use a bare 2-register address with
+  # NO buffer num_records bounds, unlike buffer_load. Without a clamp, a tile
+  # whose free dim is smaller than the macro-tile (e.g. N=8 padded to MT1=64)
+  # reads past the end of the tensor and can fault when the operand abuts an
+  # unmapped page. This computes the per-lane maximum legal GRO (in bytes) so
+  # callers can VMinI32-clamp each load offset into range.
+  #
+  # The base tile-geometry bound is only valid for a *partial* free-dim tile;
+  # for a *full* tile it under-estimates legal lane offsets, so on the main-loop
+  # path (preventOverflow) the bound is neutralized to INT_MAX for full tiles,
+  # making the downstream clamp a no-op == upstream behavior. See the two
+  # tile-edge blocks below.
+  #
+  # Returns the checked-out maxGroVgpr (caller must vgprPool.checkIn it), or
+  # None if not a transpose load.
+  ##############################################################################
+  def calcMaxGroForGLTr(self, module, kernel, tP, preventOverflow=False):
+    tc = tP["tensorChar"]
+    isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
+    if not isTr:
+      return None
+
+    module.addComment1("Max read address offset for GLTr%s"%tc)
+
+    # The clamp needs scratch VGPRs (one persistent result + temporaries). When
+    # preventOverflow is set (main-loop path), allocate so the pool refuses to
+    # grow past the VGPR cap: a few full-size transpose tiles already sit at the
+    # cap with no headroom, and forcing the allocation there makes the kernel
+    # fail to generate. If it cannot fit, skip the clamp, leaving the kernel
+    # byte-identical to upstream. The crash-prone edge-tile kernels are small
+    # and always have headroom. The tail-loop path passes preventOverflow=False
+    # to preserve exact upstream behavior (it is never at the cap in practice).
+    try:
+      maxGroVgpr = self.vgprPool.checkOut(1, 'maxGroVgpr', preventOverflow)
+      tmpVgpr = self.vgprPool.checkOutAligned(2, 2, 'tmpVgpr', preventOverflow)
+      tmp = self.vgprPool.checkOut(1, 'tmp', preventOverflow)
+      tmp2 = self.vgprPool.checkOut(1, 'tmp2', preventOverflow)
+    except RuntimeError:
+      for v in ('tmp2', 'tmp', 'tmpVgpr', 'maxGroVgpr'):
+        if v in locals():
+          self.vgprPool.checkIn(locals()[v])
+      return None
+    tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
+
+    WvG_M = kernel["MIWaveGroup"][0]
+    numKr = kernel["MatrixInstK"] // tP["glvw"]
+
+    module.addComment0("calc last tile offset")
+    module.add(vectorStaticDivide(maxGroVgpr, "Serial", kernel["WavefrontSize"], tmpVgprRes))
+    if tP["isA"]:
+      module.add(VAndB32(dst=vgpr(maxGroVgpr), src0=hex(WvG_M-1), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) mod MIWG[0]"%tc))
+      module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) *= numKr"%tc))
+    elif tP["isB"]:
+      # NB:
+      #   Calc of w_id is: /= MIWG[0], not %= MIWG[1]
+      module.add(VLShiftRightB32(dst=vgpr(maxGroVgpr), shiftHex=log2(WvG_M), src=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) /= MIWG[0]"%tc))
+      module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
+
+    module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"])+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
+    module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
+
+    with self.allocTmpSgpr(1, tag="calcMaxGroForGLTr_glvwMul") as tmpSgprInfo:
+      if tP["glvw"] > 1:
+        if tP["tlu"]:
+          module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: tile * glvw(%u)"%(tc, tP["glvw"])))
+        else:
+          module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: unroll * glvw(%u)"%(tc, tP["glvw"])))
+
+    strideIdx = tP["lsc"] if tP["tlu"] else tP["lsp"]
+    stride = kernel[strideIdx]
+    module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(maxGroVgpr), src1=stride*(tP["nrt"]-1)))
+
+    # Block 1 of 2 (partial-tile clamp). Clamp the tile (free-dim) element index
+    # to the last valid element so the bare-address transpose load cannot
+    # over-read when the tile dim size is not a whole multiple of MacroTile. The
+    # tile-geometry max above bounds the tile's own edge (->MT-1); a *partial*
+    # last tile (rem = Size - WG*MT < MT) has valid elements only up to rem-1, so
+    # the per-lane GRO must be capped there:
+    #   rem  = Size - WG*MT           (signed; valid elements in THIS tile)
+    #   edge = (rem < MT) ? rem - margin   (partial: last legal glvw-vector start)
+    #                     : MT - 1         (full: no-op, lane tile-idx max is MT-1)
+    # For a full tile this is intentionally a no-op (edge=MT-1); full-tile safety
+    # is enforced more strongly by the INT_MAX neutralization in block 2 below,
+    # which also covers the byte-domain bound after GLOBAL_OFFSET (an earlier
+    # version with only this block still corrupted full batched tiles).
+    # margin = glvw (rtv) so the full glvw-wide transpose vector starting at the
+    # clamped lane stays in bounds. Applied on the still-in-elements tile term,
+    # before GLOBAL_OFFSET folds in the unroll/K component and before bpe
+    # byte-scaling, so it composes with the rest of the sequence. Mirrors the
+    # ShiftPtr clamp in graFinalOffsetsSingleLoopGNLC (which only runs for the
+    # TLU==1 buffer path, never this transpose path). B-only: A uses bounded
+    # buffer_load. Only meaningful when this term is the tile (free) dim, tlu==1.
+    if tP["isB"] and tP["tlu"] and kernel["EdgeType"] == "ShiftPtr":
+      margin = tP["glvw"] if tP["rtv"] else 1
+      mt = kernel[tP["mt"]]
+      with self.allocTmpSgpr(2, tag="calcMaxGroForGLTr_edge") as edgeSgprInfo:
+        remSgpr  = edgeSgprInfo.idx       # rem = Size - WG*MT (valid elems this tile)
+        edgeSgpr = edgeSgprInfo.idx + 1   # selected edge (partial vs full)
+        module.add(SMulI32(dst=sgpr(remSgpr), src0=sgpr(tP["wg"]), src1=mt, comment="GLTr%s: WG*MT"%tc))
+        module.add(SSubI32(dst=sgpr(remSgpr), src0=self.sizeRef(tP["idx"]), src1=sgpr(remSgpr), comment="GLTr%s: rem = Size%s - WG*MT (signed)"%(tc, tP["tileChar"])))
+        module.add(SSubI32(dst=sgpr(edgeSgpr), src0=sgpr(remSgpr), src1=margin, comment="GLTr%s: partial edge = rem - margin(%u)"%(tc, margin)))
+        module.add(SCmpLtI32(src0=sgpr(remSgpr), src1=mt, comment="GLTr%s: is this a partial tile? (rem < MT)"%tc))
+        module.add(SCSelectB32(dst=sgpr(edgeSgpr), src0=sgpr(edgeSgpr), src1=mt-1, comment="GLTr%s: partial -> rem-margin, full -> MT-1 (no-op)"%tc))
+        module.add(VMinI32(dst=vgpr(maxGroVgpr), src0=sgpr(edgeSgpr), src1=vgpr(maxGroVgpr), comment="GLTr%s: clamp tile idx to free-dim edge"%tc))
+
+    module.addComment0("calc last unroll offset")
+    module.add(VMovB32(dst=vgpr(tmp), src=sgpr("SizesSum+%u"%self.states.unrollIdx)))
+    with self.allocTmpSgpr(1, tag="calcMaxGroForGLTr_unrollRem") as tmpSgprInfo:
+      module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel["DepthU"], tmpVgprRes, tmpSgprInfo))
+
+    module.addComment0("final offset")
+    module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
+    bfArgs = (maxGroVgpr, maxGroVgpr, tmp2, tmp)
+    module.add(MacroInstruction(name="GLOBAL_OFFSET_%s"%tc, args=bfArgs))
+    module.add(vectorMultiplyBpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
+
+    # Block 2 of 2: main-loop full-tile neutralization (preventOverflow path only).
+    # The per-lane maxGroVgpr above is a tile-geometry bound that is only correct
+    # for a genuinely *partial* free-dim tile. For a *full* tile (rem = Size-WG*MT
+    # >= MacroTile) the bound under-estimates legal lane offsets and the downstream
+    # VMinI32(offset, maxGro) corrupts valid lanes -> OOB fault (observed on
+    # batched DTVB1 full-tile kernels). Upstream (no clamp at all) is correct for
+    # those, so for full tiles overwrite maxGroVgpr with INT_MAX, making the
+    # downstream clamp a guaranteed no-op == upstream behavior. Partial tiles keep
+    # the real bound. Gated to the main loop (preventOverflow) so the K-tail path
+    # (globalReadGuardK) stays byte-identical to upstream.
+    if preventOverflow and tP["isB"] and tP["tlu"] and kernel["EdgeType"] == "ShiftPtr":
+      mt = kernel[tP["mt"]]
+      with self.allocTmpSgpr(1, tag="calcMaxGroForGLTr_fullTile") as fullSgprInfo:
+        fullSgpr = fullSgprInfo.idx
+        module.add(SMulI32(dst=sgpr(fullSgpr), src0=sgpr(tP["wg"]), src1=mt, comment="GLTr%s: WG*MT"%tc))
+        module.add(SSubI32(dst=sgpr(fullSgpr), src0=self.sizeRef(tP["idx"]), src1=sgpr(fullSgpr), comment="GLTr%s: rem = Size%s - WG*MT (signed)"%(tc, tP["tileChar"])))
+        module.add(SCmpGeI32(src0=sgpr(fullSgpr), src1=mt, comment="GLTr%s: full tile? (rem >= MT)"%tc))
+        module.add(SCSelectB32(dst=sgpr(fullSgpr), src0=0x7FFFFFFF, src1=0, comment="GLTr%s: full -> INT_MAX (no-op clamp), partial -> 0"%tc))
+        module.add(VMaxI32(dst=vgpr(maxGroVgpr), src0=sgpr(fullSgpr), src1=vgpr(maxGroVgpr), comment="GLTr%s: full tile -> raise bound to INT_MAX (clamp no-op); partial -> keep"%tc))
+
+    module.addSpaceLine()
+
+    self.vgprPool.checkIn(tmp)
+    self.vgprPool.checkIn(tmp2)
+    self.vgprPool.checkIn(tmpVgpr)
+    return maxGroVgpr
+
+  ##############################################################################
   # Global Read:
   # globalReadTrueGuardK is called for loads in the tail loop
   # Must ensure each load is in bounds - either using buffer bounds
@@ -10195,61 +10341,9 @@ class KernelWriterAssembly(KernelWriter):
     ########################################
 
     if isTr:
-      # DirectToVgpr case, we need to calculate max address
-      module.addComment1("Max read address offset for GLTr%s"%tc)
-
-      maxGroVgpr = self.vgprPool.checkOut(1, tag="globalReadGuardK_maxGroVgpr")
-
-      tmpVgpr = self.vgprPool.checkOutAligned(2, 2, tag="globalReadGuardK_tmpVgpr")
-      tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
-
-      tmp = self.vgprPool.checkOut(1, tag="globalReadGuardK_tmp")
-      tmp2 = self.vgprPool.checkOut(1, tag="globalReadGuardK_tmp2")
-
-      WvG_M = kernel["MIWaveGroup"][0]
-      numKr = kernel["MatrixInstK"] // tP["glvw"]
-
-      module.addComment0("calc last tile offset")
-      module.add(vectorStaticDivide(maxGroVgpr, "Serial", kernel["WavefrontSize"], tmpVgprRes))
-      if tP["isA"]:
-        module.add(VAndB32(dst=vgpr(maxGroVgpr), src0=hex(WvG_M-1), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) mod MIWG[0]"%tc))
-        module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) *= numKr"%tc))
-      elif tP["isB"]:
-        # NB:
-        #   Calc of w_id is: /= MIWG[0], not %= MIWG[1]
-        module.add(VLShiftRightB32(dst=vgpr(maxGroVgpr), shiftHex=log2(WvG_M), src=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) /= MIWG[0]"%tc))
-        module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
-
-      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"])+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
-      module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
-
-      with self.allocTmpSgpr(1, tag="globalReadGuardK_tmpSgprInfo") as tmpSgprInfo:
-        if tP["glvw"] > 1:
-          if tP["tlu"]:
-            module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: tile * glvw(%u)"%(tc, tP["glvw"])))
-          else:
-            module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: unroll * glvw(%u)"%(tc, tP["glvw"])))
-
-      strideIdx = tP["lsc"] if tP["tlu"] else tP["lsp"]
-      stride = kernel[strideIdx]
-      module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(maxGroVgpr), src1=stride*(tP["nrt"]-1)))
-
-      module.addComment0("calc last unroll offset")
-      module.add(VMovB32(dst=vgpr(tmp), src=sgpr("SizesSum+%u"%self.states.unrollIdx)))
-      with self.allocTmpSgpr(1, tag="globalReadGuardK_tmpSgprInfo2") as tmpSgprInfo:
-        module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel["DepthU"], tmpVgprRes, tmpSgprInfo))
-
-      module.addComment0("final offset")
-      module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
-      bfArgs = (maxGroVgpr, maxGroVgpr, tmp2, tmp)
-      module.add(MacroInstruction(name="GLOBAL_OFFSET_%s"%tc, args=bfArgs))
-      module.add(vectorMultiplyBpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
-
-      module.addSpaceLine()
-
-      self.vgprPool.checkIn(tmp)
-      self.vgprPool.checkIn(tmp2)
-      self.vgprPool.checkIn(tmpVgpr)
+      # DirectToVgpr case, we need to calculate max address (shared with the
+      # main-loop global read path via calcMaxGroForGLTr).
+      maxGroVgpr = self.calcMaxGroForGLTr(module, kernel, tP)
     elif not kernel["BufferLoad"]:
       with self.allocTmpSgpr(2, tag="globalReadGuardK_tmpSgprInfo3") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
@@ -11275,6 +11369,24 @@ class KernelWriterAssembly(KernelWriter):
       instOffset       = 0
       prevLdsOffset    = 0
 
+      # For transpose loads (no buffer bounds), compute the per-lane max legal
+      # GRO so each load below can be clamped into range. Returns None when not
+      # a transpose load; checked back in after the load loop. Emitted into
+      # imod.header (not imod.middle) so the global-read scheduler in SIA.py,
+      # which indexes imod.middle.getItem(0), is not disturbed.
+      #
+      # Scoped to operand B. The transpose-load over-read can occur for either
+      # operand, but B is the proven faulting operand for the free-dim edge
+      # (N < MacroTile1) and the clamp computation needs scratch VGPRs. Many
+      # A-transpose (DTVA1) full tiles already sit at the 256-VGPR hardware cap
+      # with zero headroom, so adding the clamp there makes the kernel fail to
+      # generate (VGPR overflow). B-transpose kernels always have headroom in
+      # practice, so the clamp that fixes the real fault is always buildable.
+      if tc == "B":
+        maxGroVgpr = self.calcMaxGroForGLTr(imod.header, kernel, tP, preventOverflow=True)
+      else:
+        maxGroVgpr = None
+
       if g2lBufIdx >= 1:
         # G2L vgpr base string. DirectToVgpr or swapAB case. Need to toggle destination vreg set
         destVgprPrefix = "G2L%s%u"%(tc, g2lBufIdx + 1)
@@ -11391,6 +11503,15 @@ class KernelWriterAssembly(KernelWriter):
 
                 useBuffer = not isTr
 
+                # Transpose loads (global_load_tr) carry no buffer num_records
+                # bounds. Clamp each per-lane GRO to the last legal element so a
+                # free dim smaller than the macro-tile (e.g. N<MT1) cannot read
+                # past the tensor. The per-lane GRO is constant across the K loop
+                # (only SrdB advances), so an in-place clamp here is correct and
+                # persists. No-op for in-range lanes. See globalReadGuardK.
+                if isTr and maxGroVgpr is not None:
+                  loadModule.add(VMinI32(dst=vgpr(offsetVgpr), src0=vgpr(maxGroVgpr), src1=vgpr(offsetVgpr), comment="GLTr%s: clamp GRO to legal range (avoid free-dim OOB)"%tc))
+
                 loadModule.add( self.chooseGlobalRead(useBuffer, \
                           bpl, destVgpr=destVgpr, \
                           addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
@@ -11442,6 +11563,9 @@ class KernelWriterAssembly(KernelWriter):
                         glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                         hi16=0, \
                         comment="G -> Reg ValuMetadata", scope=scope, th=th, nv=nv))
+
+      if maxGroVgpr is not None:
+        self.vgprPool.checkIn(maxGroVgpr)
     if tc == "A" and record[0] == True:
       self.globalread_gpr_record.a.addrVgpr = []
       self.globalread_gpr_record.a.offset = []
