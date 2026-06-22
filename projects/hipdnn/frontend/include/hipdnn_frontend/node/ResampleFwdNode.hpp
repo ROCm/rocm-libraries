@@ -100,14 +100,36 @@ public:
         // Infer output strides if not set
         if(y->get_stride().empty())
         {
-            std::vector<int64_t> yStrides(yDims.size());
-            yStrides.back() = 1;
-            for(int64_t i = static_cast<int64_t>(yDims.size()) - 2; i >= 0; --i)
+            auto& xStrides = x->get_stride();
+            if(!xStrides.empty())
             {
-                yStrides[static_cast<size_t>(i)]
-                    = yStrides[static_cast<size_t>(i + 1)] * yDims[static_cast<size_t>(i + 1)];
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims, strideOrder));
             }
-            y->set_stride(yStrides);
+            else
+            {
+                std::vector<int64_t> yStrides(yDims.size());
+                yStrides.back() = 1;
+                for(int64_t i = static_cast<int64_t>(yDims.size()) - 2; i >= 0; --i)
+                {
+                    yStrides[static_cast<size_t>(i)]
+                        = yStrides[static_cast<size_t>(i + 1)] * yDims[static_cast<size_t>(i + 1)];
+                }
+                y->set_stride(yStrides);
+            }
+        }
+
+        auto index = attributes.get_index();
+        if(index)
+        {
+            if(index->get_dim().empty())
+            {
+                index->set_dim(y->get_dim());
+            }
+            if(index->get_stride().empty())
+            {
+                index->set_stride(y->get_stride());
+            }
         }
 
         return {};

@@ -3177,31 +3177,33 @@ public:
     }
 #endif // HIPDNN_ENABLE_SDPA
 
-    /** @brief Convolution forward pass
+    /** @brief Resample forward pass
      *
-     * Computes a cross-correlation (or convolution) of the input with filters.
+     * Applies a pooling-style resample operation over the spatial dimensions of the input tensor.
+     * Supported modes include max pooling and average pooling with either excluded or included
+     * padding.
      *
-     * Example for 2D (using NCHW notation for illustration):
+     * Example for 2D max pooling (using NCHW notation for illustration):
      * @code
-     * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride_h + r*dilation_h - pad_h,
-     *                                     ow*stride_w + s*dilation_w - pad_w]
-     *                           * w[k, c, r, s]
+     * y[n,c,oh,ow] = max_{r,s} x[n, c,
+     *                            oh*stride_h + r - pre_pad_h,
+     *                            ow*stride_w + s - pre_pad_w]
      *
-     * output_dim = floor((input + pad_before + pad_after
-     *              - dilation * (kernel - 1) - 1) / stride) + 1
+     * output_dim = floor((input + pre_padding + post_padding - window) / stride) + 1
      * @endcode
      *
      * @param x Input activation tensor (batch, channels, spatial dimensions)
-     * @param w Filter/weight tensor (output channels, input channels, filter spatial dims)
-     * @param attributes Convolution parameters: padding, stride, dilation,
-     *        convolution mode
-     * @return y: Output activation tensor
+     * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
+     *        window size, and optional max-pool index generation
+     * @return Array of 2 output tensors:
+     *         - [0] y: Resampled output tensor
+     *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-     * @see hipdnn_frontend::graph::ConvFpropAttributes
+     * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
-                                                   ResampleFwdAttributes attributes)
+    std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
+                                                              ResampleFwdAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
         if(attributes.get_name().empty())
@@ -3214,6 +3216,13 @@ public:
         }
 
         auto y = outputTensor(attributes.get_name() + "::Y");
+        std::shared_ptr<TensorAttributes> index = nullptr;
+        const bool generateIndex = attributes.get_generate_index().value_or(false);
+        if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
+        {
+            index = outputTensor(attributes.get_name() + "::Index");
+            attributes.set_index(index);
+        }
 
         attributes.set_x(std::move(x));
         attributes.set_y(y);
@@ -3221,7 +3230,15 @@ public:
         _sub_nodes.emplace_back(
             std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
 
-        return y;
+        return {y, index};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
+                                                   ResampleFwdAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        return resample(std::move(x), std::move(attributes))[0];
     }
 
     // NOLINTBEGIN(readability-identifier-naming)
