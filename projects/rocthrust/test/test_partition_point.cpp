@@ -128,11 +128,12 @@ void TestPartitionPointWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(0);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   test_less_than fn = {(1ll << magnitude) - 17};
 
-  ASSERT_EQ(thrust::distance(begin, thrust::partition_point(thrust::device, begin, end, fn)), (1ll << magnitude) - 17);
+  ASSERT_EQ(_THRUST_STD::distance(begin, thrust::partition_point(thrust::device, begin, end, fn)),
+            (1ll << magnitude) - 17);
 }
 
 TEST(PartitionPointTests, TestPartitionPointWithBigIndexes)

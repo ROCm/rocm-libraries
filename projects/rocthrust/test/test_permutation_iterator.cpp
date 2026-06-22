@@ -209,9 +209,9 @@ TYPED_TEST(PermutationIteratorIntegralVectorTests, TestPermutationIteratorReduce
   T result2 = thrust::transform_reduce(
     thrust::make_permutation_iterator(source.begin(), indices.begin()),
     thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4,
-    thrust::negate<T>(),
+    _THRUST_STD::negate<T>(),
     T(0),
-    thrust::plus<T>());
+    _THRUST_STD::plus<T>());
   ASSERT_EQ(result2, -19);
 }
 

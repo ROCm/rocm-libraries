@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -46,13 +46,14 @@ TYPED_TEST(EqualTests, TestEqualSimple)
   ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 3, v2.begin()), true);
   ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 4, v2.begin()), false);
 
-  ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
-  ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
+  ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), _THRUST_STD::less_equal<T>()), true);
+  ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), _THRUST_STD::greater<T>()), false);
 }
 
-TYPED_TEST(EqualsPrimitiveTests, TestEqual)
+TYPED_TEST(EqualTests, TestEqual)
 {
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -91,10 +92,12 @@ TYPED_TEST(EqualsPrimitiveTests, TestEqual)
         ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data2.begin()), false);
 
         // different predicates
-        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::less<T>()), true);
-        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::less<T>()), true);
-        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::greater<T>()), false);
-        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::greater<T>()), false);
+        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), _THRUST_STD::less<T>()), true);
+        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), _THRUST_STD::less<T>()), true);
+        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), _THRUST_STD::greater<T>()),
+                  false);
+        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), _THRUST_STD::greater<T>()),
+                  false);
       }
     }
   }
@@ -158,7 +161,7 @@ void TestEqualWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;

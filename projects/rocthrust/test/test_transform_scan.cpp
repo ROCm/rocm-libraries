@@ -148,14 +148,14 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 
   // inclusive scan
   iter = thrust::transform_inclusive_scan(
-    input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::plus<T>());
+    input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
   ASSERT_EQ(output, result);
 
   // inclusive scan with 0 init
   iter = thrust::transform_inclusive_scan(
-    input.begin(), input.end(), output.begin(), thrust::negate<T>(), 0, thrust::plus<T>());
+    input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), 0, _THRUST_STD::plus<T>());
   result = {-1, -4, -2, -6, -1};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
@@ -163,7 +163,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 
   // exclusive scan with 0 init
   iter = thrust::transform_exclusive_scan(
-    input.begin(), input.end(), output.begin(), thrust::negate<T>(), 0, thrust::plus<T>());
+    input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), 0, _THRUST_STD::plus<T>());
   result = {0, -1, -4, -2, -6};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
@@ -171,7 +171,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 
   // inclusive scan with nonzero init
   iter = thrust::transform_inclusive_scan(
-    input.begin(), input.end(), output.begin(), thrust::negate<T>(), 3, thrust::plus<T>());
+    input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), 3, _THRUST_STD::plus<T>());
   result = {2, -1, 1, -3, 2};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
@@ -179,7 +179,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 
   // exclusive scan with nonzero init
   iter = thrust::transform_exclusive_scan(
-    input.begin(), input.end(), output.begin(), thrust::negate<T>(), 3, thrust::plus<T>());
+    input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), 3, _THRUST_STD::plus<T>());
   result = {3, 2, -1, 1, -3};
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(input, input_copy);
@@ -187,8 +187,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 
   // inplace inclusive scan
   input = input_copy;
-  iter =
-    thrust::transform_inclusive_scan(input.begin(), input.end(), input.begin(), thrust::negate<T>(), thrust::plus<T>());
+  iter  = thrust::transform_inclusive_scan(
+    input.begin(), input.end(), input.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
   result = {-1, -4, -2, -6, -1};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
@@ -196,7 +196,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
   // inplace inclusive scan with init
   input = input_copy;
   iter  = thrust::transform_inclusive_scan(
-    input.begin(), input.end(), input.begin(), thrust::negate<T>(), 3, thrust::plus<T>());
+    input.begin(), input.end(), input.begin(), _THRUST_STD::negate<T>(), 3, _THRUST_STD::plus<T>());
   result = {2, -1, 1, -3, 2};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
@@ -204,7 +204,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
   // inplace exclusive scan with init
   input = input_copy;
   iter  = thrust::transform_exclusive_scan(
-    input.begin(), input.end(), input.begin(), thrust::negate<T>(), 3, thrust::plus<T>());
+    input.begin(), input.end(), input.begin(), _THRUST_STD::negate<T>(), 3, _THRUST_STD::plus<T>());
   result = {3, 2, -1, 1, -3};
   ASSERT_EQ(std::size_t(iter - input.begin()), input.size());
   ASSERT_EQ(input, result);
@@ -254,8 +254,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformInclusiveScanDifferentTypes)
 
   thrust::host_vector<Record> input_copy(h_input);
 
-  h_iter =
-    thrust::transform_inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), negate{}, thrust::plus<int>{});
+  h_iter = thrust::transform_inclusive_scan(
+    h_input.begin(), h_input.end(), h_output.begin(), negate{}, _THRUST_STD::plus<int>{});
   ASSERT_EQ(std::size_t(h_iter - h_output.begin()), h_input.size());
   ASSERT_EQ(h_input, input_copy);
   ASSERT_EQ(h_output, result);
@@ -265,8 +265,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformInclusiveScanDifferentTypes)
   thrust::device_vector<Record> d_input = h_input;
   thrust::device_vector<int> d_output(5);
 
-  d_iter =
-    thrust::transform_inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), negate{}, thrust::plus<int>{});
+  d_iter = thrust::transform_inclusive_scan(
+    d_input.begin(), d_input.end(), d_output.begin(), negate{}, _THRUST_STD::plus<int>{});
   ASSERT_EQ(std::size_t(d_iter - d_output.begin()), d_input.size());
   ASSERT_EQ(d_input, input_copy);
   ASSERT_EQ(d_output, result);
@@ -294,46 +294,46 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
       thrust::device_vector<T> d_output(size);
 
       thrust::transform_inclusive_scan(
-        h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), thrust::plus<T>());
+        h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
       thrust::transform_inclusive_scan(
-        d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), thrust::plus<T>());
+        d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
 
       thrust::transform_inclusive_scan(
-        h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       thrust::transform_inclusive_scan(
-        d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
 
       thrust::transform_exclusive_scan(
-        h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       thrust::transform_exclusive_scan(
-        d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
 
       // in-place scans
       h_output = h_input;
       d_output = d_input;
       thrust::transform_inclusive_scan(
-        h_output.begin(), h_output.end(), h_output.begin(), thrust::negate<T>(), thrust::plus<T>());
+        h_output.begin(), h_output.end(), h_output.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
       thrust::transform_inclusive_scan(
-        d_output.begin(), d_output.end(), d_output.begin(), thrust::negate<T>(), thrust::plus<T>());
+        d_output.begin(), d_output.end(), d_output.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
 
       h_output = h_input;
       d_output = d_input;
       thrust::transform_inclusive_scan(
-        h_output.begin(), h_output.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_output.begin(), h_output.end(), h_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       thrust::transform_inclusive_scan(
-        d_output.begin(), d_output.end(), d_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_output.begin(), d_output.end(), d_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
 
       h_output = h_input;
       d_output = d_input;
       thrust::transform_exclusive_scan(
-        h_output.begin(), h_output.end(), h_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_output.begin(), h_output.end(), h_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       thrust::transform_exclusive_scan(
-        d_output.begin(), d_output.end(), d_output.begin(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_output.begin(), d_output.end(), d_output.begin(), _THRUST_STD::negate<T>(), (T) 11, _THRUST_STD::plus<T>());
       test_equality_scan(h_output, d_output);
     }
   }
@@ -352,7 +352,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanCountingIterator)
 
   Vector result(3);
 
-  thrust::transform_inclusive_scan(first, first + 3, result.begin(), thrust::negate<T>(), thrust::plus<T>());
+  thrust::transform_inclusive_scan(first, first + 3, result.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::plus<T>());
 
   Vector ref{-1, -3, -6};
   ASSERT_EQ(result, ref);
@@ -379,24 +379,52 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
       thrust::discard_iterator<> reference(size);
 
       thrust::discard_iterator<> h_result = thrust::transform_inclusive_scan(
-        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), thrust::plus<T>());
+        h_input.begin(),
+        h_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        _THRUST_STD::plus<T>());
 
       thrust::discard_iterator<> d_result = thrust::transform_inclusive_scan(
-        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), thrust::plus<T>());
+        d_input.begin(),
+        d_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        _THRUST_STD::plus<T>());
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
 
       h_result = thrust::transform_inclusive_scan(
-        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_input.begin(),
+        h_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        _THRUST_STD::plus<T>());
 
       d_result = thrust::transform_inclusive_scan(
-        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_input.begin(),
+        d_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        _THRUST_STD::plus<T>());
 
       h_result = thrust::transform_exclusive_scan(
-        h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        h_input.begin(),
+        h_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        _THRUST_STD::plus<T>());
 
       d_result = thrust::transform_exclusive_scan(
-        d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>(), (T) 11, thrust::plus<T>());
+        d_input.begin(),
+        d_input.end(),
+        thrust::make_discard_iterator(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        _THRUST_STD::plus<T>());
 
       ASSERT_EQ_QUIET(reference, h_result);
       ASSERT_EQ_QUIET(reference, d_result);
@@ -420,20 +448,20 @@ TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
   thrust::transform_exclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{0, 5, 5, 5, 8, 8, 8, 8, 8, 8}), vec);
 }

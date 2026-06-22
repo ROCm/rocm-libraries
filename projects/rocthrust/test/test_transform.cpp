@@ -156,7 +156,7 @@ TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
   Vector output(3);
   Vector result{-1, 2, -3};
 
-  iter = thrust::transform(input.begin(), input.end(), output.begin(), thrust::negate<T>());
+  iter = thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>());
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -213,7 +213,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple) THRUST_DIS
   Vector output{-1, -2, -3};
   Vector result{-1, 2, -3};
 
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+  iter =
+    thrust::transform_if(input.begin(), input.end(), output.begin(), _THRUST_STD::negate<T>(), ::internal::identity{});
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -277,7 +278,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple) THRUST_DISABLE_BROK
   Vector result{-1, 2, -3};
 
   iter = thrust::transform_if(
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+    input.begin(), input.end(), stencil.begin(), output.begin(), _THRUST_STD::negate<T>(), ::internal::identity{});
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -347,7 +348,7 @@ TYPED_TEST(TransformVectorTests, TestTransformBinarySimple) THRUST_DISABLE_BROKE
   Vector output(3);
   Vector result{5, -7, -3};
 
-  iter = thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
+  iter = thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), _THRUST_STD::minus<T>());
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input1.size());
   ASSERT_EQ(output, result);
@@ -419,8 +420,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple) THRUST_DISABLE_BRO
     input2.begin(),
     stencil.begin(),
     output.begin(),
-    thrust::minus<T>(),
-    thrust::not_fn(identity));
+    _THRUST_STD::minus<T>(),
+    _THRUST_STD::not_fn(identity));
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input1.size());
   ASSERT_EQ(output, result);
@@ -518,8 +519,8 @@ TYPED_TEST(TransformInOutTests, TestTransformUnary) THRUST_DISABLE_BROKEN_GCC_VE
       thrust::host_vector<U> h_output(size);
       thrust::device_vector<U> d_output(size);
 
-      thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>());
-      thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>());
+      thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>());
+      thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -545,10 +546,10 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryToDiscardIterator) THRUST_DISA
       thrust::device_vector<T> d_input = h_input;
 
       thrust::discard_iterator<> h_result =
-        thrust::transform(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+        thrust::transform(h_input.begin(), h_input.end(), thrust::make_discard_iterator(), _THRUST_STD::negate<T>());
 
       thrust::discard_iterator<> d_result =
-        thrust::transform(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+        thrust::transform(d_input.begin(), d_input.end(), thrust::make_discard_iterator(), _THRUST_STD::negate<T>());
 
       thrust::discard_iterator<> reference(size);
 
@@ -647,9 +648,9 @@ TYPED_TEST(TransformInOutTests, TestTransformIfUnaryNoStencil) THRUST_DISABLE_BR
       thrust::device_vector<T> d_input  = h_input;
       thrust::device_vector<U> d_output = h_output;
 
-      thrust::transform_if(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), is_positive());
+      thrust::transform_if(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>(), is_positive());
 
-      thrust::transform_if(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), is_positive());
+      thrust::transform_if(d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>(), is_positive());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -683,10 +684,10 @@ TYPED_TEST(TransformInOutTests, TestTransformIfUnary) THRUST_DISABLE_BROKEN_GCC_
       thrust::device_vector<U> d_output  = h_output;
 
       thrust::transform_if(
-        h_input.begin(), h_input.end(), h_stencil.begin(), h_output.begin(), thrust::negate<T>(), is_positive());
+        h_input.begin(), h_input.end(), h_stencil.begin(), h_output.begin(), _THRUST_STD::negate<T>(), is_positive());
 
       thrust::transform_if(
-        d_input.begin(), d_input.end(), d_stencil.begin(), d_output.begin(), thrust::negate<T>(), is_positive());
+        d_input.begin(), d_input.end(), d_stencil.begin(), d_output.begin(), _THRUST_STD::negate<T>(), is_positive());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -720,7 +721,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfUnaryToDiscardIterator) THRUST_DI
         h_input.end(),
         h_stencil.begin(),
         thrust::make_discard_iterator(),
-        thrust::negate<T>(),
+        _THRUST_STD::negate<T>(),
         is_positive());
 
       thrust::discard_iterator<> d_result = thrust::transform_if(
@@ -728,7 +729,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfUnaryToDiscardIterator) THRUST_DI
         d_input.end(),
         d_stencil.begin(),
         thrust::make_discard_iterator(),
-        thrust::negate<T>(),
+        _THRUST_STD::negate<T>(),
         is_positive());
 
       thrust::discard_iterator<> reference(size);
@@ -763,13 +764,15 @@ TYPED_TEST(TransformInOutTests, TestTransformBinary) THRUST_DISABLE_BROKEN_GCC_V
       thrust::host_vector<T> h_output(size);
       thrust::device_vector<T> d_output(size);
 
-      thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), thrust::minus<T>());
-      thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), thrust::minus<T>());
+      thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), _THRUST_STD::minus<T>());
+      thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), _THRUST_STD::minus<T>());
 
       ASSERT_EQ(h_output, d_output);
 
-      thrust::transform(h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), thrust::multiplies<T>());
-      thrust::transform(d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), thrust::multiplies<T>());
+      thrust::transform(
+        h_input1.begin(), h_input1.end(), h_input2.begin(), h_output.begin(), _THRUST_STD::multiplies<T>());
+      thrust::transform(
+        d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(), _THRUST_STD::multiplies<T>());
 
       ASSERT_EQ(h_output, d_output);
     }
@@ -798,9 +801,9 @@ TYPED_TEST(TransformInOutTests, TestTransformBinaryToDiscardIterator) THRUST_DIS
       thrust::device_vector<T> d_input2 = h_input2;
 
       thrust::discard_iterator<> h_result = thrust::transform(
-        h_input1.begin(), h_input1.end(), h_input2.begin(), thrust::make_discard_iterator(), thrust::minus<T>());
+        h_input1.begin(), h_input1.end(), h_input2.begin(), thrust::make_discard_iterator(), _THRUST_STD::minus<T>());
       thrust::discard_iterator<> d_result = thrust::transform(
-        d_input1.begin(), d_input1.end(), d_input2.begin(), thrust::make_discard_iterator(), thrust::minus<T>());
+        d_input1.begin(), d_input1.end(), d_input2.begin(), thrust::make_discard_iterator(), _THRUST_STD::minus<T>());
 
       thrust::discard_iterator<> reference(size);
 
@@ -844,7 +847,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinary) THRUST_DISABLE_BROKEN_GCC
         h_input2.begin(),
         h_stencil.begin(),
         h_output.begin(),
-        thrust::minus<T>(),
+        _THRUST_STD::minus<T>(),
         is_positive());
 
       thrust::transform_if(
@@ -853,7 +856,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinary) THRUST_DISABLE_BROKEN_GCC
         d_input2.begin(),
         d_stencil.begin(),
         d_output.begin(),
-        thrust::minus<T>(),
+        _THRUST_STD::minus<T>(),
         is_positive());
 
       ASSERT_EQ(h_output, d_output);
@@ -868,7 +871,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinary) THRUST_DISABLE_BROKEN_GCC
         h_input2.begin(),
         h_stencil.begin(),
         h_output.begin(),
-        thrust::multiplies<T>(),
+        _THRUST_STD::multiplies<T>(),
         is_positive());
 
       thrust::transform_if(
@@ -877,7 +880,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinary) THRUST_DISABLE_BROKEN_GCC
         d_input2.begin(),
         d_stencil.begin(),
         d_output.begin(),
-        thrust::multiplies<T>(),
+        _THRUST_STD::multiplies<T>(),
         is_positive());
 
       ASSERT_EQ(h_output, d_output);
@@ -915,7 +918,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinaryToDiscardIterator) THRUST_D
         h_input2.begin(),
         h_stencil.begin(),
         thrust::make_discard_iterator(),
-        thrust::minus<T>(),
+        _THRUST_STD::minus<T>(),
         is_positive());
 
       thrust::discard_iterator<> d_result = thrust::transform_if(
@@ -924,7 +927,7 @@ TYPED_TEST(TransformInOutTests, TestTransformIfBinaryToDiscardIterator) THRUST_D
         d_input2.begin(),
         d_stencil.begin(),
         thrust::make_discard_iterator(),
-        thrust::minus<T>(),
+        _THRUST_STD::minus<T>(),
         is_positive());
 
       thrust::discard_iterator<> reference(size);
@@ -1002,8 +1005,8 @@ TYPED_TEST(TransformInOutTests, TestTransformBinaryCountingIterator) THRUST_DISA
   thrust::host_vector<U> h_result(size);
   thrust::device_vector<U> d_result(size);
 
-  thrust::transform(h_first, h_first + size, h_first, h_result.begin(), thrust::plus<T>());
-  thrust::transform(d_first, d_first + size, d_first, d_result.begin(), thrust::plus<T>());
+  thrust::transform(h_first, h_first + size, h_first, h_result.begin(), _THRUST_STD::plus<T>());
+  thrust::transform(d_first, d_first + size, d_first, d_result.begin(), _THRUST_STD::plus<T>());
 
   ASSERT_EQ(h_result, d_result);
 }
