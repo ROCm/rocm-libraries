@@ -106,7 +106,7 @@ def _set_name_to_reg_num(
     if gpr.regIdx != -1 or gpr.regName is None:
         return
     key = gpr.getRegNameWithType()
-    base = assignment[key]
+    base = assignment.get(key, 0)
     off = gpr.regName.getTotalOffsets()
     gpr.regIdx = base + off
 
@@ -130,7 +130,9 @@ def _convert_text_variables_impl(
                     _set_name_to_reg_num(p, assignment)
         elif isinstance(item, _code.RegSet):
             if item.ref is not None:
-                num = int(assignment[item.ref]) + int(item.offset)
+                # C++ unordered_map::operator[] returns 0 for missing keys;
+                # match that lenient behaviour so forward-refs don't crash.
+                num = int(assignment.get(item.ref, 0)) + int(item.offset)
             else:
                 assert item.value is not None
                 num = int(item.value) + int(item.offset)
