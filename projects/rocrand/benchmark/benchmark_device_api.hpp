@@ -30,6 +30,25 @@
 
 #include <optional>
 
+// This file provides benchmark runners for device API-based benchmarks.
+//
+// It is organized into multiple layers of abstraction:
+// - device_api_benchmark: provides the primbench infrastructure.
+// - runner: provides infrastructure to set up an RNG engine and launch a generator.
+// - generator: executes the sampling logic and draws values from the requested distribution.
+// - gpu_rand: provides a shared interface to access the C-style device API.
+// - generate_kernel: the actual device kernel being benchmarked.
+//
+// A benchmark is triggered by an API call as follows:
+// 1. `device_api_benchmark<...>` is instantiated in `benchmark_device_api.cpp`.
+// 2. `device_api_benchmark::run` creates a `runner` and a `generator`.
+// 3. The runner uses the generator to produce values.
+//    (This step primarily handles host-side orchestration.)
+// 4. The generator uses `gpu_rand` to invoke the device API.
+//    The call may be vectorized (e.g., `rocrand4`).
+//    Vectorization size is determined by `get_vectorization`.
+// 5. The vectorized output is unrolled via the `unrolled` utility type.
+
 /// The default maximum number of threads per block.
 #define RAND_DEFAULT_MAX_BLOCK_SIZE 256
 
