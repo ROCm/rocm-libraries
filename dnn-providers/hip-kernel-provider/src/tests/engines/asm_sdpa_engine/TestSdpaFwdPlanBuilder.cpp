@@ -12,9 +12,9 @@
 #include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
-#include "core/Context.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
@@ -512,10 +512,10 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
 
 // Helper: create a forward SDPA graph with explicit strides for all tensors.
 auto createSdpaFwdGraphWithStrides(const std::vector<int64_t>& dims,
-                                    const std::vector<int64_t>& qStrides,
-                                    const std::vector<int64_t>& kStrides,
-                                    const std::vector<int64_t>& vStrides,
-                                    const std::vector<int64_t>& oStrides)
+                                   const std::vector<int64_t>& qStrides,
+                                   const std::vector<int64_t>& kStrides,
+                                   const std::vector<int64_t>& vStrides,
+                                   const std::vector<int64_t>& oStrides)
 {
     const std::vector<int64_t> kDims = {dims[0], dims[1], dims[2], dims[3]};
     const std::vector<int64_t> oDims = {dims[0], dims[1], dims[2], dims[3]};
@@ -548,28 +548,27 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
     constexpr int64_t K_OVERFLOW_STRIDE = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
     const std::vector<int64_t> dims = {4, 8, 256, 128};
     const std::vector<int64_t> overflowStrides = {K_OVERFLOW_STRIDE, 256 * 128, 128, 1};
-    const std::vector<int64_t> normalStrides
-        = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
 
     // Q has overflow stride
-    auto builderQ = createSdpaFwdGraphWithStrides(dims, overflowStrides, normalStrides,
-                                                   normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(
-        builderQ.GetBufferPointer(), builderQ.GetSize());
+    auto builderQ = createSdpaFwdGraphWithStrides(
+        dims, overflowStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(builderQ.GetBufferPointer(),
+                                                                   builderQ.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwQ));
 
     // K has overflow stride
-    auto builderK = createSdpaFwdGraphWithStrides(dims, normalStrides, overflowStrides,
-                                                   normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(
-        builderK.GetBufferPointer(), builderK.GetSize());
+    auto builderK = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, overflowStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(builderK.GetBufferPointer(),
+                                                                   builderK.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwK));
 
     // Normal strides pass
-    auto builderOk = createSdpaFwdGraphWithStrides(dims, normalStrides, normalStrides,
-                                                    normalStrides, normalStrides);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
-        builderOk.GetBufferPointer(), builderOk.GetSize());
+    auto builderOk = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(builderOk.GetBufferPointer(),
+                                                                    builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
 }
 
@@ -592,8 +591,8 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
     // an empty key.  isApplicable would reject this, but buildPlan must also
     // throw rather than crashing via cfg_fmha_fwd.at("").
     auto builder = createSdpaFwdGraph({4, 8, 256, 100});
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
-        builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
 
     // Forward ignores engineConfig — a null-buffer wrapper suffices.
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
@@ -609,8 +608,8 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
 TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettings_IsNoOp)
 {
     auto builder = createSdpaFwdGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
-        builder.GetBufferPointer(), builder.GetSize());
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
     Settings settings;
