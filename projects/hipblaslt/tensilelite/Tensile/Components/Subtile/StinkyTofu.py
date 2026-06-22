@@ -66,10 +66,9 @@ def buildSubtileStinkyTofuOptions(kernel, writer):
     level) for kernels with ``buffer_load...lds`` (DTL) producers, which keep
     their Python-emitted waits.
     """
-    siaOptLevel = kernel.get("_StinkyTofuOptLevel")
-    waitCntSelected = siaOptLevel is not None
-    optLevel = siaOptLevel if waitCntSelected else SUBTILE_STINKYTOFU_BASIC_OPTLEVEL
-
+    siaOptLevel = kernel.get("_StinkyTofuOptLevel", SUBTILE_STINKYTOFU_BASIC_OPTLEVEL)
+    waitCntSelected = siaOptLevel not in (None, 0)
+    optLevel = int(siaOptLevel) if waitCntSelected else SUBTILE_STINKYTOFU_BASIC_OPTLEVEL
     enableWaitCnt = waitCntSelected
     if enableWaitCnt and not subtileKernelIsWaitInsertionSafe(kernel):
         # DTL (buffer_load...lds) producers are classified as plain MUBUF loads
@@ -94,6 +93,12 @@ def buildSubtileStinkyTofuOptions(kernel, writer):
             # On only for ScheduleIterAlg=4 wait-insertion-safe kernels; basic
             # kernels keep their own split waits.
             "EnableWaitCntInsertion": enableWaitCnt,
+            # gfx1250: skip an unnecessary s_wait_tensorcnt(0) across unroll copies
+            # in double-buffered TDM loops; the wait pass won't re-propagate
+            # tensorcnt status for tensor_load_to_lds. Only affects the
+            # wait-insertion path, which the DTL guard restricts to pure-TDM
+            # kernels matching this rule's precondition.
+            "EnableLoopCarriedTokenDeps": True,
             # True: expert scheduling mode2; False: mode 0. Independent of OptLevel.
             "EnableESM2": kernel["EnableStinkyTofuESM2"],
             "TileA0": kernel["ThreadTile0"],

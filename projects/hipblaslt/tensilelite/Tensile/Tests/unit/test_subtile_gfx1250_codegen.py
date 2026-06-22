@@ -332,10 +332,11 @@ class TestSubtileStinkyTofu:
         from Tensile.Components.Subtile.StinkyTofu import (
             buildSubtileStinkyTofuOptions, SUBTILE_STINKYTOFU_BASIC_OPTLEVEL)
         kernel = _stinky_kernel()
-        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        kernel["_StinkyTofuOptLevel"] = 0  # ScheduleIterAlg != 4 (Solution.py sets 0)
         opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         # Basic level: no wait-count insertion, but the kernel-scope passes
-        # (InsertVgprMsbPass) still run at OptLevel=0.
+        # (InsertVgprMsbPass) still run at OptLevel=0. Regression guard: optLevel
+        # 0 must NOT be treated as a selected wait-insertion level.
         assert opts["EnableWaitCntInsertion"] is False
         assert opts["OptLevel"] == SUBTILE_STINKYTOFU_BASIC_OPTLEVEL == 0
         # Barriers stay Python-owned.
@@ -365,8 +366,12 @@ class TestSubtileStinkyTofu:
         classic = KernelWriter._classicStinkyTofuOptions(writer, kernel,
                                                          kernel["_StinkyTofuOptLevel"])
         subtile = buildSubtileStinkyTofuOptions(kernel, writer)
-        # Same option surface; only the forced values differ.
-        assert set(subtile.keys()) == set(classic.keys())
+        # Subtile mirrors the classic surface plus the loop-carried token deps
+        # toggle it enables for the gfx1250 wait-insertion path.
+        assert set(subtile.keys()) - set(classic.keys()) == {"EnableLoopCarriedTokenDeps"}
+        assert set(classic.keys()) - set(subtile.keys()) == set()
+        assert subtile["EnableLoopCarriedTokenDeps"] is True
+        # Only the forced values differ on the shared keys.
         differing = {k for k in classic if classic[k] != subtile[k]}
         assert differing <= {"ClusterBarrier", "VectorWidthA", "VectorWidthB"}
 
@@ -394,7 +399,7 @@ class TestSubtileStinkyTofu:
         from Tensile.KernelWriter import KernelWriter
         from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         kernel = _stinky_kernel()
-        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        kernel["_StinkyTofuOptLevel"] = 0  # ScheduleIterAlg != 4 (Solution.py sets 0)
         writer = _stinky_mock_writer()
         kb, sig = _build_minimal_kernel_body()
         opts = buildSubtileStinkyTofuOptions(kernel, writer)
@@ -779,7 +784,7 @@ class TestSubtileStinkyTofuWaitCnt:
     def test_basic_level_waitcnt_off(self):
         from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         kernel = _stinky_kernel()
-        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        kernel["_StinkyTofuOptLevel"] = 0  # ScheduleIterAlg != 4 (Solution.py sets 0)
         opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is False
         assert opts["OptLevel"] == 0
@@ -819,7 +824,7 @@ class TestSubtileStinkyTofuWaitCnt:
         from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         kb, sig = _build_tagged_wait_body()
         kernel = _stinky_kernel()
-        kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+        kernel["_StinkyTofuOptLevel"] = 0  # ScheduleIterAlg != 4 (Solution.py sets 0)
         opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
         assert opts["EnableWaitCntInsertion"] is False
         asm = KernelWriter._maybeRunStinkyTofu(_stinky_mock_writer(), kernel, kb,
@@ -903,7 +908,27 @@ class TestSubtileStinkyTofuWaitInsertionGuard:
     def test_guard_basic_level_stays_off(self):
         from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
         for kernel in (_stinky_kernel(), _non_tdm_kernel(), _mx_scale_kernel()):
-            kernel["_StinkyTofuOptLevel"] = None  # ScheduleIterAlg != 4
+            kernel["_StinkyTofuOptLevel"] = 0  # ScheduleIterAlg != 4 (Solution.py sets 0)
             opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
             assert opts["EnableWaitCntInsertion"] is False
             assert opts["OptLevel"] == 0
+
+    # -- regression: opt level 0/None mean basic; only a non-zero level selects --
+    # wait insertion. The production default subtile path (SIA != 4) reports
+    # _StinkyTofuOptLevel == 0, which must NOT enable wait-count insertion.
+
+    @pytest.mark.parametrize("optLevel", [0, None])
+    def test_zero_or_none_optlevel_is_basic(self, optLevel):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()  # pure-TDM (wait-insertion-safe)
+        kernel["_StinkyTofuOptLevel"] = optLevel
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is False
+        assert opts["OptLevel"] == 0
+
+    def test_nonzero_optlevel_safe_tdm_selects_waitcnt(self):
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        kernel = _stinky_kernel()  # _StinkyTofuOptLevel=3, pure-TDM (safe)
+        opts = buildSubtileStinkyTofuOptions(kernel, _stinky_mock_writer())
+        assert opts["EnableWaitCntInsertion"] is True
+        assert opts["OptLevel"] == 3
