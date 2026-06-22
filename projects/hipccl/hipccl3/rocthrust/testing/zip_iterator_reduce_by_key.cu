@@ -66,7 +66,7 @@ struct TestZipIteratorReduceByKey
         make_zip_iterator(h_data1.begin(), h_data2.begin()),
         h_data3.begin(),
         make_zip_iterator(h_data4.begin(), h_data5.begin()),
-        equal_to<T>(),
+        _THRUST_STD::equal_to<T>(),
         TuplePlus<Tuple>());
 
       // run on device
@@ -76,7 +76,7 @@ struct TestZipIteratorReduceByKey
         make_zip_iterator(d_data1.begin(), d_data2.begin()),
         d_data3.begin(),
         make_zip_iterator(d_data4.begin(), d_data5.begin()),
-        equal_to<T>(),
+        _THRUST_STD::equal_to<T>(),
         TuplePlus<Tuple>());
 
       ASSERT_EQUAL(h_data3, d_data3);
@@ -112,7 +112,7 @@ struct TestZipIteratorReduceByKey
         make_zip_iterator(h_data1.begin(), h_data2.begin()),
         make_zip_iterator(h_data3.begin(), h_data4.begin()),
         make_zip_iterator(h_data5.begin(), h_data6.begin()),
-        equal_to<Tuple>(),
+        _THRUST_STD::equal_to<Tuple>(),
         TuplePlus<Tuple>());
 
       // run on device
@@ -122,7 +122,7 @@ struct TestZipIteratorReduceByKey
         make_zip_iterator(d_data1.begin(), d_data2.begin()),
         make_zip_iterator(d_data3.begin(), d_data4.begin()),
         make_zip_iterator(d_data5.begin(), d_data6.begin()),
-        equal_to<Tuple>(),
+        _THRUST_STD::equal_to<Tuple>(),
         TuplePlus<Tuple>());
 
       ASSERT_EQUAL(h_data3, d_data3);

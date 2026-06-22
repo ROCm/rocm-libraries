@@ -668,7 +668,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result =
         thrust::remove_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
@@ -748,7 +748,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
         size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
-      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result = thrust::remove_copy_if(
         h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());

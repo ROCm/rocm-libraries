@@ -85,10 +85,10 @@ namespace __reduce_by_key
 {
 
 template <bool>
-struct is_true : thrust::detail::false_type
+struct is_true : _THRUST_STD::false_type
 {};
 template <>
-struct is_true<true> : thrust::detail::true_type
+struct is_true<true> : _THRUST_STD::true_type
 {};
 
 namespace mpl = thrust::detail::mpl::math;
@@ -211,8 +211,8 @@ struct ReduceByKeyAgent
 
     // Whether or not the scan operation has a zero-valued identity value
     // (true if we're performing addition on a primitive type)
-    HAS_IDENTITY_ZERO =
-      ::cuda::std::is_same<ReductionOp, plus<value_type>>::value && ::cuda::std::is_arithmetic<value_type>::value
+    HAS_IDENTITY_ZERO = ::cuda::std::is_same<ReductionOp, ::cuda::std::plus<value_type>>::value
+                     && ::cuda::std::is_arithmetic<value_type>::value
   };
 
   struct impl
@@ -238,7 +238,7 @@ struct ReduceByKeyAgent
     //
     THRUST_DEVICE_FUNCTION void scan_tile(size_value_pair_t (&scan_items)[ITEMS_PER_THREAD],
                                           size_value_pair_t& tile_aggregate,
-                                          thrust::detail::true_type /* has_identity */)
+                                          _THRUST_STD::true_type /* has_identity */)
     {
       size_value_pair_t identity;
       identity.value = 0;
@@ -251,7 +251,7 @@ struct ReduceByKeyAgent
     //
     THRUST_DEVICE_FUNCTION void scan_tile(size_value_pair_t (&scan_items)[ITEMS_PER_THREAD],
                                           size_value_pair_t& tile_aggregate,
-                                          thrust::detail::false_type /* has_identity */)
+                                          _THRUST_STD::false_type /* has_identity */)
     {
       BlockScan(storage.scan_storage.scan).ExclusiveScan(scan_items, scan_items, scan_op, tile_aggregate);
     }
@@ -262,7 +262,7 @@ struct ReduceByKeyAgent
       size_value_pair_t (&scan_items)[ITEMS_PER_THREAD],
       size_value_pair_t& tile_aggregate,
       TilePrefixCallback& prefix_op,
-      thrust::detail::true_type /*  has_identity */)
+      _THRUST_STD::true_type /*  has_identity */)
     {
       BlockScan(storage.scan_storage.scan).ExclusiveScan(scan_items, scan_items, scan_op, prefix_op);
       tile_aggregate = prefix_op.GetBlockAggregate();
@@ -274,7 +274,7 @@ struct ReduceByKeyAgent
       size_value_pair_t (&scan_items)[ITEMS_PER_THREAD],
       size_value_pair_t& tile_aggregate,
       TilePrefixCallback& prefix_op,
-      thrust::detail::false_type /* has_identity */)
+      _THRUST_STD::false_type /* has_identity */)
     {
       BlockScan(storage.scan_storage.scan).ExclusiveScan(scan_items, scan_items, scan_op, prefix_op);
       tile_aggregate = prefix_op.GetBlockAggregate();
@@ -894,7 +894,7 @@ THRUST_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 {
   using size_type = thrust::detail::it_difference_t<KeysInputIt>;
 
-  size_type num_items = thrust::distance(keys_first, keys_last);
+  size_type num_items = _THRUST_STD::distance(keys_first, keys_last);
 
   pair<KeysOutputIt, ValuesOutputIt> result = thrust::make_pair(keys_output, values_output);
 
@@ -980,7 +980,7 @@ pair<KeyOutputIt, ValOutputIt> _CCCL_HOST_DEVICE reduce_by_key(
 {
   using KeyT = thrust::detail::it_value_t<KeyInputIt>;
   return cuda_cub::reduce_by_key(
-    policy, keys_first, keys_last, values_first, keys_output, values_output, equal_to<KeyT>());
+    policy, keys_first, keys_last, values_first, keys_output, values_output, ::cuda::std::equal_to<KeyT>());
 }
 
 } // namespace cuda_cub
