@@ -29,6 +29,27 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+//------------------------------------------------------------------------------
+// Reduces Hermitian/symmetric band matrix A to real symmetric tridiagonal form
+// by a unitary similarity transformation:
+//      Q^H A_band Q = A_tri.
+//
+//  handle      Rocblas_handle.
+//  uplo        Lower or upper; only lower currently supported.
+//  n           Matrix dimension. n >= 0.
+//  kd          Matrix bandwidth. kd >= 1.
+//  Aband       n-by-n band matrix, with space for kd - 1 super-diagonals and
+//              2*kd - 1 sub-diagonals. On input, diagonal and kd sub-diagonals
+//              must be set; other entries must be 0.
+//              todo: verify what must be set/zero.
+//  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
+//  D           Vector of length n. On output, diagonal of tridiagonal A_tri.
+//  E           Vector of length n-1. On output, sub-diagonal of tridiagonal A_tri.
+//  V           Array of size ldv*nv, where
+//              number of tiles nt = ceil( (n - 1) / kd ), and
+//              number of vectors nv = kd*nt*(nt + 1)/2.
+//  ldv         Leading dimension of V. ldv >= 2*kd.
+//
 template <typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
                                           rocblas_fill uplo,

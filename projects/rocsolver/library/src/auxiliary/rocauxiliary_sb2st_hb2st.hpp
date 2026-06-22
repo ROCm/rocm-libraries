@@ -47,7 +47,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define DIMY 32
 
 //------------------------------------------------------------------------------
-// Generate Householder reflector.
+// Generates a Householder reflector.
 // Must be called with one wave; this assumes threads are synchronized and does
 // not do __syncthreads. It does __threadfence_block where __syncthreads would
 // normally be required.
@@ -56,6 +56,14 @@ ROCSOLVER_BEGIN_NAMESPACE
 // If norm( xhat ) == 0, LAPACK sets tau = 0 and H = I,
 // whereas this will set tau = 2 and H = [ -1 0 ].
 //                                       [  0 I ]
+//
+//  xid         Thread x index.
+//  n           Vector dimension.
+//  x           On input, vector to reduce.
+//              On output, x[0] = plusminus norm(x),
+//              x[1:] is Householder vector with implicit 1 in x[0].
+//  tau         On output, Householder tau value.
+//  s_work      Shared memory workspace of size >= 1.
 //
 template <typename T, typename I, typename S = decltype(std::real(T{}))>
 __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
@@ -66,7 +74,6 @@ __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
     const S one = 1;
 
     // norm reduction
-    // was T, but should be real.
     S norm2 = 0;
     for(I i = xid; i < n; i += DIMX)
     {
@@ -118,7 +125,7 @@ __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
 
             x[0] = norm;
         }
-        __threadfence_block(); // for s_scale; was missing
+        __threadfence_block(); // for s_scale
 
         // scal x[1:n]
         for(I i = xid + 1; i < n; i += DIMX)
@@ -133,10 +140,19 @@ __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
 }
 
 //------------------------------------------------------------------------------
-// Apply H on left or right of C:
+// Applies H on left or right of C:
 // C := H C if on left,
 // C := C H if on right.
 // To apply H^H, pass in conj( tau ).
+// Called with DIMX x DIMY thread block, such that threads in the x dimension
+// are in a wavefront and are implicitly synchronized.
+//
+//  xid, yid    Thread x and y indices.
+//  side        Side to apply H, on left or right.
+//  m, n        Dimensions of block being updated.
+//  v, tau      Householder vector and tau; assumes v[0] == 1 explicitly.
+//  C           M-by-n block to update.
+//  s_work      Shared memory workspace of size = block y dimension.
 //
 template <typename T, typename I>
 __device__ void
@@ -212,11 +228,19 @@ __device__ void
 }
 
 //------------------------------------------------------------------------------
-// Apply H on left and right of Hermitian block:
+// Applies H on left and right of Hermitian block:
 // C := H^H C H
-// Assumes the whole Hermitian block is set, both upper and lower.
+// Sets the whole Hermitian block, both upper and lower.
 // (In LAPACK, this is larfy, which doesn't fit well into LAPACK's naming
 // conventions. I guess y comes from sy.)
+// Called with DIMX x DIMY thread block, such that threads in the x dimension
+// are in a wavefront and are implicitly synchronized.
+//
+//  xid, yid    Thread x and y indices.
+//  n           Block dimension.
+//  v, tau      Householder vector; assumes v[0] == 1 explicitly.
+//  C           n-by-n Hermitian block to update.
+//  s_work      Shared memory workspace of size = block y dimension.
 //
 template <typename T, typename I>
 __device__ void sb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I ldc, T* s_work)
@@ -292,6 +316,24 @@ __device__ void sb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
 }
 
 //------------------------------------------------------------------------------
+// Does a single task in the hb2st task-graph.
+//
+//  n           Matrix dimension.
+//  kd          Matrix bandwidth.
+//  sweep       Column being reduced to tridiagonal and its bulges chased.
+//  task        Step in current sweep.
+//  Aband       Band matrix. On output:
+//              If task = 0: reduces column sweep to tridiagonal and updates
+//              diagonal block at sweep + 1.
+//              If task > 0: updates off-diagonal block (bulge) at column
+//              sweep + 1 + (task - 1)*kd, reduces first column of bulge back
+//              to bandwidth kd, and updates diagonal block.
+//  E           On output with task = 0, sets sub-diagonal element E[sweep].
+//  V           Array of Householder vectors.
+//  tau         Householder tau values.
+//  s_housev    Shared memory workspace for Householder vectors of size = kd.
+//  s_work      Shared memory workspace of size = block y dimension.
+//
 template <typename T, typename I, typename S>
 __device__ void sb2st_hb2st_task(const I xid,
                                  const I yid,
@@ -306,8 +348,7 @@ __device__ void sb2st_hb2st_task(const I xid,
                                  I ldv,
                                  T* tau,
                                  T* s_housev,
-                                 T* s_work,
-                                 I round)
+                                 T* s_work)
 {
     // gemv implementation is faster than hemv,
     // which is provided for comparison.
@@ -326,7 +367,8 @@ __device__ void sb2st_hb2st_task(const I xid,
     // `vp` is Householder vector generated in previous task.
     // `vc` is Householder vector generated in current  task.
     //
-    // `jp` is left col of previous diagonal tile and current off-diagonal tile.
+    // `jp` is left col of previous diagonal tile and current off-diagonal tile
+    //      (defined later).
     // `jc` is left col of current  diagonal tile.
     // `jn` is left col of next     diagonal tile; end of update.
     //         (I.e., `jn` is right + 1 col of current diagonal tile.)
@@ -361,7 +403,6 @@ __device__ void sb2st_hb2st_task(const I xid,
                 s_housev[0] = T(1);
                 tau[vj] = s_tau;
             }
-            // was: starting from 1, for (i = 1 + xid; ...
             // if V is initialized to Identity, don't need to store i=0.
             for(I i = xid; i < nc; i += DIMX)
             {
@@ -498,19 +539,32 @@ __device__ void sb2st_hb2st_task(const I xid,
 }
 
 //------------------------------------------------------------------------------
-/* SB2ST_HB2ST_STEP_KERNEL runs a single round from multiple sweeps in parallel. Run with
-   sweeps_in_parallel thread blocks in y and batch_count thread blocks in z.
-
-   Sweep i can begin execution when sweep i-1 has completed 3 rounds. That is,
-   - Sweep 0 can start at round 0
-   - Sweep 1 can start at round 2
-   ...
-   - Sweep i can start at round 2*i
-   ...
-   - Sweep n-1 can start at round 2*(n-1)
-
-   Sweep n-1 is complete after 1 round, therefore the total number of rounds is 3*(n-1)+1.
-*/
+// SB2ST_HB2ST_STEP_KERNEL runs a single round with multiple sweeps in parallel.
+// Run with 1 block in x, parallel_sweeps blocks in y, and batch_count blocks in z.
+// Each thread block is DIMX x DIMY.
+// (Batch is unused and untested.)
+//
+// Sweep i can begin execution when sweep i-1 has completed 2 rounds. That is,
+// - Sweep 0 can start at round 0
+// - Sweep 1 can start at round 2
+//   ...
+// - Sweep i can start at round 2*i
+//   ...
+// - Sweep n-1 can start at round 2*(n-1)
+//
+// Sweep n-1 is complete after 1 round, therefore the total number of rounds is
+// 2*(n-1)+1.
+//
+//  n           Matrix dimension.
+//  kd          Matrix bandwidth.
+//  round       Index of round.
+//  AAband      Band matrix. See sb2st_hb2st_task.
+//  EE          Sub-diagonal.
+//  VV          Array of Householder vectors.
+//  TTau        Householder tau values.
+//
+// Requires shared memory of type T, size = kd + DIMY.
+//
 template <typename T, typename I, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_kernel(I n,
                                          I kd,
@@ -550,10 +604,19 @@ ROCSOLVER_KERNEL void sb2st_hb2st_kernel(I n,
 
     // execute sweep task
     sb2st_hb2st_task<T, I, S>(xid, yid, n, kd, sweep, task, Aband, ldab, E, V, ldv, tau, s_housev,
-                              s_work, round);
+                              s_work);
 }
 
 //------------------------------------------------------------------------------
+// Copies the final diagonal from the band matrix A to the vector D.
+// Called with grid ( ceil( n / BS1 ), 1, batch_count ).
+// Thread blocks are size BS1.
+// (Batch is unused and untested.)
+//
+//  n           Matrix dimension.
+//  AAband      n-by-n band matrix, shifted so diagonal is in row 0.
+//  DD          On output, diagonal vector of length n.
+//
 template <typename T, typename I, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(I n,
                                             T* AAband,
@@ -578,6 +641,8 @@ ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(I n,
 }
 
 //------------------------------------------------------------------------------
+// hb2st does not require main memory workspace.
+//
 template <bool BATCHED, typename T, typename I, typename S>
 void rocsolver_sb2st_hb2st_getMemorySize(const I n, const I kd, const I batch_count, size_t* size_work)
 {
@@ -585,6 +650,8 @@ void rocsolver_sb2st_hb2st_getMemorySize(const I n, const I kd, const I batch_co
 }
 
 //------------------------------------------------------------------------------
+// Checks hb2st arguments. See rocsolver_sb2st_hb2st_impl.
+//
 template <typename T, typename I, typename S>
 rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
                                               rocblas_fill uplo,
@@ -625,6 +692,8 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
+// Implements hb2st. See rocsolver_sb2st_hb2st_impl.
+//
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
                                               rocblas_fill uplo,
