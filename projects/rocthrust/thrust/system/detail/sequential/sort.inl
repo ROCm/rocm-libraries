@@ -53,7 +53,7 @@ namespace sort_detail
 ////////////////////
 
 template <typename KeyType, typename Compare>
-struct needs_reverse : _THRUST_STD::is_same<Compare, typename thrust::greater<KeyType>>
+struct needs_reverse : _THRUST_STD::is_same<Compare, typename _THRUST_STD::greater<KeyType>>
 {};
 
 template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
@@ -62,7 +62,7 @@ THRUST_HOST_DEVICE void stable_sort(
   RandomAccessIterator first,
   RandomAccessIterator last,
   StrictWeakOrdering,
-  thrust::detail::true_type)
+  _THRUST_STD::true_type)
 {
   thrust::system::detail::sequential::stable_primitive_sort(exec, first, last);
 
@@ -85,7 +85,7 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   RandomAccessIterator1 last1,
   RandomAccessIterator2 first2,
   StrictWeakOrdering,
-  thrust::detail::true_type)
+  _THRUST_STD::true_type)
 {
   // if comp is greater<T> then reverse the keys and values
   using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
@@ -116,7 +116,7 @@ THRUST_HOST_DEVICE void stable_sort(
   RandomAccessIterator first,
   RandomAccessIterator last,
   StrictWeakOrdering comp,
-  thrust::detail::false_type)
+  _THRUST_STD::false_type)
 {
   thrust::system::detail::sequential::stable_merge_sort(exec, first, last, comp);
 }
@@ -131,7 +131,7 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   RandomAccessIterator1 last1,
   RandomAccessIterator2 first2,
   StrictWeakOrdering comp,
-  thrust::detail::false_type)
+  _THRUST_STD::false_type)
 {
   thrust::system::detail::sequential::stable_merge_sort_by_key(exec, first1, last1, first2, comp);
 }
@@ -139,8 +139,8 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
 template <typename KeyType, typename Compare>
 struct use_primitive_sort
     : ::internal::_And<::internal::is_arithmetic<KeyType>,
-                       _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, thrust::less<KeyType>>,
-                                                _THRUST_STD::is_same<Compare, thrust::greater<KeyType>>>>
+                       _THRUST_STD::disjunction<_THRUST_STD::is_same<Compare, _THRUST_STD::less<KeyType>>,
+                                                _THRUST_STD::is_same<Compare, _THRUST_STD::greater<KeyType>>>>
 {};
 
 } // end namespace sort_detail
@@ -159,7 +159,7 @@ THRUST_HOST_DEVICE void stable_sort(
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);),
     ( // _THRUST_IS_DEVICE:
-      thrust::detail::false_type use_primitive_sort;
+      _THRUST_STD::false_type use_primitive_sort;
       sort_detail::stable_sort(exec, first, last, comp, use_primitive_sort);));
 }
 
@@ -181,7 +181,7 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
      sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering> use_primitive_sort;
      sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);),
     ( // _THRUST_IS_DEVICE:
-      thrust::detail::false_type use_primitive_sort;
+      _THRUST_STD::false_type use_primitive_sort;
       sort_detail::stable_sort_by_key(exec, first1, last1, first2, comp, use_primitive_sort);));
 }
 

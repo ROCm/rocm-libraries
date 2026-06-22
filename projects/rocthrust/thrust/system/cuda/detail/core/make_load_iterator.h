@@ -37,14 +37,14 @@ namespace cuda_cub::core::detail
 {
 template <class PtxPlan, class It>
 typename LoadIterator<PtxPlan, It>::type _CCCL_DEVICE _CCCL_FORCEINLINE
-make_load_iterator_impl(It it, thrust::detail::true_type /* is_trivial */)
+make_load_iterator_impl(It it, _THRUST_STD::true_type /* is_trivial */)
 {
   return raw_pointer_cast(&*it);
 }
 
 template <class PtxPlan, class It>
 typename LoadIterator<PtxPlan, It>::type _CCCL_DEVICE _CCCL_FORCEINLINE
-make_load_iterator_impl(It it, thrust::detail::false_type /* is_trivial */)
+make_load_iterator_impl(It it, _THRUST_STD::false_type /* is_trivial */)
 {
   return it;
 }

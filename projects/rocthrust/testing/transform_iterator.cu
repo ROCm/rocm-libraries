@@ -39,7 +39,7 @@
 // ensure that we properly support thrust::reverse_iterator from _THRUST_STD
 void TestTransformIteratorTraits()
 {
-  using func    = thrust::negate<int>;
+  using func    = _THRUST_STD::negate<int>;
   using base_it = thrust::host_vector<int>::iterator;
 
   using it     = thrust::transform_iterator<func, base_it>;
@@ -71,7 +71,7 @@ void TestTransformIterator()
 {
   using T = typename Vector::value_type;
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -95,7 +95,7 @@ void TestMakeTransformIterator()
 {
   using T = typename Vector::value_type;
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -125,12 +125,12 @@ struct TestTransformIteratorReduce
     thrust::device_vector<T> d_data = h_data;
 
     // run on host
-    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
+    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(h_data.end(), _THRUST_STD::negate<T>()));
 
     // run on device
-    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
+    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(d_data.end(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQUAL(h_result, d_result);
   }

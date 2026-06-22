@@ -219,28 +219,28 @@ TYPED_TEST(OffsetIteratorTests, TestOffsetIteratorComparisonAndDistance)
   auto test = [](auto iter1, auto iter2) {
     ASSERT_EQ(iter1 == iter2, true);
     ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1++;
     ASSERT_EQ(iter1 == iter2, false);
     ASSERT_EQ(iter1 - iter2, 1);
-    ASSERT_EQ(thrust::distance(iter1, iter2), -1);
+    ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), -1);
 
     iter2++;
     ASSERT_EQ(iter1 == iter2, true);
     ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1 += 100;
     iter2 += 100;
     ASSERT_EQ(iter1 == iter2, true);
     ASSERT_EQ(iter1 - iter2, 0);
-    ASSERT_EQ(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1 -= 5;
     ASSERT_EQ(iter1 == iter2, false);
     ASSERT_EQ(iter1 - iter2, -5);
-    ASSERT_EQ(thrust::distance(iter1, iter2), 5);
+    ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 5);
   };
 
   Vector v(101);

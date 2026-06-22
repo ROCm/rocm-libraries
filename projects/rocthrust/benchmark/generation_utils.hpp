@@ -353,7 +353,7 @@ std::size_t gen_uniform_offsets(
     policy,
     segment_offsets.data(),
     segment_offsets.data() + segment_offsets.size(),
-    segment_offsets.data() /*, thrust::plus<>{}*/);
+    segment_offsets.data() /*, _THRUST_STD::plus<>{}*/);
 
   // Find first sum of offsets greater than 'elements', we are sure that there is
   // going to be one because we added elements + 1 at the end of the segment_offsets.
@@ -361,7 +361,7 @@ std::size_t gen_uniform_offsets(
     policy, segment_offsets.data(), segment_offsets.data() + segment_offsets.size(), geq_t<T>{elements});
 
   // Compute the element's index.
-  auto dist = thrust::distance(segment_offsets.data(), iter);
+  auto dist = _THRUST_STD::distance(segment_offsets.data(), iter);
   // Fill next item with 'elements'.
   thrust::fill_n(policy, segment_offsets.data() + dist, 1, elements);
   // Return next item's index.

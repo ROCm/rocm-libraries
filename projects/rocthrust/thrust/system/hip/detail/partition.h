@@ -80,7 +80,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
   size_t temp_storage_bytes     = 0;
   value_type* d_partition_out   = nullptr;
   size_type* d_num_selected_out = nullptr;
-  size_type num_items           = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items           = static_cast<size_type>(_THRUST_STD::distance(first, last));
   hipStream_t stream            = hip_rocprim::stream(policy);
   bool debug_sync               = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -144,7 +144,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
   thrust::transform_iterator<Predicate, StencilIt> flags{stencil, predicate};
   value_type* d_partition_out   = nullptr;
   size_type* d_num_selected_out = nullptr;
-  size_type num_items           = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items           = static_cast<size_type>(_THRUST_STD::distance(first, last));
   hipStream_t stream            = hip_rocprim::stream(policy);
   bool debug_sync               = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -204,7 +204,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
 
   size_t temp_storage_bytes     = 0;
   size_type* d_num_selected_out = nullptr;
-  size_type num_items           = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items           = static_cast<size_type>(_THRUST_STD::distance(first, last));
   hipStream_t stream            = hip_rocprim::stream(policy);
   bool debug_sync               = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -279,7 +279,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   size_t temp_storage_bytes = 0;
   thrust::transform_iterator<Predicate, StencilIt> flags{stencil, predicate};
   size_type* d_num_selected_out = nullptr;
-  size_type num_items           = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items           = static_cast<size_type>(_THRUST_STD::distance(first, last));
   hipStream_t stream            = hip_rocprim::stream(policy);
   bool debug_sync               = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -342,14 +342,14 @@ template <typename Derived, typename InputIt, typename Predicate>
 THRUST_HIP_RUNTIME_FUNCTION InputIt
 inplace_partition(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  if (thrust::distance(first, last) <= 0)
+  if (_THRUST_STD::distance(first, last) <= 0)
   {
     return first;
   }
 
   // Element type of the input iterator
   using value_t         = thrust::detail::it_value_t<InputIt>;
-  std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
+  std::size_t num_items = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
   thrust::detail::temporary_array<value_t, Derived> tmp(policy, num_items);
@@ -368,14 +368,14 @@ template <typename Derived, typename InputIt, typename StencilIt, typename Predi
 THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
   execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
 {
-  if (thrust::distance(first, last) <= 0)
+  if (_THRUST_STD::distance(first, last) <= 0)
   {
     return first;
   }
 
   // Element type of the input iterator
   using value_t         = thrust::detail::it_value_t<InputIt>;
-  std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
+  std::size_t num_items = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
   thrust::detail::temporary_array<value_t, Derived> tmp(policy, num_items);

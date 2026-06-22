@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -314,7 +314,7 @@ void TestCopyIfWithMagnitude(int magnitude)
   offset_t num_items = offset_t{1ull} << magnitude;
   thrust::counting_iterator<offset_t> begin(offset_t{0});
   auto end = begin + num_items;
-  ASSERT_EQUAL(static_cast<offset_t>(thrust::distance(begin, end)), num_items);
+  ASSERT_EQUAL(static_cast<offset_t>(_THRUST_STD::distance(begin, end)), num_items);
 
   // Run algorithm on large number of items
   offset_t match_every_nth     = 1000000;
@@ -323,7 +323,7 @@ void TestCopyIfWithMagnitude(int magnitude)
   auto selected_out_end = thrust::copy_if(begin, end, copied_out.begin(), mod_n<offset_t>{match_every_nth});
 
   // Ensure number of selected items are correct
-  offset_t num_selected_out = static_cast<offset_t>(thrust::distance(copied_out.begin(), selected_out_end));
+  offset_t num_selected_out = static_cast<offset_t>(_THRUST_STD::distance(copied_out.begin(), selected_out_end));
   ASSERT_EQUAL(num_selected_out, expected_num_copied);
   copied_out.resize(expected_num_copied);
 
@@ -351,7 +351,7 @@ void TestCopyIfStencilWithMagnitude(int magnitude)
   thrust::counting_iterator<offset_t> begin(offset_t{0});
   auto end = begin + num_items;
   thrust::counting_iterator<offset_t> stencil(offset_t{0});
-  ASSERT_EQUAL(static_cast<offset_t>(thrust::distance(begin, end)), num_items);
+  ASSERT_EQUAL(static_cast<offset_t>(_THRUST_STD::distance(begin, end)), num_items);
 
   // Run algorithm on large number of items
   offset_t match_every_nth     = 1000000;
@@ -360,7 +360,7 @@ void TestCopyIfStencilWithMagnitude(int magnitude)
   auto selected_out_end = thrust::copy_if(begin, end, stencil, copied_out.begin(), mod_n<offset_t>{match_every_nth});
 
   // Ensure number of selected items are correct
-  offset_t num_selected_out = static_cast<offset_t>(thrust::distance(copied_out.begin(), selected_out_end));
+  offset_t num_selected_out = static_cast<offset_t>(_THRUST_STD::distance(copied_out.begin(), selected_out_end));
   ASSERT_EQUAL(num_selected_out, expected_num_copied);
   copied_out.resize(expected_num_copied);
 

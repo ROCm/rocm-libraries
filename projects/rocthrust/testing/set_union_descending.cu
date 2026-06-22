@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ void TestSetUnionDescendingSimple()
   Vector ref{4, 3, 3, 2, 0};
   Vector result(5);
 
-  Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL_QUIET(result.end(), end);
   ASSERT_EQUAL(ref, result);
@@ -46,8 +46,8 @@ void TestSetUnionDescending(const size_t n)
   thrust::host_vector<T> h_a(temp.begin(), temp.begin() + n);
   thrust::host_vector<T> h_b(temp.begin() + n, temp.end());
 
-  thrust::sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-  thrust::sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+  thrust::sort(h_a.begin(), h_a.end(), _THRUST_STD::greater<T>());
+  thrust::sort(h_b.begin(), h_b.end(), _THRUST_STD::greater<T>());
 
   thrust::device_vector<T> d_a = h_a;
   thrust::device_vector<T> d_b = h_b;
@@ -58,10 +58,12 @@ void TestSetUnionDescending(const size_t n)
   typename thrust::host_vector<T>::iterator h_end;
   typename thrust::device_vector<T>::iterator d_end;
 
-  h_end = thrust::set_union(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
+  h_end =
+    thrust::set_union(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), _THRUST_STD::greater<T>());
   h_result.erase(h_end, h_result.end());
 
-  d_end = thrust::set_union(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+  d_end =
+    thrust::set_union(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), _THRUST_STD::greater<T>());
 
   d_result.erase(d_end, d_result.end());
 

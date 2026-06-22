@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,7 @@ int main()
   cudaStreamCreate(&s);
 
   // launch a CUDA kernel with only 1 thread on our stream
-  reduce_kernel<<<1, 1, 0, s>>>(data.begin(), data.end(), 0, thrust::plus<int>(), result.data());
+  reduce_kernel<<<1, 1, 0, s>>>(data.begin(), data.end(), 0, _THRUST_STD::plus<int>(), result.data());
 
   // wait for the stream to finish
   cudaStreamSynchronize(s);
@@ -77,7 +77,7 @@ int main()
   auto begin        = data.begin();
   auto end          = data.end();
   unsigned int init = 0;
-  auto binary_op    = thrust::plus<unsigned int>();
+  auto binary_op    = _THRUST_STD::plus<unsigned int>();
 
   // std::async captures the algorithm parameters by value
   // use std::launch::async to ensure the creation of a new thread

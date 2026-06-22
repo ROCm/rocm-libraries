@@ -527,7 +527,7 @@ THRUST_RUNTIME_FUNCTION ItemsOutputIt unique(
   //  using size_type = thrust::detail::it_difference_t<ItemsInputIt>;
   using size_type = int;
 
-  size_type num_items       = static_cast<size_type>(thrust::distance(items_first, items_last));
+  size_type num_items       = static_cast<size_type>(_THRUST_STD::distance(items_first, items_last));
   size_t temp_storage_bytes = 0;
   cudaStream_t stream       = cuda_cub::stream(policy);
 
@@ -633,9 +633,10 @@ unique_count(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last,
   {
     return 0;
   }
-  auto size = thrust::distance(first, last);
-  auto it   = thrust::make_zip_iterator(first, thrust::next(first));
-  return 1 + thrust::count_if(policy, it, thrust::next(it, size - 1), zip_adj_not_predicate<BinaryPred>{binary_pred});
+  auto size = _THRUST_STD::distance(first, last);
+  auto it   = thrust::make_zip_iterator(first, _THRUST_STD::next(first));
+  return 1
+       + thrust::count_if(policy, it, _THRUST_STD::next(it, size - 1), zip_adj_not_predicate<BinaryPred>{binary_pred});
 }
 
 } // namespace cuda_cub

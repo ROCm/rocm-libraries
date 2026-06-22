@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -440,9 +440,9 @@ struct TestUniqueCopyByKeyLargeInput
       thrust::unique_by_key_copy(keys_in, keys_in + num_items, values_in, keys_out.begin(), values_out.begin());
 
     // Ensure that we created the correct output
-    auto const num_selected_out = thrust::distance(keys_out.begin(), selected_aut_end.first);
+    auto const num_selected_out = _THRUST_STD::distance(keys_out.begin(), selected_aut_end.first);
     ASSERT_EQUAL(reference_keys.size(), static_cast<std::size_t>(num_selected_out));
-    ASSERT_EQUAL(num_selected_out, thrust::distance(values_out.begin(), selected_aut_end.second));
+    ASSERT_EQUAL(num_selected_out, _THRUST_STD::distance(values_out.begin(), selected_aut_end.second));
     keys_out.resize(num_selected_out);
     values_out.resize(num_selected_out);
     ASSERT_EQUAL(reference_keys, keys_out);
@@ -470,9 +470,9 @@ struct TestUniqueCopyByKeyLargeOutCount
       thrust::unique_by_key_copy(thrust::device, keys_in, keys_in + num_items, values_in, keys_out, values_out);
 
     // Ensure that we created the correct output
-    auto const num_selected_out = thrust::distance(keys_out, selected_aut_end.first);
+    auto const num_selected_out = _THRUST_STD::distance(keys_out, selected_aut_end.first);
     ASSERT_EQUAL(num_items, static_cast<std::size_t>(num_selected_out));
-    ASSERT_EQUAL(num_selected_out, thrust::distance(values_out, selected_aut_end.second));
+    ASSERT_EQUAL(num_selected_out, _THRUST_STD::distance(values_out, selected_aut_end.second));
   }
 };
 SimpleUnitTest<TestUniqueCopyByKeyLargeOutCount, IntegralTypes> TestUniqueCopyByKeyLargeOutCountInstance;

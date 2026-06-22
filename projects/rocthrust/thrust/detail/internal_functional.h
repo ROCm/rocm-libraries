@@ -125,11 +125,11 @@ struct is_non_const_reference
 {};
 
 template <typename T>
-struct is_tuple_of_iterator_references : thrust::detail::false_type
+struct is_tuple_of_iterator_references : _THRUST_STD::false_type
 {};
 
 template <typename... Ts>
-struct is_tuple_of_iterator_references<thrust::detail::tuple_of_iterator_references<Ts...>> : thrust::detail::true_type
+struct is_tuple_of_iterator_references<thrust::detail::tuple_of_iterator_references<Ts...>> : _THRUST_STD::true_type
 {};
 
 // use this enable_if to avoid assigning to temporaries in the transform functors below

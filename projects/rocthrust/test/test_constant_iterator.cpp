@@ -126,7 +126,7 @@ TEST(ConstantIteratorTests, TestConstantIteratorIncrementBig)
   thrust::constant_iterator<long long int> begin(1);
   thrust::constant_iterator<long long int> end = begin + n;
 
-  ASSERT_EQ(thrust::distance(begin, end), n);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), n);
 }
 
 TEST(ConstantIteratorTests, TestConstantIteratorComparison)
@@ -217,12 +217,12 @@ TYPED_TEST(ConstantIteratorTests, TestConstantIteratorTransform)
   ConstIter last1  = first1 + result.size();
   ConstIter first2 = make_constant_iterator<T>(3);
 
-  thrust::transform(first1, last1, result.begin(), thrust::negate<T>());
+  thrust::transform(first1, last1, result.begin(), _THRUST_STD::negate<T>());
 
   Vector ref(4, -7);
   ASSERT_EQ(ref, result);
 
-  thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
+  thrust::transform(first1, last1, first2, result.begin(), _THRUST_STD::plus<T>());
 
   ref = Vector(4, 10);
   ASSERT_EQ(ref, result);
