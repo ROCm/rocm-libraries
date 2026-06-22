@@ -1,0 +1,8 @@
+MIOpenDriver conv -n 32 -c 3 -H 224 -W 224 -k 64 -y 7 -x 7 -p 3 -q 3 -u 2 -v 2 -F 1 -t 1 -i 1
+PRNG seed: 12345678
+Timestamp: 2026-06-03 22:21:36 UTC; Host Name: ctr-cx63-mi300x-21.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 2 x EPYC 9654; RAM Size: 1511 GB; GPU Model: 1 x AMD Instinct MI300X; AMDGPU Driver: 6.16.6
+MIOpen Forward Conv. Algorithm: 3, Solution: 37/ConvBinWinogradRxSf3x2
+GPU Kernel Time Forward Conv. Elapsed: 0.195529 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv7x7u2, 32, 3, 112, 112, 7, 7, 64, 7552892928, 19305216, 102760448, 38628, 624, 0.195529
+Forward Convolution Verifies OK on GPU reference (3.16455e-08 < 1.5e-06)

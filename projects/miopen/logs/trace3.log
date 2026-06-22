@@ -1,0 +1,2 @@
+MIOpenDriver conv -n 32 -c 3 -H 224 -W 224 -k 64 -y 7 -x 7 -p 3 -q 3 -u 2 -v 2 -F 1 -t 1 -i 1
+Hip error: 'out of memory'(2) at /TheRock/rocm-libraries/projects/hipblaslt/library/src/amd_detail/hipblaslt.cpp:164

@@ -1,0 +1,7 @@
+MIOpenDriver conv -n 32 -c 3 -H 224 -W 224 -k 64 -y 7 -x 7 -p 3 -q 3 -u 2 -v 2 -F 1 -t 1 -i 1
+MIOpen Error: ctr-cx71-mi300x-01.adc.amd.com:/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/src/hip/handlehip.cpp:132: No device: no ROCm-capable device is detected
+MIOpen Error: ctr-cx71-mi300x-01.adc.amd.com:/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: ctr-cx71-mi300x-01.adc.amd.com:/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+MIOpen Error: ctr-cx71-mi300x-01.adc.amd.com:/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/src/include/miopen/errors.hpp:128: Dereferencing nullptr
+Error getting workspace size, status = 3
+AllocateBuffersAndCopy() FAILED, rc = 3

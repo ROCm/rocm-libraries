@@ -1,0 +1,9 @@
+MIOpenDriver conv -n 32 -c 3 -H 224 -W 224 -k 64 -y 7 -x 7 -p 3 -q 3 -u 2 -v 2 -F 1 -t 1 -i 1
+[MIOpen->hipDNN] hipdnnCreate cold: 2240760 ns
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+MIOpen(HIP): Warning [OpenRuntimeLibraryForDevice] CK grouped conv library not found for device gfx942: /opt/rocm/lib/libMIOpenCKGroupedConv_gfx942.so: undefined symbol: _ZN2ck16tensor_operation6device8instance70add_device_grouped_conv2d_fwd_xdl_nhwgc_gkyxc_nhwgk_f32_tf32_instancesERSt6vectorISt10unique_ptrINS1_31DeviceGroupedConvFwdMultipleABDILi2ENS_13tensor_layout11convolution5NHWGCENS7_5GKYXCENS_5TupleIJEEENS7_5NHWGKEffSB_fNS0_12element_wise11PassThroughESE_SE_DB19_SF_EESt14default_deleteISG_EESaISJ_EE
+PRNG seed: 12345678
+Timestamp: 2026-06-11 17:33:58 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+
+rocBLAS error: Cannot read /opt/rocm/lib/rocblas/library/TensileLibrary.dat: Illegal seek for GPU arch : gfx942
+ List of available TensileLibrary Files : 

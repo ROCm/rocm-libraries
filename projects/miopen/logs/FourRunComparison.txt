@@ -1,0 +1,273 @@
+time ./bin/MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1  2>&1 | tee ../perf-disabled-first.log
+MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+PRNG seed: 12345678
+Timestamp: 2026-06-12 15:11:20 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+MIOpen Forward Conv. Algorithm: 3, Solution: 84/ConvBinWinogradRxSf2x3g1
+GPU Kernel Time Forward Conv. Elapsed: 0.017044 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 16, 16, 16, 16, 3, 3, 16, 18874368, 271360, 262144, 1107, 31, 0.017044
+
+real    0m4.860s
+user    0m0.752s
+sys     0m0.853s
+
+
+----------------------------------
+
+
+time ./bin/MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1  2>&1 | tee ../perf-disabled-second.log
+MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+PRNG seed: 12345678
+Timestamp: 2026-06-12 15:11:27 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+MIOpen Forward Conv. Algorithm: 3, Solution: 84/ConvBinWinogradRxSf2x3g1
+GPU Kernel Time Forward Conv. Elapsed: 0.016516 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 16, 16, 16, 16, 3, 3, 16, 18874368, 271360, 262144, 1143, 32, 0.016516
+
+real    0m0.213s
+user    0m0.074s
+sys     0m0.045s
+
+
+---------------------------------
+
+
+time MIOPEN_HIPDNN_FORWARDING=enabled MIOPEN_HIPDNN_FORWARDING_CONV=enabled MIOPEN_HIPDNN_FORWARDING_TIMING=1 ./bin/MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1  2>&1 | tee ../perf-enabled-first.log
+MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1
+[MIOpen->hipDNN] hipdnnCreate cold: 2116080 ns
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+PRNG seed: 12345678
+Timestamp: 2026-06-12 15:11:48 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+[MIOpen->hipDNN] conv plan build (cold): 1329078 ns
+[MIOpen->hipDNN] conv execute (cold): 1412897 ns
+[MIOpen->hipDNN] conv execute (warm): 30369 ns
+[MIOpen->hipDNN] conv execute (warm): 32530 ns
+[MIOpen->hipDNN] conv execute (warm): 27320 ns
+[MIOpen->hipDNN] conv execute (warm): 27469 ns
+[MIOpen->hipDNN] conv execute (warm): 27190 ns
+[MIOpen->hipDNN] conv execute (warm): 27130 ns
+[MIOpen->hipDNN] conv execute (warm): 27219 ns
+[MIOpen->hipDNN] conv execute (warm): 27270 ns
+[MIOpen->hipDNN] conv execute (warm): 27240 ns
+[MIOpen->hipDNN] conv execute (warm): 27700 ns
+[MIOpen->hipDNN] conv execute (warm): 27259 ns
+[MIOpen->hipDNN] conv execute (warm): 27090 ns
+[MIOpen->hipDNN] conv execute (warm): 27060 ns
+[MIOpen->hipDNN] conv execute (warm): 27150 ns
+[MIOpen->hipDNN] conv execute (warm): 27539 ns
+[MIOpen->hipDNN] conv execute (warm): 27360 ns
+[MIOpen->hipDNN] conv execute (warm): 27070 ns
+[MIOpen->hipDNN] conv execute (warm): 27129 ns
+[MIOpen->hipDNN] conv execute (warm): 27070 ns
+[MIOpen->hipDNN] conv execute (warm): 27070 ns
+[MIOpen->hipDNN] conv execute (warm): 27190 ns
+[MIOpen->hipDNN] conv execute (warm): 27039 ns
+[MIOpen->hipDNN] conv execute (warm): 27080 ns
+[MIOpen->hipDNN] conv execute (warm): 27140 ns
+[MIOpen->hipDNN] conv execute (warm): 27409 ns
+[MIOpen->hipDNN] conv execute (warm): 27050 ns
+[MIOpen->hipDNN] conv execute (warm): 27020 ns
+[MIOpen->hipDNN] conv execute (warm): 27530 ns
+[MIOpen->hipDNN] conv execute (warm): 27179 ns
+[MIOpen->hipDNN] conv execute (warm): 27100 ns
+[MIOpen->hipDNN] conv execute (warm): 27020 ns
+[MIOpen->hipDNN] conv execute (warm): 27009 ns
+[MIOpen->hipDNN] conv execute (warm): 27350 ns
+[MIOpen->hipDNN] conv execute (warm): 27060 ns
+[MIOpen->hipDNN] conv execute (warm): 27130 ns
+[MIOpen->hipDNN] conv execute (warm): 27199 ns
+[MIOpen->hipDNN] conv execute (warm): 27520 ns
+[MIOpen->hipDNN] conv execute (warm): 27840 ns
+[MIOpen->hipDNN] conv execute (warm): 27129 ns
+[MIOpen->hipDNN] conv execute (warm): 27320 ns
+[MIOpen->hipDNN] conv execute (warm): 27310 ns
+[MIOpen->hipDNN] conv execute (warm): 27189 ns
+[MIOpen->hipDNN] conv execute (warm): 27070 ns
+[MIOpen->hipDNN] conv execute (warm): 27160 ns
+[MIOpen->hipDNN] conv execute (warm): 27140 ns
+[MIOpen->hipDNN] conv execute (warm): 28259 ns
+[MIOpen->hipDNN] conv execute (warm): 27030 ns
+[MIOpen->hipDNN] conv execute (warm): 27000 ns
+[MIOpen->hipDNN] conv execute (warm): 27359 ns
+[MIOpen->hipDNN] conv execute (warm): 27330 ns
+[MIOpen->hipDNN] conv execute (warm): 27210 ns
+[MIOpen->hipDNN] conv execute (warm): 27770 ns
+[MIOpen->hipDNN] conv execute (warm): 27489 ns
+[MIOpen->hipDNN] conv execute (warm): 27320 ns
+[MIOpen->hipDNN] conv execute (warm): 27710 ns
+[MIOpen->hipDNN] conv execute (warm): 27369 ns
+[MIOpen->hipDNN] conv execute (warm): 27980 ns
+[MIOpen->hipDNN] conv execute (warm): 27730 ns
+[MIOpen->hipDNN] conv execute (warm): 27810 ns
+[MIOpen->hipDNN] conv execute (warm): 27479 ns
+[MIOpen->hipDNN] conv execute (warm): 27610 ns
+[MIOpen->hipDNN] conv execute (warm): 27370 ns
+[MIOpen->hipDNN] conv execute (warm): 27569 ns
+[MIOpen->hipDNN] conv execute (warm): 27520 ns
+[MIOpen->hipDNN] conv execute (warm): 27500 ns
+[MIOpen->hipDNN] conv execute (warm): 27660 ns
+[MIOpen->hipDNN] conv execute (warm): 27409 ns
+[MIOpen->hipDNN] conv execute (warm): 27460 ns
+[MIOpen->hipDNN] conv execute (warm): 27440 ns
+[MIOpen->hipDNN] conv execute (warm): 27579 ns
+[MIOpen->hipDNN] conv execute (warm): 27400 ns
+[MIOpen->hipDNN] conv execute (warm): 27540 ns
+[MIOpen->hipDNN] conv execute (warm): 27700 ns
+[MIOpen->hipDNN] conv execute (warm): 27569 ns
+[MIOpen->hipDNN] conv execute (warm): 27470 ns
+[MIOpen->hipDNN] conv execute (warm): 27500 ns
+[MIOpen->hipDNN] conv execute (warm): 27469 ns
+[MIOpen->hipDNN] conv execute (warm): 27500 ns
+[MIOpen->hipDNN] conv execute (warm): 27630 ns
+[MIOpen->hipDNN] conv execute (warm): 29280 ns
+[MIOpen->hipDNN] conv execute (warm): 27369 ns
+[MIOpen->hipDNN] conv execute (warm): 27910 ns
+[MIOpen->hipDNN] conv execute (warm): 27710 ns
+[MIOpen->hipDNN] conv execute (warm): 27349 ns
+[MIOpen->hipDNN] conv execute (warm): 27550 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27950 ns
+[MIOpen->hipDNN] conv execute (warm): 27439 ns
+[MIOpen->hipDNN] conv execute (warm): 27720 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27609 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 27720 ns
+[MIOpen->hipDNN] conv execute (warm): 27739 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27740 ns
+[MIOpen->hipDNN] conv execute (warm): 27669 ns
+[MIOpen->hipDNN] conv execute (warm): 27860 ns
+MIOpen Forward Conv. Algorithm: 3, Solution: 84/ConvBinWinogradRxSf2x3g1
+[MIOpen->hipDNN] hipdnnDestroy: 1070 ns
+GPU Kernel Time Forward Conv. Elapsed: 0.000000 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 16, 16, 16, 16, 3, 3, 16, 18874368, 271360, 262144, inf, inf, 0.000000
+
+real    0m4.863s
+user    0m0.738s
+sys     0m0.872s
+
+
+-----------------------------------
+
+
+time MIOPEN_HIPDNN_FORWARDING=enabled MIOPEN_HIPDNN_FORWARDING_CONV=enabled MIOPEN_HIPDNN_FORWARDING_TIMING=1 ./bin/MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1  2>&1 | tee ../perf-enabled-second.log
+MIOpenDriver conv -n 16 -c 16 -H 16 -W 16 -k 16 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -F 1 -V 0 -i 100 -t 1
+[MIOpen->hipDNN] hipdnnCreate cold: 2146229 ns
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+PRNG seed: 12345678
+Timestamp: 2026-06-12 15:11:56 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+[MIOpen->hipDNN] conv plan build (cold): 3908480225 ns
+[MIOpen->hipDNN] conv execute (cold): 1432496 ns
+[MIOpen->hipDNN] conv execute (warm): 33110 ns
+[MIOpen->hipDNN] conv execute (warm): 30249 ns
+[MIOpen->hipDNN] conv execute (warm): 33800 ns
+[MIOpen->hipDNN] conv execute (warm): 29130 ns
+[MIOpen->hipDNN] conv execute (warm): 27899 ns
+[MIOpen->hipDNN] conv execute (warm): 27880 ns
+[MIOpen->hipDNN] conv execute (warm): 27900 ns
+[MIOpen->hipDNN] conv execute (warm): 27800 ns
+[MIOpen->hipDNN] conv execute (warm): 27610 ns
+[MIOpen->hipDNN] conv execute (warm): 27820 ns
+[MIOpen->hipDNN] conv execute (warm): 27720 ns
+[MIOpen->hipDNN] conv execute (warm): 27909 ns
+[MIOpen->hipDNN] conv execute (warm): 27800 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 28000 ns
+[MIOpen->hipDNN] conv execute (warm): 27770 ns
+[MIOpen->hipDNN] conv execute (warm): 27750 ns
+[MIOpen->hipDNN] conv execute (warm): 27719 ns
+[MIOpen->hipDNN] conv execute (warm): 28050 ns
+[MIOpen->hipDNN] conv execute (warm): 27500 ns
+[MIOpen->hipDNN] conv execute (warm): 27859 ns
+[MIOpen->hipDNN] conv execute (warm): 27810 ns
+[MIOpen->hipDNN] conv execute (warm): 27790 ns
+[MIOpen->hipDNN] conv execute (warm): 27770 ns
+[MIOpen->hipDNN] conv execute (warm): 28009 ns
+[MIOpen->hipDNN] conv execute (warm): 27720 ns
+[MIOpen->hipDNN] conv execute (warm): 27670 ns
+[MIOpen->hipDNN] conv execute (warm): 27729 ns
+[MIOpen->hipDNN] conv execute (warm): 28840 ns
+[MIOpen->hipDNN] conv execute (warm): 27650 ns
+[MIOpen->hipDNN] conv execute (warm): 28250 ns
+[MIOpen->hipDNN] conv execute (warm): 27899 ns
+[MIOpen->hipDNN] conv execute (warm): 31030 ns
+[MIOpen->hipDNN] conv execute (warm): 28920 ns
+[MIOpen->hipDNN] conv execute (warm): 28779 ns
+[MIOpen->hipDNN] conv execute (warm): 28390 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27750 ns
+[MIOpen->hipDNN] conv execute (warm): 27619 ns
+[MIOpen->hipDNN] conv execute (warm): 27610 ns
+[MIOpen->hipDNN] conv execute (warm): 28070 ns
+[MIOpen->hipDNN] conv execute (warm): 27899 ns
+[MIOpen->hipDNN] conv execute (warm): 27850 ns
+[MIOpen->hipDNN] conv execute (warm): 28050 ns
+[MIOpen->hipDNN] conv execute (warm): 27790 ns
+[MIOpen->hipDNN] conv execute (warm): 27870 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 27690 ns
+[MIOpen->hipDNN] conv execute (warm): 27729 ns
+[MIOpen->hipDNN] conv execute (warm): 27660 ns
+[MIOpen->hipDNN] conv execute (warm): 28110 ns
+[MIOpen->hipDNN] conv execute (warm): 28100 ns
+[MIOpen->hipDNN] conv execute (warm): 27690 ns
+[MIOpen->hipDNN] conv execute (warm): 27730 ns
+[MIOpen->hipDNN] conv execute (warm): 27750 ns
+[MIOpen->hipDNN] conv execute (warm): 27899 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 27800 ns
+[MIOpen->hipDNN] conv execute (warm): 27939 ns
+[MIOpen->hipDNN] conv execute (warm): 27630 ns
+[MIOpen->hipDNN] conv execute (warm): 27870 ns
+[MIOpen->hipDNN] conv execute (warm): 27800 ns
+[MIOpen->hipDNN] conv execute (warm): 32809 ns
+[MIOpen->hipDNN] conv execute (warm): 27710 ns
+[MIOpen->hipDNN] conv execute (warm): 27660 ns
+[MIOpen->hipDNN] conv execute (warm): 27749 ns
+[MIOpen->hipDNN] conv execute (warm): 27590 ns
+[MIOpen->hipDNN] conv execute (warm): 29400 ns
+[MIOpen->hipDNN] conv execute (warm): 28090 ns
+[MIOpen->hipDNN] conv execute (warm): 27849 ns
+[MIOpen->hipDNN] conv execute (warm): 28020 ns
+[MIOpen->hipDNN] conv execute (warm): 27820 ns
+[MIOpen->hipDNN] conv execute (warm): 27839 ns
+[MIOpen->hipDNN] conv execute (warm): 27710 ns
+[MIOpen->hipDNN] conv execute (warm): 27890 ns
+[MIOpen->hipDNN] conv execute (warm): 28110 ns
+[MIOpen->hipDNN] conv execute (warm): 27769 ns
+[MIOpen->hipDNN] conv execute (warm): 27560 ns
+[MIOpen->hipDNN] conv execute (warm): 27850 ns
+[MIOpen->hipDNN] conv execute (warm): 27959 ns
+[MIOpen->hipDNN] conv execute (warm): 27900 ns
+[MIOpen->hipDNN] conv execute (warm): 27670 ns
+[MIOpen->hipDNN] conv execute (warm): 27750 ns
+[MIOpen->hipDNN] conv execute (warm): 27699 ns
+[MIOpen->hipDNN] conv execute (warm): 27750 ns
+[MIOpen->hipDNN] conv execute (warm): 27590 ns
+[MIOpen->hipDNN] conv execute (warm): 27989 ns
+[MIOpen->hipDNN] conv execute (warm): 28060 ns
+[MIOpen->hipDNN] conv execute (warm): 27780 ns
+[MIOpen->hipDNN] conv execute (warm): 27610 ns
+[MIOpen->hipDNN] conv execute (warm): 27719 ns
+[MIOpen->hipDNN] conv execute (warm): 27730 ns
+[MIOpen->hipDNN] conv execute (warm): 27760 ns
+[MIOpen->hipDNN] conv execute (warm): 27809 ns
+[MIOpen->hipDNN] conv execute (warm): 32710 ns
+[MIOpen->hipDNN] conv execute (warm): 29610 ns
+[MIOpen->hipDNN] conv execute (warm): 27709 ns
+[MIOpen->hipDNN] conv execute (warm): 27800 ns
+MIOpen Forward Conv. Algorithm: 3, Solution: 84/ConvBinWinogradRxSf2x3g1
+[MIOpen->hipDNN] hipdnnDestroy: 1090 ns
+GPU Kernel Time Forward Conv. Elapsed: 0.000000 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv3x3u1, 16, 16, 16, 16, 3, 3, 16, 18874368, 271360, 262144, inf, inf, 0.000000
+
+real    0m4.121s
+user    0m0.377s
+sys     0m0.753s

@@ -1,0 +1,9 @@
+MIOpenDriver conv -n 32 -c 3 -H 224 -W 224 -k 64 -y 7 -x 7 -p 3 -q 3 -u 2 -v 2 -F 1 -t 1 -i 1
+MIOpen(HIP): Warning [ParseAndLoadDb] File is unreadable: "/home/AMD/nhanna/repos/rocm-libraries/projects/miopen/build/share/miopen/db/gfx94250.HIP.fdb.txt"
+PRNG seed: 12345678
+Timestamp: 2026-06-11 19:50:58 UTC; Host Name: splinter-ctr-bj78-02.adc.amd.com; Operating System: Linux 6.8.0-31-generic; ROCm: 7.14.60850; MIOpen Driver: 3.5.2; CPU Vendor: AMD; CPU Model: 1 x Ryzen 9; RAM Size: 62 GB; GPU Model: 1 x AMD Instinct MI308X, 1 x AMD Radeon Graphics; AMDGPU Driver: 6.16.6
+MIOpen Forward Conv. Algorithm: 5, Solution: 107/ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC
+GPU Kernel Time Forward Conv. Elapsed: 0.654659 ms (average)
+stats: name, n, c, ho, wo, y, x, k, flopCnt, bytesRead, bytesWritten, GFLOPs, GB/s, timeMs
+stats: fwd-conv7x7u2, 32, 3, 112, 112, 7, 7, 64, 7552892928, 19305216, 102760448, 11537, 186, 0.654659
+Forward Convolution Verifies OK on GPU reference (3.89275e-08 < 1.5e-05)
