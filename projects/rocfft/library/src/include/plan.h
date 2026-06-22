@@ -21,12 +21,15 @@
 #ifndef PLAN_H
 #define PLAN_H
 
+#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstring>
 #include <list>
+#include <numeric>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
@@ -112,48 +115,33 @@ struct rocfft_brick_t
 
 struct rocfft_field_t
 {
-    std::vector<rocfft_brick_t> bricks;
+    /**
+     * @return The field's global data range (as a contiguous layout), i.e.,
+     * the minimal full layout that logically includes all bricks' partial layouts.
+     * @note In-buffer strides are meaningless in this object.
+    */
+    const data_layout_t& get_global_data_range() const
+    {
+        return global_data_range;
+    }
 
     /**
-     * @return the minimal full (i.e., non-partial) data layout that logically includes
-     * all bricks' partial layouts. The returned layout is set with contiguous in-buffer
-     * strides.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no brick or some
-     * dimensionally inconsistent bricks. 
+     * @return An `std::set<size_t>` of the length dimensions whose logical range
+     * in every brick matches the field's global data range.
      */
-    data_layout_t get_full_data_range() const;
+    const std::set<size_t>& get_undistributed_length_dimensions() const
+    {
+        return undistributed_length_dimensions;
+    }
 
     /**
-     * @brief Finalizes all the field's bricks, i.e., sorts them by increasing rank (stable
-     * sort) and sets the `is_partial` flags for all axes of their layouts.
+     * @return `true` iff all length dimensions of the field are undistributed (i.e.,
+     * all bricks have full length axes)
      */
-    void finalize();
-
-    /**
-     * @return true iff all parts of the field's full range of logical indices are covered
-     * once and only once by the field's bricks.
-     */
-    bool has_valid_tessellation() const;
-
-    /**
-     * @param[in] dim dimension index of interest (flattened: length axes
-     * followed by batch axes)
-     * @return `true` iff the corresponding length dimension is not partial
-     * in any of the field's bricks.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no bricks. An
-     * `std::invalid_argument` is thrown if `dim` is out of range.
-     */
-    bool has_undistributed_axis(size_t dim) const;
-
-    /**
-     * @return An `std::set<size_t>` of the length dimensions that are not
-     * partial in any of the field's bricks.
-     * 
-     * @throw An `std::logic_error` is thrown if the field has no bricks.
-     */
-    std::set<size_t> get_undistributed_length_dimensions() const;
+    inline bool has_undistributed_length_axes() const
+    {
+        return undistributed_length_dimensions.size() == global_data_range.get_len_rank();
+    }
 
     /**
      * @brief Verifies whether this field is consistent as input (resp. output)
@@ -182,7 +170,7 @@ struct rocfft_field_t
      * (sharing the same locations, brick-wise).
      * 
      * @throw An `std::logic_error` is thrown if the current object has no brick,
-     * or if any of its bricks has some partial length axis in its data layout.
+     * or if any of its bricks has a partial length axis.
      */
     std::optional<rocfft_field_t>
         get_other_embarrassingly_parallel_io_field(io_data_label           other_io,
@@ -193,8 +181,93 @@ struct rocfft_field_t
 
     inline bool operator==(const rocfft_field_t& other) const
     {
-        return bricks == other.bricks;
+        // all other members are derived from the bricks
+        return get_bricks() == other.get_bricks();
     }
+
+    /**
+     * @brief Constructs a field from a collection of bricks.
+     *
+     * The constructor computes the field's global data range as the supremum of
+     * all bricks' upper bounds, validates that the bricks form a valid tessellation
+     * (complete, non-overlapping coverage of the global data range), identifies
+     * undistributed length dimensions, and sorts bricks by increasing comm rank.
+     *
+     * @note Ownership of the bricks is transferred to the constructed object.
+     *
+     * @param[in] field_bricks vector of bricks composing the field. Must be
+     * non-empty and dimensionally consistent (all bricks must have the same
+     * length rank and batch rank).
+     *
+     * @throw std::invalid_argument if @p field_bricks is empty, if bricks are
+     * not dimensionally consistent, or if the bricks do not form a valid
+     * tessellation of the field's global data range.
+     */
+    rocfft_field_t(std::vector<rocfft_brick_t>&& field_bricks);
+
+    rocfft_field_t(const rocfft_field_t&) = default;
+    rocfft_field_t& operator=(const rocfft_field_t&) = default;
+    rocfft_field_t(rocfft_field_t&&)                 = default;
+    rocfft_field_t& operator=(rocfft_field_t&&) = default;
+
+    inline const std::vector<rocfft_brick_t>& get_bricks() const
+    {
+        return bricks;
+    }
+    inline const rocfft_brick_t& get_brick(size_t brick_idx) const
+    {
+        if(brick_idx >= bricks.size())
+            throw std::out_of_range("Brick index out of range in " + ROCFFT_CURRENT_FUNCTION);
+        return bricks[brick_idx];
+    }
+    inline size_t num_bricks() const
+    {
+        return bricks.size();
+    }
+    inline bool empty() const
+    {
+        return bricks.empty();
+    }
+
+private:
+    /**
+     * @return true iff all parts of the field's full range of logical indices are covered
+     * once and only once by the field's bricks.
+     */
+    bool has_valid_tessellation() const;
+
+    // default constructor is private, accessible only to the user-facing friend function(s).
+    // Regular construction, e.g., internally to the library, should be done via the
+    // public constructor taking ownership of a complete vector of bricks (given all at once).
+    rocfft_field_t() = default;
+
+    inline void finalize()
+    {
+        rocfft_field_t finalized_field(std::move(bricks));
+        std::swap(*this, finalized_field);
+    }
+
+    void erase_unit_length_axis(size_t len_dim);
+    void reorder_length_axes(const std::vector<size_t>& len_axis_order);
+
+    std::vector<rocfft_brick_t> bricks;
+    std::set<size_t>            undistributed_length_dimensions;
+    data_layout_t               global_data_range;
+
+    // Internal brick-adding API used by the public C API and MPI allgather
+    static void add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick);
+
+    // User-facing APIs require users to build fields incrementally, brick by brick.
+    // They're given access to the private default constructor and allowed to expand
+    // the `bricks` member directly.
+    friend rocfft_status rocfft_field_create(rocfft_field* field);
+    friend rocfft_status rocfft_field_add_brick(rocfft_field, rocfft_brick);
+    // The `rocfft_plan_description_t` finalizes the user-defined fields by
+    // - all-gathering bricks across all processes in the description's communicator;
+    // - erasing non-distributed unit-length axes from all bricks;
+    // - re-ordering length axes by increasing in-buffer strides.
+    // These operations require access to the private members of this class.
+    friend struct rocfft_plan_description_t;
 };
 
 struct rocfft_plan_description_t
@@ -250,7 +323,7 @@ struct rocfft_plan_description_t
      * - gathering all the fields' bricks on all processes involved in the description's
      *   communicator, if any;
      * 
-     * - finalizing bricks for all member fields (see `rocfft_field_t::finalize()`);
+     * - finalizing, and validating all member fields;
      * 
      * - removing trivial unit-span axes from all layouts (including bricks' if any)
      * and sorting length axes by increasing strides if that can be done consistently
@@ -354,7 +427,7 @@ struct rocfft_plan_description_t
         for(auto& f : fields)
         {
             fieldPtrs += std::count_if(
-                f.bricks.begin(), f.bricks.end(), [comm_rank](const rocfft_brick_t& b) {
+                f.get_bricks().begin(), f.get_bricks().end(), [comm_rank](const rocfft_brick_t& b) {
                     return b.location.comm_rank == comm_rank;
                 });
         }
@@ -769,7 +842,7 @@ private:
         {
             // validation checks at object's construction guarantee
             // it's identical for all I/O bricks
-            return input.field.bricks[0].layout.corresponding_axes_in_embedding();
+            return input.field.get_brick(0).layout.corresponding_axes_in_embedding();
         }
         std::optional<LoadOps>  load_ops  = std::nullopt;
         std::optional<StoreOps> store_ops = std::nullopt;
