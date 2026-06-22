@@ -558,13 +558,11 @@ private:
                                                                  const size_t*,
                                                                  const size_t);
     // Descriptions need access to private members to
-    // - complete the definitions data layouts once the lengths (full logical ranges) are known;
     // - remove trivial axes (of unit logical range) from full and partial layouts upon finalization;
     // - possibly re-order relevant layouts' length axes by increasing in-buffer strides.
     friend struct rocfft_plan_description_t;
-    // Fields set the `is_partial` flags for axes of its bricks that are found to span the
-    // entire range of logical indices in the corresponding full layout's length or batch
-    // axes (upon field finalization)
+    // Fields need access to private members to erase or reorder length axes in their bricks'
+    // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
 };
 
