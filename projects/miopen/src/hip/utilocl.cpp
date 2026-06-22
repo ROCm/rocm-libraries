@@ -6,6 +6,7 @@
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/util.hpp>
+#include <miopen/tensor.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -604,16 +605,20 @@ float Col2Im2dGPU(const Handle& handle,
                   const uint32_t in_w,
                   Data_t im,
                   uint32_t im_offset,
-                  miopenDataType_t type)
+                  miopenDataType_t type,
+                  bool layoutNHWC,
+                  const int num_groups = 1)
 {
     std::string program_name = "MIOpenCol2Im2d.cpp";
     std::string kernel_name  = "Col2Im2dU";
+    std::string layout_str   = layoutNHWC ? "NHWC" : "NCHW";
 
     // clang-format off
     std::string network_config =
         "c" + std::to_string(in_c) +
         "in_h" + std::to_string(in_h) +
         "in_w" + std::to_string(in_w) +
+        "groups" + std::to_string(num_groups) +
         "y" + std::to_string(wei_h) +
         "x" + std::to_string(wei_w) +
         "p" + std::to_string(pad_h) +
@@ -622,7 +627,8 @@ float Col2Im2dGPU(const Handle& handle,
         "v" + std::to_string(stride_w) +
         "l" + std::to_string(dilation_h) +
         "j" + std::to_string(dilation_w) +
-        "t" + std::to_string(type);
+        "t" + std::to_string(type) +
+        "layout" + layout_str;
     // clang-format on
 
     auto&& kernels = handle.GetKernels("miopenCol2Im2d", network_config);
@@ -670,6 +676,8 @@ float Col2Im2dGPU(const Handle& handle,
         };
 
         params += " -DMIOPEN_USE_64BIT_INDEX=" + std::to_string(Is64BitIndexRequired());
+        params += " -DLAYOUT_NHWC=" + std::to_string(static_cast<int>(layoutNHWC));
+        params += " -DGROUPS=" + std::to_string(num_groups);
 
         handle.AddKernel(
             "miopenCol2Im2d", network_config, program_name, kernel_name, vld, vgd, params)(
@@ -716,8 +724,11 @@ float Col2Im3dGPU(const Handle& handle,
                   const uint32_t in_w,
                   Data_t im,
                   const uint64_t im_offset,
-                  miopenDataType_t type)
+                  miopenDataType_t type,
+                  bool layoutNHWC,
+                  const uint32_t num_groups)
 {
+    std::string layout_str   = layoutNHWC ? "NHWC" : "NCHW";
     std::string program_name = "MIOpenCol2Im3d.cpp";
     std::string kernel_name  = "Col2Im3dU";
 
@@ -739,7 +750,9 @@ float Col2Im3dGPU(const Handle& handle,
         "d" + std::to_string(dilation_d) +
         "_" + std::to_string(dilation_h) +
         "_" + std::to_string(dilation_w) +
-        "t" + std::to_string(type);
+        "g" + std::to_string(num_groups) +
+        "t" + std::to_string(type) +
+        "layout" + layout_str;;
     // clang-format on
 
     auto&& kernels = handle.GetKernels("miopenCol2Im3d", network_config);
@@ -780,6 +793,8 @@ float Col2Im3dGPU(const Handle& handle,
         std::string params = GetDataTypeKernelParams(type);
 
         params += use_64_bit_index ? " -DMIOPEN_USE_64BIT_INDEX=1" : " -DMIOPEN_USE_64BIT_INDEX=0";
+        params += " -DLAYOUT_NHWC=" + std::to_string(static_cast<int>(layoutNHWC));
+        params += " -DGROUPS=" + std::to_string(num_groups);
 
         size_t global_threads = static_cast<size_t>(in_c) * in_d * in_h * in_w;
         size_t local_threads  = std::min(WG_SIZE, global_threads);
@@ -966,7 +981,9 @@ float Im2ColGPU(const Handle& handle,
                 const std::vector<int>& stride_spatial,
                 const std::vector<int>& dilation_spatial,
                 Data_t col,
-                miopenDataType_t type)
+                miopenDataType_t type,
+                bool layoutNHWC,
+                int num_groups)
 {
     switch(spatial_dim)
     {
@@ -988,7 +1005,9 @@ float Im2ColGPU(const Handle& handle,
                            dilation_spatial[0],
                            dilation_spatial[1],
                            col,
-                           type);
+                           type,
+                           layoutNHWC,
+                           num_groups);
     }
     case 3: {
         return Im3d2ColGPU(handle,
@@ -1014,7 +1033,9 @@ float Im2ColGPU(const Handle& handle,
                            dilation_spatial[1],
                            dilation_spatial[2],
                            col,
-                           type);
+                           type,
+                           layoutNHWC,
+                           num_groups);
     }
     default: {
         MIOPEN_THROW("unsupported convolution dimension");
@@ -1034,7 +1055,9 @@ float Col2ImGPU(const Handle& handle,
                 const std::vector<size_t>& in_spatial,
                 Data_t im,
                 std::size_t im_offset,
-                miopenDataType_t type)
+                miopenDataType_t type,
+                bool layoutNHWC,
+                const int num_groups)
 {
     switch(spatial_dim)
     {
@@ -1056,7 +1079,9 @@ float Col2ImGPU(const Handle& handle,
                            in_spatial[1],
                            im,
                            im_offset,
-                           type);
+                           type,
+                           layoutNHWC,
+                           num_groups);
     }
     case 3: {
         return Col2Im3dGPU(handle,
@@ -1082,7 +1107,9 @@ float Col2ImGPU(const Handle& handle,
                            in_spatial[2],
                            im,
                            im_offset,
-                           type);
+                           type,
+                           layoutNHWC,
+                           num_groups);
     }
     default: {
         MIOPEN_THROW("unsupported convolution dimension");
