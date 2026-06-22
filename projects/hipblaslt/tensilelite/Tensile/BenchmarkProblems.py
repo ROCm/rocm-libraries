@@ -41,7 +41,8 @@ from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution, printTypeMismatchSummary
+from Tensile.SolutionStructs.Solution import Solution
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
@@ -69,6 +70,46 @@ _CACHE_FIELDS = {
     "InternalSupportParams": "internalSupportParams",
     "CustomKernelWildcard": "customKernelWildcard",
 }
+
+# Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
+# --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
+# byte-identical across runs (T8) and the value is large enough that addFromCSV's winner
+# selection has a well-defined winner. See the synthetic-perf caveat in
+# Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md.
+_CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
+
+
+def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutions):
+    """Write a deterministic synthetic results CSV in the schema LibraryLogic.addFromCSV
+    consumes, for the GPU-less --cpu-only path.
+
+    The real client writes one CSV row per benchmarked problem size; column 0 is the perf
+    unit header ("GFlops"), the next ``numIndices`` columns are the problem-size indices,
+    and the trailing ``numSolutions`` columns are per-solution GFlops. We mirror exactly
+    that layout (data-stub style of ProblemSizesMock in SolutionStructs/Problem.py): the
+    first data-row column repeats the gfx arch name (matching the captured real-CSV
+    fixtures), the size columns come straight from ``problemSizes.problems[*].sizes``, and
+    every solution cell is the fixed ``_CPU_ONLY_SYNTHETIC_GFLOPS`` so the file is
+    deterministic / byte-identical across runs.
+    """
+    problems = list(problemSizes.problems)
+    numIndices = len(problems[0].sizes) if problems else 0
+    # At least one solution column so addFromCSV's solutionStartIdx is well-defined.
+    numSolutions = max(int(numSolutions), 1)
+
+    header = ["GFlops"]
+    header += ["Size%d" % i for i in range(numIndices)]
+    header += ["Solution_%d" % i for i in range(numSolutions)]
+
+    lines = [",".join(header)]
+    for problem in problems:
+        row = [gfxName]
+        row += [str(int(s)) for s in problem.sizes]
+        row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
+        lines.append(",".join(row))
+
+    with open(resultsFileName, "w", newline="") as f:
+        f.write("\n".join(lines) + "\n")
 
 # 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
 # in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
@@ -182,7 +223,7 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
                 debugConfig.printSolutionRejectionReason,
                 debugConfig.printIndexAssignmentInfo,
                 assembler,
-                isaInfoMap
+                isaInfoMap,
             )
             if solutionObject["Valid"]:
                 return solutionObject
@@ -190,6 +231,9 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
                 print1("rejecting solution " + str(solution))
         elif debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
+    except ConfigTypeError:
+        # Re-raise so this is not swallowed by the generic except below.
+        raise
     except Exception as e:
         print(f"Error processing permutation {perm}: {e}")
     return None
@@ -249,7 +293,7 @@ def _getCustomKernelSolutionObj(
                debugConfig.printSolutionRejectionReason,
                debugConfig.printIndexAssignmentInfo,
                assembler,
-               isaInfoMap
+               isaInfoMap,
            )
 
     return sol
@@ -510,7 +554,8 @@ def writeBenchmarkFiles(
     return codeObjectFiles, libraryFileRel
 
 
-def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx, useCache,
+def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
+                          outerBenchmarkIdx, configPath, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
@@ -534,7 +579,13 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
     print1("# Converting Config to BenchmarkProcess Object")
     print1(HR)
     print1("")
-    benchmarkProcess = BenchmarkProcess(problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo)
+    # Pass the YAML location prefix so type-mismatch errors carry a clear
+    # path like ``BenchmarkProblems[<outer>][<1+sizeGroup>].ForkParameters.<Key>``.
+    keyPathPrefix = f"BenchmarkProblems[{outerBenchmarkIdx}][{1 + problemSizeGroupIdx}]"
+    benchmarkProcess = BenchmarkProcess(
+        problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo,
+        keyPathPrefix=keyPathPrefix, srcFile=configPath,
+    )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
     groupName = "{}_{:02d}".format(str(benchmarkProcess.problemType), problemSizeGroupIdx)
@@ -738,6 +789,16 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
+            # --cpu-only plumbing: runClient covered the config/run-script writing then
+            # stubbed the device launch (returncode 0). The device never produced a perf
+            # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
+            # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
+            # existing skip-if-already-benchmarked guard.
+            if globalParameters["CpuOnly"]:
+                numSolutions = len(solutions) if solutions else 1
+                _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
+                                          gfxName, numSolutions)
+
             if returncode:
                 benchmarkTestFails += 1
                 printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
@@ -788,7 +849,13 @@ def main(
     benchmarkDataPath = ensurePath(outputPath / BENCHMARK_DATA_DIR)
 
     totalTestFails = 0
-    for benchmarkProblemTypeConfig in config:
+    # Recover the originating YAML path (or first of a list) so input-YAML
+    # validation errors can carry a file:line prefix in their message.
+    configPath = globalParameters.get("ConfigPath", "")
+    if isinstance(configPath, (list, tuple)):
+        configPath = configPath[0] if configPath else ""
+
+    for outerIdx, benchmarkProblemTypeConfig in enumerate(config):
         problemTypeConfig = benchmarkProblemTypeConfig[0]
         if len(benchmarkProblemTypeConfig) < 2:
             problemSizeGroupConfigs = [{}]
@@ -820,6 +887,8 @@ def main(
                             problemTypeConfig,
                             sizeGroupConfig,
                             idx,
+                            outerIdx,
+                            configPath,
                             useCache,
                             asmToolchain,
                             srcToolchain,
@@ -855,9 +924,6 @@ def main(
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )
-
-    # Print summary of any parameter type mismatches found during ProblemType creation
-    printTypeMismatchSummary()
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

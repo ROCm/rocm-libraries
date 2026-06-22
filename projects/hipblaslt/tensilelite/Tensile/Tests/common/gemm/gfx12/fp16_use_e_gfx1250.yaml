@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   DataInitTypeA: 3
@@ -62,7 +62,7 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -70,7 +70,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [-1]
         - StaggerU: [0]
