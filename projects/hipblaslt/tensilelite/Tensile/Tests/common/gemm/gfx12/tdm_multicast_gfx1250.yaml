@@ -3,7 +3,6 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print

@@ -16,7 +16,6 @@ GlobalParameters:
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   KernelTime: True
-  NewClient: 2
   PrintIndexAssignments: 1
   # PrintSolutionRejectionReason: 1
   Device: 0

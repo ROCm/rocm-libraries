@@ -4,7 +4,6 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
