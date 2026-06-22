@@ -1446,7 +1446,7 @@ MAINLOOP:
       [ 5] gr_inc     gr_inc(B)
       [ 6] gr_inc     gr_inc(SA)
       [ 7] gr_inc     gr_inc(SB)
-      [ 8] inline     inline(initD_overlap)
+      [ 8] inline     inline(initC_overlap)
       [ 9] wait_gr    wait_gr(0)
       [10] sync       sync
       [11] lr         LR A  (MT n, subIterK [0]) [0-7]
@@ -1484,7 +1484,7 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-7]
       [ 2] gr         GR SA (MT n, subIterK [0,1]) ids [0-7]
       [ 3] gr         GR SB (MT n, subIterK [0,1]) ids [0-7]
-      [ 4] inline     inline(initD_overlap)
+      [ 4] inline     inline(initC_overlap)
       [ 5] wait_gr    wait_gr(0)
       [ 6] sync       sync
       [ 7] lr         LR A  (MT n, subIterK [0]) [0-7]
@@ -1518,7 +1518,7 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
-      [ 4] inline     inline(initD_overlap)
+      [ 4] inline     inline(initC_overlap)
       [ 5] wait_gr    wait_gr(0)
       [ 6] sync       sync
       [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
@@ -1537,7 +1537,7 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
-      [ 4] inline     inline(initD_overlap)
+      [ 4] inline     inline(initC_overlap)
       [ 5] wait_gr    wait_gr(0)
       [ 6] sync       sync
       [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
