@@ -252,6 +252,17 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     if numGpus > 1 and forBenchmark:
       return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
 
+    # --cpu-only plumbing: short-circuit the device boundary. The client-config writing
+    # (writeClientConfigIni / writeClientConfig) ran upstream in the benchmark flow and is
+    # real coverage we keep. The remaining steps -- writeRunScript (which embeds the
+    # device-bound client executable path via getClientExecutablePath, raising GPU-less
+    # when PrebuiltClient is absent) and the subprocess.Popen launch -- both require a GPU,
+    # so we skip them and return a 0 returncode. The synthetic results CSV is written by
+    # the call site (BenchmarkProblems.py) under the same flag.
+    if globalParameters["CpuOnly"]:
+      print1("# CpuOnly: skipping device-bound client launch; returning returncode 0.")
+      return 0
+
     # Original single-GPU path
     runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 

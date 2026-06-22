@@ -1255,7 +1255,6 @@ def checkParametersAreValid(
     from .TypeValidationErrors import (
         ConfigTypeError,
         formatMismatch,
-        _STRICT_GATE_ENABLED,
     )
 
     (name, values) = param
@@ -1270,8 +1269,7 @@ def checkParametersAreValid(
         )
 
     runTypeCheck = (
-        _STRICT_GATE_ENABLED
-        and name in _expectedParamTypes
+        name in _expectedParamTypes
         and name not in _skipTypeCheck
     )
 
@@ -1323,11 +1321,8 @@ def validateInternalSupportParams(
         return
 
     from .TypeValidationErrors import (
-        ConfigTypeError, formatMismatch, _STRICT_GATE_ENABLED,
+        ConfigTypeError, formatMismatch,
     )
-
-    if not _STRICT_GATE_ENABLED:
-        return
 
     # defaultInternalSupportParams lives in Common/GlobalParameters; import
     # lazily because that module pulls in a lot.

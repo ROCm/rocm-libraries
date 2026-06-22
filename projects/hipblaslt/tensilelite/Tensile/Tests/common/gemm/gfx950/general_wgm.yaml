@@ -12,8 +12,8 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
   DeviceLDS: 163840
@@ -57,7 +57,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -67,14 +67,14 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [2]
         #- StreamKXCCMapping: [8]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
@@ -95,7 +95,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -105,14 +105,14 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [2]
         #- StreamKXCCMapping: [8]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
@@ -134,7 +134,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -145,12 +145,12 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [-1,0,1]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
@@ -169,7 +169,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -180,12 +180,12 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [-1,0,1]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
