@@ -12,22 +12,47 @@
 
 int main()
 {
-    auto data = non_ascii_test();
-    auto it   = data.find("non_ascii_test.txt");
-    assert(it != data.end());
+    const auto data = non_ascii_test();
+    const auto it   = data.find("non_ascii_test.txt");
+    if(it == data.end())
+    {
+        std::cerr << "Embedded file 'non_ascii_test.txt' not found\n";
+        return 1;
+    }
 
-    auto content = it->second;
-    assert(!content.empty());
-    assert(content.find("\xe2\x80\x94") != std::string_view::npos);
+    const std::string_view content = it->second;
+    if(content.empty())
+    {
+        std::cerr << "Embedded content is empty\n";
+        return 1;
+    }
+    if(content.find("\xe2\x80\x94") == std::string_view::npos)
+    {
+        std::cerr << "Expected UTF-8 em dash bytes not found in embedded content\n";
+        return 1;
+    }
 
     std::ifstream file(std::string(SOURCE_DIR) + "/non_ascii_test.txt", std::ios::binary);
-    assert(file.is_open());
+    if(!file.is_open())
+    {
+        std::cerr << "Failed to open source file non_ascii_test.txt\n";
+        return 1;
+    }
 
     std::vector<char> original((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
 
-    assert(content.size() == original.size());
-    assert(std::memcmp(content.data(), original.data(), content.size()) == 0);
+    if(content.size() != original.size())
+    {
+        std::cerr << "Size mismatch: embedded=" << content.size() << " original=" << original.size()
+                  << "\n";
+        return 1;
+    }
+    if(std::memcmp(content.data(), original.data(), content.size()) != 0)
+    {
+        std::cerr << "Content mismatch between embedded and original file\n";
+        return 1;
+    }
 
     std::cout << "Non-ASCII embed regression test passed." << std::endl;
     return 0;

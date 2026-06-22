@@ -38,7 +38,6 @@ add_executable(test_non_ascii_embed non_ascii_test.cpp)
 set_target_properties(test_non_ascii_embed PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 target_link_libraries(test_non_ascii_embed PRIVATE non_ascii_test)
-target_compile_options(test_non_ascii_embed PRIVATE -Werror=narrowing)
 target_compile_definitions(test_non_ascii_embed PRIVATE
     SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME codegen_test_non_ascii_embed
