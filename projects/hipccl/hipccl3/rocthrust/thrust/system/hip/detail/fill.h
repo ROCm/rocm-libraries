@@ -84,7 +84,7 @@ template <class Derived, class ForwardIterator, class T>
 void THRUST_HOST_DEVICE
 fill(execution_policy<Derived>& policy, ForwardIterator first, ForwardIterator last, const T& value)
 {
-  hip_rocprim::fill_n(policy, first, thrust::distance(first, last), value);
+  hip_rocprim::fill_n(policy, first, _THRUST_STD::distance(first, last), value);
 } // func fill
 
 } // namespace hip_rocprim

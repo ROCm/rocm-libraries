@@ -76,7 +76,7 @@ TEST(TransformInputOutputIteratorVectorTests, TestTransformInputOutputIteratorTr
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using input_func  = thrust::negate<int>;
+  using input_func  = _THRUST_STD::negate<int>;
   using output_func = thrust::square<int>;
   using base_it     = thrust::host_vector<int>::iterator;
 
@@ -112,7 +112,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using InputFunction  = thrust::negate<T>;
+  using InputFunction  = _THRUST_STD::negate<T>;
   using OutputFunction = thrust::square<T>;
   using Iterator       = typename Vector::iterator;
 
@@ -150,7 +150,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using InputFunction  = thrust::negate<T>;
+  using InputFunction  = _THRUST_STD::negate<T>;
   using OutputFunction = thrust::square<T>;
 
   Vector input(4);
@@ -197,14 +197,14 @@ TYPED_TEST(TransformInputOutputIteratorVariableUnitTests, TestTransformInputOutp
 
     // run on host (uses forward iterator negate)
     thrust::inclusive_scan(
-      thrust::make_transform_input_output_iterator(h_data.begin(), thrust::negate<T>(), ::internal::identity{}),
-      thrust::make_transform_input_output_iterator(h_data.end(), thrust::negate<T>(), ::internal::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.begin(), _THRUST_STD::negate<T>(), ::internal::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.end(), _THRUST_STD::negate<T>(), ::internal::identity{}),
       h_result.begin());
     // run on device (uses reverse iterator negate)
     thrust::inclusive_scan(
       d_data.begin(),
       d_data.end(),
-      thrust::make_transform_input_output_iterator(d_result.begin(), thrust::square<T>(), thrust::negate<T>()));
+      thrust::make_transform_input_output_iterator(d_result.begin(), thrust::square<T>(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQ(h_result, d_result);
   }

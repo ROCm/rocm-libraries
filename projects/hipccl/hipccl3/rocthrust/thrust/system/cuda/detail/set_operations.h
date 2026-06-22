@@ -1151,8 +1151,8 @@ THRUST_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> set_operations(
 {
   using size_type = thrust::detail::it_difference_t<KeysIt1>;
 
-  size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-  size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+  size_type num_keys1 = static_cast<size_type>(_THRUST_STD::distance(keys1_first, keys1_last));
+  size_type num_keys2 = static_cast<size_type>(_THRUST_STD::distance(keys2_first, keys2_last));
 
   if (num_keys1 + num_keys2 == 0)
   {
@@ -1248,7 +1248,7 @@ OutputIt _CCCL_HOST_DEVICE set_difference(
 {
   THRUST_CDP_DISPATCH(
     (using items1_t = thrust::detail::it_value_t<ItemsIt1>; items1_t* null_ = nullptr;
-     auto tmp = __set_operations::set_operations<thrust::detail::false_type>(
+     auto tmp = __set_operations::set_operations<_THRUST_STD::false_type>(
        policy,
        items1_first,
        items1_last,
@@ -1295,7 +1295,7 @@ OutputIt _CCCL_HOST_DEVICE set_intersection(
 {
   THRUST_CDP_DISPATCH(
     (using items1_t = thrust::detail::it_value_t<ItemsIt1>; items1_t* null_ = nullptr;
-     auto tmp = __set_operations::set_operations<thrust::detail::false_type>(
+     auto tmp = __set_operations::set_operations<_THRUST_STD::false_type>(
        policy,
        items1_first,
        items1_last,
@@ -1342,7 +1342,7 @@ OutputIt _CCCL_HOST_DEVICE set_symmetric_difference(
 {
   THRUST_CDP_DISPATCH(
     (using items1_t = thrust::detail::it_value_t<ItemsIt1>; items1_t* null_ = nullptr;
-     auto tmp = __set_operations::set_operations<thrust::detail::false_type>(
+     auto tmp = __set_operations::set_operations<_THRUST_STD::false_type>(
        policy,
        items1_first,
        items1_last,
@@ -1389,7 +1389,7 @@ OutputIt _CCCL_HOST_DEVICE set_union(
 {
   THRUST_CDP_DISPATCH(
     (using items1_t = thrust::detail::it_value_t<ItemsIt1>; items1_t* null_ = nullptr;
-     auto tmp = __set_operations::set_operations<thrust::detail::false_type>(
+     auto tmp = __set_operations::set_operations<_THRUST_STD::false_type>(
        policy,
        items1_first,
        items1_last,
@@ -1451,7 +1451,7 @@ pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE set_difference_by_key(
 {
   auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<thrust::detail::true_type>(
+    (ret = __set_operations::set_operations<_THRUST_STD::true_type>(
        policy,
        keys1_first,
        keys1_last,
@@ -1527,7 +1527,7 @@ pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE set_intersection_by_key(
 {
   auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<thrust::detail::true_type>(
+    (ret = __set_operations::set_operations<_THRUST_STD::true_type>(
        policy,
        keys1_first,
        keys1_last,
@@ -1601,7 +1601,7 @@ pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE set_symmetric_difference_by_
 {
   auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<thrust::detail::true_type>(
+    (ret = __set_operations::set_operations<_THRUST_STD::true_type>(
        policy,
        keys1_first,
        keys1_last,
@@ -1678,7 +1678,7 @@ pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE set_union_by_key(
 {
   auto ret = thrust::make_pair(keys_result, items_result);
   THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<thrust::detail::true_type>(
+    (ret = __set_operations::set_operations<_THRUST_STD::true_type>(
        policy,
        keys1_first,
        keys1_last,

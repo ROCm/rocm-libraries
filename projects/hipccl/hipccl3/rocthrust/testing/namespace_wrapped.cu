@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ void TestWrappedNamespace()
   THRUST_NS_QUALIFIER::device_vector<int> d_out(n);
 
   ::wrap_thrust::thrust::transform(
-    in_1_begin, in_1_begin + n, in_2_begin, d_out.begin(), ::wrap_thrust::thrust::plus<>{});
+    in_1_begin, in_1_begin + n, in_2_begin, d_out.begin(), ::wrap_thrust::_THRUST_STD::plus<>{});
 
   ::wrap_thrust::thrust::host_vector<int> h_out(d_out);
 

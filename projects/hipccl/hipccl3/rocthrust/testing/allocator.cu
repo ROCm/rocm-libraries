@@ -128,7 +128,7 @@ struct my_allocator_with_custom_destroy
     return !(*this == other);
   }
 
-  using is_always_equal = thrust::detail::true_type;
+  using is_always_equal = _THRUST_STD::true_type;
 
   // use composition rather than inheritance
   // to avoid inheriting std::allocator's member

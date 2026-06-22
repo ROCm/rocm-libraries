@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,8 +35,8 @@ void TestNvccIndependenceTransform(void)
   thrust::host_vector<T> h_output(n);
   thrust::device_vector<T> d_output(n);
 
-  thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>());
-  thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>());
+  thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::negate<T>());
+  thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::negate<T>());
 
   ASSERT_EQUAL(h_output, d_output);
 }
@@ -84,8 +84,8 @@ void TestNvccIndependenceSort(void)
   thrust::host_vector<T> h_data   = unittest::random_integers<T>(n);
   thrust::device_vector<T> d_data = h_data;
 
-  thrust::sort(h_data.begin(), h_data.end(), thrust::less<T>());
-  thrust::sort(d_data.begin(), d_data.end(), thrust::less<T>());
+  thrust::sort(h_data.begin(), h_data.end(), _THRUST_STD::less<T>());
+  thrust::sort(d_data.begin(), d_data.end(), _THRUST_STD::less<T>());
 
   ASSERT_EQUAL(h_data, d_data);
 }
