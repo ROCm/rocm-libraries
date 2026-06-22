@@ -135,11 +135,11 @@ struct data_layout_t
 
     /**
      * @brief Constructs a new `data_layout_t` object capturing a full range of logical
-     * indices with one batch axis, and default in-buffer strides (enforcing in-buffer
-     * contiguity for the innermost length axis).
+     * indices with possibly many batch axes, and default in-buffer strides (enforcing
+     * in-buffer contiguity for the innermost length axis).
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
-     * @param[in] batch span of the logical index range along its batch axis.
+     * @param[in] batches spans of the logical index range along all batch axes.
      * @param[in] real_case_with_padding flag setting the in-buffer stride of the
      * layout's first non-contiguous axis to the value that is required in real
      * domain for real, in-place Discrete Fourier Transforms.
@@ -147,8 +147,16 @@ struct data_layout_t
      * @throw An `std::invalid_argument` is thrown if `lengths` is empty.
      */
     static data_layout_t default_full_layout(const std::vector<size_t>& lengths,
-                                             size_t                     batch,
+                                             const std::vector<size_t>& batches,
                                              bool real_case_with_padding = false);
+
+    // convenience overload for the common unidimensional batch case
+    inline static data_layout_t default_full_layout(const std::vector<size_t>& lengths,
+                                                    size_t                     batch,
+                                                    bool real_case_with_padding = false)
+    {
+        return default_full_layout(lengths, std::vector<size_t>(1, batch), real_case_with_padding);
+    }
 
     /**
      * @return The number of length axes.
