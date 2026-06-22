@@ -1,3 +1,4 @@
 rocm-docs-core==1.35.0
+sphinxcontrib-datatemplates==0.11.0
 autodoc
 joblib  # Required dependency for API doc-string generation

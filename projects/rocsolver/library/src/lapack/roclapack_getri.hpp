@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -166,7 +166,8 @@ rocblas_int getri_get_blksize(const rocblas_int dim)
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_getri_getMemorySize(const rocblas_int n,
+void rocsolver_getri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
                                    size_t* size_work2,
@@ -192,8 +193,12 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
 
 #ifdef OPTIMAL
+    // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
+    // n <= wavefront size
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     // if tiny size, no workspace needed
-    if((n <= GETRI_TINY_SIZE && !ISBATCHED) || (n <= GETRI_BATCH_TINY_SIZE && ISBATCHED))
+    if((n <= std::min(GETRI_TINY_SIZE, props->warpSize) && !ISBATCHED)
+       || (n <= std::min(GETRI_BATCH_TINY_SIZE, props->warpSize) && ISBATCHED))
     {
         *size_work1 = 0;
         *size_work2 = 0;
@@ -210,8 +215,9 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
     size_t unused, w1a = 0, w1b = 0, w2a = 0, w2b = 0, w3a = 0, w3b = 0, w4a = 0, w4b = 0, t1, t2;
 
     // requirements for calling TRTRI
-    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(rocblas_diagonal_non_unit, n, batch_count,
-                                                       &w1b, &w2b, &w3b, &w4b, &t2, &unused, &opt1);
+    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(handle, rocblas_diagonal_non_unit, n,
+                                                       batch_count, &w1b, &w2b, &w3b, &w4b, &t2,
+                                                       &unused, &opt1);
 
     // size of array of pointers (batched cases)
     if(BATCHED)
@@ -221,7 +227,7 @@ void rocsolver_getri_getMemorySize(const rocblas_int n,
 
 #ifdef OPTIMAL
     // if small size nothing else is needed
-    if(n <= TRTRI_MAX_COLS)
+    if(n <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         *size_work1 = w1b;
         *size_work2 = w2b;
@@ -330,7 +336,11 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
 
 #ifdef OPTIMAL
-    if((n <= GETRI_TINY_SIZE && !ISBATCHED) || (n <= GETRI_BATCH_TINY_SIZE && ISBATCHED))
+    // the optimized small/tiny kernels are warp-synchronous, so they are only valid for
+    // n <= wavefront size
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if((n <= std::min(GETRI_TINY_SIZE, props->warpSize) && !ISBATCHED)
+       || (n <= std::min(GETRI_BATCH_TINY_SIZE, props->warpSize) && ISBATCHED))
     {
         return getri_run_small<T>(handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info,
                                   batch_count, true, pivot);
@@ -347,7 +357,7 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
 
 #ifdef OPTIMAL
     // if small size, use optimized kernel for stage 2
-    if(n <= TRTRI_MAX_COLS)
+    if(n <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         return getri_run_small<T>(handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info,
                                   batch_count, false, pivot);

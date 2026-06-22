@@ -48,7 +48,14 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.ptr_q = qPtr;
     args.ptr_k = kPtr;
     args.ptr_v = vPtr;
-    args.ptr_lse = nullptr; // POC: no LSE output (withStats = false)
+    if(_params.lseUid >= 0)
+    {
+        args.ptr_lse = uidToPtrMap.at(_params.lseUid);
+    }
+    else
+    {
+        args.ptr_lse = nullptr;
+    }
 
     // Attention scale
     args.scalar = _params.attnScale;
@@ -83,7 +90,7 @@ void SdpaFwdPlan::execute(const Handle& handle,
     }
 
     args.s_opt = tuneOpt;
-    args.s_lse = 0; // POC: don't compute LSE
+    args.s_lse = (_params.lseUid >= 0) ? 1 : 0;
 
     // KV dimensions
     args.s_kv_seq_len = _params.seqLenKv;
@@ -105,8 +112,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.ptr_qseq = nullptr;
     args.ptr_kseq = nullptr;
 
-    // LSE stride (not used since ptr_lse = nullptr)
-    args.s_lse_Hs = 0;
+    // LSE stride (head dimension, in bytes)
+    constexpr unsigned int K_FP32_SIZE = 4;
+    args.s_lse_Hs = (_params.lseUid >= 0) ? _params.lseStrideHead * K_FP32_SIZE : 0;
 
     // Padding pointers (nullptr for batch mode)
     args.ptr_qseq_padding = nullptr;

@@ -622,10 +622,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   if padBytes == 0:
     module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
   else:
-    rowStrideSgpr = writer.sgprPool.checkOut(1)
-    module.add(SMovB32(dst=sgpr(rowStrideSgpr), src=hex(ldsRowStride), comment="LDS row stride (incl 16B TDM pad)"))
-    module.add(VMulLOU32(dst=vgpr(rowOffset), src0=sgpr(rowStrideSgpr), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
-    writer.sgprPool.checkIn(rowStrideSgpr)
+    module.add(VMulLOU32(dst=vgpr(rowOffset), src0=hex(ldsRowStride), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
   _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
   _computeLROffset(module, tileInfoB, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
   writer.vgprPool.checkIn(tmpVgpr)

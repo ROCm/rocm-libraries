@@ -14,8 +14,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeScaleAlphaVec: 2
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200
   PrintSolutionRejectionReason: True
   UseUserArgs: False
@@ -56,17 +56,17 @@ BenchmarkProblems:
         - ClusterLocalRead: [0]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - StaggerU: [32]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [1]
@@ -74,7 +74,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [0]
         - LocalReadVectorWidth: [4]
         - PrefetchGlobalRead: [2]
-        - ForceDisableShadowInit: [0, 1]
+        - ForceDisableShadowInit: [false, true]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
       BenchmarkJoinParameters:
