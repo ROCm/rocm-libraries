@@ -60,7 +60,7 @@ exclude: |
     projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb/.*|
     projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb_cubic_v/.*|
     projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb-linear_v/.*
-    
+
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
