@@ -8,5 +8,4 @@ target_sources(stinkytofu_objs PRIVATE
     Function.cpp
     PassManager.cpp
     DebugPrintInstrumentation.cpp
-    DAGScheduleJsonWriter.cpp
 )

@@ -22,46 +22,38 @@
  * ************************************************************************ */
 #pragma once
 
+#include <iostream>
 #include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
 
-#include "stinkytofu/Export.hpp"
+#include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/core/PassInstrumentation.hpp"
 
 namespace stinkytofu {
 
-struct StinkyInstruction;
-
-/// One-line, JSON-safe label for a DAG node (opcode / mnemonic + trimmed operands).
-STINKYTOFU_EXPORT std::string instructionJsonLabel(const StinkyInstruction& inst);
-
-/// UTF-8 JSON for tools/stinkytofu-analysis: register-dependency edges plus before/after
-/// instruction order per region (schema stinkytofu-dag-schedule-v1). Used by PassManager pass-order
-/// snapshots.
-class STINKYTOFU_EXPORT DAGScheduleJsonCollector {
+/// Run StinkyTofu Assembly IR verification after every pass (LLVM `-verify-each`
+/// style). Reports the first failure to stderr, tagged with the pass that just
+/// ran, so a corruption is attributed to the exact transform that introduced it.
+///
+/// This is the unified, opt-in verification observer: prefer it over inserting a
+/// StinkyIRVerifierPass at a single point when you want per-pass attribution.
+class VerifyInstrumentation : public PassInstrumentation {
    public:
-    DAGScheduleJsonCollector(std::string outputPath, std::string functionName);
-    ~DAGScheduleJsonCollector();
+    explicit VerifyInstrumentation(AsmVerifierConfig config = {}) : config_(config) {
+        // verify-each attributes failures per pass, so never abort inside the
+        // verifier -- otherwise the offending pass name would not be reported.
+        config_.abortOnError = false;
+    }
 
-    DAGScheduleJsonCollector(const DAGScheduleJsonCollector&) = delete;
-    DAGScheduleJsonCollector& operator=(const DAGScheduleJsonCollector&) = delete;
-
-    void addRegion(const std::string& title,
-                   const std::vector<std::pair<unsigned, std::string>>& nodeIdAndLabel,
-                   const std::vector<std::pair<unsigned, unsigned>>& edges,
-                   const std::vector<unsigned>& programOrderNodeIds,
-                   const std::vector<unsigned>& scheduledOrderNodeIds);
-
-    void finalize();
+    void afterPass(const std::string& passName, Function& F, PassContext& /*ctx*/) override {
+        std::string error = validateStinkyIR(F, config_);
+        if (!error.empty()) {
+            std::cerr << "[verify-each] StinkyTofu ASM IR invalid after " << passName << ": "
+                      << error << '\n';
+        }
+    }
 
    private:
-    std::string escapeJson(std::string_view s) const;
-
-    std::string outputPath_;
-    std::string functionName_;
-    std::vector<std::string> regionsJson_;
-    bool finalized_ = false;
+    AsmVerifierConfig config_;
 };
 
 }  // namespace stinkytofu
