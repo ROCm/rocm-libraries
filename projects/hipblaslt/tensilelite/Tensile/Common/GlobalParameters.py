@@ -813,7 +813,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate. Three categories:
     #   - Dead (no consumer anywhere; safe to silently drop):
-    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
     "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
