@@ -212,6 +212,28 @@ std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
     return test_cases;
 }
 
+// Shape subsets for the tiered instantiations. The complete shape list stays in
+// BNInferTestConfigs (used by the Full instantiations); these keep Smoke
+// (pre-commit) and Standard (per-CI) cheap while preserving a representative
+// spread (resnet50 shapes are ordered large-spatial first, large-channel next).
+template <typename T>
+std::vector<BNTestCase> BNInferTestConfigsSmoke(miopenBatchNormMode_t mode)
+{
+    auto cases = BNInferTestConfigs<T>(mode);
+    if(cases.size() > 2)
+        cases.resize(2);
+    return cases;
+}
+
+template <typename T>
+std::vector<BNTestCase> BNInferTestConfigsStandard(miopenBatchNormMode_t mode)
+{
+    auto cases = BNInferTestConfigs<T>(mode);
+    if(cases.size() > 4)
+        cases.resize(4);
+    return cases;
+}
+
 struct TestNameGenerator
 {
     std::string

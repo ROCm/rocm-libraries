@@ -279,6 +279,24 @@ std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode
     return activations;
 }
 
+// Activation subsets for the tiered instantiations. The full list stays in
+// ActivationConfigs() (used by the Full instantiations).
+std::vector<miopenActivationMode_t> ActivationConfigsSmoke(miopenBatchNormMode_t mode)
+{
+    auto a = ActivationConfigs(mode);
+    if(a.size() > 1)
+        a.resize(1);
+    return a;
+}
+
+std::vector<miopenActivationMode_t> ActivationConfigsStandard(miopenBatchNormMode_t mode)
+{
+    auto a = ActivationConfigs(mode);
+    if(a.size() > 2)
+        a.resize(2);
+    return a;
+}
+
 } // namespace BatchNormFwdInfer
 using namespace BatchNormFwdInfer;
 
@@ -342,45 +360,36 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
+// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
+// representative subsets; Full (comprehensive/nightly) runs the complete
+// activation x shape x layout cross product so no coverage is lost.
+#define BN_FWD_INFER_TIERS(SUITE, T, MODE)                                                         \
+    INSTANTIATE_TEST_SUITE_P(Smoke,                                                                \
+                             SUITE,                                                                \
+                             testing::Combine(testing::ValuesIn(ActivationConfigsSmoke(MODE)),     \
+                                              testing::ValuesIn(BNInferTestConfigsSmoke<T>(MODE)), \
+                                              testing::Values(miopenTensorNCHW)),                  \
+                             TestNameGenerator());                                                 \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Standard,                                                                                  \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigsStandard(MODE)),                       \
+                         testing::ValuesIn(BNInferTestConfigsStandard<T>(MODE)),                   \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());                                                                      \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Full,                                                                                      \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigs(MODE)),                               \
+                         testing::ValuesIn(BNInferTestConfigs<T>(MODE)),                           \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());
+
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_FP32, float, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_FP32, float, miopenBNPerActivation)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_FP16, half_float::half, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_FP16, half_float::half, miopenBNPerActivation)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_BFP16, bfloat16, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_BFP16, bfloat16, miopenBNPerActivation)
+
+#undef BN_FWD_INFER_TIERS

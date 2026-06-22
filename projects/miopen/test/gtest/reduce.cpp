@@ -803,6 +803,57 @@ inline auto GetCases()
     return cases;
 }
 
+// Smoke (pre-commit) tier: a tiny representative subset -- a couple of
+// reduce-dimension layouts crossed with a few representative ops, no indices,
+// single alpha/beta. The complete cross product stays in the Full instantiation.
+template <typename T>
+inline auto GenCasesSmoke()
+{
+    std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}};
+
+    // Reduce cases are expensive (each distinct op/dim compiles a kernel), so
+    // keep Smoke minimal: canonical ADD op over a partial and a full reduction.
+    // Other ops (AMAX/NORM2) are exercised by the Standard tier on every CI.
+    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+                            testing::ValuesIn(std::vector<std::vector<int>>{{0}, {0, 1, 2, 3}}),
+                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD),
+                            testing::Values(0),
+                            testing::Values(0),
+                            testing::ValuesIn(alphabetas));
+}
+
+// Standard (per-CI) tier: all reduce-dimension layouts crossed with a few
+// representative ops. Broader than Smoke, far cheaper than the full cross
+// product (which remains in the Full instantiation).
+template <typename T>
+inline auto GenCasesStandard()
+{
+    std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}};
+
+    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+                            testing::ValuesIn(get_toreduce_dims()),
+                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD,
+                                            MIOPEN_REDUCE_TENSOR_AMAX,
+                                            MIOPEN_REDUCE_TENSOR_NORM2),
+                            testing::Values(0),
+                            testing::Values(0),
+                            testing::ValuesIn(alphabetas));
+}
+
+template <typename T>
+inline auto GetCasesSmoke()
+{
+    static const auto cases = GenCasesSmoke<T>();
+    return cases;
+}
+
+template <typename T>
+inline auto GetCasesStandard()
+{
+    static const auto cases = GenCasesStandard<T>();
+    return cases;
+}
+
 inline auto GetCasesReduceCustomTestSet1()
 {
     static TestCase test_case = std::make_tuple(std::vector<size_t>{1024, 30528, 1},
@@ -1164,8 +1215,15 @@ TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
+// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
+// subsets; Full (comprehensive/nightly) runs the complete cross product so no
+// coverage is lost. See GenCasesSmoke/GenCasesStandard above.
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCasesSmoke<float>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP32, GetCasesStandard<float>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP32, GetCases<float>());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCasesSmoke<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP16, GetCasesStandard<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP16, GetCases<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
 
 // Reduce Custom Tests

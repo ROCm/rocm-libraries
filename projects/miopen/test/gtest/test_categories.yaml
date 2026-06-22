@@ -15,6 +15,8 @@ positive_patterns: &positive_patterns
   - "*/GPU_BNActivInfer_*"
   - "*/GPU_BNOCLInfer*_*"
   - "*/GPU_bn_infer*_*"
+  - "*/GPU_bn_activ_infer_*"
+  - "*/GPU_bn_fwd_infer_*"
   - "CPU_*"
   - "*/CPU_*"
   - "*/GPU_Cat_*"
@@ -111,6 +113,12 @@ test_categories:
       - "*DeepBench*"
       - "*MIOpenTestConv*"
       - "Full/GPU_Reduce_FP64*"
+      # Tiered suites: the complete (Full) cross product runs only in
+      # comprehensive/full. The Smoke + Standard instantiations still run here.
+      - "Full/GPU_Reduce_FP32*"
+      - "Full/GPU_Reduce_FP16*"
+      - "Full/GPU_bn_activ_infer_*"
+      - "Full/GPU_bn_fwd_infer_*"
       - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
