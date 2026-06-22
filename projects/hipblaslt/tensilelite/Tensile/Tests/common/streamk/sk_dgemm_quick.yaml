@@ -198,7 +198,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -302,7 +302,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -344,7 +344,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - StaggerU: [0, 32]
@@ -392,7 +392,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -455,7 +455,7 @@ BenchmarkProblems:
     #       - [16, 16, 4, 1, 1, 1,4, 2,2]
     #       - [16, 16, 4, 1, 1, 1,2, 2,2]
     #       - [16, 16, 4, 1, 1, 1,1, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -538,7 +538,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - StaggerU: [0, 32]
@@ -586,7 +586,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -649,7 +649,7 @@ BenchmarkProblems:
     #       - [16, 16, 4, 1, 1, 1,4, 2,2]
     #       - [16, 16, 4, 1, 1, 1,2, 2,2]
     #       - [16, 16, 4, 1, 1, 1,1, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -690,7 +690,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]
@@ -781,7 +781,7 @@ BenchmarkProblems:
     #     - MatrixInstruction:
     #       # - [16, 16, 4, 1, 1, 8,8, 2,2]
     #       - [16, 16, 4, 1, 1, 4,4, 2,2]
-    #     - MIArchVgpr: [0]
+    #     - MIArchVgpr: [false]
     #     - PrefetchGlobalRead: [2]
     #     - PrefetchLocalRead: [1]
     #     - ScheduleIterAlg: [3]

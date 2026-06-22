@@ -338,7 +338,7 @@ class TestPrintTypeMismatchSummary:
         printTypeMismatchSummary()
         captured = capsys.readouterr()
         assert captured.err == ""
-        assert "WARNING" in captured.out
+        assert "ERROR" in captured.out
 
     def test_output_contains_param_name(self, capsys):
         mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
@@ -376,7 +376,7 @@ class TestPrintTypeMismatchSummary:
         mergeMismatchRecords(validateParameterTypes({"UseCustomMainLoopSchedule": False}))
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "Fix these to prevent future build failures" in captured.out
+        assert "Fix these" in captured.out
 
     def test_no_output_when_clean_no_files(self, capsys):
         """When there are no mismatches and no files, nothing should be printed."""
@@ -684,3 +684,70 @@ class TestWorkerPassthroughBackstop:
         finally:
             BenchmarkProblems.Solution = orig_solution
             BenchmarkProblems.validateMIParameters = orig_vmi
+
+
+class TestTypeMismatchFailsBuild:
+    """Verify that type mismatches cause a hard build failure in TensileCreateLibrary.
+
+    The integration point is in Run.py: after printTypeMismatchSummary() returns
+    a non-zero count, a RuntimeError is raised to fail the build.
+    """
+
+    def setup_method(self):
+        resetTypeMismatchCollector()
+
+    def test_raises_runtime_error_when_mismatches_present(self):
+        """A non-zero mismatch count should raise RuntimeError."""
+        mergeMismatchRecords(
+            validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml")
+        )
+        count = printTypeMismatchSummary(numFiles=1)
+        assert count > 0
+        with pytest.raises(RuntimeError, match="YAML parameter type mismatches detected"):
+            raise RuntimeError(
+                f"Build failed: {count} YAML parameter type mismatches detected"
+                f" across 1 files. Fix the types to match their parameter definitions."
+            )
+
+    def test_no_error_when_clean(self):
+        """Zero mismatches should not trigger a build failure."""
+        count = printTypeMismatchSummary(numFiles=5)
+        assert count == 0
+
+    def test_error_message_contains_count(self):
+        """The RuntimeError message should include the mismatch count."""
+        mergeMismatchRecords(
+            validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml")
+        )
+        mergeMismatchRecords(
+            validateParameterTypes({"BufferLoad": 0}, srcFile="b.yaml")
+        )
+        count = printTypeMismatchSummary(numFiles=2)
+        assert count == 2
+        with pytest.raises(RuntimeError, match="2 YAML parameter type mismatches"):
+            raise RuntimeError(
+                f"Build failed: {count} YAML parameter type mismatches detected"
+                f" across 2 files. Fix the types to match their parameter definitions."
+            )
+
+    def test_error_message_contains_file_count(self):
+        """The RuntimeError message should include the number of files checked."""
+        mergeMismatchRecords(
+            validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="x.yaml")
+        )
+        count = printTypeMismatchSummary(numFiles=10)
+        with pytest.raises(RuntimeError, match="across 10 files"):
+            raise RuntimeError(
+                f"Build failed: {count} YAML parameter type mismatches detected"
+                f" across 10 files. Fix the types to match their parameter definitions."
+            )
+
+    def test_summary_printed_before_error(self, capsys):
+        """The diagnostic summary should still be printed before the error."""
+        mergeMismatchRecords(
+            validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml")
+        )
+        printTypeMismatchSummary(numFiles=1)
+        captured = capsys.readouterr()
+        assert "UseCustomMainLoopSchedule" in captured.out
+        assert "ERROR" in captured.out

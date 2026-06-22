@@ -99,7 +99,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         # - LocalReadVectorWidth: [4,8]
-        # - SourceSwap: [0,1]
+        # - SourceSwap: [false,true]
         - UseSgprForGRO: [1]
       BenchmarkForkParameters:
       JoinParameters:
