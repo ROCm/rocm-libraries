@@ -1105,6 +1105,12 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
   mod.add(comp.setDataType(dtype, descSgprName(1)))
   mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+  # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
+  # Subtile loads both A and B on every wave, so it uses split masks
+  # (MulticastMask{tc}), not the non-subtile single parity mask.
+  enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+  if kernel["Multicast"] and enableCluster:
+    mod.add(comp.setMulticastMask(descSgprName(1), f"MulticastMask{tc}", writer))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx

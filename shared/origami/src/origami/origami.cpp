@@ -82,7 +82,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
   auto num_timesteps =
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
-  auto split_factor = math::safe_ceil_div(skGrid, numMTs);
+  auto split_factor = math::safe_ceil_div(skGrid, numMTs * batch);
 
   // Stream-K fixup deadlock prevention:
   // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
@@ -91,6 +91,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // The chunk transform reorders WG IDs across XCDs, breaking this assumption and potentially
   // filling all GPU execution slots with spinning fixup waves resulting in a cooperative deadlock.
   bool sk_has_partial_tiles = (skGrid > 0 && skGrid < (numMTs * batch) && (numMTs * batch) % skGrid != 0);
+
+  // The same hazard exists when a single output tile is finished by more than one workgroup
+  // because the K dimension is split across workgroups (skGrid > tiles): the fixup handoff
+  // still needs a tile's co-op workgroups to stay in consecutive physical-WG order, and the
+  // chunk transform reorders them. Disable chunking whenever tiles are split or partial.
+  bool sk_split_tiles  = (skGrid > 0 && split_factor > 1);
+  bool sk_disable_chunk = sk_has_partial_tiles || sk_split_tiles;
 
   // -------------------
   // NonTemporal Cases
@@ -107,7 +114,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
     // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
-    if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+    if (sk_disable_chunk) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
@@ -149,7 +156,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgm         = 1;
     }
 
-    if (sk_has_partial_tiles) wgmxccchunk = 0;
+    if (sk_disable_chunk) wgmxccchunk = 0;
     return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
   }
 
@@ -168,7 +175,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   else
     out_wgmxccchunk = 0;
 
-  if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+  if (sk_disable_chunk) out_wgmxccchunk = 0;
 
   // -------------------
   // WGMXCC Prediction
@@ -305,6 +312,9 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Set the best WGM
     out_wgm = bestWGM;
   }
+
+  // Split/partial Stream-K tiles must not use the chunk transform (see sk_disable_chunk).
+  if (sk_disable_chunk) out_wgmxccchunk = 0;
 
   return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
 }

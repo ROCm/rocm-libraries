@@ -14,8 +14,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeScaleAlphaVec: 2
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200
   # PrintStoreRegisterDb: 1
   PrintSolutionRejectionReason: True
@@ -52,24 +52,24 @@ BenchmarkProblems:
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         # TODO GSU=2 + Algo=MB fails kernel launch
         # Was silently failing prior to exceptions being flagged as errors
         # Need to review this test case
         # - GlobalSplitU: [1, 2]
         - GlobalSplitU: [1]
-        - PreloadKernArgs: [0, 1]
+        - PreloadKernArgs: [false, true]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -107,17 +107,17 @@ BenchmarkProblems:
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         # TODO GSU=2 + Algo=MB fails kernel launch
         # Was silently failing prior to exceptions being flagged as errors
@@ -162,17 +162,17 @@ BenchmarkProblems:
         - DepthU: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         # TODO GSU=2 + Algo=MB fails kernel launch
         # Was silently failing prior to exceptions being flagged as errors
