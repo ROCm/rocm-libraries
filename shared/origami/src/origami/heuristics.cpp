@@ -29,6 +29,8 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   weight_epilogue      = other.weight_epilogue;
   weight_loop_overhead = other.weight_loop_overhead;
   weight_tile_total    = other.weight_tile_total;
+  tail_loop_overhead   = other.tail_loop_overhead;
+  tile_fixed_overhead  = other.tile_fixed_overhead;
 
   // Empirical constants
   main_memory_load_latency            = other.main_memory_load_latency;
@@ -193,8 +195,11 @@ static void apply_tf32_heuristics(heuristic_params_t& params,
     }
   }
 
-  // Bias for large K-dimension (depth upscaling)
-  if ((K >= (M * 16) && K >= (N * 16)) && (MT_K >= 128)) { params.weight_tile_total *= 0.5; }
+  // NOTE: a large-K depth-upscaling bias (MT_K>=128 -> weight_tile_total *= 0.5)
+  // was removed here: with the current GEMM model it over-credits small deep-MT_K
+  // tiles (e.g. MT64x128x128) on huge-K xf32 shapes, flipping the pick off the
+  // HW-faster shallow tile (e.g. MT192x160x32) -- a full sweep showed removing it
+  // is a clear net win (26 shapes faster, 2 negligibly slower).
 }
 
 heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
@@ -308,9 +313,9 @@ void heuristics_database_t::initialize_defaults() {
     std::vector<cms_config> bf16_nt_configs = {
         {160, 256, 64, 1.0 / 1.20},
         {192, 256, 64, 1.0 / 1.10},
-        {208, 256, 64, 1.0 / 1.20},
-        {256, 160, 64, 1.0 / 1.20},
-        {256, 192, 64, 1.0 / 1.20},
+        {208, 256, 64, 1.0 / 1.05},
+        {256, 160, 64, 1.0 / 1.05},
+        {256, 192, 64, 1.0 / 1.05},
         {256, 256, 64, 1.0 / 1.15},
     };
 
@@ -332,7 +337,7 @@ void heuristics_database_t::initialize_defaults() {
         {160, 256, 64, 1.0 / 1.10},
         {208, 256, 64, 1.0 / 1.10},
         {256, 192, 64, 1.0 / 1.00},
-        {256, 256, 64, 1.0 / 1.05},
+        {256, 256, 64, 1.0 / 1.20},
     };
 
     for (const auto& cfg : bf16_nn_configs) {
@@ -355,7 +360,7 @@ void heuristics_database_t::initialize_defaults() {
         {256, 96, 64, 1.0 / 1.10},
         {256, 192, 64, 1.0 / 1.10},
         {256, 224, 64, 1.0 / 1.05},
-        {256, 256, 64, 1.0 / 1.05},
+        {256, 256, 64, 1.0 / 1.15},
     };
 
     for (const auto& cfg : bf16_tn_configs) {

@@ -53,6 +53,11 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_EPILOGUE      = 2.0;
   static constexpr double WEIGHT_LOOP_OVERHEAD = 500.0;
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
+  static constexpr size_t CACHE_LINE_BYTES     = 128;
+  static constexpr size_t DRAM_SECTOR_BYTES    = 64;
+  static constexpr size_t LDS_XFER_BYTES       = 128;
+  static constexpr double TAIL_LOOP_OVERHEAD   = 700.0;
+  static constexpr double TILE_FIXED_OVERHEAD  = 1500.0;
 
   // Empirical Constants
   static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 200.0;
@@ -69,7 +74,7 @@ struct heuristic_defaults_t {
   static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
   static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
   static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
-  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
+  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 5.0;
   static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 1.1;
   static constexpr size_t EPILOGUE_THREADS_PER_WAVE        = 64;
   static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
@@ -77,10 +82,11 @@ struct heuristic_defaults_t {
   static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
   static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
   static constexpr double EPILOGUE_L_BARRIER                = 100.0;
-  static constexpr double EPILOGUE_L_SMEM = 900.0;  // s_load_dword(glc) cross-XCD flag poll
+  static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
   static constexpr size_t POSTGSU_COMPUTE_BYTES          = 4;  // workspace partials stored as f32
-  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 12000.0;
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 8000.0;
+  static constexpr double KERNEL_LAUNCH_OVERHEAD         = 4.5 * 2200.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
   static constexpr size_t POSTGSU_WAVEFRONT_SIZE         = 64;
 
@@ -126,6 +132,8 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   double weight_epilogue      = heuristic_defaults_t::WEIGHT_EPILOGUE;
   double weight_loop_overhead = heuristic_defaults_t::WEIGHT_LOOP_OVERHEAD;
   double weight_tile_total    = heuristic_defaults_t::WEIGHT_TILE_TOTAL;
+  double tail_loop_overhead   = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
+  double tile_fixed_overhead  = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
 
   // === Empirical Constants ===
   double main_memory_load_latency         = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;

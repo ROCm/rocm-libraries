@@ -60,6 +60,9 @@ struct ORIGAMI_EXPORT context_t {
   size_t tile_elements     = 0;
   double output_tile_bytes = 0.0;
 
+  /// Per-operand DRAM traffic (cache/mem model input).
+  operand_traffic_t traffic{};
+
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
@@ -439,7 +442,8 @@ ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
 ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
-                                const context_t& context);
+                                const context_t& context,
+                                double* scalar_store_fraction = nullptr);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.
