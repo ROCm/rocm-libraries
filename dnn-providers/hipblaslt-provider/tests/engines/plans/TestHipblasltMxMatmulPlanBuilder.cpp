@@ -5,12 +5,14 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
+#include "engines/plans/MxArchSupport.hpp"
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
@@ -158,6 +160,11 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
+        if(!hipblaslt_plugin_test::isMxSupportedArch(archName))
+        {
+            GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
+        }
         ASSERT_EQ(hipblasLtCreate(&_handle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
     }
 

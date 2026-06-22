@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
+
 #include "IntegrationGpuMatmulBase.hpp"
 #include "utils/MxMatmulUtils.hpp"
 
@@ -30,10 +32,10 @@ protected:
             return;
         }
 
-        const std::string archName = currentDeviceArchName();
+        const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
         if(!isMxSupportedArch(archName))
         {
-            GTEST_SKIP() << "MX block-scaled data types are not supported on " << archName;
+            GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
         }
     }
 

@@ -3,30 +3,22 @@
 
 #pragma once
 
-#include <string>
+#include <string_view>
 
-#include <hip/hip_runtime.h>
+#include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
 
 #include "MatmulUtils.hpp"
 
 namespace test_mx_matmul_common
 {
 
-// The current device's gcnArchName, or an empty string if it cannot be queried.
-inline std::string currentDeviceArchName()
+// hipBLASLt only ships VEC32_UE8M0 MX GEMM kernels for gfx950 and gfx1250.
+inline bool isMxSupportedArch(std::string_view archName)
 {
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-    {
-        return {};
-    }
-    return {props.gcnArchName};
-}
-
-// MX block-scaled GEMM (FP8/FP6/FP4) is supported only on gfx950 and gfx1250.
-inline bool isMxSupportedArch(const std::string& archName)
-{
-    return archName.rfind("gfx950", 0) == 0 || archName.rfind("gfx125", 0) == 0;
+    using hipdnn_test_sdk::utilities::archMatches;
+    using hipdnn_test_sdk::utilities::ArchMatchMode;
+    return archMatches(archName, "gfx950", ArchMatchMode::PREFIX)
+           || archMatches(archName, "gfx1250", ArchMatchMode::PREFIX);
 }
 
 /// MX-specific GEMM shapes. A is [M, K] transposed (col-major, opA=T) and B is

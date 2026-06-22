@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "utils/MxMatmulUtils.hpp"
@@ -128,10 +129,10 @@ protected:
             return;
         }
 
-        const std::string archName = currentDeviceArchName();
+        const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
         if(!isMxSupportedArch(archName))
         {
-            GTEST_SKIP() << "MX block-scaled data types are not supported on " << archName;
+            GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
         }
     }
 };
