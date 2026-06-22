@@ -16,7 +16,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxLDS: 163840
   CpuThreads: 1
   RotatingBufferSize: 0
   PrintSolutionRejectionReason: True

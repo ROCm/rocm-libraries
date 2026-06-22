@@ -14,7 +14,6 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   #Device: 0
   PruneSparseMode: 0
-  MaxLDS: 163840
 BenchmarkProblems:
   #######################################
   # NN - standard

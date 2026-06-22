@@ -21,7 +21,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxLDS: 163840
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
   CpuThreads: 1

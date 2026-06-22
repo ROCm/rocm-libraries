@@ -20,7 +20,6 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   KernelTime: True
-  MaxLDS: 163840
 
   #PrintSolutionRejectionReason: True
   #Device: 3

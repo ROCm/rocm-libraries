@@ -24,7 +24,6 @@ GlobalParameters:
   #MaxWorkspaceSize: 3355443200
   KernelTime: True
   #RotatingBufferSize: 512
-  MaxLDS: 163840
 
   PrintSolutionRejectionReason: True
   #Device: 3

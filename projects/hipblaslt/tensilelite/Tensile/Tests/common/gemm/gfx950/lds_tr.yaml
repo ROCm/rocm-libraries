@@ -15,7 +15,6 @@ GlobalParameters:
   Device: 0
   KeepBuildTmp: True
   PrintSolutionRejectionReason: True
-  MaxLDS: 163840
 
 BenchmarkProblems:
   ########################################

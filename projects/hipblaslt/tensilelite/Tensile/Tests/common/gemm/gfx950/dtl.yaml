@@ -16,7 +16,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   BoundsCheck: 2
   KeepBuildTmp: True
-  MaxLDS: 163840
 
 BenchmarkProblems:
   ########################################

@@ -15,7 +15,6 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  MaxLDS: 163840
   RotatingBufferSize: 512
   KeepBuildTmp: True
   #GenerateSourcesAndExit: True

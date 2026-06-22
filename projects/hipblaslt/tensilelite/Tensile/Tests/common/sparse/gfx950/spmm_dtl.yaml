@@ -8,7 +8,6 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   PruneSparseMode: 0
-  MaxLDS: 163840
   PrintSolutionRejectionReason: 1
 
 BenchmarkProblems:
