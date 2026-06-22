@@ -27,7 +27,6 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   ISA: [[12, 5, 0]]
-  # UseGPUTimer: False
 
 BenchmarkProblems:
   #######################################
