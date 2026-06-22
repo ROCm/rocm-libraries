@@ -71,8 +71,11 @@ test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
+      # Run the entire Smoke instantiation tier. Suites are kept fast at the
+      # source level (each heavy suite is split Smoke/Standard/Full), so the
+      # excludes below are reserved for genuine known failures, not for
+      # clawing back runtime.
+      - "Smoke/*"
 
     exclude:
       - "*/GPU_MIOpenDriver*"
@@ -83,22 +86,6 @@ test_categories:
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
-
-    test_files:
-      - "gtest/smoke_*.cpp"
-      - "gtest/unit_ActivationDescriptor.cpp"
-      - "gtest/unit_TensorDescriptor.cpp"
-      - "gtest/unit_FinInterface.cpp"
-      - "gtest/unit_lib_env_var.cpp"
-      - "gtest/gtest_activation.cpp"
-      - "handle_test.cpp"
-      - "gtest/handle_hip_device.cpp"
-      - "gtest/tensor_api.cpp"
-      - "gtest/tensor_test.cpp"
-      - "gtest/log.cpp"
-      - "gtest/log_test.cpp"
-      - "gtest/test_errors.cpp"
-      - "gtest/pooling2d_asymmetric.cpp"
 
     labels:
       - "quick"
@@ -364,8 +351,9 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP32*"  # 24 min
   - "Full/GPU_Softmax_BFP16*"  # 13 min
   - "Full/GPU_Softmax_FP16*" # 11.5 min
-  - "Smoke/GPU_Reduce_FP32*"  # 6.5 min
-  - "Smoke/GPU_Reduce_FP16*"  # 4.5 min
+  # Note: the former Smoke/GPU_Reduce_FP32*/FP16* excludes were dropped here.
+  # GPU_Reduce is now split Smoke/Standard/Full at the source level, so its
+  # Smoke tier is tiny; the large set lives in Full (comprehensive/nightly).
 
 exclude_gpu:
   exclude_gpu_gfx120X:
