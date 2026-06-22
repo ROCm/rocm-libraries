@@ -21,7 +21,6 @@ GlobalParameters:
   #EnqueuesPerSync: 10
   #NumWarmups: 1
   MaxLDS: 163840
-  DeviceLDS: 163840
   #AsmDebug: True
 
 BenchmarkProblems:

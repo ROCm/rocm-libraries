@@ -24,7 +24,6 @@ GlobalParameters:
   MaxFileName: 256
   KernelTime: True
   MaxLDS: 163840
-  DeviceLDS: 163840
 
   #PrintSolutionRejectionReason: True
   #Device: 3

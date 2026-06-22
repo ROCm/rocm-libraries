@@ -17,7 +17,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   BoundsCheck: 2
   KeepBuildTmp: True
-  DeviceLDS: 163840
   MaxLDS: 163840
 
 BenchmarkProblems:
