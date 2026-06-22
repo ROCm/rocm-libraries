@@ -395,6 +395,22 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
+# Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
+# When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
+# probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
+# This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
+# must be set solely from the args.cpuOnly flag. Listed here so restoreDefaultGlobalParameters
+# resets it to False between runs/tests.
+globalParameters["CpuOnly"] = False
+
+# Companion plumbing for --cpu-only: the target gfx arch the belt spoof in
+# _detectGlobalCurrentISA returns when the direct ISA-detection path is reached
+# without an arch (e.g. a test calling detectGlobalCurrentISA directly). The primary
+# path supplies the arch via --gpu-targets and never reaches detection. Undocumented;
+# not exposed via --global-parameters. Reset here so restoreDefaultGlobalParameters
+# clears it between runs/tests.
+globalParameters["CpuOnlyArch"] = "gfx942"
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -923,18 +939,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
         printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
-
-    from .TypeValidationErrors import _STRICT_GATE_ENABLED
-
-    if not _STRICT_GATE_ENABLED:
-        for key in config:
-            if key in ignoreKeys:
-                continue
-            value = config[key]
-            if key not in globalParameters:
-                printWarning("Global parameter %s = %s unrecognised." % (key, value))
-            globalParameters[key] = value
-        return
 
     _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:

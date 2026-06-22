@@ -833,7 +833,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
-      auto skGrid   = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      auto skGrid   = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
       size_t numMT_M = (problem.size.m + config.mt.m - 1) / config.mt.m;
       size_t numMT_N = (problem.size.n + config.mt.n - 1) / config.mt.n;
 
@@ -919,9 +919,32 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
       if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 3);
+        REQUIRE(out_wgm.wgm == 4);
       else if (gpu_arch == 950)
         REQUIRE(out_wgm.wgm == 4);
+
+      // Test 8: K-split StreamK (skGrid > tiles) must NOT use the chunk transform.
+      // Splitting a tile across multiple workgroups requires the StreamK fixup, whose
+      // spin-wait handoff assumes a tile's co-op workgroups stay in consecutive physical
+      // order. The chunk remap reorders them and can deadlock, so chunking must be off.
+      {
+        auto skGrid_split = 2 * numMT_M * numMT_N;  // split_factor = 2 (skGrid > tiles)
+
+        // Non-temporal case that produces a non-zero chunk for a data-parallel grid
+        // (see Test 1) must report chunk == 0 once the grid is K-split.
+        config.cache_hints_a = 4;
+        config.cache_hints_b = 3;
+        auto out_wgm_split_nt =
+            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
+        REQUIRE(out_wgm_split_nt.wgmxccchunk == 0);
+        config.cache_hints_a = 0;
+        config.cache_hints_b = 0;
+
+        // Main path (no cache hints) must also report chunk == 0 when K-split.
+        auto out_wgm_split =
+            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
+        REQUIRE(out_wgm_split.wgmxccchunk == 0);
+      }
     }
   }
 }
