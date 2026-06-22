@@ -2945,12 +2945,11 @@ class TestIntegration:
             sched.deallocVgprTiles(writer)
 
     def test_initD_emitted_on_tail_only_and_preloop_paths(self):
-        """initD must run whether or not the K<DepthU skip fires.
+        """initC is one canonical preloop op reached by every path.
 
-        Normal path (K>=DepthU): preloop zeros D exactly once.
-        Tail-only path (K<DepthU): the preloop is skipped, so a separate
-        InitDForTailOnly block (guarded so the normal path branches over it)
-        zeros D before the tail loop accumulates.
+        Normal path (K>=DepthU): GR issue -> initC -> rest of preloop.
+        Tail-only path (K<DepthU): skip the prefetch GR to the same initC,
+        then jump to the tail loop. No separate/duplicated init block.
         """
         kernel = create_kernel(256, 256, fp4=True)
         assert not kernel["NoTailLoop"]
@@ -2969,35 +2968,24 @@ class TestIntegration:
                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
             )
 
-            # Normal path: the preloop zeros D exactly once (no double-zero).
-            preloop_asm = str(sched._emitLoop(
-                writer, kernel, "PRELOOP", sched._preloop_emitted, schedule=False))
-            assert preloop_asm.count("vgprTiles to zero") == 1, \
-                "preloop should zero D exactly once"
-
             asm = str(sched.emitMainAndExitLoops(writer, kernel))
 
-            # Tail-only path: dedicated guarded init block exists.
-            assert "InitDForTailOnly:" in asm, \
-                "tail-only path must have an InitDForTailOnly block"
-            assert "preloop skipped, must init D" in asm, \
-                "K<DepthU guard should branch to the tail-only init block"
-            assert "main pipeline ran: D already valid" in asm, \
-                "normal path must branch over the tail-only init block"
+            # initC emitted exactly once across all paths (no duplicate init).
+            assert asm.count("vgprTiles to zero") == 1, \
+                "initC must be zeroed exactly once"
+            assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
 
-            # The tail-only init zeroing is emitted inside that block, after the
-            # branch-over guard (so the normal path skips it at runtime).
-            init_label_idx = asm.index("InitDForTailOnly:")
-            skip_branch_idx = asm.rindex("main pipeline ran: D already valid",
-                                         0, init_label_idx)
-            zero_after_block = asm.index("vgprTiles to zero", init_label_idx)
-            assert skip_branch_idx < init_label_idx < zero_after_block, \
-                "expected: branch-over -> InitDForTailOnly: -> zero D"
+            # Unified control flow: skip prefetch GR to initC, then jump to tail.
+            skip_idx = asm.index("SkipPreloopGR:")
+            zero_idx = asm.index("vgprTiles to zero")
+            tail_idx = asm.index("K < DepthU: jump to tail loop")
+            assert skip_idx < zero_idx < tail_idx, \
+                "expected: SkipPreloopGR: -> initC -> jump to tail loop"
         finally:
             sched.deallocVgprTiles(writer)
 
     def test_initD_uf1_tail_only_control_flow_invariants(self):
-        """uf==1 (make_cfg_bf16): tail-only initD control-flow invariants."""
+        """uf==1 (make_cfg_bf16): unified initC control-flow invariants."""
         import re
         kernel = create_kernel(256, 256, fp4=False)
         assert not kernel["NoTailLoop"]
@@ -3015,21 +3003,18 @@ class TestIntegration:
 
             asm = str(sched.emitMainAndExitLoops(writer, kernel))
 
-            assert asm.count("label_InitDForTailOnly:") == 1, \
-                "uf==1 must emit exactly one InitDForTailOnly block"
+            assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
 
-            guard_branches = re.findall(r"s_cbranch_scc1\s+label_InitDForTailOnly", asm)
-            assert len(guard_branches) == 1, \
-                "K<DepthU guard must branch to InitDForTailOnly"
+            # initC emitted exactly once (single canonical location).
+            assert asm.count("vgprTiles to zero") == 1, "initC zeroed exactly once"
+
+            assert asm.count("label_SkipPreloopGR:") == 1, "SkipPreloopGR label present"
+            skip_gr = re.findall(r"s_cbranch_scc1\s+label_SkipPreloopGR", asm)
+            assert len(skip_gr) == 1, "K<DepthU guard must skip prefetch GR to initC"
 
             assert asm.count("label_SkipToEnd:") == 1, "SkipToEnd label must be present"
-
-            # Tolerant lower bound (not ==2): finding #1 drops the dead uf==1 branch.
-            skip_branches = re.findall(r"s_branch\s+label_SkipToEnd", asm)
-            assert len(skip_branches) >= 1, "normal path must branch over to SkipToEnd"
-
-            assert asm.count("vgprTiles to zero") == 2, \
-                "initD zeroed in preloop and in tail-only block"
+            tail_jump = re.findall(r"s_cbranch_scc1\s+label_SkipToEnd", asm)
+            assert len(tail_jump) == 1, "K<DepthU must jump to tail loop after initC"
         finally:
             sched.deallocVgprTiles(writer)
 
@@ -3971,7 +3956,7 @@ class TestBuildLoopVariants_PGR0:
         preloop = sched.build_preloop()
         ops = preloop[0][0]
         labels = [getattr(em.source, 'label', None) for em in ops]
-        assert labels == ['initD_overlap'], \
+        assert labels == ['initC_overlap'], \
             f"PGR=0 preloop should be exactly one initD op, got {labels}"
 
     def test_ngll_empty(self):
@@ -4004,7 +3989,7 @@ class TestPreloopInitD:
         sched.emit()
         preloop = sched.build_preloop()
         initd = [em for em in preloop[0][0]
-                 if getattr(em.source, 'label', None) == 'initD_overlap']
+                 if getattr(em.source, 'label', None) == 'initC_overlap']
         assert len(initd) == 1, \
             f"pgr={pgr} preloop should zero D exactly once, got {len(initd)}"
 

@@ -257,7 +257,7 @@ class TestGfx1250SubtileCodegen:
 
         initd_ops = [em.source for partition in preloop for group in partition
                      for em in group
-                     if getattr(em.source, 'label', None) == 'initD_overlap']
+                     if getattr(em.source, 'label', None) == 'initC_overlap']
         assert len(initd_ops) == 1, "build_preloop must place exactly one initD op"
 
         # Build the op against the gfx1250 writer (the scheduler's emit-time call).
