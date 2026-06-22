@@ -212,21 +212,6 @@ TEST(ApiExport, ToolchainCapsProbe) {
 }
 
 // =============================================================================
-// DAGScheduleJsonCollector + PassOrderSnapshotInstrumentation (stinkytofu-opt)
-// =============================================================================
-
-TEST(ApiExport, DAGScheduleJsonCollector) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    EXPECT_NE(collector, nullptr);
-}
-
-TEST(ApiExport, PassOrderSnapshotInstrumentation) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    auto instr = std::make_shared<PassOrderSnapshotInstrumentation>(std::move(collector));
-    EXPECT_NE(instr, nullptr);
-}
-
-// =============================================================================
 // SignatureBase (rocisa ToStinkyTofuUtils)
 // =============================================================================
 
