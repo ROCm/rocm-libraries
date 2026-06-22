@@ -109,12 +109,14 @@ void BatchnormValidator::checkTensorDataTypesSupported(
     const std::vector<int64_t>& statTensorIds,
     const std::vector<int64_t>& intermediateTensorIds)
 {
-    validateConsistentDataTypes(
-        ioTensorIds,
-        bn_type_configs::getAllowedIoTypes(),
-        "Batchnorm implementation supports only FLOAT, HALF, and BFLOAT16 data types for x, y, "
-        "dy, and dx tensors.",
-        "All IO tensors for batchnorm must have the same data type.");
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(ioTensorAttr.data_type(),
+                                    bn_type_configs::getAllowedIoTypes(),
+                                    "Batchnorm implementation supports only FLOAT, HALF, and "
+                                    "BFLOAT16 data types for x, y, tensors");
+    }
 
     const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
     if(allowedAffineTypes.size() == 1)

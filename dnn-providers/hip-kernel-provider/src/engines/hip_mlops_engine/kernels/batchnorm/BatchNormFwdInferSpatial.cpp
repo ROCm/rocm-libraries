@@ -1,37 +1,48 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "FloatTypes.h"
 #include "HipKernelActivation.hpp"
+#include "HipKernelCast.hpp"
 #include "VectorTypes.hpp"
+#include <type_traits>
+
+using InputType = HIP_PLUGIN_BN_INPUT_TYPE;
+using OutputType = HIP_PLUGIN_BN_OUTPUT_TYPE;
+using ComputeType = HIP_PLUGIN_BN_COMPUTE_TYPE;
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = HIP_PLUGIN_BN_GRP0 * HIP_PLUGIN_BN_GRP1 * HIP_PLUGIN_BN_GRP2;
 
 // define types for vectorized loads/stores
-using FLOAT_VEC_TYPE =
-    typename hip_kernel_provider::mapped_vector_type<FLOAT, HIP_PLUGIN_BN_VEC_SIZE>::type;
-using FLOAT_ACCUM_VEC_TYPE =
-    typename hip_kernel_provider::mapped_vector_type<FLOAT_ACCUM, HIP_PLUGIN_BN_VEC_SIZE>::type;
+using InputVecType =
+    typename hip_kernel_provider::mapped_vector_type<InputType, HIP_PLUGIN_BN_VEC_SIZE>::type;
+using OutputVecType =
+    typename hip_kernel_provider::mapped_vector_type<OutputType, HIP_PLUGIN_BN_VEC_SIZE>::type;
+using ComputeVecType =
+    typename hip_kernel_provider::mapped_vector_type<ComputeType, HIP_PLUGIN_BN_VEC_SIZE>::type;
 
 template <unsigned int vecSizeX, unsigned int vecSizeY>
 __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       unsigned int tidy,
-                                                      const FLOAT* in,
-                                                      FLOAT* out,
-                                                      const FLOAT_ACCUM* mean,
-                                                      const FLOAT_ACCUM* invVariance,
-                                                      const FLOAT_ACCUM* scale,
-                                                      const FLOAT_ACCUM* bias,
+                                                      const InputType* in,
+                                                      OutputType* out,
+                                                      const ComputeType* mean,
+                                                      const ComputeType* invVariance,
+                                                      const ComputeType* scale,
+                                                      const ComputeType* bias,
                                                       unsigned int batchSize,
                                                       unsigned int cStride,
                                                       unsigned int hwStride,
                                                       unsigned int batchStride,
-                                                      FLOAT_ACCUM alpha,
-                                                      FLOAT_ACCUM beta)
+                                                      ComputeType alpha,
+                                                      ComputeType beta)
 {
-    FLOAT_ACCUM inhat[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT value[HIP_PLUGIN_BN_VEC_SIZE];
+    // ComputeType must be float to prevent precision loss
+    static_assert(std::is_same<ComputeType, float>::value,
+                  "ComputeType must be float for the BN fwd kernel");
+    ComputeType inhat[HIP_PLUGIN_BN_VEC_SIZE];
+    InputType value[HIP_PLUGIN_BN_VEC_SIZE];
+    OutputType outValue[HIP_PLUGIN_BN_VEC_SIZE]; // Unused if InputType equals OutputType
 
     // loop over the batches
     // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
@@ -42,36 +53,50 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
         // load input value
         const unsigned int batchIndex
             = (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value))
-            = *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+
+        *(reinterpret_cast<InputVecType*>(value))
+            = *(reinterpret_cast<const InputVecType*>(in + batchIndex));
 
         // perform batchnorm and activation
 #pragma unroll
         for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
         {
-            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
+            inhat[i] = (hip_kernel_provider::to_float32(value[i]) - mean[i]) * invVariance[i];
             inhat[i] = scale[i] * inhat[i] + bias[i];
             inhat[i] = hip_kernel_provider::applyActivation<
-                FLOAT_ACCUM,
+                ComputeType,
                 static_cast<hip_kernel_provider::ActivationMode>(HIP_PLUGIN_BN_NRN_OP_ID)>(
                 inhat[i], alpha, beta);
-
-            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            if constexpr(std::is_same_v<InputType, OutputType>)
+            {
+                value[i] = hip_kernel_provider::from_float32<OutputType>(inhat[i]);
+            }
+            else
+            {
+                outValue[i] = hip_kernel_provider::from_float32<OutputType>(inhat[i]);
+            }
         }
 
         // write output value
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex))
-            = *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+        OutputVecType* outPtr = reinterpret_cast<OutputVecType*>(out + batchIndex);
+        if constexpr(std::is_same_v<InputType, OutputType>)
+        {
+            *outPtr = *(reinterpret_cast<const OutputVecType*>(value));
+        }
+        else
+        {
+            *outPtr = *(reinterpret_cast<const OutputVecType*>(outValue));
+        }
     }
 }
 
 extern "C" __global__ void __launch_bounds__(blockSize)
-    BatchNormFwdInferSpatialEst(const FLOAT* __restrict in,
-                                FLOAT* __restrict out,
-                                const FLOAT_ACCUM* __restrict estimatedMean,
-                                const FLOAT_ACCUM* __restrict estimatedVariance,
-                                const FLOAT_ACCUM* __restrict scale,
-                                const FLOAT_ACCUM* __restrict bias,
+    BatchNormFwdInferSpatialEst(const InputType* __restrict in,
+                                OutputType* __restrict out,
+                                const ComputeType* __restrict estimatedMean,
+                                const ComputeType* __restrict estimatedVariance,
+                                const ComputeType* __restrict scale,
+                                const ComputeType* __restrict bias,
                                 double epsilon,
                                 unsigned int c,
                                 unsigned int hw,
@@ -79,8 +104,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                 unsigned int cStride,
                                 unsigned int hwStride,
                                 unsigned int batchStride,
-                                FLOAT_ACCUM alpha,
-                                FLOAT_ACCUM beta)
+                                ComputeType alpha,
+                                ComputeType beta)
 {
     unsigned int tidx = blockIdx.x * HIP_PLUGIN_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * HIP_PLUGIN_BN_GRP1 + threadIdx.y;
@@ -100,21 +125,21 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int adjIndex = tidx * vecSizeX;
 
     // batch parameters and values for current thread
-    FLOAT_ACCUM mean[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM variance[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM pscale[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM pbias[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM invVariance[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType mean[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType variance[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType pscale[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType pbias[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
     if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
     {
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(variance))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(mean))
+            = *(reinterpret_cast<const ComputeVecType*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(variance))
+            = *(reinterpret_cast<const ComputeVecType*>(estimatedVariance + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(pscale))
+            = *(reinterpret_cast<const ComputeVecType*>(scale + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(pbias))
+            = *(reinterpret_cast<const ComputeVecType*>(bias + adjIndex));
     }
     else // NCHW layout
     {
@@ -134,7 +159,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
     for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
     {
-        invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
+        invVariance[i] = rsqrt(fabs(variance[i] + static_cast<ComputeType>(epsilon)));
     }
 
     BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
@@ -156,20 +181,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
 // epsilon parameter and rsqrt() operations.
 extern "C" __global__ void __launch_bounds__(blockSize)
-    BatchNormFwdInferSpatialEstInvVar(const FLOAT* __restrict in,
-                                      FLOAT* __restrict out,
-                                      const FLOAT_ACCUM* __restrict estimatedMean,
-                                      const FLOAT_ACCUM* __restrict estimatedInvVariance,
-                                      const FLOAT_ACCUM* __restrict scale,
-                                      const FLOAT_ACCUM* __restrict bias,
+    BatchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
+                                      OutputType* __restrict out,
+                                      const ComputeType* __restrict estimatedMean,
+                                      const ComputeType* __restrict estimatedInvVariance,
+                                      const ComputeType* __restrict scale,
+                                      const ComputeType* __restrict bias,
                                       unsigned int c,
                                       unsigned int hw,
                                       unsigned int batchSize,
                                       unsigned int cStride,
                                       unsigned int hwStride,
                                       unsigned int batchStride,
-                                      FLOAT_ACCUM alpha,
-                                      FLOAT_ACCUM beta)
+                                      ComputeType alpha,
+                                      ComputeType beta)
 {
     unsigned int tidx = blockIdx.x * HIP_PLUGIN_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * HIP_PLUGIN_BN_GRP1 + threadIdx.y;
@@ -189,20 +214,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int adjIndex = tidx * vecSizeX;
 
     // batch parameters and values for current thread
-    FLOAT_ACCUM mean[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM pscale[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM pbias[HIP_PLUGIN_BN_VEC_SIZE];
-    FLOAT_ACCUM invVariance[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType mean[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType pscale[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType pbias[HIP_PLUGIN_BN_VEC_SIZE];
+    ComputeType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
     if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
     {
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(invVariance))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedInvVariance + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
-        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias))
-            = *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(mean))
+            = *(reinterpret_cast<const ComputeVecType*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(invVariance))
+            = *(reinterpret_cast<const ComputeVecType*>(estimatedInvVariance + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(pscale))
+            = *(reinterpret_cast<const ComputeVecType*>(scale + adjIndex));
+        *(reinterpret_cast<ComputeVecType*>(pbias))
+            = *(reinterpret_cast<const ComputeVecType*>(bias + adjIndex));
     }
     else // NCHW layout
     {
