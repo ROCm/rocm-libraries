@@ -526,6 +526,51 @@ inline auto GetCases()
     return cases;
 }
 
+// Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
+// stays in GenCases (used by the Full instantiation), so no coverage is lost.
+// These are intentionally small fixed sets (the cases are cheap CPU checks).
+inline auto GenCasesSmoke()
+{
+    return testing::Combine(
+        MakeNamedParameterValues<int>("batch_size", 2),
+        MakeNamedParameterValues<int>("num_layer", 4),
+        MakeNamedParameterValues<int>("in_size", 8),
+        MakeNamedParameterValues<int>("wei_hh", 8),
+        MakeNamedParameterValues<miopenRNNMode_t>("mode", miopenRNNRELU, miopenLSTM, miopenGRU),
+        MakeNamedParameterValues<miopenRNNBiasMode_t>(
+            "biasMode", miopenRNNwithBias, miopenRNNNoBias),
+        MakeNamedParameterValues<miopenRNNDirectionMode_t>(
+            "directionMode", miopenRNNunidirection, miopenRNNbidirection),
+        MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNlinear));
+}
+
+inline auto GenCasesStandard()
+{
+    return testing::Combine(
+        MakeNamedParameterValues<int>("batch_size", 2, 8),
+        MakeNamedParameterValues<int>("num_layer", 4, 16),
+        MakeNamedParameterValues<int>("in_size", 8),
+        MakeNamedParameterValues<int>("wei_hh", 8),
+        MakeNamedParameterValues<miopenRNNMode_t>("mode", miopenRNNRELU, miopenLSTM, miopenGRU),
+        MakeNamedParameterValues<miopenRNNBiasMode_t>(
+            "biasMode", miopenRNNwithBias, miopenRNNNoBias),
+        MakeNamedParameterValues<miopenRNNDirectionMode_t>(
+            "directionMode", miopenRNNunidirection, miopenRNNbidirection),
+        MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNskip, miopenRNNlinear));
+}
+
+inline auto GetCasesSmoke()
+{
+    static const auto cases = GenCasesSmoke();
+    return cases;
+}
+
+inline auto GetCasesStandard()
+{
+    static const auto cases = GenCasesStandard();
+    return cases;
+}
+
 }; // namespace
 
 std::ostream& operator<<(std::ostream& os, miopenRNNMode_t param)
@@ -716,4 +761,8 @@ using CPU_WSuperTensor_NONE = WSuperTensorTest;
 
 TEST_P(CPU_WSuperTensor_NONE, WSuperTensorTest) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCases(), TestNameGenerator{});
+// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
+// (comprehensive/nightly) runs the complete cross product so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard, CPU_WSuperTensor_NONE, GetCasesStandard(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, CPU_WSuperTensor_NONE, GetCases(), TestNameGenerator{});

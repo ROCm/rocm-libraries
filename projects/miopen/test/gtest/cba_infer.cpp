@@ -242,7 +242,41 @@ INSTANTIATE_TEST_SUITE_P(
 
 #endif
 
+// Evenly-spaced subset of GetNetwork1 configs for the Smoke (pre-commit) and
+// Standard (per-CI) tiers. The full config list stays in the Full
+// instantiations below, so no coverage is lost. Each instantiation is further
+// multiplied by the fixture's TEST_P count and the layout count.
+static std::vector<ConvTestCaseBase> CbaNetworkSubset(std::size_t count)
+{
+    const auto all      = GetNetwork1<ConvTestCaseBase>();
+    const std::size_t n = std::min(count, all.size());
+    std::vector<ConvTestCaseBase> out;
+    out.reserve(n);
+    for(std::size_t i = 0; i < n; ++i)
+        out.push_back(all[i * all.size() / n]);
+    return out;
+}
+
+// FP32: tiered (4 TEST_P fixtures x configs x 1 layout).
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvBiasActivInfer_FP32,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(3)),
+                                          testing::Values(miopenTensorNCHW),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvBiasActivInfer_FP32,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(10)),
+                                          testing::Values(miopenTensorNCHW),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvBiasActivInfer_FP32,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
@@ -252,7 +286,26 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
 
+// FP16: tiered (3 TEST_P fixtures x configs x layouts; Smoke uses one layout).
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvBiasActivInfer_FP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(3)),
+                                          testing::Values(miopenTensorNCHW),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvBiasActivInfer_FP16,
+                         testing::Combine(testing::Values(miopenActivationRELU),
+                                          testing::ValuesIn(CbaNetworkSubset(10)),
+                                          testing::Values(miopenTensorNCHW, miopenTensorNHWC),
+                                          testing::Values(0.25f),
+                                          testing::Values(0.75f),
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvBiasActivInfer_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
