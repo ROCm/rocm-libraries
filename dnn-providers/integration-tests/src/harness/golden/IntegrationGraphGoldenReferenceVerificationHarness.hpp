@@ -373,31 +373,19 @@ private:
         return synthesizeInputs();
     }
 
-    // tier-3 synthesis: single-node graph whose op has a registered initializer.
-    // Builds zeroed input tensors from graph attributes, routes each leaf input to
-    // its owning node's initializer, and fills them. Any refusal -> SKIP+report.
+    // tier-3 synthesis: builds zeroed input tensors from graph attributes, walks
+    // every node (single-node or fused), and fills each node's owned leaf inputs.
+    // If any node's synthesis fails the whole graph is skipped.
     bool synthesizeInputs()
     {
         const auto wrapper = _bundle->graphWrapper();
-
-        if(wrapper.nodeCount() != 1)
-        {
-            skipUnverifiable("graph-only bundle with no input data: input synthesis supports "
-                             "single-node graphs only (this graph has "
-                             + std::to_string(wrapper.nodeCount()) + " nodes)");
-            return false;
-        }
-
-        const auto& node = wrapper.getNode(0);
-
-        // Leaf inputs = non-virtual tensors that are not graph outputs. (For a
-        // single-node graph every such tensor is an input to that node.)
         const auto& tensorAttrMap = wrapper.getTensorMap();
         const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                            _bundle->outputTensorUids.end());
 
+        // Leaf inputs = non-virtual tensors that are not graph outputs.
         InputTensorMap inputs;
-        std::vector<int64_t> leafInputUids;
+        std::vector<int64_t> allLeafInputUids;
         for(const auto& [uid, attrs] : tensorAttrMap)
         {
             if(attrs->virtual_() || outputUids.count(uid) != 0)
@@ -406,17 +394,25 @@ private:
             }
             inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
             inputs[uid]->fillTensorWithValue(0.f);
-            leafInputUids.push_back(uid);
+            allLeafInputUids.push_back(uid);
         }
 
         std::mt19937 rng(static_cast<std::mt19937::result_type>(
             _bundle->metadata.seed.value_or(K_DEFAULT_SEED)));
 
-        const FillOutcome outcome = synthesizeNodeInputs(node, leafInputUids, inputs, rng);
-        if(!outcome.filled)
+        // Synthesize per node. In a fused graph (e.g. conv+bias+relu) each node
+        // owns a disjoint subset of the leaf inputs; virtual inter-node tensors
+        // are excluded above and handled by the engine at execution time.
+        for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
         {
-            skipUnverifiable(outcome.reason);
-            return false;
+            const auto& node = wrapper.getNode(i);
+            const SynthesisResult outcome
+                = synthesizeNodeInputs(node, allLeafInputUids, inputs, rng);
+            if(!outcome.filled)
+            {
+                skipUnverifiable(outcome.reason);
+                return false;
+            }
         }
 
         _bundle->tensors = std::move(inputs);
