@@ -5635,8 +5635,8 @@ public:
      * @brief Add a resample backward (pooling gradient) operation to the graph
      *
      * @param dy: Input gradient tensor
-    * @param attributes: Resample backward operation attributes
-    * @param index: Optional max-pool index tensor produced by resample_fwd
+     * @param attributes: Resample backward operation attributes
+     * @param index: Optional max-pool index tensor produced by resample_fwd
      * @return dx: Output gradient tensor
      */
     // NOLINTBEGIN(readability-identifier-naming)
