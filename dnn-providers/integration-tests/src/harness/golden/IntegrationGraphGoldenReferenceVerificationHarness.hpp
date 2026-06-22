@@ -461,10 +461,10 @@ private:
 
     void applyMetadataGuards() const
     {
-        // metadata is mandatory, so a loaded bundle always has it (a bundle with
-        // no .meta.json fails to load and never reaches here). Individual fields
-        // (VRAM, arch) are still optional within BundleMetadata; the guards below
-        // no-op when their field is absent, so they can be called unconditionally.
+        // Sweep cases may inline metadata and single-graph bundles still load it
+        // from .meta.json, but either way the bundle always carries a metadata
+        // object here. Individual fields (VRAM, arch) remain optional, so the
+        // guards below can run unconditionally.
         if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
                _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
         {

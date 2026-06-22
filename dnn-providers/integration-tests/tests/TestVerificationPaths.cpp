@@ -33,6 +33,11 @@ std::filesystem::path batchNormSmallBundle()
            / "Small.json";
 }
 
+std::filesystem::path batchNormSweepRoot()
+{
+    return goldenDataRoot() / "quick" / "BatchnormFwdInference" / "Inference";
+}
+
 void verifyGoldenComparison(
     hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors,
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>&
@@ -205,6 +210,26 @@ TEST(TestVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough
     }
 
     EXPECT_EQ(bundles.front().suiteName, "BatchnormInference_nchw_fp32_Small");
+}
+
+TEST(TestVerificationRouting, BatchNormSweepSampleIsDiscoverable)
+{
+    const auto sweepRoot = batchNormSweepRoot();
+    if(!std::filesystem::exists(sweepRoot / "sweep.json"))
+    {
+        GTEST_SKIP() << "Sweep sample not available: " << sweepRoot;
+    }
+
+    const auto bundles = discoverBundles(goldenDataRoot());
+    const auto it
+        = std::find_if(bundles.begin(), bundles.end(), [&](const DiscoveredBundle& bundle) {
+              return bundle.isTemplateSweepCase() && bundle.jsonPath == sweepRoot / "sweep.json"
+                     && bundle.caseId == "small_fp32_nchw";
+          });
+
+    ASSERT_NE(it, bundles.end());
+    EXPECT_EQ(it->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(it->testName, "small_fp32_nchw");
 }
 
 // NOLINTEND(readability-identifier-naming)
