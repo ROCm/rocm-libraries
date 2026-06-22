@@ -100822,7 +100822,7 @@
   #   CustomKernelName: ''
   #   DebugStreamK: 0
   #   DepthU: 64
-  #   DirectToLds: false
+  #   DirectToLds: 0
   #   DirectToLdsA: false
   #   DirectToLdsB: false
   #   DirectToVgprA: 1
@@ -100831,10 +100831,10 @@
   #   EdgeType: ShiftPtr
   #   EnableF32XdlMathOp: false
   #   EnableMatrixInstruction: true
-  #   ExpandPointerSwap: 1
+  #   ExpandPointerSwap: true
   #   ExpertSchedulingMode: 2
   #   ForceDisableShadowInit: false
-  #   GlobalReadPerMfma: 1
+  #   GlobalReadPerMfma: 1.0
   #   GlobalReadVectorWidthA: 8
   #   GlobalReadVectorWidthB: 4
   #   GlobalSplitU: 1
@@ -100960,7 +100960,7 @@
   #   ScheduleLocalWrite: 1
   #   SolutionIndex: 429
   #   SolutionNameMin: Cijk_Ailk_Bljk_I8BH_SHB_HA_S_SCD_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR1_CADS0_DTLA0_DTLB0_DTVA1_DTVB0_EPS1_FDSI0_GRPM1_GRVWA8_GRVWB4_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA1201_IU1_K1_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB32_LPM0_LRVW16_LWPMn1_MIAV1_MIWT8_1_MO40_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA4_NLCB1_ONLL0_PGR1_PLR1_PKA0_SIA3_SS0_SU32_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS32_WG16_8_1_WGM8_WGMXCC1_WGMXCCGn1
-  #   SourceSwap: 0
+  #   SourceSwap: false
   #   StaggerU: 32
   #   StaggerUMapping: 0
   #   StaggerUStride: 256
@@ -100977,26 +100977,26 @@
   #   SubGroupA: 2
   #   SubGroupB: 64
   #   SuppressNoLoadLoop: false
-  #   SwapGlobalReadOrder: false
+  #   SwapGlobalReadOrder: 0
   #   ThreadTile: [1, 1]
   #   ThreadTile0: 64
   #   ThreadTile1: 1
   #   ThreadTileA: 64
   #   ThreadTileB: 1
   #   TransposeLDS: 1
-  #   TransposeLDSMetadata: true
+  #   TransposeLDSMetadata: 1
   #   ULSGRODoubleG2L: 0
   #   UnrollLoopSwapGlobalReadOrder: 0
   #   UnrollMajorLDSA: false
   #   UnrollMajorLDSB: true
   #   UnrollMajorLDSMetadata: true
-  #   Use64bShadowLimit: 1
+  #   Use64bShadowLimit: true
   #   UseCustomMainLoopSchedule: 0
   #   UseDot2F32XEmulation: true
   #   UseDotInstruction: false
   #   UseF32XEmulation: false
   #   UseInstOffsetForGRO: 0
-  #   UsePLRPack: false
+  #   UsePLRPack: 0
   #   UseSgprForGRO: -1
   #   Valid: true
   #   VectorStore: -1

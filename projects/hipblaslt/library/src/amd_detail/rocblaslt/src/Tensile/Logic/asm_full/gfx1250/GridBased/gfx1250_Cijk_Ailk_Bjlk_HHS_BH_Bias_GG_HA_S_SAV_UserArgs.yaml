@@ -77,8 +77,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 0
-  TransposeB: 1
+  TransposeA: false
+  TransposeB: true
   UseBeta: true
   UseBias: 1
   UseE: false
@@ -129,7 +129,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -411,7 +411,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -563,7 +563,7 @@
     SpaceFillingAlgo: []
     StaggerU: 32
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -693,7 +693,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
