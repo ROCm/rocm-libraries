@@ -125,6 +125,11 @@ namespace TensileLite
         return m_dataParallel;
     }
 
+    int Debug::streamK5ForceMode() const
+    {
+        return m_streamK5ForceMode;
+    }
+
     int Debug::useExperimentalSelection() const
     {
         return m_experimentSelection;
@@ -199,6 +204,17 @@ namespace TensileLite
         const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
         if(exp_streamkDP)
             m_dataParallel = strtol(exp_streamkDP, nullptr, 0) != 0;
+
+        // StreamK=5 hybrid-mode debug override (-1=respect API, 0=static, 1=dynamic).
+        // Non-numeric or out-of-range values are ignored (not silently coerced to 0).
+        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        if(sk5Force)
+        {
+            char* end = nullptr;
+            const long val = strtol(sk5Force, &end, 0);
+            if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
+                m_streamK5ForceMode = static_cast<int>(val);
+        }
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)

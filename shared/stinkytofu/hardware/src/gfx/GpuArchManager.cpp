@@ -24,6 +24,7 @@
 #include "gfx/GpuArchManager.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>  // fix me: don't use iostream.
 #include <unordered_map>
 #include <unordered_set>

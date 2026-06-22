@@ -355,7 +355,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     hipblasOperation_t opB = matmul_descr->op_B;
 
     auto matmul_swizzle_status
-        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, a_type, b_type, swizzleA, swizzleB);
+        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, matA->type, matB->type, swizzleA, swizzleB);
 
     if(matmul_swizzle_status != rocblaslt_status_continue)
         return matmul_swizzle_status;
@@ -508,23 +508,4 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
     }
 }
 
-inline hipDataType get_alpha_beta_target_type(hipblasComputeType_t typeCompute, hipDataType typeA)
-{
-    if (typeA == HIP_C_32F || typeA == HIP_C_64F)
-    {
-        if (typeCompute == HIPBLAS_COMPUTE_64F)
-            return HIP_C_64F; 
-        else
-            return HIP_C_32F; 
-    }
-    else
-    {
-        if (typeCompute == HIPBLAS_COMPUTE_64F)
-            return HIP_R_64F;
-        else if (typeCompute == HIPBLAS_COMPUTE_32I)
-            return HIP_R_32I;
-        else 
-            return HIP_R_32F; 
-    }
-}
 #endif

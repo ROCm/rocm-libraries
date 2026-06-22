@@ -23,75 +23,69 @@ SOFTWARE.
 */
 
 #include <cstdio>
+
 #include "errors.hpp"
 #include "handle.hpp"
 
-extern "C" rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize, Rpp32u numThreads, void* stream, RppBackend backend)
-{
-    if(backend == RppBackend::RPP_HOST_BACKEND)
+extern "C" rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize, Rpp32u numThreads,
+                                 void* stream, RppBackend backend) {
+    if (backend == RppBackend::RPP_HOST_BACKEND)
         return rpp::try_([&] { rpp::deref(handle) = new rpp::Handle(nBatchSize, numThreads); });
 #if GPU_SUPPORT
-    else if(backend == RppBackend::RPP_HIP_BACKEND)
-    {
-            return rpp::try_([&] {
-            rpp::deref(handle) = new rpp::Handle(nBatchSize, reinterpret_cast<rppAcceleratorQueue_t>(stream));
+    else if (backend == RppBackend::RPP_HIP_BACKEND) {
+        return rpp::try_([&] {
+            rpp::deref(handle) =
+                new rpp::Handle(nBatchSize, reinterpret_cast<rppAcceleratorQueue_t>(stream));
         });
     }
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT
     else
         return rppStatusNotImplemented;
-
 }
 
-extern "C" rppStatus_t rppDestroy(rppHandle_t handle, RppBackend backend)
-{
-    if(backend == RppBackend::RPP_HOST_BACKEND)
-    {
+extern "C" rppStatus_t rppDestroy(rppHandle_t handle, RppBackend backend) {
+    if (backend == RppBackend::RPP_HOST_BACKEND) {
 #if GPU_SUPPORT
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu();});
+        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu(); });
 #else
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_host();});
+        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_host(); });
 #endif
-        if(status == rppStatusSuccess) delete handle;
+        if (status == rppStatusSuccess) delete handle;
         return status;
     }
 #if GPU_SUPPORT
-    else if(backend == RppBackend::RPP_HIP_BACKEND)
-    {
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu();});
-        if(status == rppStatusSuccess) delete handle;
+    else if (backend == RppBackend::RPP_HIP_BACKEND) {
+        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu(); });
+        if (status == rppStatusSuccess) delete handle;
         return status;
     }
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT
     else
         return rppStatusNotImplemented;
 }
 
-extern "C" rppStatus_t rppSetBatchSize(rppHandle_t handle, size_t batchSize)
-{
+extern "C" rppStatus_t rppSetBatchSize(rppHandle_t handle, size_t batchSize) {
     return rpp::try_([&] { rpp::deref(handle).SetBatchSize(batchSize); });
 }
 
-extern "C" rppStatus_t rppGetBatchSize(rppHandle_t handle, size_t *batchSize)
-{
+extern "C" rppStatus_t rppGetBatchSize(rppHandle_t handle, size_t* batchSize) {
     return rpp::try_([&] { rpp::deref(batchSize) = rpp::deref(handle).GetBatchSize(); });
 }
 
 #if GPU_SUPPORT
 
-extern "C" rppStatus_t rppSetStream(rppHandle_t handle, rppAcceleratorQueue_t streamID)
-{
+extern "C" rppStatus_t rppSetStream(rppHandle_t handle, rppAcceleratorQueue_t streamID) {
     return rpp::try_([&] { rpp::deref(handle).SetStream(streamID); });
 }
 
-extern "C" rppStatus_t rppGetStream(rppHandle_t handle, rppAcceleratorQueue_t* streamID)
-{
+extern "C" rppStatus_t rppGetStream(rppHandle_t handle, rppAcceleratorQueue_t* streamID) {
     return rpp::try_([&] { rpp::deref(streamID) = rpp::deref(handle).GetStream(); });
 }
 
-extern "C" rppStatus_t rppSetAllocator(rppHandle_t handle, rppAllocatorFunction allocator, rppDeallocatorFunction deallocator, void* allocatorContext)
-{
-    return rpp::try_([&] { rpp::deref(handle).SetAllocator(allocator, deallocator, allocatorContext); });
+extern "C" rppStatus_t rppSetAllocator(rppHandle_t handle, rppAllocatorFunction allocator,
+                                       rppDeallocatorFunction deallocator, void* allocatorContext) {
+    return rpp::try_(
+        [&] { rpp::deref(handle).SetAllocator(allocator, deallocator, allocatorContext); });
 }
 
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT

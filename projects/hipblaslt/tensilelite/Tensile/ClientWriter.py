@@ -252,6 +252,17 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     if numGpus > 1 and forBenchmark:
       return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
 
+    # --cpu-only plumbing: short-circuit the device boundary. The client-config writing
+    # (writeClientConfigIni / writeClientConfig) ran upstream in the benchmark flow and is
+    # real coverage we keep. The remaining steps -- writeRunScript (which embeds the
+    # device-bound client executable path via getClientExecutablePath, raising GPU-less
+    # when PrebuiltClient is absent) and the subprocess.Popen launch -- both require a GPU,
+    # so we skip them and return a 0 returncode. The synthetic results CSV is written by
+    # the call site (BenchmarkProblems.py) under the same flag.
+    if globalParameters["CpuOnly"]:
+      print1("# CpuOnly: skipping device-bound client launch; returning returncode 0.")
+      return 0
+
     # Original single-GPU path
     runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
@@ -648,6 +659,13 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('activation-no-guard', problemType.activationNoGuard)
         if globalParameters["DataInitValueActivationArgs"]:
           param('activation-additional-args', ','.join(map(str, globalParameters["DataInitValueActivationArgs"])))
+        # Only emit non-default StreamKHybridMode values to keep
+        # existing tests' INIs byte-identical. The C++ client defaults
+        # to a single-element vector [0], which is the same as omitting
+        # the INI key entirely.
+        if globalParameters["StreamKHybridMode"] not in ([0], (0,)):
+          for v in globalParameters["StreamKHybridMode"]:
+            param('streamk-hybrid-mode', int(v))
 
         param("device-idx",               deviceId)
 
@@ -720,6 +738,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("use-user-args",            globalParameters["UseUserArgs"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
+        param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
+        param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
         if globalParameters["RocProfCounter"]:
             for counter in globalParameters["RocProfCounter"]:
                 param("rocprof-counter", counter)

@@ -85,7 +85,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -163,7 +163,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -227,7 +227,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -294,7 +294,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -343,7 +343,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -415,7 +415,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -468,7 +468,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -520,7 +520,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -585,7 +585,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -656,7 +656,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -699,7 +699,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -721,8 +721,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       Activation: True
@@ -741,7 +741,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64   (single-wave, smaller scale-tile geometry)
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
-        - ActivationFuncCall: [0]
+        - ActivationFuncCall: [false]
         - DepthU: [256, 512, 768]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
@@ -750,10 +750,10 @@ BenchmarkProblems:
         - StaggerU: [0]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [4]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - UseCustomMainLoopSchedule: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

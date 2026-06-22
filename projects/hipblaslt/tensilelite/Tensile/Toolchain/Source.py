@@ -57,14 +57,20 @@ def _archNamesFromBundlerTarget(rawArch: str):
         single source of truth — callers that strip with `split("-xnack")[0]`
         AFTER ':' -> '-' conversion leave `gfx942-sramecc+` as the directory
         and silently place files in the wrong subdir.
-      * The filename keeps the full feature set so xnack+/xnack- code objects
-        don't collide, with ':' rewritten to '-' for filesystem safety.
+      * The filename keeps only the base arch and the xnack feature
+        (`gfx942`, `gfx942-xnack+`, `gfx942-xnack-`). The runtime helper-kernel
+        loader (HipSolutionAdapter / tensile_host) probes only
+        ``{"", "-xnack-", "-xnack+"}`` appended to ``<base>``; sramecc and any
+        other feature are never part of the loaded name, so keeping them here
+        produces a file the runtime can never find. xnack+/xnack- still get
+        distinct filenames, so they do not collide.
 
     Returns ``(filenameArch, baseArch)`` — both extracted from the same source
     token so they cannot drift apart.
     """
     baseArch     = rawArch.split(":", 1)[0]
-    filenameArch = re.sub(":", "-", rawArch)
+    xnack        = next((f for f in rawArch.split(":")[1:] if f.startswith("xnack")), None)
+    filenameArch = baseArch + ("-" + xnack if xnack else "")
     return filenameArch, baseArch
 
 
