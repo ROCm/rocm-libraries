@@ -142,6 +142,9 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
                 is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>
                     ? 16
                     : MmaOp::kM / MmaOp::kCMBlocks;
+
+            // Seems like identical definition for MFMA, and value does not exist for WMMA.
+            static constexpr index_t kABKPerLane = MmaOp::kABKPerLane;
         };
     };
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
