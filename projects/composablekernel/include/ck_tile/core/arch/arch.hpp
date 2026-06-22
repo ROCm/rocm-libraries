@@ -467,6 +467,94 @@ static constexpr auto getCMakeCompilerTarget()
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// Constexpr query functions for CMake-configured GPU targets.
+//
+// These functions allow compile-time queries against the set of GPU targets
+// configured via CMake (CK_CMAKE_GPU_TARGET_IDS), replacing the need for
+// separate CMake-injected feature macros (CK_USE_GFX950, CK_USE_XDL, etc.).
+//
+// Usage:
+//   if constexpr (getCMakeTargetsContain<amdgcn_target_id::GFX950>()) { ... }
+//   if constexpr (getCMakeTargetsContainAnyFamily<
+//       amdgcn_target_family_id::GFX9,
+//       amdgcn_target_family_id::GFX11,
+//       amdgcn_target_family_id::GFX12>()) { ... }  // equivalent to CK_USE_XDL
+//   if constexpr (getCMakeTargetsContainOtherThan<amdgcn_target_id::GFX950>()) { ... }
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Check if a specific GPU target ID is present in the CMake-configured target list.
+ * @tparam Target The amdgcn_target_id to search for.
+ * @return true if Target is in CK_CMAKE_GPU_TARGET_IDS, false otherwise.
+ */
+template <amdgcn_target_id Target>
+static constexpr bool getCMakeTargetsContain()
+{
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+    for(auto id : ids)
+    {
+        if(static_cast<amdgcn_target_id>(id) == Target)
+        {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+/**
+ * @brief Check if any CMake-configured GPU target belongs to any of the given families.
+ * @tparam Families Pack of amdgcn_target_family_id values to check.
+ * @return true if any target in CK_CMAKE_GPU_TARGET_IDS belongs to any of Families.
+ *
+ * Equivalences to CMake feature macros:
+ *   getCMakeTargetsContainAnyFamily<GFX9, GFX11, GFX12>()  ==  CK_USE_XDL
+ *   getCMakeTargetsContainAnyFamily<GFX11, GFX12>()        ==  CK_USE_WMMA
+ */
+template <amdgcn_target_family_id... Families>
+static constexpr bool getCMakeTargetsContainAnyFamily()
+{
+    static_assert(sizeof...(Families) > 0, "At least one family must be specified");
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+    for(auto id : ids)
+    {
+        auto family = static_cast<amdgcn_target_family_id>(id >> 8);
+        if(((family == Families) || ...))
+        {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+/**
+ * @brief Check if any CMake-configured GPU target is different from the given target.
+ * @tparam Target The amdgcn_target_id to exclude.
+ * @return true if any target in CK_CMAKE_GPU_TARGET_IDS is NOT equal to Target.
+ *
+ * Use case: determine if generic (non-arch-specific) code paths should be compiled.
+ *   getCMakeTargetsContainOtherThan<GFX950>() -> true if any non-GFX950 target is present.
+ */
+template <amdgcn_target_id Target>
+static constexpr bool getCMakeTargetsContainOtherThan()
+{
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+    for(auto id : ids)
+    {
+        if(static_cast<amdgcn_target_id>(id) != Target)
+        {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
 // Cleanup
 #undef MAP_COMPILER_STATE_TO_GFX9_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX10_3_TARGET
