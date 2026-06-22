@@ -940,18 +940,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 
-    from .TypeValidationErrors import _STRICT_GATE_ENABLED
-
-    if not _STRICT_GATE_ENABLED:
-        for key in config:
-            if key in ignoreKeys:
-                continue
-            value = config[key]
-            if key not in globalParameters:
-                printWarning("Global parameter %s = %s unrecognised." % (key, value))
-            globalParameters[key] = value
-        return
-
     _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
         if key in ignoreKeys:

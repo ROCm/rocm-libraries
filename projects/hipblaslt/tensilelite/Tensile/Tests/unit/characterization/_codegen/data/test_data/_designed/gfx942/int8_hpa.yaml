@@ -67,10 +67,10 @@ BenchmarkProblems:
         - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - StaggerU: [0]
         - WorkGroupMapping: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

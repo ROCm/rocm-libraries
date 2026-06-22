@@ -2,7 +2,7 @@
 - gfx950
 - {Architecture: gfx950, CUCount: 128}
 - [Device 75a0]
-- Activation: 1
+- Activation: True
   ActivationComputeDataType: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all
@@ -101,7 +101,7 @@
     CustomKernelName: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 64
-    DirectToLds: true
+    DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
     DirectToVgprA: false
@@ -112,12 +112,12 @@
     EnableF32XEmulationLds: false
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: False
     ExpertSchedulingMode: 0
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
@@ -247,7 +247,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
-    SourceSwap: 1
+    SourceSwap: True
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
@@ -274,13 +274,13 @@
     ThreadTileA: 32
     ThreadTileB: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: True
     UseCustomMainLoopSchedule: -1
     UseDotInstruction: false
     UseF32XEmulation: false

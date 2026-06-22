@@ -75,7 +75,7 @@ BenchmarkProblems:
         - GlobalSplitU: [0]
         - SourceSwap: [True]
         - WorkGroupMapping: [1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - GlobalReadVectorWidthA: [1]

@@ -33,8 +33,8 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: True
+  CSVMergeSameProblemID: True
   Device: 0
 
 BenchmarkProblems:
@@ -48,8 +48,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup

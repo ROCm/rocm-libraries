@@ -428,7 +428,8 @@ def parseSolutionsData(
                              printIndexAssignmentInfo,
                              assembler,
                              isaInfoMap,
-                             srcFile
+                             srcFile,
+                             raiseProblemTypeOnTypeMismatch=False,
                          )
         solutions.append(solutionObject)
     problemType = solutions[0]["ProblemType"]
@@ -532,7 +533,12 @@ def parseLibraryLogicData(
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
-    problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo, srcFile=srcFile)
+    problemType = ProblemType(
+        data["ProblemType"],
+        printIndexAssignmentInfo,
+        srcFile=srcFile,
+        raiseOnTypeMismatch=False,
+    )
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
@@ -578,7 +584,8 @@ def parseLibraryLogicData(
                              printIndexAssignmentInfo,
                              assembler,
                              isaInfoMap,
-                             srcFile
+                             srcFile,
+                             raiseProblemTypeOnTypeMismatch=False,
                          )
         return solutionObject
 

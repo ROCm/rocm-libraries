@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -31,11 +31,11 @@ GlobalParameters:
 # Shared SK5-hybrid fork entries (single-value) plus common benchmark params.
 .SkHybridCommonFork: &sk_hybrid_common_fork
   - KernelLanguage: ["Assembly"]
-  - PrefetchLocalRead: [True]
+  - PrefetchLocalRead: [1]
   - 1LDSBuffer: [1]
   - ExpandPointerSwap: [False]
   - GlobalSplitU: [0]
-  - MIArchVgpr: [0]
+  - MIArchVgpr: [False]
   - PrefetchGlobalRead: [2]
   - ScheduleIterAlg: [3]
   - SourceSwap: [True]

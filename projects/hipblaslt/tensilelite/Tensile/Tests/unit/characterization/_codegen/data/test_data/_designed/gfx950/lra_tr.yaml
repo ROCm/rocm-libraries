@@ -56,8 +56,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -85,7 +85,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [1]
         - GlobalSplitU: [1]
         - LocalReadVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ExpandPointerSwap: [False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

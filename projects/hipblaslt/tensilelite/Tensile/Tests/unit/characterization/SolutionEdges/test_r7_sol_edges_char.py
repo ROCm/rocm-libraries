@@ -51,7 +51,10 @@ def gfx1250_iim():
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
-    return makeIsaInfoMap([isa], cxx)
+    iim = makeIsaInfoMap([isa], cxx)
+    if not iim[isa].asmCaps["SupportedISA"]:
+        pytest.skip("amdclang++ in this environment does not support gfx1250")
+    return iim
 
 
 @pytest.fixture(scope="module")
@@ -117,8 +120,8 @@ def _make_gfx942_hhs_params(iim, **overrides):
         "DestDataType": "H",
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
-        "TransposeA": 0,
-        "TransposeB": 0,
+        "TransposeA": False,
+        "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
     }
@@ -150,8 +153,8 @@ def _make_gfx942_hhs_params(iim, **overrides):
         "GlobalReadVectorWidthA": -1,
         "GlobalReadVectorWidthB": -1,
         "LocalReadVectorWidth": -1,
-        "SourceSwap": 0,
-        "ExpandPointerSwap": 1,
+        "SourceSwap": False,
+        "ExpandPointerSwap": True,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "HalfPLR": 0,
     }
@@ -180,8 +183,8 @@ def _make_gfx1250_hhs_params(iim, mi=None, **overrides):
         "DestDataType": "H",
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
-        "TransposeA": 0,
-        "TransposeB": 0,
+        "TransposeA": False,
+        "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
     }
@@ -213,8 +216,8 @@ def _make_gfx1250_hhs_params(iim, mi=None, **overrides):
         "GlobalReadVectorWidthA": 1,
         "GlobalReadVectorWidthB": 1,
         "LocalReadVectorWidth": -1,
-        "SourceSwap": 0,
-        "ExpandPointerSwap": 0,
+        "SourceSwap": False,
+        "ExpandPointerSwap": False,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "TDMInst": 3,
         "HalfPLR": 1,
@@ -351,7 +354,7 @@ def test_halfplr_rejects_inner_unroll_ne_one_on_gfx1250(
         mi=mi,
         ScheduleIterAlg=0,
         InnerUnroll=2,
-        ProblemType={"TransposeA": 1},  # TN -> TLUA=False -> UnrollMajorLDSA=True
+        ProblemType={"TransposeA": True},  # TN -> TLUA=False -> UnrollMajorLDSA=True
         TransposeLDS=1,
     )
     sol = _derive(params, assembler, gfx1250_iim)
@@ -381,8 +384,8 @@ def _make_gfx942_dot2_params(iim, **overrides):
         "DestDataType": "H",
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
-        "TransposeA": 0,
-        "TransposeB": 0,
+        "TransposeA": False,
+        "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
     }
@@ -391,7 +394,7 @@ def _make_gfx942_dot2_params(iim, **overrides):
     params = {
         "ProblemType": problem_type,
         "ISA": isa,
-        "EnableMatrixInstruction": 0,
+        "EnableMatrixInstruction": False,
         "WorkGroup": [16, 16, 1],
         "WavefrontSize": 64,
         "DepthU": 16,
@@ -415,8 +418,8 @@ def _make_gfx942_dot2_params(iim, **overrides):
         "GlobalReadVectorWidthA": -1,
         "GlobalReadVectorWidthB": -1,
         "LocalReadVectorWidth": -1,
-        "SourceSwap": 0,
-        "ExpandPointerSwap": 0,
+        "SourceSwap": False,
+        "ExpandPointerSwap": False,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "NumWaveSplitK": 1,
         "ScheduleLocalWrite": 1,
@@ -487,8 +490,8 @@ def _make_gfx942_sparse_lds_params(iim, **overrides):
         "DestDataType": "H",
         "ComputeDataType": "s",
         "HighPrecisionAccumulate": True,
-        "TransposeA": 0,
-        "TransposeB": 0,
+        "TransposeA": False,
+        "TransposeB": False,
         "UseBeta": True,
         "Batched": True,
         "Sparse": 1,
@@ -522,9 +525,9 @@ def _make_gfx942_sparse_lds_params(iim, **overrides):
         "GlobalReadVectorWidthA": -1,
         "GlobalReadVectorWidthB": -1,
         "LocalReadVectorWidth": -1,
-        "SourceSwap": 0,
-        "ExpandPointerSwap": 0,
-        "DirectToVgprSparseMetadata": 0,
+        "SourceSwap": False,
+        "ExpandPointerSwap": False,
+        "DirectToVgprSparseMetadata": False,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "WorkGroupMapping": 8,
         "ClusterLocalRead": 1,

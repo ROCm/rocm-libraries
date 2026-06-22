@@ -43,8 +43,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       BiasSrc: "A"
@@ -66,12 +66,12 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [True]
         - TransposeLDS: [1]
         - GlobalSplitU: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - NumElementsPerBatchStore: [2]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

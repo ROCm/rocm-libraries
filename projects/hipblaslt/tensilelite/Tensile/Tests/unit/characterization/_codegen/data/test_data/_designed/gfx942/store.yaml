@@ -11,9 +11,9 @@
 #     non-interleave dscnt path) and 559-565 (ScaleAlphaVec epilogue load)
 #   - StoreRemapVectorWidth: [0, 4] gates lines 637, 714, 721, 822 (StoreRemap
 #     epilogue in _prolog and _epilog)
-#   - StorePriorityOpt: [0, 1] gates alphaBeforeLoadC (line 385) when MIArchVgpr
+#   - StorePriorityOpt: [False, True] gates alphaBeforeLoadC (line 385) when MIArchVgpr
 #     + beta + (StorePriorityOpt or StoreSyncOpt) are all true
-#   - SourceSwap: [0] required for StoreRemap compatibility
+#   - SourceSwap: [False] required for StoreRemap compatibility
 #
 # 2 x 2 = 4 emitted kernels (well under <=8 budget).
 GlobalParameters:
@@ -39,8 +39,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -59,11 +59,11 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
         - GlobalSplitU: [1]
-        - SourceSwap: [0]
-        - StorePriorityOpt: [0, 1]
+        - SourceSwap: [False]
+        - StorePriorityOpt: [False, True]
         - StoreRemapVectorWidth: [0, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

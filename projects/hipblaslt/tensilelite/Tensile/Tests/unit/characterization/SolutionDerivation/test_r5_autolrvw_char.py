@@ -104,8 +104,8 @@ def _make_gfx950_mx_fp8_solution(iim, assembler, **overrides):
             "HighPrecisionAccumulate": True,
             "MXBlockA": 32,
             "MXBlockB": 32,
-            "TransposeA": 1,
-            "TransposeB": 0,
+            "TransposeA": True,
+            "TransposeB": False,
             "UseBeta": True,
             "Batched": True,
         },
@@ -122,7 +122,7 @@ def _make_gfx950_mx_fp8_solution(iim, assembler, **overrides):
         "DirectToLds": 1,
         "StaggerU": 0,
         "StreamK": 3,
-        "UseSubtileImpl": 1,
+        "UseSubtileImpl": True,
         # Auto LRVW — triggers isAutoLRVW in calLRVWFor950MX (lines 3064-3088)
         "LocalReadVectorWidth": -1,
         "GlobalReadVectorWidthA": 16,
@@ -137,8 +137,8 @@ def _make_gfx950_mx_fp8_solution(iim, assembler, **overrides):
         "VectorWidthA": -1,
         "VectorWidthB": -1,
         "StoreVectorWidth": -1,
-        "SourceSwap": 1,
-        "ExpandPointerSwap": 1,
+        "SourceSwap": True,
+        "ExpandPointerSwap": True,
         "GlobalSplitU": 1,
         "InnerUnroll": 1,
         "DebugStreamK": 0,
@@ -246,7 +246,7 @@ def test_gfx950_mx_fp8_autolrvw_lrvw_derived(_gp_assigned, gfx950_iim, gfx950_as
 
 def test_gfx950_mx_fp8_autolrvw_source_swap_cleared(_gp_assigned, gfx950_iim, gfx950_assembler):
     """UseSubtileImpl block (line 821) forces SourceSwap=False even if config requests True."""
-    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler, SourceSwap=1)
+    sol = _make_gfx950_mx_fp8_solution(gfx950_iim, gfx950_assembler, SourceSwap=True)
     assert sol.get("Valid") is True
     # Line 821: state["SourceSwap"] = False
     assert sol.get("SourceSwap") is False, (

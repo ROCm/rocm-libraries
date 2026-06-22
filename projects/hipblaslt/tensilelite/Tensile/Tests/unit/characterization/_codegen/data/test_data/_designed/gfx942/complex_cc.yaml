@@ -59,14 +59,14 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1]
           - [16, 16, 4, 1, 1, 1, 1, 2, 1]
         - ScheduleIterAlg: [3]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - GlobalSplitU: [1]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - DepthU: [8]
         - WorkGroup:
           - [16, 4, 1]
-        - SourceSwap: [0]
+        - SourceSwap: [False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -58,8 +58,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 0
@@ -78,7 +78,7 @@ BenchmarkProblems:
         - StoreRemapVectorWidth: [4]
         - DepthU: [32]
         - GlobalSplitU: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [False]
         - PrefetchGlobalRead: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

@@ -68,8 +68,8 @@ BenchmarkProblems:
       OperationType: GEMM
       DataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
