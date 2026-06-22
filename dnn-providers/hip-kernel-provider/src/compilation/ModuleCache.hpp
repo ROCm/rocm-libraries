@@ -8,7 +8,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace hip_kernel_provider_common
+namespace hip_kernel_provider::compilation
 {
 
 /// @brief Thread-safe CRTP cache for loaded modules.
@@ -83,4 +83,4 @@ private:
     std::unordered_map<std::string, Value> _entries;
 };
 
-} // namespace hip_kernel_provider_common
+} // namespace hip_kernel_provider::compilation

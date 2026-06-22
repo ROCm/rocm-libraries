@@ -4,7 +4,7 @@
 #pragma once
 
 #include "SdpaKernelUtils.hpp"
-#include "common/ModuleCache.hpp"
+#include "compilation/ModuleCache.hpp"
 
 #include <memory>
 #include <string>
@@ -26,7 +26,7 @@ namespace asm_sdpa_engine
 using CachedModule = std::shared_ptr<HipModuleGuard>;
 
 class SdpaModuleCache
-    : public hip_kernel_provider_common::
+    : public hip_kernel_provider::compilation::
           ModuleCache<SdpaModuleCache, CachedModule, const std::string&, const char*>
 {
 public:

@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "common/ModuleCache.hpp"
+#include "compilation/ModuleCache.hpp"
 
 #include <gtest/gtest.h>
 #include <memory>
@@ -16,8 +16,8 @@ using TestValue = std::shared_ptr<int>;
 // A mock derived class that uses the CRTP base.  The load function
 // returns a TestValue constructed from the key, or nullptr if the key
 // starts with "FAIL".
-class MockModuleCache
-    : public hip_kernel_provider_common::ModuleCache<MockModuleCache, TestValue, const std::string&>
+class MockModuleCache : public hip_kernel_provider::compilation::
+                            ModuleCache<MockModuleCache, TestValue, const std::string&>
 {
 public:
     static std::string makeKey(const std::string& name)
