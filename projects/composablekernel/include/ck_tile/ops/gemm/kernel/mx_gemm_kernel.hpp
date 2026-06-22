@@ -74,6 +74,7 @@ struct MxGemmKernel
     using BaseKernel::PersistentKernel;
     using typename BaseKernel::AsLayout;
     using typename BaseKernel::BsLayout;
+    using typename BaseKernel::CLayout;
     using typename BaseKernel::DsLayout;
 
     using typename BaseKernel::ADataType;
@@ -415,15 +416,44 @@ struct MxGemmKernel
                                        const std::array<const void*, NumDTensor>& ds_ptr,
                                        EDataType* e_ptr,
                                        void* smem_ptr,
-                                       const KernelArgs& kargs,
+                                       KernelArgs kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
                                        const index_t block_idx_n)
     {
         std::array<ScalePtrType, NumATensor> as_scale_ptr;
-        static_for<0, NumATensor, 1>{}([&](auto i) {
-            as_scale_ptr[i] = reinterpret_cast<ScalePtrType>(kargs.as_scale_ptr[i]);
-        });
+        std::array<const ADataType*, NumATensor> as_ptr_;
+        index_t block_idx_m_;
+        // Large tensor support (when M is large, N and K are relatively small)
+        using ALayout = remove_cvref_t<std::tuple_element_t<0, AsLayout>>;
+        constexpr bool offset_ptrs_by_tile_coords =
+            std::is_same_v<tensor_layout::gemm::RowMajor, ALayout> &&
+            std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
+
+        if constexpr(offset_ptrs_by_tile_coords)
+        {
+            static_for<0, NumATensor, 1>{}([&](auto i) {
+                as_ptr_[i] = as_ptr[i] + static_cast<std::ptrdiff_t>(block_idx_m) *
+                                             kargs.stride_As[i] / APackedSize;
+            });
+            e_ptr += static_cast<std::ptrdiff_t>(block_idx_m) * kargs.stride_E;
+            static_for<0, NumATensor, 1>{}([&](auto i) {
+                as_scale_ptr[i] = reinterpret_cast<ScalePtrType>(kargs.as_scale_ptr[i]) +
+                                  static_cast<std::ptrdiff_t>(block_idx_m / MXdlPackEff) *
+                                      (kargs.K / BlockScaleSize / KXdlPackEff);
+            });
+
+            kargs.M      = std::min(kargs.M - block_idx_m, TilePartitioner::MPerBlock);
+            block_idx_m_ = 0;
+        }
+        else
+        {
+            static_for<0, NumATensor, 1>{}([&](auto i) {
+                as_scale_ptr[i] = reinterpret_cast<ScalePtrType>(kargs.as_scale_ptr[i]);
+            });
+            static_for<0, NumATensor, 1>{}([&](auto i) { as_ptr_[i] = as_ptr[i]; });
+            block_idx_m_ = block_idx_m;
+        }
 
         std::array<ScalePtrType, NumBTensor> bs_scale_ptr;
         static_for<0, NumBTensor, 1>{}([&](auto i) {
@@ -433,7 +463,7 @@ struct MxGemmKernel
         // cluster launch pads grid to cluster boundaries; skip out-of-bound blocks
         if constexpr(BaseKernel::ClusterLaunch)
         {
-            if(block_idx_m >= kargs.M || block_idx_n >= kargs.N)
+            if(block_idx_m_ >= kargs.M || block_idx_n >= kargs.N)
                 return;
         }
 
@@ -456,12 +486,12 @@ struct MxGemmKernel
         const auto& as_block_window = [&]() {
             if constexpr(MxGemmPipeline::Preshuffle)
             {
-                return BaseKernel::MakeABlockWindows(as_ptr, kargs, kargs.K, block_idx_m);
+                return BaseKernel::MakeABlockWindows(as_ptr_, kargs, kargs.K, block_idx_m_);
             }
             else
             {
                 return BaseKernel::MakeABlockWindows(
-                    as_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_m);
+                    as_ptr_, kargs, splitk_batch_offset.splitted_k, block_idx_m_);
             }
         }();
         const auto& bs_block_window = [&]() {
@@ -476,12 +506,12 @@ struct MxGemmKernel
             }
         }();
         const auto& ds_block_window =
-            BaseKernel::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
+            BaseKernel::MakeDBlockWindows(ds_ptr, kargs, block_idx_m_, block_idx_n);
 
         // Create scale block windows. For split-K (k_batch > 1), k_elem_offset advances the
         // scale origin into the correct packed-K slice for this k_id; otherwise it is zero.
         const auto& scale_a_block_window =
-            MakeScaleABlockWindow(as_scale_ptr, kargs, block_idx_m, k_elem_offset);
+            MakeScaleABlockWindow(as_scale_ptr, kargs, block_idx_m_, k_elem_offset);
         const auto& scale_b_block_window =
             MakeScaleBBlockWindow(bs_scale_ptr, kargs, block_idx_n, k_elem_offset);
 
@@ -507,7 +537,7 @@ struct MxGemmKernel
         {
             auto c_block_window =
                 BaseKernel::template MakeCBlockWindows<memory_operation_enum::set>(
-                    e_ptr, kargs, block_idx_m, block_idx_n);
+                    e_ptr, kargs, block_idx_m_, block_idx_n);
             EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
         }
         else
@@ -516,7 +546,7 @@ struct MxGemmKernel
             {
                 auto c_block_window =
                     BaseKernel::template MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                        e_ptr, kargs, block_idx_m, block_idx_n);
+                        e_ptr, kargs, block_idx_m_, block_idx_n);
                 EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
         }
