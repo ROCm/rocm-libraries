@@ -218,6 +218,10 @@ if(ROCM_LIBS_SUPERBUILD)
     # can use find_package() as intended for standalone builds.
     set(EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR "${CMAKE_BINARY_DIR}/hipdnn-staging")
 
+    # Clear the staging prefix at the start of every configure to ensure the most
+    # recent selected dependencies are used.
+    file(REMOVE_RECURSE "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}")
+
     # Custom target to install hipdnn to staging directory for the example plugin project.
     # Only install Runtime and Development components - skip test binaries which may not be built.
     # This only runs when example_engine_plugin is built (due to DEPENDS).
@@ -237,13 +241,16 @@ if(ROCM_LIBS_SUPERBUILD)
         COMMENT "Installing hipDNN to staging directory for example_engine_plugin"
     )
 
-    # Stage the workspace's fetched nlohmann_json only when FETCHED.
-    if(EXISTS "${CMAKE_BINARY_DIR}/_deps/nlohmann_json-build/cmake_install.cmake")
+    # Stage the workspace's fetched nlohmann_json only when it was FETCHED.
+    include(FetchContent)
+    FetchContent_GetProperties(nlohmann_json)
+    string(FIND "${nlohmann_json_DIR}" "${CMAKE_BINARY_DIR}" _nlohmann_fetched_in_build_tree)
+    if(nlohmann_json_DIR AND _nlohmann_fetched_in_build_tree EQUAL 0)
         add_custom_command(
             TARGET example_plugin_hipdnn-staging-install
             POST_BUILD
             COMMAND ${CMAKE_COMMAND}
-                    -DBUILD_DIR=${CMAKE_BINARY_DIR}/_deps/nlohmann_json-build
+                    -DBUILD_DIR=${nlohmann_json_BINARY_DIR}
                     -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
             COMMENT "Staging fetched nlohmann_json for example_engine_plugin"
@@ -278,6 +285,8 @@ ExternalProject_Add(example_engine_plugin
         "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
     CMAKE_ARGS
+        # Clear any cached nlohmann_json_DIR so find_package re-resolves it.
+        "-Unlohmann_json_DIR"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
     DEPENDS ${_example_plugin_depends}
     INSTALL_COMMAND ""
