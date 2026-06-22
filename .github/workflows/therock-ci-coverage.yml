@@ -138,10 +138,24 @@ jobs:
           # the loader cannot resolve the dependency.
           find "${DIST}" -name 'libLLVM.so*' -exec cp -av {} "${STAGE}/bin/" \;
           find "${DIST}" -name 'librocm_sysdeps_*.so*' -exec cp -av {} "${STAGE}/bin/" \;
+          # Demangler used by llvm-cov show for readable HTML.
+          cp -av "${LLVM_BIN}/llvm-cxxfilt" "${STAGE}/bin/" 2>/dev/null || true
           echo "Staged coverage objects:"
           ls -lR "${STAGE}"
           echo "llvm-profdata dependencies (in build env):"
           ldd "${STAGE}/bin/llvm-profdata" || true
+
+      - name: Export coverage metadata
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pyyaml || true
+          # Written into the staged dir so it travels with the coverage objects.
+          python3 .github/scripts/export_coverage_metadata.py \
+            --build-dir TheRock/build-coverage \
+            --project "${{ inputs.project_name }}" \
+            --config test_categories_coverage.yaml \
+            --output "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
+          cat "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
 
       - name: Upload coverage objects and llvm tools
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -255,45 +269,26 @@ jobs:
           PROFRAW_DIR="${GITHUB_WORKSPACE}/coverage-profraw"
           REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
           mkdir -p "${REPORT_DIR}"
-          chmod +x "${OBJECTS_DIR}/bin/llvm-profdata" "${OBJECTS_DIR}/bin/llvm-cov"
-          # The llvm tools are dynamically linked against the staged libLLVM.so
-          # and TheRock's bundled sysdeps, all staged in bin/.
-          export LD_LIBRARY_PATH="${OBJECTS_DIR}/bin:${LD_LIBRARY_PATH:-}"
-          LLVM_PROFDATA="${OBJECTS_DIR}/bin/llvm-profdata"
-          LLVM_COV="${OBJECTS_DIR}/bin/llvm-cov"
-          LIB_NAME="lib$(echo "${CMAKE_TARGET}" | tr '[:upper:]' '[:lower:]')"
+          METADATA="${OBJECTS_DIR}/coverage_metadata.json"
 
-          echo "llvm-profdata dependencies:"; ldd "${LLVM_PROFDATA}" || true
-
-          # Object files (instrumented libraries) for llvm-cov.
-          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name "*.so*")
-          if [[ ${#OBJECTS[@]} -eq 0 ]]; then
-            echo "No instrumented libraries were staged for ${LIB_NAME}."
-            exit 1
-          fi
-          OBJ_ARGS=()
-          for obj in "${OBJECTS[@]}"; do OBJ_ARGS+=("-object" "${obj}"); done
-
-          # Profraw files collected from every test shard.
-          mapfile -t PROFRAW < <(find "${PROFRAW_DIR}" -type f -name "*.profraw")
-          if [[ ${#PROFRAW[@]} -eq 0 ]]; then
-            echo "No profraw files were collected from the test runs."
-            exit 1
-          fi
-          echo "Merging ${#PROFRAW[@]} profraw file(s) for objects: ${OBJECTS[*]}"
-
-          "${LLVM_PROFDATA}" merge -sparse "${PROFRAW[@]}" -o "${REPORT_DIR}/${LIB_NAME}.profdata"
-          "${LLVM_COV}" report "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" | tee "${REPORT_DIR}/coverage.report"
-          "${LLVM_COV}" show "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=html -output-dir="${REPORT_DIR}"
-          "${LLVM_COV}" export "${OBJ_ARGS[@]}" -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=lcov > "${REPORT_DIR}/coverage.info"
+          # Drive merge + report from the build-time metadata. --skip-tests: the
+          # tests already ran in the package-test stage and uploaded their profraw.
+          python3 .github/scripts/coverage_runner.py \
+            --build-dir "${OBJECTS_DIR}" \
+            --metadata "${METADATA}" \
+            --coverage-dir "${REPORT_DIR}" \
+            --profraw-dir "${PROFRAW_DIR}" \
+            --skip-tests
 
           # Make lcov paths repo-relative so Codecov can map them to the source tree.
-          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+          if [[ -f "${REPORT_DIR}/coverage.info" ]]; then
+            sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+          fi
 
-          # Source files referenced by the coverage data (repo-relative).
-          mapfile -t SOURCES < <("${LLVM_COV}" export "${OBJ_ARGS[@]}" \
-            -instr-profile="${REPORT_DIR}/${LIB_NAME}.profdata" -format=lcov \
-            | sed -n 's|^SF:||p' | sed "s|${GITHUB_WORKSPACE}/||g" | sort -u)
+          # Collect details for the reference links file.
+          mapfile -t SOURCES < <(sed -n 's|^SF:||p' "${REPORT_DIR}/coverage.info" 2>/dev/null | sort -u)
+          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name "*.so*" 2>/dev/null | sort)
+          PROFRAW_COUNT=$(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | wc -l)
 
           # Generate the reference text file with all relevant paths and links.
           LINKS_FILE="${REPORT_DIR}/coverage-report-links.txt"
@@ -306,6 +301,10 @@ jobs:
             echo "Pull request:     ${GITHUB_SERVER_URL}/${REPO}/pull/${PR_NUMBER:-N/A}"
             echo "Workflow run:     ${RUN_URL}"
             echo "GPU family:       ${AMDGPU_FAMILIES}"
+            echo
+            echo "[Coverage config]"
+            echo "  Config:  test_categories_coverage.yaml -> coverage_metadata.json"
+            echo "  Runner:  .github/scripts/coverage_runner.py (--skip-tests)"
             echo
             echo "[TheRock - where ${PROJECT_NAME} was packed for coverage]"
             echo "  Build TheRock ref: ${BUILD_THEROCK_REF}"
@@ -324,14 +323,14 @@ jobs:
             echo "[Tests executed against the instrumented build]"
             echo "  projects_to_test: ${PROJECTS_TO_TEST}"
             echo "  Test driver:      ctest (via .github/workflows/therock-test-component.yml)"
-            echo "  profraw merged:   ${#PROFRAW[@]} file(s)"
+            echo "  profraw merged:   ${PROFRAW_COUNT} file(s)"
             echo "  Test stage:       ${RUN_URL} (job 'Test Coverage (${PROJECT_NAME} | ${AMDGPU_FAMILIES})')"
             echo
             echo "[Coverage report outputs]"
             echo "  HTML report:    coverage-report/index.html"
-            echo "  Text summary:   coverage-report/coverage.report"
+            echo "  Text summary:   coverage-report/code_cov_$(echo "${CMAKE_TARGET}" | tr '[:upper:]' '[:lower:]').report"
             echo "  LCOV:           coverage-report/coverage.info"
-            echo "  Merged profile: coverage-report/${LIB_NAME}.profdata"
+            echo "  Merged profile: coverage-report/$(echo "${CMAKE_TARGET}" | tr '[:upper:]' '[:lower:]').profdata"
             echo
             echo "[Report upload / download]"
             echo "  Artifact name:  ${REPORT_ARTIFACT}"
@@ -378,9 +377,10 @@ jobs:
           {
             echo "### ${{ inputs.project_name }} coverage (${{ inputs.amdgpu_families }})"
             echo ""
-            if [[ -f coverage-report/coverage.report ]]; then
+            report_file="$(find coverage-report -maxdepth 1 -name 'code_cov_*.report' 2>/dev/null | head -1)"
+            if [[ -n "${report_file}" ]]; then
               echo '```'
-              tail -n 3 coverage-report/coverage.report
+              tail -n 3 "${report_file}"
               echo '```'
             fi
             echo "- Report artifact: \`${REPORT_ARTIFACT}\` (download from [run artifacts](${RUN_URL}))"
