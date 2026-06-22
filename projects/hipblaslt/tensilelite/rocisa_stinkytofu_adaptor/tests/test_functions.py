@@ -315,5 +315,203 @@ class TestFunctionsDummyCallables(unittest.TestCase):
                     self.assertIsNone(fn())
 
 
+# ==========================================================================
+# Section C — Counting / analysis functions (real, in __init__.py)
+# ==========================================================================
+
+from rocisa_stinkytofu_adaptor import (  # noqa: E402
+    countType, countInstruction, countGlobalRead, countSMemLoad,
+    countLocalRead, countLocalWrite, countWeightedLocalRead,
+    countWeightedLocalWrite, countDSStoreB128, countDSStoreB192,
+    countDSStoreB256, countVMovB32, countMFMA, getMFMAs, findInstCount,
+)
+from rocisa_stinkytofu_adaptor.code import Module, TextBlock  # noqa: E402
+from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
+    Instruction, BufferLoadB128, BufferLoadB32, FlatLoadB64,
+    DSLoadB32, DSLoadB64, DSLoadB192, DSLoad2B32,
+    DSStoreB32, DSStoreB64, DSStoreB128, DSStoreB192, DSStoreB256,
+    DSStore2B32, VMovB32, SLoadB32, SLoadB128,
+    GlobalLoadTR8B64, MFMAInstruction, SMFMAInstruction, MXMFMAInstruction,
+    SAddU32, SNop,
+)
+
+
+class TestCountInstruction(unittest.TestCase):
+    def test_empty_module(self):
+        self.assertEqual(countInstruction(Module()), 0)
+
+    def test_flat_module(self):
+        m = Module()
+        m.add(BufferLoadB128())
+        m.add(DSLoadB32())
+        m.add(DSStoreB32())
+        self.assertEqual(countInstruction(m), 3)
+
+    def test_nested_module(self):
+        m = Module()
+        m.add(BufferLoadB128())
+        sub = Module()
+        sub.add(DSLoadB32())
+        sub.add(DSStoreB32())
+        m.add(sub)
+        self.assertEqual(countInstruction(m), 3)
+
+    def test_skips_textblock(self):
+        m = Module()
+        m.add(TextBlock("// comment\n"))
+        m.add(BufferLoadB128())
+        self.assertEqual(countInstruction(m), 1)
+
+
+class TestCountGlobalRead(unittest.TestCase):
+    def test_buffer_loads(self):
+        m = Module()
+        m.add(BufferLoadB128())
+        m.add(BufferLoadB32())
+        m.add(DSLoadB32())
+        self.assertEqual(countGlobalRead(m), 2)
+
+    def test_flat_loads(self):
+        m = Module()
+        m.add(FlatLoadB64())
+        self.assertEqual(countGlobalRead(m), 1)
+
+    def test_global_load_tr(self):
+        m = Module()
+        m.add(GlobalLoadTR8B64())
+        self.assertEqual(countGlobalRead(m), 1)
+
+    def test_no_false_positives(self):
+        m = Module()
+        m.add(DSLoadB32())
+        m.add(SLoadB32())
+        self.assertEqual(countGlobalRead(m), 0)
+
+
+class TestCountSMemLoad(unittest.TestCase):
+    def test_sloads(self):
+        m = Module()
+        m.add(SLoadB32())
+        m.add(SLoadB128())
+        m.add(BufferLoadB128())
+        self.assertEqual(countSMemLoad(m), 2)
+
+
+class TestCountLocalRead(unittest.TestCase):
+    def test_ds_loads(self):
+        m = Module()
+        m.add(DSLoadB32())
+        m.add(DSLoadB64())
+        m.add(DSLoad2B32())
+        m.add(DSStoreB32())
+        self.assertEqual(countLocalRead(m), 3)
+
+    def test_nested(self):
+        m = Module()
+        sub = Module()
+        sub.add(DSLoadB32())
+        m.add(sub)
+        m.add(DSLoadB64())
+        self.assertEqual(countLocalRead(m), 2)
+
+
+class TestCountLocalWrite(unittest.TestCase):
+    def test_ds_stores(self):
+        m = Module()
+        m.add(DSStoreB32())
+        m.add(DSStoreB64())
+        m.add(DSStore2B32())
+        m.add(DSLoadB32())
+        self.assertEqual(countLocalWrite(m), 3)
+
+
+class TestCountWeighted(unittest.TestCase):
+    def test_weighted_local_read(self):
+        m = Module()
+        m.add(DSLoadB32())
+        m.add(DSLoadB192())
+        self.assertEqual(countWeightedLocalRead(m), 3)  # 1 + 2
+
+    def test_weighted_local_write(self):
+        m = Module()
+        m.add(DSStoreB128())
+        m.add(DSStoreB192())
+        m.add(DSStoreB256())
+        self.assertEqual(countWeightedLocalWrite(m), 5)  # 1 + 2 + 2
+
+
+class TestCountExactType(unittest.TestCase):
+    def test_ds_store_b128(self):
+        m = Module()
+        m.add(DSStoreB128())
+        m.add(DSStoreB192())
+        self.assertEqual(countDSStoreB128(m), 1)
+        self.assertEqual(countDSStoreB192(m), 1)
+        self.assertEqual(countDSStoreB256(m), 0)
+
+    def test_vmov_b32(self):
+        m = Module()
+        m.add(VMovB32(dst="v0", src="v1"))
+        m.add(VMovB32(dst="v2", src="v3"))
+        self.assertEqual(countVMovB32(m), 2)
+
+
+class TestCountMFMA(unittest.TestCase):
+    def test_no_mfma(self):
+        m = Module()
+        m.add(BufferLoadB128())
+        self.assertEqual(countMFMA(m), 0)
+        self.assertEqual(getMFMAs(m), [])
+
+
+class TestFindInstCount(unittest.TestCase):
+    def test_found(self):
+        target = DSLoadB32()
+        m = Module()
+        m.add(BufferLoadB128())
+        m.add(target)
+        cnt, found = findInstCount(m, target)
+        self.assertTrue(found)
+        self.assertEqual(cnt, 1)
+
+    def test_not_found(self):
+        target = DSLoadB32()
+        m = Module()
+        m.add(BufferLoadB128())
+        cnt, found = findInstCount(m, target)
+        self.assertFalse(found)
+
+    def test_skips_textblock(self):
+        target = DSStoreB32()
+        m = Module()
+        m.add(BufferLoadB128())
+        m.add(TextBlock("// skip me\n"))
+        m.add(DSLoadB32())
+        m.add(target)
+        cnt, found = findInstCount(m, target)
+        self.assertTrue(found)
+        self.assertEqual(cnt, 2)
+
+    def test_nested_module(self):
+        target = DSLoadB32()
+        m = Module()
+        sub = Module()
+        sub.add(BufferLoadB128())
+        sub.add(target)
+        m.add(sub)
+        cnt, found = findInstCount(m, target)
+        self.assertTrue(found)
+        self.assertEqual(cnt, 1)
+
+
+class TestCountType(unittest.TestCase):
+    def test_generic_isinstance(self):
+        m = Module()
+        m.add(BufferLoadB128())
+        m.add(DSLoadB32())
+        m.add(TextBlock("// x\n"))
+        self.assertEqual(countType(m, Instruction), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

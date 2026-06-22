@@ -289,21 +289,218 @@ def getSlcBitName() -> str:
     """Mirror ``rocisa::getSlcBitName()`` using the active ISA asm caps."""
     return _caps.slc_bit_name_from_caps(rocIsa.getInstance().getAsmCaps())
 
-countType = make_dummy_func(f"{_P}.countType")
-countInstruction = make_dummy_func(f"{_P}.countInstruction")
-countGlobalRead = make_dummy_func(f"{_P}.countGlobalRead")
-countSMemLoad = make_dummy_func(f"{_P}.countSMemLoad")
-countLocalRead = make_dummy_func(f"{_P}.countLocalRead")
-countLocalWrite = make_dummy_func(f"{_P}.countLocalWrite")
-countWeightedLocalRead = make_dummy_func(f"{_P}.countWeightedLocalRead")
-countWeightedLocalWrite = make_dummy_func(f"{_P}.countWeightedLocalWrite")
-countDSStoreB128 = make_dummy_func(f"{_P}.countDSStoreB128")
-countDSStoreB192 = make_dummy_func(f"{_P}.countDSStoreB192")
-countDSStoreB256 = make_dummy_func(f"{_P}.countDSStoreB256")
-countVMovB32 = make_dummy_func(f"{_P}.countVMovB32")
-countMFMA = make_dummy_func(f"{_P}.countMFMA")
-getMFMAs = make_dummy_func(f"{_P}.getMFMAs")
-findInstCount = make_dummy_func(f"{_P}.findInstCount")
+# ==========================================================================
+# Module-level counting / analysis functions
+# ==========================================================================
+# Mirrors ``rocisa/src/count.cpp``. The C++ uses dynamic_cast to traverse
+# a Module tree and count instructions by type. Here we use isinstance()
+# against tuples of concrete adaptor classes.
+
+def _count_recursive(item, type_tuple, weights=None):
+    """Recursively count instructions matching *type_tuple* in *item* tree."""
+    from .code import Module as _Mod
+    if isinstance(item, _Mod):
+        total = 0
+        for child in item.itemList:
+            total += _count_recursive(child, type_tuple, weights)
+        return total
+    if isinstance(item, type_tuple):
+        if weights:
+            w = weights.get(type(item))
+            if w is not None:
+                return w
+        return 1
+    return 0
+
+
+def _count_exact_type(item, exact_type):
+    """Count items whose type is exactly *exact_type* (no subclass match)."""
+    from .code import Module as _Mod
+    if isinstance(item, _Mod):
+        total = 0
+        for child in item.itemList:
+            total += _count_exact_type(child, exact_type)
+        return total
+    return 1 if type(item) is exact_type else 0
+
+
+def _get_matching(item, type_tuple):
+    """Collect all items matching *type_tuple* in tree order."""
+    from .code import Module as _Mod
+    result = []
+    if isinstance(item, _Mod):
+        for child in item.itemList:
+            result.extend(_get_matching(child, type_tuple))
+    elif isinstance(item, type_tuple):
+        result.append(item)
+    return result
+
+
+def countType(item, cls):
+    """Generic isinstance-based count (mirrors ``rocisa::countType``)."""
+    from .code import Module as _Mod
+    if isinstance(item, _Mod):
+        return sum(countType(child, cls) for child in item.itemList)
+    return 1 if isinstance(item, cls) else 0
+
+
+def countInstruction(item):
+    """Count all Instruction nodes in tree (mirrors ``countX<Instruction>``)."""
+    from .instruction import Instruction as _Inst
+    from .code import Module as _Mod
+    if isinstance(item, _Mod):
+        return sum(countInstruction(child) for child in item.itemList)
+    return 1 if isinstance(item, _Inst) else 0
+
+
+def countGlobalRead(item):
+    """Count BufferLoad*/FlatLoad*/GlobalLoadTR* (mirrors ``countX<GlobalReadInstruction>``)."""
+    return _count_recursive(item, _global_read_types())
+
+
+def countSMemLoad(item):
+    """Count SLoadB* instructions (mirrors ``countX<SMemLoadInstruction>``)."""
+    return _count_recursive(item, _smem_load_types())
+
+
+def countLocalRead(item):
+    """Count DSLoad* instructions (mirrors ``countX<LocalReadInstruction>``)."""
+    return _count_recursive(item, _local_read_types())
+
+
+def countLocalWrite(item):
+    """Count DSStore* instructions (mirrors ``countX<LocalWriteInstruction>``)."""
+    return _count_recursive(item, _local_write_types())
+
+
+def countWeightedLocalRead(item):
+    """Count local reads with weights: DSLoadB192 counts as 2."""
+    from . import instruction as _inst
+    weights = {_inst.DSLoadB192: 2}
+    return _count_recursive(item, _local_read_types(), weights)
+
+
+def countWeightedLocalWrite(item):
+    """Count local writes with weights: DSStoreB192/B256 count as 2."""
+    from . import instruction as _inst
+    weights = {_inst.DSStoreB192: 2, _inst.DSStoreB256: 2}
+    return _count_recursive(item, _local_write_types(), weights)
+
+
+def countDSStoreB128(item):
+    """Count exact DSStoreB128 instances."""
+    from . import instruction as _inst
+    return _count_exact_type(item, _inst.DSStoreB128)
+
+
+def countDSStoreB192(item):
+    """Count exact DSStoreB192 instances."""
+    from . import instruction as _inst
+    return _count_exact_type(item, _inst.DSStoreB192)
+
+
+def countDSStoreB256(item):
+    """Count exact DSStoreB256 instances."""
+    from . import instruction as _inst
+    return _count_exact_type(item, _inst.DSStoreB256)
+
+
+def countVMovB32(item):
+    """Count exact VMovB32 instances."""
+    from . import instruction as _inst
+    return _count_exact_type(item, _inst.VMovB32)
+
+
+def countMFMA(item):
+    """Count all MFMA-family instructions (MFMA, SMFMA, MXMFMA)."""
+    return _count_recursive(item, _mfma_types())
+
+
+def getMFMAs(item):
+    """Get all MFMA-family instruction objects from tree."""
+    return _get_matching(item, _mfma_types())
+
+
+def findInstCount(module, targetItem, count=0):
+    """Find index of *targetItem* in tree, skipping TextBlocks.
+
+    Returns (count, found) pair matching C++ semantics.
+    """
+    from .code import Module as _Mod, TextBlock as _TB
+    if isinstance(module, _Mod):
+        for child in module.itemList:
+            if isinstance(child, _Mod):
+                count, found = findInstCount(child, targetItem, count)
+                if found:
+                    return (count, True)
+            elif child is targetItem:
+                return (count, True)
+            elif not isinstance(child, _TB):
+                count += 1
+    return (count, False)
+
+
+# ---------------------------------------------------------------------------
+# Lazy type-tuple builders (avoid circular imports at module level)
+# ---------------------------------------------------------------------------
+
+def _global_read_types():
+    from . import instruction as _inst
+    return (
+        _inst.BufferLoadU8, _inst.BufferLoadI8,
+        _inst.BufferLoadD16HIU8, _inst.BufferLoadD16U8,
+        _inst.BufferLoadD16I8, _inst.BufferLoadD16HII8,
+        _inst.BufferLoadD16HIB16, _inst.BufferLoadD16B16,
+        _inst.BufferLoadB16, _inst.BufferLoadI16, _inst.BufferLoadU16,
+        _inst.BufferLoadB32, _inst.BufferLoadB64,
+        _inst.BufferLoadB96, _inst.BufferLoadB128, _inst.BufferLoadB192,
+        _inst.FlatLoadU8, _inst.FlatLoadI8,
+        _inst.FlatLoadD16HIU8, _inst.FlatLoadD16U8,
+        _inst.FlatLoadD16I8, _inst.FlatLoadD16HII8,
+        _inst.FlatLoadD16HIB16, _inst.FlatLoadD16B16,
+        _inst.FlatLoadU16, _inst.FlatLoadI16,
+        _inst.FlatLoadB32, _inst.FlatLoadB64,
+        _inst.FlatLoadB96, _inst.FlatLoadB128, _inst.FlatLoadB192,
+        _inst.GlobalLoadTR8B64, _inst.GlobalLoadTR16B128,
+    )
+
+
+def _smem_load_types():
+    from . import instruction as _inst
+    return (
+        _inst.SLoadB32, _inst.SLoadB64, _inst.SLoadB128,
+        _inst.SLoadB256, _inst.SLoadB512,
+    )
+
+
+def _local_read_types():
+    from . import instruction as _inst
+    return (
+        _inst.DSLoadU8, _inst.DSLoadI8, _inst.DSLoadD16HIU8,
+        _inst.DSLoadU16, _inst.DSLoadI16, _inst.DSLoadD16HIU16,
+        _inst.DSLoadB16, _inst.DSLoadB32, _inst.DSLoadB64,
+        _inst.DSLoadB96, _inst.DSLoadB96TrB6,
+        _inst.DSLoadB64TrB4, _inst.DSLoadB64TrB16,
+        _inst.DSLoadB128TrB16, _inst.DSLoadB64TrB8,
+        _inst.DSLoadB128, _inst.DSLoadB192,
+        _inst.DSLoad2B32, _inst.DSLoad2B64,
+    )
+
+
+def _local_write_types():
+    from . import instruction as _inst
+    return (
+        _inst.DSStoreB8, _inst.DSStoreB16,
+        _inst.DSStoreB32, _inst.DSStoreB64,
+        _inst.DSStoreB96, _inst.DSStoreB128,
+        _inst.DSStoreB192, _inst.DSStoreB256,
+        _inst.DSStore2B32, _inst.DSStore2B64,
+    )
+
+
+def _mfma_types():
+    from . import instruction as _inst
+    return (_inst.MFMAInstruction, _inst.SMFMAInstruction, _inst.MXMFMAInstruction)
 
 # rocisa <-> stinkytofu interop
 # ---------------------------------------------------------------------------
