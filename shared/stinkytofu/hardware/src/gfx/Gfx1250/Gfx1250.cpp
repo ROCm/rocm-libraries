@@ -339,6 +339,7 @@ void setGfx1250ConversionMap(GpuArch& registry) {
         {"SWaitTensorcnt", "lowerRocisaWaitTensorcnt"},
         {"SWaitAlu", "lowerRocisaWaitAlu"},
         {"SBarrier", "lowerRocisaSBarrier"},
+        {"SBarrierSignalIsFirst", "lowerRocisaSBarrierSignalIsFirst"},
 
         // {"VMaxPKF16", "v_max_pk_f16"},
 

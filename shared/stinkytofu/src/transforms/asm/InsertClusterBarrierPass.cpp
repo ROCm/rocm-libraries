@@ -118,7 +118,9 @@ StinkyRegister makeSymbolicSgpr(const std::string& symbolicName) {
 /// `wait_kmcnt`-style modifiers).
 bool isBarrierWithLiteralId(const StinkyInstruction& inst, bool wantSignal, int id,
                             bool rejectMemToken) {
-    if (wantSignal ? !isBarrierSignal(inst) : !isBarrierWait(inst)) return false;
+    // Plain `s_barrier_signal` only: `s_barrier_signal_isfirst` shares the barrier-id
+    // operand shape but must not satisfy cluster plain-signal idempotency checks.
+    if (wantSignal ? !isPlainBarrierSignal(inst) : !isBarrierWait(inst)) return false;
     if (rejectMemToken && inst.getModifier<MemTokenData>() != nullptr) return false;
     const auto& srcs = inst.getSrcRegs();
     return !srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt &&

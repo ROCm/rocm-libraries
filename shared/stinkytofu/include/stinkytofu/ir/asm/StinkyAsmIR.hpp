@@ -422,8 +422,15 @@ inline bool isBarrier(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Barrier);
 }
 
-inline bool isBarrierSignal(const StinkyInstruction& inst) {
+/// `s_barrier_signal` only (excludes `s_barrier_signal_isfirst`). Used where the
+/// SCC / cluster-handshake logic applies only to the plain signal opcode.
+inline bool isPlainBarrierSignal(const StinkyInstruction& inst) {
     return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal;
+}
+
+inline bool isBarrierSignal(const StinkyInstruction& inst) {
+    return isPlainBarrierSignal(inst) ||
+           inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal_isfirst;
 }
 
 inline bool isBarrierWait(const StinkyInstruction& inst) {

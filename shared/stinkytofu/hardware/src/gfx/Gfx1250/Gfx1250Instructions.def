@@ -98,6 +98,8 @@ DEF_BATCH(.format = SOPP_IMM32,
 // Control Flow — Barrier signal (SOP1 format)
 DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier},
     .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
+DEF_T(SBarrierSignalIsfirstInst, "s_barrier_signal_isfirst", .format = SOP1, .flags = {Barrier, ImplicitWriteSCC},
+    .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
 
 // Flat Memory
 DEF_BATCH(.format = FLAT_LOAD,
@@ -1343,7 +1345,7 @@ DEF_BATCH(.format = VOP1_TRANSCENDENTAL, .flags = {Trans64},
 //   s_and_not1_saveexec_b64 (= s_andn2_saveexec_b64),
 //   s_and_not1_wrexec_b32 (= s_andn2_wrexec_b32),
 //   s_and_not1_wrexec_b64 (= s_andn2_wrexec_b64),
-//   s_barrier_leave, s_barrier_signal_isfirst,
+//   s_barrier_leave,
 //   s_bcnt0_i32_b32, s_bcnt0_i32_b64, s_bcnt1_i32_b32, s_bcnt1_i32_b64,
 //   s_bfe_i32, s_bfe_i64, s_bfe_u32, s_bfe_u64,
 //   s_bitcmp0_b32, s_bitcmp0_b64, s_bitcmp1_b64,

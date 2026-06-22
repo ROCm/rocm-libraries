@@ -221,6 +221,28 @@ std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
     return {waitInst, signalInst};
 }
 
+// rocisa::SBarrierSignalIsFirst → s_barrier_signal_isfirst <id>  (signal-only;
+// pair with SBarrier wait or s_barrier_wait). Operand matches SBarrier signal:
+// -1 workgroup, -3 cluster when clusterBarrier is set at rocisa construction.
+std::vector<StinkyInstruction*> lowerRocisaSBarrierSignalIsFirst(rocisa::Instruction& inst,
+                                                                 AsmIRBuilder& irBuilder) {
+    auto* barrier = dynamic_cast<rocisa::SBarrierSignalIsFirst*>(&inst);
+    assert(barrier != nullptr &&
+           "lowerRocisaSBarrierSignalIsFirst: expected rocisa::SBarrierSignalIsFirst");
+
+    const int code = (barrier->getHasClusterBarrier() && barrier->getClusterBarrier()) ? -3 : -1;
+
+    const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal_isfirst, irBuilder.arch);
+    assert(desc != nullptr && "s_barrier_signal_isfirst not available on this arch");
+
+    StinkyInstruction* st = irBuilder.create(desc);
+    st->addSrcReg(StinkyRegister(code));
+    if (auto memToken = inst.getMemToken()) {
+        st->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
+    }
+    return {st};
+}
+
 };  // anonymous namespace
 
 // Include all Rocisa hardware mapping tables
