@@ -4,7 +4,7 @@
 GPU-free unit tests for OccupancyMeasure.py: occupancy formula and arch-caps table.
 
 Tests compute_occupancy_from_resources() and _arch_caps_for_kernel() used by
-both the codegen-time scan (updateOccupancyFromScan) and the custom-kernel ASM
+both the codegen-time max-VGPR path (updateOccupancyFromMaxVgpr) and the custom-kernel ASM
 parser (compute_occupancy_from_asm_source).
 HIP cross-validation lives in test_occupancy_hip.py.
 """
@@ -57,7 +57,7 @@ class TestComputeOccupancyFromResources:
     def test_case4_mt320x192x64_vgpr_256(self):
         """Case 4 (MT320x192x64): vgpr_count=256, LDS=68864 → occ=2.
 
-        This is the primary motivating case.  With updateOccupancyFromScan
+        This is the primary motivating case.  With updateOccupancyFromMaxVgpr
         the .s file has .amdhsa_next_free_vgpr=256; the formula correctly
         computes occ=2.
         """
@@ -410,7 +410,7 @@ class TestArchCapsAgreementExtended:
         assert max_waves  == exp_max_waves,  f"ISA {isa}: max_waves_per_simd mismatch"
 
 
-# ── updateOccupancyFromScan O(1) path ────────────────────────────────────────
+# ── updateOccupancyFromMaxVgpr O(1) path ─────────────────────────────────────
 
 class _MockPool:
     def __init__(self, n):
@@ -434,8 +434,8 @@ class _MockMkb:
         self.set_gprs_kwargs = kwargs
 
 
-def _make_scan_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_size=64):
-    """Minimal KernelWriterAssembly stub for updateOccupancyFromScan tests."""
+def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_size=64):
+    """Minimal KernelWriterAssembly stub for updateOccupancyFromMaxVgpr tests."""
     kw = object.__new__(_KWA)
     kw.states = SimpleNamespace(
         archCaps={
@@ -453,33 +453,33 @@ def _make_scan_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_
 
 
 @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly import requires rocisa")
-class TestUpdateOccupancyFromScanO1Path:
-    """updateOccupancyFromScan uses rocIsaPassResult.maxVgpr (O(1)); no regex fallback."""
+class TestUpdateOccupancyFromMaxVgprO1Path:
+    """updateOccupancyFromMaxVgpr uses rocIsaPassResult.maxVgpr (O(1)); no regex fallback."""
 
     def test_missing_max_vgpr_skips_update(self):
         """maxVgpr <= 0 from rocIsaPass → skip update; CUOccupancy unchanged."""
-        kw = _make_scan_writer()
+        kw = _make_max_vgpr_writer()
         mkb = _MockMkb()
         kernel = {"CUOccupancy": 2, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb, -1)
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, -1)
         assert not mkb.set_gprs_called
         assert kernel["CUOccupancy"] == 2
 
     def test_pool_estimate_skips_update(self):
         """maxVgpr == pool size → no reduction possible; CUOccupancy unchanged."""
-        kw = _make_scan_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
+        kw = _make_max_vgpr_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
         mkb = _MockMkb()
         kernel = {"CUOccupancy": 1, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb, 256)
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, 256)
         assert not mkb.set_gprs_called
         assert kernel["CUOccupancy"] == 1
 
     def test_reduced_vgpr_count_updates(self):
         """maxVgpr < pool → setGprs called and CUOccupancy corrected."""
-        kw = _make_scan_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
+        kw = _make_max_vgpr_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
         mkb = _MockMkb()
         kernel = {"CUOccupancy": 1, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb, 10)
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, 10)
         assert mkb.set_gprs_called
         assert mkb.set_gprs_kwargs["totalVgprs"] == 10
         assert mkb.set_gprs_kwargs["totalAgprs"] == 256

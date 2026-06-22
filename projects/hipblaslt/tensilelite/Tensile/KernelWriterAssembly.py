@@ -2070,46 +2070,46 @@ class KernelWriterAssembly(KernelWriter):
       mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
-  # updateOccupancyFromScan
+  # updateOccupancyFromMaxVgpr
   ##############################################################################
-  def updateOccupancyFromScan(self, kernel, mkb, scanned_vgprs: int) -> None:
+  def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
     """Update CUOccupancy and the kernel descriptor after rocIsaPass.
 
     rocIsaPass builds a register interference graph and computes the highest
     VGPR index actually referenced by instructions; the result is passed in as
-    scanned_vgprs (= max_vgpr_index + 1).  When that is lower than the
-    checkResources pool estimate, the kernel descriptor and CUOccupancy are
-    updated so .amdhsa_next_free_vgpr reflects actual usage.
+    max_vgpr (= max_vgpr_index + 1 from rocIsaPassResult.maxVgpr).  When that
+    is lower than the checkResources pool estimate, the kernel descriptor and
+    CUOccupancy are updated so .amdhsa_next_free_vgpr reflects actual usage.
 
     Only runs on ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
 
-    scanned_vgprs:
+    max_vgpr:
         Pre-computed max-VGPR count from rocIsaPassResult.maxVgpr.  When <= 0
         (not supplied by the pass), the update is skipped.
     """
     if not self.states.archCaps.get("ArchAccUnifiedRegs"):
       return
 
-    if scanned_vgprs <= 0:
+    if max_vgpr <= 0:
       return
 
     # Acc VGPRs are tracked by a separate pool and are always fully populated
     # by MFMA instructions; rocIsaPass skips acc registers in its graph, so
     # keep the pool size as the authoritative AGPR count (unchanged from before).
-    scanned_agprs = self.agprPool.size()
+    pool_agprs = self.agprPool.size()
 
     pool_total    = int(ceil(self.vgprPool.size() / 8.0)) * 8 + self.agprPool.size()
-    scanned_total = int(ceil(scanned_vgprs       / 8.0)) * 8 + scanned_agprs
+    max_vgpr_total = int(ceil(max_vgpr / 8.0)) * 8 + pool_agprs
 
-    if scanned_total >= pool_total:
+    if max_vgpr_total >= pool_total:
       return
 
-    mkb.setGprs(totalVgprs=scanned_vgprs, totalAgprs=scanned_agprs,
+    mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
                 totalSgprs=self.sgprPool.size())
 
     kernel["CUOccupancy"] = self.getOccupancy(
-      kernel["NumThreads"], scanned_vgprs, self.sgprPool.size(),
-      self.getLdsSize(kernel), scanned_agprs, self.states.doubleVgpr)
+      kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
+      self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer

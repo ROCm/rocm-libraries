@@ -62,7 +62,7 @@ namespace rocisa
         {
             // doOpt() is false (e.g. ActivationType=="all"): the graph is not
             // built, so conservatively return the pool estimate.  Python will
-            // see scanned_vgprs == vgprPool.size() and skip the update.
+            // see max_vgpr == vgprPool.size() and skip the update.
             result.maxVgpr = kernel->totalVgprs;
         }
 

@@ -6540,7 +6540,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Post-rocIsaPass: use the O(1) max-VGPR count from the register graph the
     # pass already built (passResult.maxVgpr) to update the kernel descriptor
     # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
-    self.updateOccupancyFromScan(kernel, moduleKernelBody, passResult.maxVgpr)
+    self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
@@ -9767,7 +9767,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
 
-  def updateOccupancyFromScan(self, kernel, mkb, scanned_vgprs: int) -> None:
+  def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
     """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
     using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
