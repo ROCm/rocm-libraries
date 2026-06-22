@@ -106,6 +106,9 @@ endif()
 add_armor_flags(hipsolver "${ARMOR_LEVEL}")
 
 if(WIN32)
+  # Embed PE version metadata (VERSIONINFO) into the DLL
+  target_sources(hipsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     add_custom_command(TARGET hipsolver
       POST_BUILD

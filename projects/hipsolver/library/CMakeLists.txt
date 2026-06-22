@@ -56,6 +56,22 @@ endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/internal/hipsolver-version.h.in"
 	"${PROJECT_BINARY_DIR}/include/hipsolver/internal/hipsolver-version.h")
 
+# Configure Windows DLL version resource (VERSIONINFO / PE metadata)
+if(WIN32)
+  find_package(Git QUIET)
+  set(hipsolver_VERSION_COMMIT_ID "unknown")
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+      OUTPUT_VARIABLE hipsolver_VERSION_COMMIT_ID
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+  endif()
+  string(TIMESTAMP HIPSOLVER_COPYRIGHT_YEAR "%Y")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+    "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
+
 set(hipsolver_headers_public
   include/hipsolver.h
   include/internal/hipsolver-types.h
