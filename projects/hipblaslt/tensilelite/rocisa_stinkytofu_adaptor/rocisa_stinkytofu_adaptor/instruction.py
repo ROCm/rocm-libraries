@@ -2125,7 +2125,35 @@ GlobalWb = _make_no_operand_class("GlobalWb", "global_wb")
 GlobalInv = _make_no_operand_class("GlobalInv", "global_inv")
 # SNop — real class (see class SNop above, after SMovB64).
 # logicalIR: VNop
-VNop = _make_no_operand_class("VNop", "v_nop")
+class VNop(Instruction):
+    """``v_nop`` shim — emits *count* copies of ``v_nop``."""
+
+    __slots__ = ("count",)
+
+    def __init__(self, count: int = 1, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.count = int(count)
+        self.setInst("v_nop")
+
+    def getParams(self):
+        return [self.count]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.count]
+
+    def to_stinky_logical(self, _module=None):
+        import stinkytofu as _st
+        return _st.VNop(_to_stinky_register(self.count), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = VNop(count=self.count, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
 
 
 # logicalIR: SEndpgm
