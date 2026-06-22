@@ -160,14 +160,13 @@ def validate_warp_configuration(
     gpu_name: str,
 ) -> bool:
     """Validate warp configuration."""
-
+    base_gpu_name = gpu_name.split(":")[0] if gpu_name else gpu_name
     current_combination = [warp_m, warp_n, warp_k]
 
-    allowed_combinations = WARP_SUPPORTED_COMBINATIONS.get(gpu_name, {})
+    allowed_combinations = WARP_SUPPORTED_COMBINATIONS.get(base_gpu_name)
     if not allowed_combinations:
-        # If GPU not recognized, try to be permissive but log warning
-        logging.warning(f"No warp_[m/n/k] combinations found for GPU: {gpu_name}")
-        return True
+        logging.debug(f"No warp_[m/n/k] combinations found for GPU: {base_gpu_name}; using defaults")
+        allowed_combinations = [[1, 4, 1], [2, 2, 1], [4, 1, 1]]
 
     # Check if current combination is in the allowed list
     if current_combination not in allowed_combinations:
