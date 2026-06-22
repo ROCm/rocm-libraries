@@ -142,7 +142,7 @@ inline const error_category& cuda_category();
 /*! Specialization of \p is_error_code_enum for \p cuda::errc::errc_t
  */
 template <>
-struct is_error_code_enum<cuda::errc::errc_t> : thrust::detail::true_type
+struct is_error_code_enum<cuda::errc::errc_t> : _THRUST_STD::true_type
 {};
 
 // XXX replace cuda::errc::errc_t with cuda::errc upon c++0x

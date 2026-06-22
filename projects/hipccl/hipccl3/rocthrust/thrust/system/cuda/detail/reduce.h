@@ -77,10 +77,10 @@ namespace __reduce
 {
 
 template <bool>
-struct is_true : thrust::detail::false_type
+struct is_true : _THRUST_STD::false_type
 {};
 template <>
-struct is_true<true> : thrust::detail::true_type
+struct is_true<true> : _THRUST_STD::true_type
 {};
 
 template <int _BLOCK_THREADS,
@@ -241,7 +241,7 @@ struct ReduceAgent
     // (specialized for types we can vectorize)
     //
     template <class Iterator>
-    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator d_in, thrust::detail::true_type /* can_vectorize */)
+    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator d_in, _THRUST_STD::true_type /* can_vectorize */)
     {
       return (size_t(d_in) & (sizeof(Vector) - 1)) == 0;
     }
@@ -250,7 +250,7 @@ struct ReduceAgent
     // (specialized for types we cannot vectorize)
     //
     template <class Iterator>
-    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator, thrust::detail::false_type /* can_vectorize */)
+    static THRUST_DEVICE_FUNCTION bool is_aligned(Iterator, _THRUST_STD::false_type /* can_vectorize */)
     {
       return false;
     }
@@ -266,8 +266,8 @@ struct ReduceAgent
       T& thread_aggregate,
       Size block_offset,
       int /*valid_items*/,
-      thrust::detail::true_type /* is_full_tile */,
-      thrust::detail::false_type /* can_vectorize */)
+      _THRUST_STD::true_type /* is_full_tile */,
+      _THRUST_STD::false_type /* can_vectorize */)
     {
       T items[ITEMS_PER_THREAD];
 
@@ -286,8 +286,8 @@ struct ReduceAgent
       T& thread_aggregate,
       Size block_offset,
       int /*valid_items*/,
-      thrust::detail::true_type /* is_full_tile */,
-      thrust::detail::true_type /* can_vectorize */)
+      _THRUST_STD::true_type /* is_full_tile */,
+      _THRUST_STD::true_type /* can_vectorize */)
     {
       // Alias items as an array of VectorT and load it in striped fashion
       enum
@@ -318,11 +318,7 @@ struct ReduceAgent
     //
     template <int IS_FIRST_TILE, class CAN_VECTORIZE>
     THRUST_DEVICE_FUNCTION void consume_tile(
-      T& thread_aggregate,
-      Size block_offset,
-      int valid_items,
-      thrust::detail::false_type /* is_full_tile */,
-      CAN_VECTORIZE)
+      T& thread_aggregate, Size block_offset, int valid_items, _THRUST_STD::false_type /* is_full_tile */, CAN_VECTORIZE)
     {
       // Partial tile
       int thread_offset = threadIdx.x;
@@ -358,18 +354,18 @@ struct ReduceAgent
       {
         // First tile isn't full (not all threads have valid items)
         int valid_items = block_end - block_offset;
-        consume_tile<true>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<true>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         return BlockReduce(storage.reduce).Reduce(thread_aggregate, reduction_op, valid_items);
       }
 
       // At least one full block
-      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
       block_offset += ITEMS_PER_TILE;
 
       // Consume subsequent full tiles of input
       while (block_offset + ITEMS_PER_TILE <= block_end)
       {
-        consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+        consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
         block_offset += ITEMS_PER_TILE;
       }
 
@@ -377,7 +373,7 @@ struct ReduceAgent
       if (block_offset < block_end)
       {
         int valid_items = block_end - block_offset;
-        consume_tile<false>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<false>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
       }
 
       // Compute block-wide reduction (all threads have valid items)
@@ -436,12 +432,12 @@ struct ReduceAgent
       {
         // First tile isn't full (not all threads have valid items)
         int valid_items = num_items - block_offset;
-        consume_tile<true>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+        consume_tile<true>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         return BlockReduce(storage.reduce).Reduce(thread_aggregate, reduction_op, valid_items);
       }
 
       // Consume first full tile of input
-      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+      consume_tile<true>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
 
       if (num_items > even_share_base)
       {
@@ -459,8 +455,7 @@ struct ReduceAgent
         // Consume more full tiles
         while (block_offset + ITEMS_PER_TILE <= num_items)
         {
-          consume_tile<false>(
-            thread_aggregate, block_offset, ITEMS_PER_TILE, thrust::detail::true_type(), can_vectorize);
+          consume_tile<false>(thread_aggregate, block_offset, ITEMS_PER_TILE, _THRUST_STD::true_type(), can_vectorize);
 
           __syncthreads();
 
@@ -480,7 +475,7 @@ struct ReduceAgent
         if (block_offset < num_items)
         {
           int valid_items = num_items - block_offset;
-          consume_tile<false>(thread_aggregate, block_offset, valid_items, thrust::detail::false_type(), can_vectorize);
+          consume_tile<false>(thread_aggregate, block_offset, valid_items, _THRUST_STD::false_type(), can_vectorize);
         }
       }
 
@@ -858,7 +853,7 @@ _CCCL_HOST_DEVICE T reduce(execution_policy<Derived>& policy, InputIt first, Inp
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
   // FIXME: Check for RA iterator.
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first, last));
   return cuda_cub::reduce_n(policy, first, num_items, init, binary_op);
 }
 

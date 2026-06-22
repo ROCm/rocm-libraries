@@ -118,7 +118,7 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
   OutputIterator result,
   Predicate pred)
 {
-  return thrust::copy_if(exec, first, last, stencil, result, thrust::not_fn(pred));
+  return thrust::copy_if(exec, first, last, stencil, result, _THRUST_STD::not_fn(pred));
 } // end remove_copy_if()
 
 } // end namespace generic

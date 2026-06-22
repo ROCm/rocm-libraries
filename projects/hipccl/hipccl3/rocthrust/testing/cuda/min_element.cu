@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,9 +56,9 @@ void TestMinElementDevice(ExecutionPolicy exec)
   ASSERT_EQUAL(h_min - h_data.begin(), (iter_type) d_result[0] - d_data.begin());
 
   typename thrust::host_vector<int>::iterator h_max =
-    thrust::min_element(h_data.begin(), h_data.end(), thrust::greater<int>());
+    thrust::min_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<int>());
 
-  min_element_kernel<<<1, 1>>>(exec, d_data.begin(), d_data.end(), thrust::greater<int>(), d_result.begin());
+  min_element_kernel<<<1, 1>>>(exec, d_data.begin(), d_data.end(), _THRUST_STD::greater<int>(), d_result.begin());
   {
     cudaError_t const err = cudaDeviceSynchronize();
     ASSERT_EQUAL(cudaSuccess, err);
@@ -99,9 +99,10 @@ void TestMinElementCudaStreams()
   ASSERT_EQUAL(*thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end()), 1);
   ASSERT_EQUAL(thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end()) - data.begin(), 2);
 
-  ASSERT_EQUAL(*thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end(), thrust::greater<T>()), 5);
+  ASSERT_EQUAL(*thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end(), _THRUST_STD::greater<T>()), 5);
   ASSERT_EQUAL(
-    thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 1);
+    thrust::min_element(thrust::cuda::par.on(s), data.begin(), data.end(), _THRUST_STD::greater<T>()) - data.begin(),
+    1);
 
   cudaStreamDestroy(s);
 }
@@ -123,6 +124,6 @@ void TestMinElementDevicePointer()
   T* raw_ptr = thrust::raw_pointer_cast(data.data());
   size_t n   = data.size();
   ASSERT_EQUAL(thrust::min_element(thrust::device, raw_ptr, raw_ptr + n) - raw_ptr, 2);
-  ASSERT_EQUAL(thrust::min_element(thrust::device, raw_ptr, raw_ptr + n, thrust::greater<T>()) - raw_ptr, 1);
+  ASSERT_EQUAL(thrust::min_element(thrust::device, raw_ptr, raw_ptr + n, _THRUST_STD::greater<T>()) - raw_ptr, 1);
 }
 DECLARE_UNITTEST(TestMinElementDevicePointer);

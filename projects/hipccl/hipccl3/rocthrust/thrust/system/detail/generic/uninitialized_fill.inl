@@ -51,7 +51,7 @@ THRUST_HOST_DEVICE void uninitialized_fill(
   ForwardIterator first,
   ForwardIterator last,
   const T& x,
-  thrust::detail::true_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::true_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   thrust::fill(exec, first, last, x);
 } // end uninitialized_fill()
@@ -62,7 +62,7 @@ THRUST_HOST_DEVICE void uninitialized_fill(
   ForwardIterator first,
   ForwardIterator last,
   const T& x,
-  thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 
@@ -75,7 +75,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
   ForwardIterator first,
   Size n,
   const T& x,
-  thrust::detail::true_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::true_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   return thrust::fill_n(exec, first, n, x);
 } // end uninitialized_fill()
@@ -86,7 +86,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_fill_n(
   ForwardIterator first,
   Size n,
   const T& x,
-  thrust::detail::false_type) // _THRUST_STD::is_trivially_copy_constructible
+  _THRUST_STD::false_type) // _THRUST_STD::is_trivially_copy_constructible
 {
   using ValueType = thrust::detail::it_value_t<ForwardIterator>;
 

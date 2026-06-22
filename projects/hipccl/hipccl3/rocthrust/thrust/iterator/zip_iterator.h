@@ -124,7 +124,7 @@ public:
   template <typename Iterator>
   inline THRUST_HOST_DEVICE void operator()(Iterator& it) const
   {
-    thrust::advance(it, m_step);
+    _THRUST_STD::advance(it, m_step);
   }
 
 private:
@@ -563,7 +563,7 @@ private:
   template <size_t... Is>
   inline THRUST_HOST_DEVICE void advance_impl(typename super_t::difference_type n, index_sequence<Is...>)
   {
-    (..., thrust::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
+    (..., _THRUST_STD::advance(_THRUST_STD::get<Is>(m_iterator_tuple), n));
   }
 #endif
 

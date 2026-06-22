@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -148,7 +148,7 @@ int main(void)
     thrust::device_vector<int> keys(N);
     initialize(keys);
     print(keys);
-    thrust::sort(keys.begin(), keys.end(), thrust::greater<int>());
+    thrust::sort(keys.begin(), keys.end(), _THRUST_STD::greater<int>());
     print(keys);
   }
 
@@ -195,7 +195,7 @@ int main(void)
     thrust::device_vector<int> values(N);
     initialize(keys, values);
     print(keys, values);
-    thrust::sort_by_key(keys.begin(), keys.end(), values.begin(), thrust::greater<int>());
+    thrust::sort_by_key(keys.begin(), keys.end(), values.begin(), _THRUST_STD::greater<int>());
     print(keys, values);
   }
 

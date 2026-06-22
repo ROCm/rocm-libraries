@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,16 +30,16 @@ void TestDistance(void)
 
   Iterator i = v.begin();
 
-  ASSERT_EQUAL(thrust::distance(i, v.end()), 100);
+  ASSERT_EQUAL(_THRUST_STD::distance(i, v.end()), 100);
 
   i++;
 
-  ASSERT_EQUAL(thrust::distance(i, v.end()), 99);
+  ASSERT_EQUAL(_THRUST_STD::distance(i, v.end()), 99);
 
   i += 49;
 
-  ASSERT_EQUAL(thrust::distance(i, v.end()), 50);
+  ASSERT_EQUAL(_THRUST_STD::distance(i, v.end()), 50);
 
-  ASSERT_EQUAL(thrust::distance(i, i), 0);
+  ASSERT_EQUAL(_THRUST_STD::distance(i, i), 0);
 }
 DECLARE_VECTOR_UNITTEST(TestDistance);

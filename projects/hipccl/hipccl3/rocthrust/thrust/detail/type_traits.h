@@ -206,17 +206,17 @@ using invoke_result_t = typename invoke_result<F, Us...>::type;
 
 // [NON-CCCL PARITY BEGIN]
 template <typename T>
-struct is_unbounded_array : public thrust::detail::false_type
+struct is_unbounded_array : public _THRUST_STD::false_type
 {};
 template <typename T>
-struct is_unbounded_array<T[]> : public thrust::detail::true_type
+struct is_unbounded_array<T[]> : public _THRUST_STD::true_type
 {};
 
 template <typename T>
-struct is_bounded_array : public thrust::detail::false_type
+struct is_bounded_array : public _THRUST_STD::false_type
 {};
 template <typename T, _THRUST_STD::size_t N>
-struct is_bounded_array<T[N]> : public thrust::detail::true_type
+struct is_bounded_array<T[N]> : public _THRUST_STD::true_type
 {};
 
 template <class Tp, bool>

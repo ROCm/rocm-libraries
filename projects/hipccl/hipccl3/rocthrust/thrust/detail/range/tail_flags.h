@@ -36,7 +36,7 @@ namespace detail
 {
 
 template <typename RandomAccessIterator,
-          typename BinaryPredicate = equal_to<detail::it_value_t<RandomAccessIterator>>,
+          typename BinaryPredicate = _THRUST_STD::equal_to<detail::it_value_t<RandomAccessIterator>>,
           typename ValueType       = bool,
           typename IndexType       = detail::it_difference_t<RandomAccessIterator>>
 class tail_flags

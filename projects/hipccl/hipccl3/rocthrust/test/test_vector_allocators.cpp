@@ -116,8 +116,8 @@ public:
   }
 
   using is_always_equal                        = thrust::detail::false_type;
-  using propagate_on_container_copy_assignment = thrust::detail::true_type;
-  using propagate_on_container_move_assignment = thrust::detail::true_type;
+  using propagate_on_container_copy_assignment = _THRUST_STD::true_type;
+  using propagate_on_container_move_assignment = _THRUST_STD::true_type;
   using propagate_on_container_swap            = thrust::detail::integral_constant<bool, PropagateOnSwap>;
 
 private:

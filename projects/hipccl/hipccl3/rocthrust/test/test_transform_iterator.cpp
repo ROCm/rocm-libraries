@@ -62,7 +62,7 @@ TEST(TransformIteratorTests, TestTransformIteratorTraits)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using func    = thrust::negate<int>;
+  using func    = _THRUST_STD::negate<int>;
   using base_it = thrust::host_vector<int>::iterator;
 
   using it     = thrust::transform_iterator<func, base_it>;
@@ -95,7 +95,7 @@ TYPED_TEST(TransformIteratorVectorTests, TestTransformIterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -120,7 +120,7 @@ TYPED_TEST(TransformIteratorVectorTests, TestMakeTransformIterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  using UnaryFunction = thrust::negate<T>;
+  using UnaryFunction = _THRUST_STD::negate<T>;
   using Iterator      = typename Vector::iterator;
 
   Vector input(4);
@@ -154,12 +154,12 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TestTransformIteratorReduce)
     thrust::device_vector<T> d_data = h_data;
 
     // run on host
-    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
+    T h_result = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(h_data.end(), _THRUST_STD::negate<T>()));
 
     // run on device
-    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
-                                thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
+    T d_result = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), _THRUST_STD::negate<T>()),
+                                thrust::make_transform_iterator(d_data.end(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQ(h_result, d_result);
   }

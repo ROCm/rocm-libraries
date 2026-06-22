@@ -66,7 +66,7 @@ T THRUST_HOST_DEVICE transform_reduce(
   execution_policy<Derived>& policy, InputIt first, InputIt last, TransformOp transform_op, T init, ReduceOp reduce_op)
 {
   using size_type              = thrust::detail::it_difference_t<InputIt>;
-  const size_type num_items    = static_cast<size_type>(thrust::distance(first, last));
+  const size_type num_items    = static_cast<size_type>(_THRUST_STD::distance(first, last));
   using transformed_iterator_t = transform_iterator<TransformOp, InputIt, T, T>;
 
   return reduce_n(policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op);

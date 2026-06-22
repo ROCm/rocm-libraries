@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -117,9 +117,9 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, thrust::bit_and);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, thrust::bit_or);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitXor, ^, thrust::bit_xor);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, _THRUST_STD::bit_and);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, _THRUST_STD::bit_or);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitXor, ^, _THRUST_STD::bit_xor);
 
 template <typename T>
 struct bit_negate_reference

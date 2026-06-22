@@ -81,105 +81,105 @@ TEST(TypeTraitsTests, TestIsCommutative)
 
   {
     using T  = int;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::multiplies<T>;
+    using Op = _THRUST_STD::multiplies<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::minimum<T>;
+    using Op = _THRUST_LIBCXX::minimum<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::maximum<T>;
+    using Op = _THRUST_LIBCXX::maximum<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::logical_or<T>;
+    using Op = _THRUST_STD::logical_or<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::logical_and<T>;
+    using Op = _THRUST_STD::logical_and<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_or<T>;
+    using Op = _THRUST_STD::bit_or<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_and<T>;
+    using Op = _THRUST_STD::bit_and<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_xor<T>;
+    using Op = _THRUST_STD::bit_xor<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = char;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = short;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long long;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = float;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = double;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = int;
-    using Op = thrust::minus<T>;
+    using Op = _THRUST_STD::minus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = int;
-    using Op = thrust::divides<T>;
+    using Op = _THRUST_STD::divides<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
-    using Op = thrust::divides<T>;
+    using Op = _THRUST_STD::divides<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
-    using Op = thrust::minus<T>;
+    using Op = _THRUST_STD::minus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 
   {
     using T  = thrust::tuple<int, int>;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,8 +86,8 @@ void sum_sparse_vectors(
       temp_index.end() - 1,
       temp_index.begin() + 1,
       size_t(0),
-      thrust::plus<size_t>(),
-      thrust::not_equal_to<IndexType>())
+      _THRUST_STD::plus<size_t>(),
+      _THRUST_STD::not_equal_to<IndexType>())
     + 1;
 
   // allocate space for output
@@ -101,8 +101,8 @@ void sum_sparse_vectors(
     temp_value.begin(),
     C_index.begin(),
     C_value.begin(),
-    thrust::equal_to<IndexType>(),
-    thrust::plus<ValueType>());
+    _THRUST_STD::equal_to<IndexType>(),
+    _THRUST_STD::plus<ValueType>());
 }
 
 int main(void)

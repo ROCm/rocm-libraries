@@ -117,7 +117,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename Binary
 OutputIt THRUST_HIP_RUNTIME_FUNCTION
 adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
 {
-  const auto num_items     = static_cast<std::size_t>(thrust::distance(first, last));
+  const auto num_items     = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
   std::size_t storage_size = 0;
   hipStream_t stream       = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;

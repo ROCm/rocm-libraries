@@ -253,7 +253,7 @@ class iterator_core_access
   // so return Facade1's difference_type
   template <class Facade1, class Facade2>
   THRUST_HOST_DEVICE static typename Facade1::difference_type
-  distance_from(Facade1 const& f1, Facade2 const& f2, thrust::detail::true_type)
+  distance_from(Facade1 const& f1, Facade2 const& f2, _THRUST_STD::true_type)
   {
     return -f1.distance_to(f2);
   }
@@ -262,7 +262,7 @@ class iterator_core_access
   // so return Facade2's difference_type
   template <class Facade1, class Facade2>
   THRUST_HOST_DEVICE static typename Facade2::difference_type
-  distance_from(Facade1 const& f1, Facade2 const& f2, thrust::detail::false_type)
+  distance_from(Facade1 const& f1, Facade2 const& f2, _THRUST_STD::false_type)
   {
     return f2.distance_to(f1);
   }
