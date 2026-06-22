@@ -91,8 +91,6 @@ struct data_layout_t
      * logical index range.
      * @param[in] batch_rank number of batch axes in the logical index range.
      * Default value is `1`.
-     * @param[in] is_partial flag indicating whether the constructed object covers
-     * a full data range (if `false`) or not (if `true`). Default value is `true`.
      * 
      * @note All vector arguments implicitly consider that length axes are listed
      * first followed by `batch_rank` batch axes.
@@ -105,16 +103,13 @@ struct data_layout_t
      * - `lower`, `upper`, and/or `strides` do not have the same size;
      * 
      * - any element of `lower` is found strictly larger than the corresponding
-     *   element of `upper`;
-     * 
-     * - any element of `lower` is different than 0 yet `is_partial` is `false`.
+     *   element of `upper`.
      * 
      */
     data_layout_t(const std::vector<size_t>& lower,
                   const std::vector<size_t>& upper,
                   const std::vector<size_t>& strides,
-                  size_t                     batch_rank = 1,
-                  bool                       is_partial = true);
+                  size_t                     batch_rank = 1);
 
     /**
      * @brief Constructs a new `data_layout_t` object capturing a full range of logical
@@ -316,11 +311,6 @@ struct data_layout_t
     bool is_dimensionally_consistent_with(const data_layout_t& other) const;
 
     /**
-     * @return `true` if any length axis covers a partial range.
-     */
-    bool has_some_partial_length_axis() const;
-
-    /**
      * @brief Reports the order of length axis indices if sorting them by increasing
      * in-buffer strides (possibly pinning the innermost axis).
      * 
@@ -337,7 +327,8 @@ struct data_layout_t
      * @brief Verifies whether this object's layout is consistent as input
      * (resp. output) for specific types of in-place Discrete Fourier Transforms
      * and, if so, returns the corresponding output (resp. input) layout. This
-     * object must have no partial length axis.
+     * object must have full data range representation for all length axes (all
+     * lower bounds equal to zero).
      * 
      * @param[in] other_io I/O label for the data layout to be returned. Explicitly,
      * the calling object's layout is considered an input (resp. output) layout
@@ -357,9 +348,9 @@ struct data_layout_t
      * ignores offsets as `data_layout_t` objects do not capture them.
      * 
      * @throw An `std::logic_error` is thrown if the current object is an empty
-     * layout or involves some partial length axes. An `std::invalid_argument` is
-     * thrown if `fft_type` is not an expected value or if `other_io` is not an
-     * expected value.
+     * layout or has any non-zero lower bound for a length axis.
+     * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
+     * or if `other_io` is not an expected value.
      * 
      */
     std::optional<data_layout_t> get_other_inplace_layout_for(io_data_label         other_io,
@@ -426,7 +417,6 @@ private:
         size_t lower;
         size_t upper;
         size_t inbuffer_stride;
-        bool   is_partial;
 
         inline bool has_same_logical_range_as(const axis_t& other) const
         {
@@ -439,7 +429,7 @@ private:
         inline bool operator==(const axis_t& other) const
         {
             // stride is irrelevant when comparing two layout's axes of unit logical range
-            return has_same_logical_range_as(other) && is_partial == other.is_partial
+            return has_same_logical_range_as(other)
                    && (logical_span() == 1 || inbuffer_stride == other.inbuffer_stride);
         }
         inline bool logically_contains(const size_t& coordinate) const
