@@ -50,6 +50,17 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return cases;
 }
 
+// Subset of the conv cases for the Smoke (pre-commit) and Standard (per-CI)
+// tiers. The full list stays in GetConvTestCases (used by the Full
+// instantiations), so no coverage is lost.
+auto GetConvTestCasesSubset(miopenDataType_t datatype, std::size_t n)
+{
+    auto cases = GetConvTestCases(datatype);
+    if(cases.size() > n)
+        cases.resize(n);
+    return cases;
+}
+
 const auto& GetTestParams()
 {
     static const auto params = [] {
@@ -76,14 +87,39 @@ TEST_P(CPU_UnitTestConvSolverFFTDevApplicabilityFwd_NONE, fft)
     this->RunTest(miopen::solver::conv::fft{});
 };
 
-// Smoke tests
+// Tiered: Smoke (pre-commit) and Standard (per-CI) run conv-case subsets; Full
+// (comprehensive/nightly) runs the complete list so no coverage is lost.
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverFFTFwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoFFT),
+                                          testing::ValuesIn(GetConvTestCasesSubset(miopenFloat,
+                                                                                   3))));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_UnitTestConvSolverFFTFwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoFFT),
+                                          testing::ValuesIn(GetConvTestCasesSubset(miopenFloat,
+                                                                                   10))));
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverFFTFwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoFFT),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverFFTBwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoFFT),
+                                          testing::ValuesIn(GetConvTestCasesSubset(miopenFloat,
+                                                                                   3))));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_UnitTestConvSolverFFTBwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoFFT),
+                                          testing::ValuesIn(GetConvTestCasesSubset(miopenFloat,
+                                                                                   10))));
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverFFTBwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoFFT),

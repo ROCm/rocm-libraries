@@ -366,6 +366,28 @@ inline auto GetCases()
     static const auto cases = testing::ValuesIn(GenCases());
     return cases;
 }
+
+// Smoke (pre-commit) and Standard (per-CI) subsets. The full set stays in
+// GetCases (used by the Full instantiations), so no coverage is lost.
+std::vector<TestCase> GenCasesSubset(std::size_t n)
+{
+    auto cases = GenCases();
+    if(cases.size() > n)
+        cases.resize(n);
+    return cases;
+}
+
+inline auto GetCasesSmoke()
+{
+    static const auto cases = testing::ValuesIn(GenCasesSubset(30));
+    return cases;
+}
+
+inline auto GetCasesStandard()
+{
+    static const auto cases = testing::ValuesIn(GenCasesSubset(300));
+    return cases;
+}
 } // namespace
 
 TEST_P(GPU_TernaryTensorOps_FP32, TestFloat) { this->Run(); }
@@ -374,6 +396,10 @@ TEST_P(GPU_TernaryTensorOps_FP16, TestFloat16) { this->Run(); }
 
 TEST_P(GPU_TernaryTensorOps_FP64, TestDouble) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TernaryTensorOps_FP32, GetCases());
+// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
+// (comprehensive/nightly) runs the complete set so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TernaryTensorOps_FP32, GetCasesSmoke());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TernaryTensorOps_FP32, GetCasesStandard());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP32, GetCases());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP64, GetCases());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP16, GetCases());

@@ -20,6 +20,7 @@ positive_patterns: &positive_patterns
   - "CPU_*"
   - "*/CPU_*"
   - "*/GPU_Cat_*"
+  - "*/GPU_CTC*"
   - "*/GPU_ConvBiasActiv*"
   - "*/GPU_Conv*"
   - "*/GPU_conv*"
@@ -76,6 +77,10 @@ test_categories:
       # excludes below are reserved for genuine known failures, not for
       # clawing back runtime.
       - "Smoke/*"
+      # CPU tests need no GPU and are fast, so run them all (every tier) in the
+      # pre-commit gate for breadth.
+      - "CPU_*"
+      - "*/CPU_*"
 
     exclude:
       - "*/GPU_MIOpenDriver*"
@@ -83,6 +88,9 @@ test_categories:
       # ('hip/hip_runtime.h' not found). Re-enable once fixed. FP32 still runs.
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
+      # CPU_WSuperTensor is tiered (Smoke+Standard already selected above); its
+      # Full tier is 1944 cases and would just duplicate that coverage here.
+      - "Full/CPU_WSuperTensor_*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
@@ -110,6 +118,9 @@ test_categories:
       - "Full/GPU_TensorTrans_*"
       - "Full/GPU_ConvBiasActivInfer_*"
       - "Full/CPU_WSuperTensor_*"
+      - "Full/GPU_CTC_*"
+      - "Full/GPU_UnitTestConvSolverFFTFwd_*"
+      - "Full/GPU_UnitTestConvSolverFFTBwd_*"
       - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
