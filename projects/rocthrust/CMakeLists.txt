@@ -212,8 +212,9 @@ endif()
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_definitions(ADDRESS_SANITIZER_BUILD)
-  list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
-  add_link_options(-fuse-ld=lld)
+  # Temporarily disable amdgpu-attributor pass until it's fixed for ASAN builds.
+  list(APPEND COMPILE_OPTIONS -fsanitize=address -fno-omit-frame-pointer -g -mllvm -amdgpu-attributor-enable=0)
+  add_link_options(-fsanitize=address -shared-libasan -fuse-ld=lld)
 endif()
 
 # Setup VERSION
