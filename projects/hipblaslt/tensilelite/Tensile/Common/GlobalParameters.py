@@ -812,8 +812,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate. Three categories:
-    #   - Dead (no consumer anywhere; safe to silently drop):
-    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters

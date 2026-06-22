@@ -25,7 +25,6 @@ GlobalParameters:
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
-  UseGPUTimer: False
   ForceGenerateKernel: [True]
  
 BenchmarkProblems:

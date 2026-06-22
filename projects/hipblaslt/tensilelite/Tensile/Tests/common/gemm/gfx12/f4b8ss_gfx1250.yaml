@@ -24,7 +24,6 @@ GlobalParameters:
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  # UseGPUTimer: False
 
 BenchmarkProblems:
   #######################################
