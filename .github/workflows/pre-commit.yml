@@ -5,6 +5,7 @@ on:
     branches:
       - develop
       - release/therock-*
+      - users/jerehart/test-run-flatc
   pull_request:
     branches: [develop]
 
