@@ -3,8 +3,8 @@ TestParameters:
 
 GlobalParameters:
   SleepPercent: 50
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   MaxFileName: 256
   # PrintTensorD: 0x2
@@ -49,8 +49,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -74,7 +74,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -97,8 +97,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -122,7 +122,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -145,8 +145,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -170,7 +170,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -193,8 +193,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -218,7 +218,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -242,8 +242,8 @@ BenchmarkProblems:
       DestDataTyp: i8
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -267,7 +267,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -290,8 +290,8 @@ BenchmarkProblems:
       DestDataTyp: i8
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -315,7 +315,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -338,8 +338,8 @@ BenchmarkProblems:
       DestDataTyp: i8
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -363,7 +363,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -386,8 +386,8 @@ BenchmarkProblems:
       DestDataTyp: i8
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Sparse: 1
       Batched: True
@@ -411,7 +411,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:

@@ -3,6 +3,7 @@
 
 """Tests for the rocprof-compute roofline wrapper."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -70,7 +71,7 @@ class TestRunHappyPath:
         assert rl["sysinfo_csv"].endswith("sysinfo.csv")
         # workload_path is the parent dir of roofline.csv — what
         # `rocprof-compute analyze --path` expects.
-        assert rl["workload_path"].endswith("workload/gfx90a")
+        assert Path(rl["workload_path"]).parts[-2:] == ("workload", "gfx90a")
         # No data_type, no pdf_path, no db_path under the new contract.
         assert "data_type" not in rl
         assert "pdf_path" not in rl
