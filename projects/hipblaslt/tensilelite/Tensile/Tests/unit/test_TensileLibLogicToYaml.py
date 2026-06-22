@@ -149,7 +149,7 @@ VALID_LIBLOGIC_FILE_CONTENT = """
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0

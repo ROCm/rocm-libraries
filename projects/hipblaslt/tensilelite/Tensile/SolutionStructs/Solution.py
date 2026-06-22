@@ -341,7 +341,7 @@ def printTypeMismatchSummary(numFiles=0):
   lines.append("")
   lines.append("===========================================================")
   lines.append(
-    f"WARNING: YAML parameter type mismatches detected "
+    f"ERROR: YAML parameter type mismatches detected "
     f"({totalCount} total across {len(allFiles)} files):"
   )
   lines.append("===========================================================")
@@ -359,7 +359,7 @@ def printTypeMismatchSummary(numFiles=0):
   lines.append("-----------------------------------------------------------")
   lines.append("  This will cause std::bad_cast at runtime because msgpack")
   lines.append("  serializes bool and int as different wire types.")
-  lines.append("  Fix these to prevent future build failures.")
+  lines.append("  Fix these type mismatches to proceed with the build.")
   lines.append("===========================================================")
 
   print("\n".join(lines), flush=True)

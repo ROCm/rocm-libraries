@@ -77,7 +77,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        #- SourceSwap: [0]
+        #- SourceSwap: [false]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -139,7 +139,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        #- SourceSwap: [0]
+        #- SourceSwap: [false]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -201,7 +201,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        #- SourceSwap: [0]
+        #- SourceSwap: [false]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -263,7 +263,7 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        #- SourceSwap: [0]
+        #- SourceSwap: [false]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:

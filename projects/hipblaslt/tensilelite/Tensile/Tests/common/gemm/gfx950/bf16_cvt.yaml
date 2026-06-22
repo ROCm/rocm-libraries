@@ -51,7 +51,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-          #        - ExpandPointerSwap: [0]
+          #        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]

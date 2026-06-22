@@ -652,7 +652,7 @@ BenchmarkProblems:
     #     - NonTemporalA: [0]
     #     - NonTemporalB: [0]
     #     - NonTemporalD: [4]
-    #     - SourceSwap: [1]
+    #     - SourceSwap: [true]
     #     - LDSTrInst: [False]
     #     - UseSgprForGRO: [0]
     #     - UseCustomMainLoopSchedule: [1]

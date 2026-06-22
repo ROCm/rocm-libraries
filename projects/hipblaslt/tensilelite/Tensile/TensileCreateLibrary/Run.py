@@ -844,7 +844,13 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
     # After all YAML files have been parsed and Solution objects created,
     # print a summary of any type mismatches that were collected.
-    printTypeMismatchSummary(len(logicFiles))
+    mismatchCount = printTypeMismatchSummary(len(logicFiles))
+    if mismatchCount > 0:
+        raise RuntimeError(
+            f"Build failed: {mismatchCount} YAML parameter type mismatches detected"
+            f" across {len(logicFiles)} files. Fix the types to match their parameter"
+            f" definitions."
+        )
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
