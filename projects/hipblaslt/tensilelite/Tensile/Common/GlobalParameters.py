@@ -718,7 +718,7 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
 # e.g. RocProfCounter: 42 to pass silently.
 globalParameterTypeOverrides = {
     "ClientExecutionLockPath": {type(None), str},   # path or unset
-    "ROCmSMIPath":             {type(None), str},   # path, populated at startup
+    "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
 }
