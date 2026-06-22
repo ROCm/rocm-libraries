@@ -16,14 +16,29 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 # specs.py lives outside the Tensile package, under the hipBLASLt client scripts.
 # parents[4] == projects/hipblaslt (unit -> Tests -> Tensile -> tensilelite -> hipblaslt)
+# In an installed/packaged test tree (e.g. CI's build/share/hipblaslt/...), the
+# client scripts are not shipped next to the Tensile package, so specs.py is not
+# importable there. Skip gracefully in that case rather than erroring at collection.
 specs_dir = Path(__file__).resolve().parents[4] / "clients" / "scripts" / "performance"
-sys.path.insert(0, str(specs_dir))
+if str(specs_dir) not in sys.path:
+    sys.path.insert(0, str(specs_dir))
 
-import specs  # noqa: E402
+try:
+    import specs  # noqa: E402
+    _IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - environment dependent
+    specs = None
+    _IMPORT_ERROR = exc
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        specs is None,
+        reason=f"clients/scripts/performance/specs.py not importable: {_IMPORT_ERROR}",
+    ),
+]
 
 
 def _bytes_completed(stdout_str):
