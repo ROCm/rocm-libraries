@@ -12,7 +12,9 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
+#include "lib_host_helpers.hpp"
 #include "lib_macros.hpp"
+#include "rocblas_utility.hpp"
 #include "rocsolver_logger.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
