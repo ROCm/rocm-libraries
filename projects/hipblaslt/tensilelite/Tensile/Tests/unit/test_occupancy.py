@@ -395,12 +395,17 @@ class _MockMkb:
 
 
 class TestUpdateOccupancyFromScan:
-    """Validate the post-rocIsaPass assembly scan that corrects CUOccupancy.
+    """Validate the post-rocIsaPass CUOccupancy correction path.
 
     updateOccupancyFromScan() runs after rocIsaPass (ArchAccUnifiedRegs only).
-    When removeDuplicateAssignment eliminates high-indexed VGPR copies, the
-    instruction-level count can fall below the checkResources pool estimate.
-    The scan detects this and corrects both the kernel descriptor and CUOccupancy.
+    The O(1) fast path receives the pre-computed maxVgpr from rocIsaPassResult
+    (= max VGPR index + 1, derived from the register graph the pass already
+    built).  When that count is lower than the checkResources pool estimate,
+    the kernel descriptor and CUOccupancy are corrected.
+
+    Tests exercise the new scanned_vgprs parameter directly (O(1) path).
+    The legacy O(N) text-scan fallback (scanned_vgprs=-1) is tested separately
+    in test_occupancy_buildtime.py::TestUpdateOccupancyFromScanSymbolicGuard.
     """
 
     @pytest.fixture(autouse=True)
@@ -417,38 +422,39 @@ class TestUpdateOccupancyFromScan:
         self.kw.states.doubleVgpr = True
         self.kw.getLdsSize = lambda k: k.get("LdsNumBytes", 68864)
 
-    def _run_scan(self, body_text, kernel=None):
+    def _run_scan(self, body_text, kernel=None, scanned_vgprs=-1):
+        """Invoke updateOccupancyFromScan using the new scanned_vgprs parameter.
+
+        scanned_vgprs mirrors rocIsaPassResult.maxVgpr from the C++ pass; when
+        provided (>= 0) the function uses it directly without parsing body_text.
+        Pass -1 to exercise the legacy regex fallback.
+        """
         if kernel is None:
             kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
         mkb = _MockMkb(body_text, initial_next_free_vgpr=264)
-        self.kw.updateOccupancyFromScan(kernel, mkb)
+        self.kw.updateOccupancyFromScan(kernel, mkb, scanned_vgprs)
         return kernel, mkb
 
     def test_no_update_when_scan_equals_pool(self):
-        """If instructions reference the same registers as the pool, no update."""
+        """scanned_vgprs == pool size: no update (already at pool estimate)."""
         # Pool: 21 vgpr → ceil(21/8)*8=24 + 240 = 264
-        # Body references v0-v20: max=20, scanned=21, same as pool → no update
-        body = " ".join(f"v_mov_b32 v{i}, s0" for i in range(21))
-        body += " v_mfma_f32_16x16x16_bf16 a[0:239], v[0:1], v[0:1], a[0:239]"
-        kernel, mkb = self._run_scan(body)
+        # Pass max vgpr count = 21 (same as pool) → no reduction possible.
+        kernel, mkb = self._run_scan("", scanned_vgprs=21)
         assert kernel["CUOccupancy"] == 1, "Should not update when scan == pool"
         assert mkb._set_gprs_calls == [], "setGprs should not be called"
 
     def test_update_when_scan_finds_fewer_vgprs(self):
-        """If rocIsaPass eliminated high-indexed VGPRs, scan finds fewer and updates."""
-        # Simulate: pool grew to 21 but only v0-v15 (16 VGPRs) appear in instructions
-        # after removeDuplicateAssignment.
+        """scanned_vgprs < pool: descriptor and CUOccupancy are corrected."""
+        # Pool grew to 21 but the pass graph found only 16 VGPRs used.
         # ceil(16/8)*8 + 240 = 256 → occ = 512//256 = 2
-        body = " ".join(f"v_mov_b32 v{i}, s0" for i in range(16))
-        body += " v_mfma_f32_16x16x16_bf16 a[0:239], v[0:1], v[0:1], a[0:239]"
-        kernel, mkb = self._run_scan(body)
+        kernel, mkb = self._run_scan("", scanned_vgprs=16)
         assert kernel["CUOccupancy"] == 2, (
-            f"After scan: v0-v15 only → 256 unified VGPRs → occ=2, got {kernel['CUOccupancy']}"
+            f"scanned_vgprs=16 → 256 unified VGPRs → occ=2, got {kernel['CUOccupancy']}"
         )
         assert mkb._set_gprs_calls, "setGprs must be called to update kernel descriptor"
         vgprs, agprs, _ = mkb._set_gprs_calls[-1]
         assert vgprs == 16, f"scanned vgprs should be 16, got {vgprs}"
-        assert agprs == 240, f"agprs should be 240, got {agprs}"
+        assert agprs == 240, f"agprs should be 240 (pool size), got {agprs}"
         assert mkb.getNextFreeVgpr() == 256  # ceil(16/8)*8 + 240
 
     def test_no_update_for_non_arch_acc_unified(self):
@@ -463,26 +469,38 @@ class TestUpdateOccupancyFromScan:
         kw_908.getLdsSize = lambda k: k.get("LdsNumBytes", 68864)
 
         kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
-        mkb = _MockMkb("v_mov_b32 v0, s0", initial_next_free_vgpr=264)
-        kw_908.updateOccupancyFromScan(kernel, mkb)
+        mkb = _MockMkb("", initial_next_free_vgpr=264)
+        kw_908.updateOccupancyFromScan(kernel, mkb, 16)  # non-unified: early return
         assert mkb._set_gprs_calls == [], "Non-unified arch: setGprs must not be called"
         assert kernel["CUOccupancy"] == 1, "Non-unified arch: occupancy must be unchanged"
 
-    def test_range_references_expanded_correctly(self):
-        """v[0:15] range references count as v0 through v15."""
-        body = "v_mfma_f32_16x16x16_bf16 a[0:239], v[0:15], v[0:15], a[0:239]"
-        kernel, mkb = self._run_scan(body)
+    def test_vgpr_count_16_gives_occ2(self):
+        """16 VGPRs (matching v[0:15]) → 256 unified VGPRs → occ=2."""
+        # Mirrors the old test_range_references_expanded_correctly via O(1) path.
+        kernel, mkb = self._run_scan("", scanned_vgprs=16)
         assert kernel["CUOccupancy"] == 2, (
-            f"v[0:15] → 16 VGPRs → 256 unified → occ=2, got {kernel['CUOccupancy']}"
+            f"scanned_vgprs=16 → 256 unified → occ=2, got {kernel['CUOccupancy']}"
         )
 
-    def test_agpr_count_clamped_to_pool(self):
-        """Even if scan finds fewer acc VGPRs than pool, keep pool count for acc."""
-        # Body only uses a[0:3] but pool has 240 acc VGPRs
-        body = "v_mfma_f32_16x16x16_bf16 a[0:3], v[0:1], v[0:1], a[0:3]"
-        kernel, mkb = self._run_scan(body)
-        # vgprs=2 → ceil(2/8)*8=8; agprs=min(4, 240)=4 → total=12 → occ=2
-        # BUT: scanned agprs is clamped to pool (240), so total=8+240=248 → occ=2
+    def test_agpr_always_uses_pool_size(self):
+        """AGPR count is always taken from agprPool.size(), not from the scan."""
+        # Even if the body references few acc VGPRs, pool count (240) is used.
+        kernel, mkb = self._run_scan("", scanned_vgprs=2)
         if mkb._set_gprs_calls:
             _, agprs, _ = mkb._set_gprs_calls[-1]
-            assert agprs <= 240, "Scanned agprs must not exceed pool size"
+            assert agprs == 240, f"agprs must equal agprPool.size()=240, got {agprs}"
+
+    def test_mt320x192x64_gfx950_gives_occ2(self):
+        """Motivating case: MT320x192x64/gfx950 with scanned_vgprs=16 → occ=2.
+
+        This is the case that was producing occ=1 (wrong) before PR #8197 because
+        the pool grew to 21+ VGPRs while the compiled kernel only used 16.
+        The scan (now O(1) via graph) correctly returns scanned_vgprs=16,
+        reducing the total to ceil(16/8)*8 + 240 = 256 and giving occ=2.
+        """
+        kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
+        mkb = _MockMkb("", initial_next_free_vgpr=264)
+        self.kw.updateOccupancyFromScan(kernel, mkb, 16)
+        assert kernel["CUOccupancy"] == 2, (
+            f"MT320x192x64/gfx950: expected CUOccupancy=2, got {kernel['CUOccupancy']}"
+        )

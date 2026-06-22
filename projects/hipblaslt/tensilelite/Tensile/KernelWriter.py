@@ -5946,10 +5946,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
-    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
-    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
-    # may have reduced the instruction-level VGPR count below the pool estimate.
-    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+    # Post-rocIsaPass: use the O(1) max-VGPR count from the register graph the
+    # pass already built (passResult.maxVgpr) to update the kernel descriptor
+    # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
+    self.updateOccupancyFromScan(kernel, moduleKernelBody, passResult.maxVgpr)
 
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
