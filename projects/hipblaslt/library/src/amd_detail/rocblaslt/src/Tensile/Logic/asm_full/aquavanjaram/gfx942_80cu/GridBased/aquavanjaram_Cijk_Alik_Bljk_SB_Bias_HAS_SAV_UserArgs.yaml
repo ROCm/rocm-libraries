@@ -212567,7 +212567,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -212756,7 +212756,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -212888,7 +212888,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -213077,7 +213077,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -213209,7 +213209,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -213398,7 +213398,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -213530,7 +213530,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -213719,7 +213719,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -213851,7 +213851,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -214040,7 +214040,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -214172,7 +214172,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -214361,7 +214361,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -214493,7 +214493,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -214682,7 +214682,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -214814,7 +214814,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -215003,7 +215003,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -215135,7 +215135,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -215324,7 +215324,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -215456,7 +215456,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -215645,7 +215645,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -215777,7 +215777,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -215966,7 +215966,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -216098,7 +216098,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -216287,7 +216287,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -216419,7 +216419,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -216608,7 +216608,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -216740,7 +216740,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -216929,7 +216929,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -217061,7 +217061,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -217250,7 +217250,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -217382,7 +217382,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -217571,7 +217571,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -217703,7 +217703,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -217892,7 +217892,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -218024,7 +218024,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -218213,7 +218213,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -218345,7 +218345,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -218534,7 +218534,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -218666,7 +218666,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -218855,7 +218855,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -218987,7 +218987,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -219176,7 +219176,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -219308,7 +219308,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -219497,7 +219497,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -219629,7 +219629,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -219818,7 +219818,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -219950,7 +219950,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -220139,7 +220139,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -220271,7 +220271,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -220460,7 +220460,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -220592,7 +220592,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -220781,7 +220781,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -220913,7 +220913,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -221102,7 +221102,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -221234,7 +221234,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -221423,7 +221423,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -221555,7 +221555,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -221744,7 +221744,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -221876,7 +221876,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -222065,7 +222065,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -222197,7 +222197,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -222386,7 +222386,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -222518,7 +222518,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -222707,7 +222707,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -222839,7 +222839,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -223028,7 +223028,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -223160,7 +223160,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -223349,7 +223349,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -223481,7 +223481,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -223670,7 +223670,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -223802,7 +223802,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -223991,7 +223991,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -224123,7 +224123,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -224312,7 +224312,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -224444,7 +224444,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -224633,7 +224633,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -224765,7 +224765,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -224954,7 +224954,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -225086,7 +225086,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -225275,7 +225275,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -225407,7 +225407,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -225596,7 +225596,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -225728,7 +225728,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -225917,7 +225917,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -226049,7 +226049,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -226238,7 +226238,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -226370,7 +226370,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -226559,7 +226559,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -226691,7 +226691,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -226880,7 +226880,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -227012,7 +227012,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -227201,7 +227201,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -227333,7 +227333,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -227522,7 +227522,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -227654,7 +227654,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -227843,7 +227843,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -227975,7 +227975,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -228164,7 +228164,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -228296,7 +228296,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -228485,7 +228485,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -228617,7 +228617,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -228806,7 +228806,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -228938,7 +228938,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -229127,7 +229127,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -229259,7 +229259,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -229448,7 +229448,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -229580,7 +229580,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -229769,7 +229769,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -229901,7 +229901,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -230090,7 +230090,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -230222,7 +230222,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -230411,7 +230411,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -230543,7 +230543,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -230732,7 +230732,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -230864,7 +230864,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -231053,7 +231053,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -231185,7 +231185,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -231374,7 +231374,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -231506,7 +231506,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -231695,7 +231695,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -231827,7 +231827,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -232016,7 +232016,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -232148,7 +232148,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -232337,7 +232337,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -232469,7 +232469,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -232658,7 +232658,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -232790,7 +232790,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -232979,7 +232979,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -233111,7 +233111,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -233300,7 +233300,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -233432,7 +233432,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -233621,7 +233621,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -233753,7 +233753,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -233942,7 +233942,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -234074,7 +234074,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -234263,7 +234263,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -234395,7 +234395,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -234584,7 +234584,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -234716,7 +234716,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -234905,7 +234905,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -235037,7 +235037,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -235226,7 +235226,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -235358,7 +235358,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -235547,7 +235547,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -235679,7 +235679,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -235868,7 +235868,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -236000,7 +236000,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -236189,7 +236189,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -236321,7 +236321,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -236510,7 +236510,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -236642,7 +236642,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -236831,7 +236831,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -236963,7 +236963,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -237152,7 +237152,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -237284,7 +237284,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -237473,7 +237473,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -237605,7 +237605,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -237794,7 +237794,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -237926,7 +237926,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -238115,7 +238115,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -238247,7 +238247,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -238436,7 +238436,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -238568,7 +238568,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -238757,7 +238757,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -238889,7 +238889,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -239078,7 +239078,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -239210,7 +239210,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -239399,7 +239399,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -239531,7 +239531,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -239720,7 +239720,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -239852,7 +239852,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -240041,7 +240041,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -240173,7 +240173,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -240362,7 +240362,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -240494,7 +240494,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -240683,7 +240683,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -240815,7 +240815,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -241004,7 +241004,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -241136,7 +241136,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -241325,7 +241325,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -241457,7 +241457,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -241646,7 +241646,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -241778,7 +241778,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -241967,7 +241967,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -242099,7 +242099,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -242288,7 +242288,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -242420,7 +242420,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -242609,7 +242609,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -242741,7 +242741,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -242930,7 +242930,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -243062,7 +243062,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -243251,7 +243251,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -243383,7 +243383,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -243572,7 +243572,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -243704,7 +243704,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -243893,7 +243893,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -244025,7 +244025,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -244214,7 +244214,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -244346,7 +244346,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -244535,7 +244535,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -244667,7 +244667,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -244856,7 +244856,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -244988,7 +244988,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -245177,7 +245177,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -245309,7 +245309,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -245498,7 +245498,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -245630,7 +245630,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -245819,7 +245819,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -245951,7 +245951,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -246140,7 +246140,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -246272,7 +246272,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -246461,7 +246461,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -246593,7 +246593,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -246782,7 +246782,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -246914,7 +246914,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -247103,7 +247103,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -247235,7 +247235,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -247424,7 +247424,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -247556,7 +247556,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -247745,7 +247745,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -247877,7 +247877,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -248066,7 +248066,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -248198,7 +248198,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -248387,7 +248387,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -248519,7 +248519,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -248708,7 +248708,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -248840,7 +248840,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 1
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -249029,7 +249029,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -249161,7 +249161,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -249350,7 +249350,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -249482,7 +249482,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -249671,7 +249671,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -249803,7 +249803,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -249992,7 +249992,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -250124,7 +250124,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -250313,7 +250313,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -250445,7 +250445,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -250634,7 +250634,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -250768,7 +250768,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -250962,7 +250962,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -251099,7 +251099,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -251293,7 +251293,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -251430,7 +251430,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -251624,7 +251624,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
