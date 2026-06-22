@@ -14,7 +14,6 @@ GlobalParameters:
   ValidationPrintValids: False # print matches too
   DataInitValueActivationArgs: [0.5, -1]
   PruneSparseMode: 0
-  MinKForGSU: 1
 
 BenchmarkProblems:
   #######################################

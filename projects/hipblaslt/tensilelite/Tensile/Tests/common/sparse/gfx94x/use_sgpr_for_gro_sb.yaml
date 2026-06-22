@@ -24,7 +24,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumBenchmarks: 1
   # KernelTime: False
-  MinKForGSU: 1
   # PrintCodeCommands: True
   # CpuThreads: 1
   # GenerateSourcesAndExit: True

@@ -19,7 +19,6 @@ GlobalParameters:
   DataInitTypeScaleB: 1
   CSVExportWinner: true
   CSVMergeSameProblemID: true
-  MinKForGSU: 1
   KernelTime: True
   MaxLDS: 163840
 

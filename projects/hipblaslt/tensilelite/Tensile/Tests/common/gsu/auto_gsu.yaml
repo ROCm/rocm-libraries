@@ -12,7 +12,6 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  MinKForGSU: 2
   CMakeBuildType: Debug
 
 BenchmarkProblems:

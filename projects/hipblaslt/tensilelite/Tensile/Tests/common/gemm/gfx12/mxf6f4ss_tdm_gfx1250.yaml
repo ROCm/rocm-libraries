@@ -20,7 +20,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 1
   Architecture: gfx1250
   PrintLevel: 2
   MaxLDS: 163840

@@ -19,7 +19,6 @@ GlobalParameters:
   #PrintTensorD: 1
   #PrintTensorRef: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
 
 BenchmarkProblems:
   #######################################
