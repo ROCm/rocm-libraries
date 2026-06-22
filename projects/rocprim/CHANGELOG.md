@@ -8,10 +8,9 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
 * gfx1250 support
-* Added a parallel `device_topk`, which finds the largest/smallest K elements.
-* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
-
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
 
 ### Changed
 
