@@ -97,9 +97,9 @@ static bool isMi308Device(hipStream_t stream)
     auto status = hipStreamGetDevice(stream, &deviceId);
     if(status != hipSuccess)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "hipStreamGetDevice failed with error code: " + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipStreamGetDevice failed with error code: "
+                                                           + std::to_string(status));
     }
     int chipId;
     status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
@@ -118,11 +118,11 @@ static bool isMi308Device(hipStream_t stream)
 // kernarg struct stores strides as uint32 so values that overflow silently
 // truncate, producing wrong results.  Checked early in isApplicable so the
 // engine declines rather than dispatching with bad strides.
-static bool wouldFwdByteStridesFitUint32(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+static bool
+    wouldFwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
 {
     constexpr int64_t K_BF16_BYTES = 2;
 
