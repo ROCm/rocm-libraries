@@ -22,7 +22,6 @@ GlobalParameters:
   BoundsCheck: 0
   KeepBuildTmp: True
   MaxFileName: 128
-  DeviceLDS: 163840
   MaxLDS: 163840
   MXScaleFormat: 1
 

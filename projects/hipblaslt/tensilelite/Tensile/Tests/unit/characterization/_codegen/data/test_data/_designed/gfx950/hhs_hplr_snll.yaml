@@ -29,7 +29,6 @@ GlobalParameters:
   NewClient: 2
   Device: 0
   MaxLDS: 163840
-  DeviceLDS: 163840
   PrintSolutionRejectionReason: False
 
 BenchmarkProblems:

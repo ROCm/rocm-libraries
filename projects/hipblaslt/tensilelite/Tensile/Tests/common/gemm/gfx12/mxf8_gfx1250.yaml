@@ -29,7 +29,6 @@ GlobalParameters:
   PrintLevel: 2
   UseGPUTimer: False
   MaxLDS: 163840
-  DeviceLDS: 163840
 
 
 BenchmarkProblems:

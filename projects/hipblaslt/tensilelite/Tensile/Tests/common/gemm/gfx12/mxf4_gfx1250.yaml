@@ -27,7 +27,6 @@ GlobalParameters:
   # KeepBuildTmp: True
   PrintLevel: 2
   MaxLDS: 163840
-  DeviceLDS: 163840
 
 
 BenchmarkProblems:

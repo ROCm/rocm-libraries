@@ -16,7 +16,6 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  DeviceLDS: 163840
   MaxLDS: 163840
   RotatingBufferSize: 512
   KeepBuildTmp: True

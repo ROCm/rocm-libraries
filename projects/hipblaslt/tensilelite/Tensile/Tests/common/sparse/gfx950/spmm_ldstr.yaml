@@ -16,7 +16,6 @@ GlobalParameters:
   #Device: 0
   PruneSparseMode: 0
   MaxLDS: 163840
-  DeviceLDS: 163840
   PrintSolutionRejectionReason: 1
 BenchmarkProblems:
   #######################################
