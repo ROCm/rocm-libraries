@@ -100,6 +100,61 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_snapshot)
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Tag a failed snapshot test so the terminal summary can route the author to
+    the golden-update policy.
+
+    Keys off the real ``snapshot`` fixture usage (not failure-text heuristics) and
+    records the tag on ``report.user_properties`` so it survives xdist worker ->
+    controller serialization (a plain module global would be lost under ``-n``).
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if (
+        report.when == "call"
+        and report.failed
+        and "snapshot" in getattr(item, "fixturenames", ())
+    ):
+        report.user_properties.append(("char_snapshot_failure", True))
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """On any characterization golden mismatch, print the snapshot-update policy
+    so a failing author never reaches for a blanket ``--snapshot-update``."""
+    failed = terminalreporter.stats.get("failed", [])
+    nodeids = [
+        rep.nodeid
+        for rep in failed
+        if any(k == "char_snapshot_failure" for k, _ in getattr(rep, "user_properties", []))
+    ]
+    if not nodeids:
+        return
+
+    bar = "=" * 78
+    write = terminalreporter.write_line
+    write("")
+    write(bar)
+    write("Characterization snapshot (golden) mismatch")
+    write("-" * 78)
+    write("These goldens pin TensileLite's current behavior as a refactor safety net.")
+    write("")
+    write("If this behavior change was NOT intended, you found a regression -- fix")
+    write("your code; do NOT touch the .ambr files.")
+    write("")
+    write("If it WAS intended, update ONLY the affected node(s) and review the diff:")
+    for nodeid in nodeids[:10]:
+        write("    pytest '%s' --snapshot-update" % nodeid)
+    if len(nodeids) > 10:
+        write("    ... and %d more" % (len(nodeids) - 10))
+    write("")
+    write("NEVER run a bare, suite-wide 'pytest --snapshot-update' -- it silently")
+    write("rewrites every golden and destroys the net.")
+    write("")
+    write("Policy: characterization/README.md ('Snapshot / golden discipline')")
+    write(bar)
+
+
 @pytest.fixture(scope="session")
 def cg_assembler():
     """The CPU-only assembler (amdclang++); shared across codegen suites."""
