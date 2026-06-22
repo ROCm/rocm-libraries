@@ -5202,15 +5202,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
 
-    # Always route the subtile body through StinkyTofu on supported arch.
+    # Route the subtile body through StinkyTofu on supported arch.
     # Subtile supplies its own options: a basic level (no wait-count insertion)
     # by default, or the ScheduleIterAlg=4 level with wait-count insertion.
+    # ClusterBarrier kernels are excluded: they pre-emit their cluster barrier
+    # in Python (ClusterBarrier.py), which StinkyTofu's gfx1250 backend cannot
+    # convert, so they keep the Python emission path.
     st_asm = None
     if rocisa.isSupportedByStinkyTofu(self.states.version):
-      from .Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
-      stinky_module_options = buildSubtileStinkyTofuOptions(kernel, self)
-      st_asm = self._maybeRunStinkyTofu(kernel, moduleKernelBody, fs,
-                                        stinky_module_options=stinky_module_options)
+      from .Components.Subtile.StinkyTofu import (buildSubtileStinkyTofuOptions,
+                                                  subtileRoutesThroughStinkyTofu)
+      if subtileRoutesThroughStinkyTofu(kernel):
+        stinky_module_options = buildSubtileStinkyTofuOptions(kernel, self)
+        st_asm = self._maybeRunStinkyTofu(kernel, moduleKernelBody, fs,
+                                          stinky_module_options=stinky_module_options)
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")

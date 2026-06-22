@@ -28,8 +28,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -58,7 +58,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         # ScheduleIterAlg=4 routes the subtile body through StinkyTofu.
         - ScheduleIterAlg: [4]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [3]
         - TDMInst: [3]
         - StaggerU: [0]
@@ -114,8 +114,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -133,7 +133,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         # ScheduleIterAlg=4 routes the subtile body through StinkyTofu.
         - ScheduleIterAlg: [4]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [3]
         - TDMInst: [3]
         - StaggerU: [0]
