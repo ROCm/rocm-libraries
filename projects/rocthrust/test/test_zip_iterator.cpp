@@ -99,6 +99,38 @@ TEST(ZipIterator32BitTests, TestZipIteratorTraits)
 }
 
 template <typename Vector>
+void TestZipIteratorConstructionFromIterators_test()
+{
+  using namespace thrust;
+
+  Vector v0(4);
+  Vector v1(4);
+  Vector v2(4);
+
+  // initialize input
+  sequence(v0.begin(), v0.end());
+  sequence(v1.begin(), v1.end());
+  sequence(v2.begin(), v2.end());
+
+  using IteratorTuple = tuple<typename Vector::iterator, typename Vector::iterator>;
+  using ZipIterator   = zip_iterator<IteratorTuple>;
+
+  // test construction
+  zip_iterator iter0(v0.begin(), v1.begin());
+  ASSERT_EQ(true, iter0 == ZipIterator{make_tuple(v0.begin(), v1.begin())});
+}
+
+TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorConstructionFromIterators)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestZipIteratorConstructionFromIterators_test<thrust::host_vector<T>>();
+  TestZipIteratorConstructionFromIterators_test<thrust::device_vector<T>>();
+}
+
+template <typename Vector>
 void TestZipIteratorManipulation_test()
 {
   using namespace thrust;

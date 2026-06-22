@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ int main(void)
   // gather multiple elements and apply a function before writing result in memory
   thrust::gather(IDX.begin(),
                  IDX.end(),
-                 thrust::make_zip_iterator(thrust::make_tuple(U.begin(), V.begin())),
+                 thrust::make_zip_iterator(U.begin(), V.begin()),
                  thrust::make_transform_output_iterator(W.begin(), Functor()));
 
   std::cout << "result= [ ";
