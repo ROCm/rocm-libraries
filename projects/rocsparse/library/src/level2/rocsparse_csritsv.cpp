@@ -80,7 +80,7 @@ try
         break;
     }
 
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         break;
     }

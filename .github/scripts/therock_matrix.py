@@ -32,7 +32,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
-    "shared/rocroller": "blas",
+    "shared/rocroller": "rocroller",
     "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
@@ -48,13 +48,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "projects_to_test": [
-            "hipblaslt",
-            "rocblas",
-            "hipblas",
-            "rocroller",
-            "tensilelite",
-        ],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "tensilelite"],
     },
     "miopen": {
         "cmake_options": [
@@ -150,6 +144,14 @@ additional_options = {
         "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
+    # rocRoller is built under the BLAS umbrella but only tested when its own
+    # subtree changes. Merges into the "blas" job when a PR touches both, which
+    # avoids a redundant BLAS build and S3 artifact overlap.
+    "rocroller": {
+        "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
+        "projects_to_test": ["rocroller"],
+        "project_to_add": "blas",
+    },
 }
 
 # If a project has dependencies that are also being built, we combine build options and test options
@@ -158,11 +160,17 @@ dependency_graph = {
     "miopen": ["blas", "rand"],
 }
 
+# When these subtrees change, also activate the given optional matrix project so
+# its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
+SUBTREE_EXTRA_MATRIX_PROJECTS = {
+    "projects/hipblaslt": "sparselt",
+}
+
 
 def collect_projects_to_run(subtrees):
     platform = os.getenv("PLATFORM")
     projects = set()
-    # Make a deep copy of project_map to avoid modifying the original
+    # Work on per-call deep copies so module-level state stays immutable across calls.
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
 
@@ -170,6 +178,10 @@ def collect_projects_to_run(subtrees):
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
+
+        extra_matrix = SUBTREE_EXTRA_MATRIX_PROJECTS.get(subtree)
+        if extra_matrix:
+            projects.add(extra_matrix)
 
     for project in list(projects):
         # Check if an optional math component was included.
