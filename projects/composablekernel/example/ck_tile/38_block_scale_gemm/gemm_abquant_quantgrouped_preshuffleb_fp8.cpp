@@ -15,11 +15,13 @@ static auto _ = []() {
         using BQuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 1, 128>>;
         using TypeConfig =
             decltype(GemmQuantTypeConfig<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::half_t, float>{});
-        return run_gemm_example_prec_type<GemmConfigPrefill<ck_tile::fp8_t>,
-                                          TypeConfig,
-                                          AQuantGroupSize,
-                                          BQuantGroupSize,
-                                          ck_tile::QuantType::ABQuantGrouped>(arg_parser);
+        return run_gemm_abquant_quantgrouped_preshuffleb<ck_tile::fp8_t,
+                                                         true,
+                                                         TypeConfig,
+                                                         AQuantGroupSize,
+                                                         BQuantGroupSize,
+                                                         ck_tile::QuantType::ABQuantGrouped>(
+            arg_parser);
     };
     lut[hash_multiple_strings({"fp8",
                                "abquant",
@@ -30,11 +32,13 @@ static auto _ = []() {
         using BQuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 128, 128>>;
         using TypeConfig =
             decltype(GemmQuantTypeConfig<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::half_t, float>{});
-        return run_gemm_example_prec_type<GemmConfigPrefill<ck_tile::fp8_t>,
-                                          TypeConfig,
-                                          AQuantGroupSize,
-                                          BQuantGroupSize,
-                                          ck_tile::QuantType::ABQuantGrouped>(arg_parser);
+        return run_gemm_abquant_quantgrouped_preshuffleb<ck_tile::fp8_t,
+                                                         true,
+                                                         TypeConfig,
+                                                         AQuantGroupSize,
+                                                         BQuantGroupSize,
+                                                         ck_tile::QuantType::ABQuantGrouped>(
+            arg_parser);
     };
     return 0;
 }();

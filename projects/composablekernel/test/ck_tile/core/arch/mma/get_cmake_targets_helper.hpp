@@ -64,24 +64,9 @@ static CK_TILE_HOST bool dispatchCompilerTarget(ck_tile::core::arch::amdgcn_targ
 
 static CK_TILE_HOST constexpr int32_t getCMakeWaveSize()
 {
-    using ck_tile::core::arch::amdgcn_target_id;
-#ifdef CK_CMAKE_GPU_TARGET_IDS
-    constexpr uint32_t ids[]       = {CK_CMAKE_GPU_TARGET_IDS};
-    constexpr index_t targets_size = sizeof(ids) / sizeof(ids[0]);
-    static_assert(targets_size > 0);
-    constexpr auto first_target_id = static_cast<amdgcn_target_id>(ids[0]);
-    if constexpr(first_target_id >= amdgcn_target_id::GFX908 &&
-                 first_target_id <= amdgcn_target_id::GFX950)
-    {
-        return 64;
-    }
-    else
-    {
-        return 32;
-    }
-#else
-    static_assert(false, "Configure CK_CMAKE_GPU_TARGET_IDS before calling this function.");
-    return 0;
-#endif
+    using namespace ck_tile::core::arch;
+    // Use the first CMake-configured target's wave size.
+    // getCMakeCompilerTarget() picks the first target from CK_CMAKE_GPU_TARGET_IDS.
+    return static_cast<int32_t>(getCMakeCompilerTarget<>().WAVE_SIZE_ID);
 }
 } // namespace ck_tile::core::arch::testing

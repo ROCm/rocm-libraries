@@ -31,11 +31,12 @@ static auto _ = []() {
         using BQuantGroupSize = ck_tile::QuantGroupShape<ck_tile::sequence<1, 128, 128>>;
         using TypeConfig =
             decltype(GemmQuantTypeConfig<ck_tile::bf8_t, ck_tile::bf8_t, ck_tile::half_t, float>{});
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::bf8_t>,
-                                          TypeConfig,
-                                          AQuantGroupSize,
-                                          BQuantGroupSize,
-                                          ck_tile::QuantType::ABQuantGrouped>(arg_parser);
+        return run_gemm_abquant_quantgrouped<ck_tile::bf8_t,
+                                             true,
+                                             TypeConfig,
+                                             AQuantGroupSize,
+                                             BQuantGroupSize,
+                                             ck_tile::QuantType::ABQuantGrouped>(arg_parser);
     };
     return 0;
 }();
