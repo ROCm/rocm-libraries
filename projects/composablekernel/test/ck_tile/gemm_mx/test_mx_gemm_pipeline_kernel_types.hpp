@@ -97,6 +97,10 @@ using KernelTypesMxGemmCompAsyncRCR = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F8,       BF8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>
 >;
 
+using KernelTypesMxGemmCompAsyncRCRLargeCases = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,        I64,         I64,          I256,       I16,        I16, CompAsync, I32>
+>;
+
 using KernelTypesMxGemmCompAsyncRRR = ::testing::Types<
     std::tuple<    Row,     Row,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
     std::tuple<    Row,     Row,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32, CompAsync, I32>,
