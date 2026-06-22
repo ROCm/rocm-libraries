@@ -408,6 +408,14 @@ int main(int argc, char** argv)
     llvm::yaml::Input yin((*inputFile)->getMemBufferRef());
     yin >> rv;
 
+    // Build the timing config once from the parsed YAML and validate it up front, before any
+    // GPU setup, so a bad config fails fast. The same object is reused for the measurement
+    // below -- keep it the single source of truth rather than mirroring fields into a second
+    // config that can drift out of sync.
+    hipblaslt_bench::TimingConfig timingCfg;
+    timingCfg.iters         = rv.gs.iters;
+    timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
+    timingCfg.adaptive      = rv.gs.adaptive;
     if(rv.gs.adaptive)
     {
         // Adaptive timing and graph mode are mutually exclusive: graph mode times a single
@@ -420,18 +428,17 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        hipblaslt_bench::TimingConfig tmp;
-        tmp.warmup_time         = rv.gs.warmup_time;
-        tmp.sample_time         = rv.gs.sample_time;
-        tmp.min_iters           = rv.gs.min_iters;
-        tmp.max_iters           = rv.gs.max_iters;
-        tmp.measure_time        = rv.gs.measure_time;
-        tmp.max_measure_time    = rv.gs.max_measure_time;
-        tmp.noise_threshold     = rv.gs.noise_threshold;
-        tmp.stability_threshold = rv.gs.stability_threshold;
-        tmp.stability_window    = rv.gs.stability_window;
-        tmp.stability_interval  = rv.gs.stability_interval;
-        if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+        timingCfg.warmup_time         = rv.gs.warmup_time;
+        timingCfg.sample_time         = rv.gs.sample_time;
+        timingCfg.min_iters           = rv.gs.min_iters;
+        timingCfg.max_iters           = rv.gs.max_iters;
+        timingCfg.measure_time        = rv.gs.measure_time;
+        timingCfg.max_measure_time    = rv.gs.max_measure_time;
+        timingCfg.noise_threshold     = rv.gs.noise_threshold;
+        timingCfg.stability_threshold = rv.gs.stability_threshold;
+        timingCfg.stability_window    = rv.gs.stability_window;
+        timingCfg.stability_interval  = rv.gs.stability_interval;
+        if(const auto err = hipblaslt_bench::validate_adaptive_config(timingCfg); !err.empty())
         {
             hipblaslt_cerr << "error: " << err << std::endl;
             return 1;
@@ -588,24 +595,6 @@ int main(int argc, char** argv)
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
-
-    hipblaslt_bench::TimingConfig timingCfg;
-    timingCfg.iters         = iters;
-    timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
-    timingCfg.adaptive      = rv.gs.adaptive;
-    if(rv.gs.adaptive)
-    {
-        timingCfg.warmup_time      = rv.gs.warmup_time;
-        timingCfg.sample_time      = rv.gs.sample_time;
-        timingCfg.measure_time     = rv.gs.measure_time;
-        timingCfg.max_measure_time = rv.gs.max_measure_time;
-        timingCfg.min_iters          = rv.gs.min_iters;
-        timingCfg.max_iters          = rv.gs.max_iters;
-        timingCfg.noise_threshold    = rv.gs.noise_threshold;
-        timingCfg.stability_threshold = rv.gs.stability_threshold;
-        timingCfg.stability_window    = rv.gs.stability_window;
-        timingCfg.stability_interval  = rv.gs.stability_interval;
-    }
 
     // One enqueue of the whole layer sequence for a given (rotating) index.
     auto launch = [&](int64_t idx) {
