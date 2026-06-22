@@ -6,7 +6,7 @@ Companion docs in this directory:
 - **`DECISIONS.md`** — why modules are accepted below the coverage bar, which latent bugs are pinned, which mutants are accepted as equivalent, and the few departures from the add-only rule.
 - **`_codegen/GPU-MOCK.md`** — the GPU-less (`--cpu-only`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
 
-Everything you need to understand or extend the suite is in this directory. Additional background and the campaign's full per-module provenance are tracked under AIHPBLAS-3871.
+Everything you need to understand or extend the suite is in this directory. The campaign's full per-module provenance is tracked under AIHPBLAS-3871: for each characterized module, the archived `target.md` plan (public surface by tier, determinism strategy), the before→after coverage numbers, the mutation-testing outcome, and any accepted ceiling or pinned-bug rationale.
 
 ## Per-module protocol
 
@@ -69,7 +69,7 @@ These `.ambr` goldens are the safety net for the TensileLite/hipBLASLt consolida
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. A golden diff is a reviewed behavior change, not a chore.
-2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net — a green run that proves nothing. (A CI guard enforcing this is coming under AIHPBLAS-3876; don't wait for it.)
+2. **Never** run a bare, suite-wide `pytest --snapshot-update`. It silently rewrites every golden and destroys the net. That is, one could introduce a bug, update the goldens to make the tests green, and thereby *pin the bug* — rendering the tests useless. A CI guard that disallows bulk updates is coming under AIHPBLAS-3876; don't wait for it.
 3. After recording, re-run the node **without** `--snapshot-update` twice — it must be byte-identical. Churn means the test isn't deterministic; fix it via the `{basename, err}` digest / canonicalization, not by re-recording.
 4. For **stable archs** (gfx908/90a/942) a codegen golden change is a *signal* — treat a digest diff as a suspected compiler/codegen regression and justify it in `DECISIONS.md` (and the PR description) before committing the new golden. Newer, still-churning archs may keep a small number of compiler generations side by side.
 
@@ -83,7 +83,7 @@ A real mass update (e.g. an intended change to the snapshot format itself) is al
 
 ### Resources
 
-- Project overview & snapshot governance (Confluence): _link pending publish_
+- Project overview & snapshot governance (Confluence): [TensileLite Characterization Tests — Overview & Snapshot Governance](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1755647079/TensileLite+Characterization+Tests+Overview+Snapshot+Governance)
 - Tracking: AIHPBLAS-3867 (Lock the net), AIHPBLAS-3875 (this policy + helper script), AIHPBLAS-3876 (CI blanket-regeneration guard).
 
 ## Mutation testing

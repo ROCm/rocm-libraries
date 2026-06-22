@@ -120,8 +120,13 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """On any characterization golden mismatch, print the snapshot-update policy
-    so a failing author never reaches for a blanket ``--snapshot-update``."""
+    """When a characterization snapshot test fails, print the snapshot-update
+    policy so a failing author never reaches for a blanket ``--snapshot-update``.
+
+    This fires for any failure of a ``snapshot``-fixture test, which is usually a
+    golden mismatch but can also be an unrelated error in a snapshot-using test;
+    the guidance is harmless in the latter case.
+    """
     failed = terminalreporter.stats.get("failed", [])
     nodeids = [
         rep.nodeid
@@ -135,7 +140,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     write = terminalreporter.write_line
     write("")
     write(bar)
-    write("Characterization snapshot (golden) mismatch")
+    write("Characterization snapshot test failed (likely a golden mismatch)")
     write("-" * 78)
     write("These goldens pin TensileLite's current behavior as a refactor safety net.")
     write("")
@@ -151,7 +156,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     write("NEVER run a bare, suite-wide 'pytest --snapshot-update' -- it silently")
     write("rewrites every golden and destroys the net.")
     write("")
-    write("Policy: characterization/README.md ('Snapshot / golden discipline')")
+    write("Policy: Tensile/Tests/unit/characterization/README.md ('Snapshot / golden discipline')")
     write(bar)
 
 
