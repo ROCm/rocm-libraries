@@ -30,6 +30,11 @@
         offset,                                                              \
         ##__VA_ARGS__)
 
+// HIP vs CUDA implementation differences:
+// - HIP (rocRAND) maps 64-bit outputs (`unsigned long long`) to both Sobol64 
+//   and Threefry64 generator states. CUDA (cuRAND) only maps it to Sobol64.
+// - HIP queues `generator_discrete_custom` distributions, which are omitted 
+//   in the CUDA implementation.
 #ifdef __HIP__
     #define QUEUE_DISTRIBUTIONS(State, engine)                                                   \
         do                                                                                       \

@@ -35,6 +35,12 @@
                                                         offset,     \
                                                         benchmark_host)
 
+// HIP vs CUDA implementation differences:
+// - HIP (rocRAND) benchmarks sub-32-bit integers (`uint8_t`, `uint16_t`) and 
+//   half-precision floats (`__half`) across various distributions.
+// - CUDA (cuRAND) dynamically checks the `engine` type at runtime to route 
+//   `uint32_t` vs `unsigned long long` for uniform integer generation, and 
+//   only benchmarks standard `float` and `double` types.
 #ifdef __HIP__
     #define QUEUE_DISTRIBUTIONS(engine, ordering)                     \
         do                                                            \
