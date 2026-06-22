@@ -753,6 +753,12 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["Sparse"] and state["DirectToLdsMetadata"]:
       state["NonDTLTailLoopMetadata"] = True
 
+    # tailLoopOpt (mode 3) uses wide unguarded loads that rely on buffer
+    # load SRD limits for K-edge protection.  Flat loads lack an SRD, so
+    # force mode 2 (globalReadGuardK with per-element exec-mask checks).
+    if not state["BufferLoad"]:
+      state["tailLoopOptA"] = False
+      state["tailLoopOptB"] = False
     if (state["ISA"] != (9, 4, 2) and state["ISA"] != (9, 5, 0)) or \
        (state["ProblemType"]["Sparse"]) or \
        (state["UseDotInstruction"]):

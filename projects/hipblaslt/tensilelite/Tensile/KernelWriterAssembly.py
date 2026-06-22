@@ -10231,10 +10231,10 @@ class KernelWriterAssembly(KernelWriter):
 
               if (dataType.isDouble() or dataType.isSingle())\
                  and (kernel["BufferLoad"] or tP["tlu"]):
-                # For BufferLoad: use same buffer_load instruction for tail loop as out of tail loop.
-                # This is mandatory for DirectToLds case. Also, it improves tail loop performance.
-                # For flat loads with TLU=True: vectors span tile (not K), so a single
-                # wide load is safe — graShift ensures M/N is in bounds.
+                # BufferLoad: SRD limit handles OOB, use same wide instruction as main loop.
+                # Flat + TLU=True: vector spans tile (not K) so all elements share the
+                # same K index.  A single exec-mask check guards the whole vector; graShift
+                # keeps the tile-edge in bounds.
                 numLoadVectorComp = numLoadVectorComp // tailGRVW
 
               if isLds or isTr:
@@ -10347,6 +10347,7 @@ class KernelWriterAssembly(KernelWriter):
                 offset = 0
                 hi8 = 0
                 hi16 = 0
+                bpl = numElementsPerLoad*(tP["bpeGR"] if not tP["isM"] else tP["bpe"])
 
                 if kernel["BufferLoad"] or isTr:
                   # Use buffer limit to stay in-bounds - the limit was set to edge when SRD initialized
@@ -10453,7 +10454,6 @@ class KernelWriterAssembly(KernelWriter):
                     comment = f"Load {numElementsPerLoad} elements for 6 bits"
 
                   useBuffer = not isTr
-                  bpl = numElementsPerLoad*(tP["bpeGR"] if not tP["isM"] else tP["bpe"]) # bytesPerLoad
 
                   # if hi8=1 or hi16=1 (component 1,2,3 for int8) or (component 1 for half), use the temp destVgprHi
                   # but only when hi16=1 we use the _d16_hi version instruction, see the below visualized int8 comment
