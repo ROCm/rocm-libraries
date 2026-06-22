@@ -1,0 +1,83 @@
+# serializer version: 1
+# name: test_benchmark_step_basic
+  dict({
+    'isFinal': True,
+    'repr': '03_Final',
+    'str': '03_Final',
+    'wildcard': False,
+  })
+# ---
+# name: test_fork_permutations
+  dict({
+    'len': 4,
+    'num_perms': 4,
+    'perms': list([
+      dict({
+        'G': 'a',
+        'X': 1,
+        'Y': 3,
+      }),
+      dict({
+        'G': 'a',
+        'X': 2,
+        'Y': 3,
+      }),
+      dict({
+        'G': 'b',
+        'X': 1,
+        'Y': 3,
+      }),
+      dict({
+        'G': 'b',
+        'X': 2,
+        'Y': 3,
+      }),
+    ]),
+  })
+# ---
+# name: test_get_defaults_for_missing_parameters
+  dict({
+    'B': list([
+      2,
+    ]),
+    'ProblemSizes': list([
+      list([
+        1,
+      ]),
+    ]),
+  })
+# ---
+# name: test_lazy_fork_permutations
+  list([
+    dict({
+      'A': 1,
+      'g': 0,
+    }),
+    dict({
+      'A': 1,
+      'g': 1,
+    }),
+    dict({
+      'A': 2,
+      'g': 0,
+    }),
+    dict({
+      'A': 2,
+      'g': 1,
+    }),
+  ])
+# ---
+# name: test_separate_parameters
+  dict({
+    'multi': dict({
+      'M': list([
+        1,
+        2,
+        3,
+      ]),
+    }),
+    'single': dict({
+      'S': 1,
+    }),
+  })
+# ---

@@ -11,8 +11,8 @@ GlobalParameters:
   #DataInitTypeB: 8
   #DataInitTypeBias: 0
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   #Device: 0
   PruneSparseMode: 0
   MaxLDS: 163840
@@ -61,7 +61,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -69,7 +69,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -142,7 +142,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -150,7 +150,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -222,7 +222,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -230,7 +230,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -302,7 +302,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]       #
+        - ExpandPointerSwap: [false, true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -310,7 +310,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -380,7 +380,7 @@ BenchmarkProblems:
         - DepthU: [32,64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]       #
+        - ExpandPointerSwap: [true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -388,7 +388,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -465,7 +465,7 @@ BenchmarkProblems:
         - DepthU: [32,64]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]       #
+        - ExpandPointerSwap: [true]       #
         - TransposeLDS: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -473,7 +473,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -549,7 +549,7 @@ BenchmarkProblems:
         - DepthU: [32,64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]       #
+        - ExpandPointerSwap: [true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -557,7 +557,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2,3]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
@@ -639,7 +639,7 @@ BenchmarkProblems:
         - DepthU: [32,64,128]
         #- LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]       #
+        - ExpandPointerSwap: [true]       #
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -647,7 +647,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2,3]
         - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
         #- VectorWidthA: [1]
