@@ -1631,6 +1631,124 @@ class SLoadB512(SMemLoadInstruction):
         super().__init__(InstType.INST_B512, dst, base, soffset, smem, comment, **kwargs)
 
 
+_ST_SSTORE_LOGICAL_BY_INST_TYPE: Dict[Any, str] = {
+    InstType.INST_B32: "SStoreB32",
+    InstType.INST_B64: "SStoreB64",
+    InstType.INST_B128: "SStoreB128",
+    InstType.INST_B256: "SStoreB256",
+    InstType.INST_B512: "SStoreB512",
+}
+
+
+class SMemStoreInstruction(Instruction):
+    """``s_store_<b*> src, base, soffset`` base class."""
+
+    __slots__ = ("src", "base", "soffset", "smem")
+
+    def __init__(
+        self,
+        inst_type: Any,
+        src: Any = None,
+        base: Any = None,
+        soffset: Any = None,
+        smem: Any = None,
+        comment: str = "",
+        **kwargs: Any,
+    ):
+        _ = kwargs
+        super().__init__(inst_type, comment)
+        self.src = src
+        self.base = base
+        self.soffset = soffset
+        self.smem = smem
+        self.setInst("s_store_")
+
+    def toString(self) -> str:
+        parts: List[str] = []
+        if self.src is not None:
+            parts.append(
+                self.src.toString() if hasattr(self.src, "toString") else str(self.src))
+        if self.base is not None:
+            parts.append(
+                self.base.toString() if hasattr(self.base, "toString") else str(self.base))
+        parts.append(_input_to_str(self.soffset))
+        kstr = self.instStr + _smem_load_type_suffix(self.instType) + " " + ", ".join(parts)
+        if self.smem is not None and hasattr(self.smem, "toString"):
+            kstr += self.smem.toString()
+        return self.formatWithComment(kstr)
+
+    def getParams(self):
+        return [self.src, self.base, self.soffset]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.src, self.base, self.soffset]
+
+    def to_stinky_logical(self) -> Any:
+        if self.smem is not None:
+            raise NotImplementedError(
+                "rocisa_stinkytofu_adaptor: SMemStore with non-None SMEMModifiers "
+                "is not yet supported on the stinkytofu logical-IR path.",
+            )
+        import stinkytofu as _st  # noqa: WPS433
+
+        fac_name = _ST_SSTORE_LOGICAL_BY_INST_TYPE.get(self.instType)
+        if fac_name is None:
+            raise ValueError(f"SMemStore: unsupported instType {self.instType!r}")
+        factory = getattr(_st, fac_name)
+        return factory(
+            _to_stinky_register(self.src),
+            _to_stinky_register(self.base),
+            _to_stinky_register(self.soffset),
+            self.comment,
+        )
+
+    def __deepcopy__(self, memo):
+        clone = self.__class__.__new__(self.__class__)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = (
+            _deepcopy(self.m_memToken, memo) if self.m_memToken is not None else None
+        )
+        clone.src = _deepcopy(self.src, memo) if self.src is not None else None
+        clone.base = _deepcopy(self.base, memo) if self.base is not None else None
+        if isinstance(self.soffset, (int, float, str, bool)):
+            clone.soffset = self.soffset
+        else:
+            clone.soffset = _deepcopy(self.soffset, memo)
+        clone.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
+        return clone
+
+
+class SStoreB32(SMemStoreInstruction):
+    def __init__(self, src=None, base=None, soffset=None, smem=None, comment="", **kw):
+        super().__init__(InstType.INST_B32, src, base, soffset, smem, comment, **kw)
+
+
+class SStoreB64(SMemStoreInstruction):
+    def __init__(self, src=None, base=None, soffset=None, smem=None, comment="", **kw):
+        super().__init__(InstType.INST_B64, src, base, soffset, smem, comment, **kw)
+
+
+class SStoreB128(SMemStoreInstruction):
+    def __init__(self, src=None, base=None, soffset=None, smem=None, comment="", **kw):
+        super().__init__(InstType.INST_B128, src, base, soffset, smem, comment, **kw)
+
+
+class SStoreB256(SMemStoreInstruction):
+    def __init__(self, src=None, base=None, soffset=None, smem=None, comment="", **kw):
+        super().__init__(InstType.INST_B256, src, base, soffset, smem, comment, **kw)
+
+
+class SStoreB512(SMemStoreInstruction):
+    def __init__(self, src=None, base=None, soffset=None, smem=None, comment="", **kw):
+        super().__init__(InstType.INST_B512, src, base, soffset, smem, comment, **kw)
+
+
 # ==========================================================================
 # Branch instructions
 # source: rocisa/rocisa/src/instruction/branch.cpp
@@ -1840,11 +1958,14 @@ SCmpLtI32 = _make_scalar_cmp_class("SCmpLtI32", "s_cmp_lt_i32", InstType.INST_I3
 SCmpLtU32 = _make_scalar_cmp_class("SCmpLtU32", "s_cmp_lt_u32", InstType.INST_U32)
 # logicalIR: SBitcmp1B32
 SBitcmp1B32 = _make_scalar_cmp_class("SBitcmp1B32", "s_bitcmp1_b32", InstType.INST_B32)
-# SCmpK* — no logical IR entries, remain dummies.
-SCmpKEQU32 = make_dummy_class(f"{_P}.SCmpKEQU32")
-SCmpKGeU32 = make_dummy_class(f"{_P}.SCmpKGeU32")
-SCmpKGtU32 = make_dummy_class(f"{_P}.SCmpKGtU32")
-SCmpKLGU32 = make_dummy_class(f"{_P}.SCmpKLGU32")
+# logicalIR: SCmpKEQU32
+SCmpKEQU32 = _make_scalar_cmp_class("SCmpKEQU32", "s_cmpk_eq_u32", InstType.INST_U32)
+# logicalIR: SCmpKGeU32
+SCmpKGeU32 = _make_scalar_cmp_class("SCmpKGeU32", "s_cmpk_ge_u32", InstType.INST_U32)
+# logicalIR: SCmpKGtU32
+SCmpKGtU32 = _make_scalar_cmp_class("SCmpKGtU32", "s_cmpk_gt_u32", InstType.INST_U32)
+# logicalIR: SCmpKLGU32
+SCmpKLGU32 = _make_scalar_cmp_class("SCmpKLGU32", "s_cmpk_lg_u32", InstType.INST_U32)
 
 # -- Vector Compare (dst, src0, src1) --
 # logicalIR: VCmpEQF32
@@ -1950,7 +2071,8 @@ SAddU64 = _make_scalar_alu_class("SAddU64", "s_add_u64", InstType.INST_U64)
 # SSubBU32 — real class (see Scalar ALU section above)
 # logicalIR: SCSelectB32
 SCSelectB32 = _make_scalar_alu_class("SCSelectB32", "s_cselect_b32", InstType.INST_B32)
-SCSelectB64 = make_dummy_class(f"{_P}.SCSelectB64")
+# logicalIR: SCSelectB64
+SCSelectB64 = _make_scalar_alu_class("SCSelectB64", "s_cselect_b64", InstType.INST_B64)
 # SAndB32 — real class (see Scalar ALU section above)
 # SAndB64 — real class (see Scalar ALU section above)
 # SAndN2B32 — real class (see Scalar ALU section above)
@@ -1982,7 +2104,8 @@ SFf1B32 = _make_scalar_unary_class("SFf1B32", "s_ff1_i32_b32", InstType.INST_B32
 SBfmB32 = _make_scalar_alu_class("SBfmB32", "s_bfm_b32", InstType.INST_B32)
 # logicalIR: SBfeU32
 SBfeU32 = _make_scalar_alu_class("SBfeU32", "s_bfe_u32", InstType.INST_U32)
-SFlbitI32B32 = make_dummy_class(f"{_P}.SFlbitI32B32")
+# logicalIR: SFlbitI32B32
+SFlbitI32B32 = _make_scalar_unary_class("SFlbitI32B32", "s_flbit_i32_b32", InstType.INST_B32)
 # logicalIR: SMovkI32
 SMovkI32 = _make_scalar_unary_class("SMovkI32", "s_movk_i32", InstType.INST_I32)
 # logicalIR: SSExtI16toI32
@@ -1994,7 +2117,8 @@ SSExtI16toI32 = _make_scalar_unary_class("SSExtI16toI32", "s_sext_i32_i16", Inst
 # logicalIR: SSetPrior
 SSetPrior = _make_imm_no_dest_class("SSetPrior", "s_setprio")
 # SBarrier — real class (see SBarrier section above)
-SDcacheWb = make_dummy_class(f"{_P}.SDcacheWb")
+# logicalIR: SDcacheWb
+SDcacheWb = _make_no_operand_class("SDcacheWb", "s_dcache_wb")
 # logicalIR: GlobalWb
 GlobalWb = _make_no_operand_class("GlobalWb", "global_wb")
 # logicalIR: GlobalInv
@@ -2041,7 +2165,8 @@ class SEndpgm(Instruction):
 
 # logicalIR: SSleep
 SSleep = _make_imm_no_dest_class("SSleep", "s_sleep")
-SSetVgprMsb = make_dummy_class(f"{_P}.SSetVgprMsb")
+# logicalIR: SSetVgprMsb
+SSetVgprMsb = _make_imm_no_dest_class("SSetVgprMsb", "s_set_vgpr_msb")
 # SGetRegB32 — real class (see Scalar Control section above)
 # SSetRegB32 — real class (see Scalar Control section above)
 # SSetRegIMM32B32 — real class (see Scalar Control section above)
@@ -2556,14 +2681,18 @@ VAccvgprWrite = _make_scalar_unary_class("VAccvgprWrite", "v_accvgpr_write", Ins
 # logicalIR: VAccvgprWriteB32
 VAccvgprWriteB32 = _make_scalar_unary_class("VAccvgprWriteB32", "v_accvgpr_write_b32", InstType.INST_B32)
 # VReadfirstlaneB32 — real class (see Vector ALU section above)
-VReadlaneB32 = make_dummy_class(f"{_P}.VReadlaneB32")
-VWritelaneB32 = make_dummy_class(f"{_P}.VWritelaneB32")
+# logicalIR: VReadlaneB32
+VReadlaneB32 = _make_scalar_alu_class("VReadlaneB32", "v_readlane_b32", InstType.INST_B32)
+# logicalIR: VWritelaneB32
+VWritelaneB32 = _make_scalar_alu_class("VWritelaneB32", "v_writelane_b32", InstType.INST_B32)
 # logicalIR: VRndneF32
 VRndneF32 = _make_scalar_unary_class("VRndneF32", "v_rndne_f32", InstType.INST_F32)
 # logicalIR: VPermB32
 VPermB32 = _make_ternary_class("VPermB32", "v_perm_b32", InstType.INST_B32)
-VPermlane16SwapB32 = make_dummy_class(f"{_P}.VPermlane16SwapB32")
-VPermlane32SwapB32 = make_dummy_class(f"{_P}.VPermlane32SwapB32")
+# logicalIR: VPermlane16SwapB32
+VPermlane16SwapB32 = _make_scalar_unary_class("VPermlane16SwapB32", "v_permlane16_swap_b32", InstType.INST_B32)
+# logicalIR: VPermlane32SwapB32
+VPermlane32SwapB32 = _make_scalar_unary_class("VPermlane32SwapB32", "v_permlane32_swap_b32", InstType.INST_B32)
 SSchedulingFence = make_dummy_class(f"{_P}.SSchedulingFence")
 
 
@@ -2652,9 +2781,10 @@ VCvtF64toU32 = _make_scalar_unary_class("VCvtF64toU32", "v_cvt_u32_f64", InstTyp
 VCvtU32toF64 = _make_scalar_unary_class("VCvtU32toF64", "v_cvt_f64_u32", InstType.INST_F64)
 # logicalIR: PVCvtBF16toFP32
 PVCvtBF16toFP32 = _make_scalar_unary_class("PVCvtBF16toFP32", "v_cvt_f32_bf16", InstType.INST_F32)
-# (no Gfx1250 mapping - remain dummy)
-VCvtPkF32toFP16 = make_dummy_class(f"{_P}.VCvtPkF32toFP16")
-VCvtFP8toF16 = make_dummy_class(f"{_P}.VCvtFP8toF16")
+# logicalIR: VCvtPkF32toFP16
+VCvtPkF32toFP16 = _make_scalar_alu_class("VCvtPkF32toFP16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
+# logicalIR: VCvtFP8toF16
+VCvtFP8toF16 = _make_scalar_unary_class("VCvtFP8toF16", "v_cvt_f16_fp8", InstType.INST_F16)
 
 
 # ==========================================================================
@@ -2961,14 +3091,16 @@ BufferLoadD16I8 = _make_buffer_load_class("BufferLoadD16I8", "buffer_load_d16_i8
 BufferLoadD16HII8 = _make_buffer_load_class("BufferLoadD16HII8", "buffer_load_d16_hi_i8")
 BufferLoadD16HIB16 = _make_buffer_load_class("BufferLoadD16HIB16", "buffer_load_d16_hi_b16")
 BufferLoadD16B16 = _make_buffer_load_class("BufferLoadD16B16", "buffer_load_d16_b16")
-BufferLoadB16 = make_dummy_class(f"{_P}.BufferLoadB16")
+# logicalIR: BufferLoadB16
+BufferLoadB16 = _make_buffer_load_class("BufferLoadB16", "buffer_load_b16")
 BufferLoadI16 = _make_buffer_load_class("BufferLoadI16", "buffer_load_i16")
 BufferLoadU16 = _make_buffer_load_class("BufferLoadU16", "buffer_load_u16")
 BufferLoadB32 = _make_buffer_load_class("BufferLoadB32", "buffer_load_b32")
 BufferLoadB64 = _make_buffer_load_class("BufferLoadB64", "buffer_load_b64")
 BufferLoadB96 = _make_buffer_load_class("BufferLoadB96", "buffer_load_b96")
 BufferLoadB128 = _make_buffer_load_class("BufferLoadB128", "buffer_load_b128")
-BufferLoadB192 = make_dummy_class(f"{_P}.BufferLoadB192")
+# logicalIR: BufferLoadB192
+BufferLoadB192 = _make_buffer_load_class("BufferLoadB192", "buffer_load_b192")
 
 # --- Flat Load: rocisa(dst, vaddr, flat, comment) ---
 FlatLoadU8 = _make_flat_load_class("FlatLoadU8", "flat_load_u8")
@@ -2985,16 +3117,53 @@ FlatLoadB32 = _make_flat_load_class("FlatLoadB32", "flat_load_b32")
 FlatLoadB64 = _make_flat_load_class("FlatLoadB64", "flat_load_b64")
 FlatLoadB96 = _make_flat_load_class("FlatLoadB96", "flat_load_b96")
 FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
-FlatLoadB192 = make_dummy_class(f"{_P}.FlatLoadB192")
-GlobalLoadTR8B64 = make_dummy_class(f"{_P}.GlobalLoadTR8B64")
-GlobalLoadTR16B128 = make_dummy_class(f"{_P}.GlobalLoadTR16B128")
+# logicalIR: FlatLoadB192
+FlatLoadB192 = _make_flat_load_class("FlatLoadB192", "flat_load_b192")
+# logicalIR: GlobalLoadTR8B64
+def _make_global_load_tr_class(class_name: str, mnemonic: str):
+    """Factory for global_load_tr* shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
+
+    def __init__(self, dst: Any = None, vaddr: Any = None,
+                 saddr: Any = None, modifier: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[vaddr, saddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self._modifier = modifier
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    return cls
+
+
+GlobalLoadTR8B64 = _make_global_load_tr_class("GlobalLoadTR8B64", "global_load_tr_b64_b8")
+# logicalIR: GlobalLoadTR16B128
+GlobalLoadTR16B128 = _make_global_load_tr_class("GlobalLoadTR16B128", "global_load_tr_b128_b16")
 
 # --- Buffer Store / Atomic: rocisa(src, vaddr, saddr, soffset, mubuf, comment) ---
 BufferStoreB8 = _make_buffer_store_class("BufferStoreB8", "buffer_store_b8")
 BufferStoreD16HIU8 = _make_buffer_store_class("BufferStoreD16HIU8", "buffer_store_d16_hi_b8")
-BufferStoreD16U8 = make_dummy_class(f"{_P}.BufferStoreD16U8")
+# logicalIR: BufferStoreD16U8
+BufferStoreD16U8 = _make_buffer_store_class("BufferStoreD16U8", "buffer_store_d16_u8")
 BufferStoreD16HIB16 = _make_buffer_store_class("BufferStoreD16HIB16", "buffer_store_d16_hi_b16")
-BufferStoreD16B16 = make_dummy_class(f"{_P}.BufferStoreD16B16")
+# logicalIR: BufferStoreD16B16
+BufferStoreD16B16 = _make_buffer_store_class("BufferStoreD16B16", "buffer_store_d16_b16")
 BufferStoreB16 = _make_buffer_store_class("BufferStoreB16", "buffer_store_b16")
 BufferStoreB32 = _make_buffer_store_class("BufferStoreB32", "buffer_store_b32")
 BufferStoreB64 = _make_buffer_store_class("BufferStoreB64", "buffer_store_b64")
@@ -3009,7 +3178,8 @@ FlatStoreB8 = _make_flat_store_class("FlatStoreB8", "flat_store_b8")
 FlatStoreD16HIB8 = _make_flat_store_class("FlatStoreD16HIB8", "flat_store_d16_hi_b8")
 FlatStoreB16 = _make_flat_store_class("FlatStoreB16", "flat_store_b16")
 FlatStoreD16HIB16 = _make_flat_store_class("FlatStoreD16HIB16", "flat_store_d16_hi_b16")
-FlatStoreD16B16 = make_dummy_class(f"{_P}.FlatStoreD16B16")
+# logicalIR: FlatStoreD16B16
+FlatStoreD16B16 = _make_flat_store_class("FlatStoreD16B16", "flat_store_d16_b16")
 FlatStoreB32 = _make_flat_store_class("FlatStoreB32", "flat_store_b32")
 FlatStoreB64 = _make_flat_store_class("FlatStoreB64", "flat_store_b64")
 FlatStoreB96 = _make_flat_store_class("FlatStoreB96", "flat_store_b96")
@@ -3021,11 +3191,14 @@ FlatAtomicCmpswapB32 = _make_flat_atomic_class("FlatAtomicCmpswapB32", "flat_ato
 # --- DS Load: rocisa(dst, src, ds, comment) ---
 DSLoadU8 = _make_ds_load_class("DSLoadU8", "ds_load_u8")
 DSLoadI8 = _make_ds_load_class("DSLoadI8", "ds_load_i8")
-DSLoadD16HIU8 = make_dummy_class(f"{_P}.DSLoadD16HIU8")
+# logicalIR: DSLoadD16HIU8
+DSLoadD16HIU8 = _make_ds_load_class("DSLoadD16HIU8", "ds_load_d16_hi_u8")
 DSLoadU16 = _make_ds_load_class("DSLoadU16", "ds_load_u16")
 DSLoadI16 = _make_ds_load_class("DSLoadI16", "ds_load_i16")
-DSLoadD16HIU16 = make_dummy_class(f"{_P}.DSLoadD16HIU16")
-DSLoadB16 = make_dummy_class(f"{_P}.DSLoadB16")
+# logicalIR: DSLoadD16HIU16
+DSLoadD16HIU16 = _make_ds_load_class("DSLoadD16HIU16", "ds_load_d16_hi_u16")
+# logicalIR: DSLoadB16
+DSLoadB16 = _make_ds_load_class("DSLoadB16", "ds_load_b16")
 DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32")
 DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
 DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
@@ -3081,7 +3254,8 @@ DSLoad2B32 = _make_ds_load2_class("DSLoad2B32", "ds_load2_b32")
 DSLoad2B64 = _make_ds_load2_class("DSLoad2B64", "ds_load2_b64")
 
 # --- DS Store (binary): rocisa(dstAddr, src, ds, comment) ---
-DSStoreU16 = make_dummy_class(f"{_P}.DSStoreU16")
+# logicalIR: DSStoreU16
+DSStoreU16 = _make_ds_store_class("DSStoreU16", "ds_store_u16")
 DSStoreB8 = _make_ds_store_class("DSStoreB8", "ds_store_b8")
 DSStoreB16 = _make_ds_store_class("DSStoreB16", "ds_store_b16")
 # logicalIR: DSStoreB8HID16
@@ -3094,7 +3268,8 @@ DSStoreB96 = _make_ds_store_class("DSStoreB96", "ds_store_b96", latency=4)
 DSStoreB128 = _make_ds_store_class("DSStoreB128", "ds_store_b128", latency=5)
 # logicalIR: DSStoreB192
 DSStoreB192 = _make_ds_store_class("DSStoreB192", "ds_store_b192", latency=6)
-DSStoreB256 = make_dummy_class(f"{_P}.DSStoreB256")
+# logicalIR: DSStoreB256
+DSStoreB256 = _make_ds_store_class("DSStoreB256", "ds_store_b256", latency=7)
 
 # --- DS Store2 / Permute (ternary): rocisa(dstAddr, src0, src1, ds, comment) ---
 DSStore2B32 = _make_ds_store2_class("DSStore2B32", "ds_store2_b32", latency=3)
@@ -3136,15 +3311,109 @@ def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1):
 
 DSBPermuteB32 = _make_ds_permute_class("DSBPermuteB32", "ds_bpermute_b32")
 
-# --- SMEM Atomic / Store (remain dummy) ---
-SAtomicInc = make_dummy_class(f"{_P}.SAtomicInc")
-SAtomicDec = make_dummy_class(f"{_P}.SAtomicDec")
-# SLoadB32 … SLoadB512 — real classes (``SMemLoadInstruction`` subclasses).
-SStoreB32 = make_dummy_class(f"{_P}.SStoreB32")
-SStoreB64 = make_dummy_class(f"{_P}.SStoreB64")
-SStoreB128 = make_dummy_class(f"{_P}.SStoreB128")
-SStoreB256 = make_dummy_class(f"{_P}.SStoreB256")
-SStoreB512 = make_dummy_class(f"{_P}.SStoreB512")
+# --- SMEM Store / Atomic ---
+# SStoreB32 … SStoreB512 — real classes (``SMemStoreInstruction`` subclasses, defined above).
+# logicalIR: SAtomicInc
+class SAtomicInc(Instruction):
+    """``s_atomic_inc dst, base, soffset`` shim."""
+
+    __slots__ = ("dst", "base", "soffset", "smem")
+
+    def __init__(self, dst=None, base=None, soffset=None, smem=None, comment="", **kw):
+        _ = kw
+        super().__init__(InstType.INST_B32, comment)
+        self.dst = dst
+        self.base = base
+        self.soffset = soffset
+        self.smem = smem
+        self.setInst("s_atomic_inc")
+
+    def getParams(self):
+        return [self.dst, self.base, self.soffset]
+
+    def getDstParams(self):
+        return [self.dst] if self.dst else []
+
+    def getSrcParams(self):
+        return [self.base, self.soffset]
+
+    def toString(self) -> str:
+        parts = [_input_to_str(self.dst), _input_to_str(self.base), _input_to_str(self.soffset)]
+        kstr = self.instStr + " " + ", ".join(parts)
+        if self.smem is not None and hasattr(self.smem, "toString"):
+            kstr += self.smem.toString()
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        return _st.SAtomicInc(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.base),
+            _to_stinky_register(self.soffset),
+            self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = self.__class__.__new__(self.__class__)
+        memo[id(self)] = dup
+        Instruction.__init__(dup, self.instType, self.comment)
+        dup.instStr = self.instStr
+        dup.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
+        dup.base = _deepcopy(self.base, memo) if self.base is not None else None
+        dup.soffset = self.soffset if isinstance(self.soffset, (int, float, str, bool)) else _deepcopy(self.soffset, memo)
+        dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
+        return dup
+
+
+# logicalIR: SAtomicDec
+class SAtomicDec(Instruction):
+    """``s_atomic_dec dst, base`` shim (no soffset)."""
+
+    __slots__ = ("dst", "base", "smem")
+
+    def __init__(self, dst=None, base=None, smem=None, comment="", **kw):
+        _ = kw
+        super().__init__(InstType.INST_B32, comment)
+        self.dst = dst
+        self.base = base
+        self.smem = smem
+        self.setInst("s_atomic_dec")
+
+    def getParams(self):
+        return [self.dst, self.base]
+
+    def getDstParams(self):
+        return [self.dst] if self.dst else []
+
+    def getSrcParams(self):
+        return [self.base]
+
+    def toString(self) -> str:
+        parts = [_input_to_str(self.dst), _input_to_str(self.base)]
+        kstr = self.instStr + " " + ", ".join(parts)
+        if self.smem is not None and hasattr(self.smem, "toString"):
+            kstr += self.smem.toString()
+        return self.formatWithComment(kstr)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        return _st.SAtomicDec(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.base),
+            self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = self.__class__.__new__(self.__class__)
+        memo[id(self)] = dup
+        Instruction.__init__(dup, self.instType, self.comment)
+        dup.instStr = self.instStr
+        dup.dst = _deepcopy(self.dst, memo) if self.dst is not None else None
+        dup.base = _deepcopy(self.base, memo) if self.base is not None else None
+        dup.smem = _deepcopy(self.smem, memo) if self.smem is not None else None
+        return dup
 
 # --- TensorLoadToLds: rocisa(group0, group1, group2, group3, comment) ---
 def _make_tensor_load_class():

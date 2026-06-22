@@ -1227,9 +1227,9 @@ class TestDevelopInstructionExports(unittest.TestCase):
     """
 
     _NAMES = (
-        "BufferLoadB16",
-        "SAtomicInc",
         "SMemAtomicIncInstruction",
+        "SMemAtomicDecInstruction",
+        "SMemStoreInstruction",
     )
 
     def test_all_develop_exports_importable(self):
