@@ -53,12 +53,6 @@ struct GemmTileConfig {
 /// Pass-specific feature configuration
 /// Categorizes optimization behaviors into semantics, properties, and features
 struct PassFeatureConfig {
-    /// Barrier semantics and unrolling behavior
-    /// These are code structure PROPERTIES (not optional features)
-    struct BarrierConfig {
-        bool unrollMovableBarrier = false;  ///< Whether GEMM barriers can be moved during unroll
-    };
-
     /// Loop structure and unrolling properties
     /// These are code structure PROPERTIES (not optional features)
     struct LoopConfig {
@@ -84,22 +78,8 @@ struct PassFeatureConfig {
         int globalReadDrainLatency = 0;
     };
 
-    /// Generic before/after instruction-order snapshot written by PassManager.
-    struct PassOrderSnapshotConfig {
-        /// Output path; if non-empty, PassManager records snapshots into JSON
-        /// for tools/stinkytofu-analysis (schema stinkytofu-dag-schedule-v1).
-        std::string jsonPath;
-        /// Prepended to each region title (e.g. Tensile pipeline group: loopWithPrefetch).
-        std::string titlePrefix;
-        /// `Pass::getName()` strings; after each listed pass, emit one region.
-        /// If empty and jsonPath is set, defaults to StinkyDAGSchedulerPass only.
-        std::vector<std::string> dumpAfterPasses;
-    };
-
-    BarrierConfig barrierConfig;
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
-    PassOrderSnapshotConfig passOrderSnapshot;
 };
 
 /// VGPR MSB encoding mode supported by the toolchain.

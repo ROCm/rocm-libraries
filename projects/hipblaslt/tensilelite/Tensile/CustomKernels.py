@@ -96,7 +96,7 @@ _ACTIVATION_ARG_INDEX = {
 # set: getCustomKernelConfig drops them so they don't pollute the solution
 # dict, while validateCustomKernelMetadata still sees them via its independent
 # readCustomKernelConfig call.
-_PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams"}
+_PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
     if "CustomKernel" in config and config["CustomKernel"]["name"]:
@@ -346,7 +346,6 @@ def getCustomKernelConfig(
     # validParameters dict (that leaks state across calls and into unit tests
     # via the precomputed _expectedParamTypes cache in test_validateParameterTypes).
     mergedValid = {**validParameters, **newMIValidParameters}
-
     for k, v in kernelConfig.items():
         if k in _PASSTHROUGH_KEYS:
             continue

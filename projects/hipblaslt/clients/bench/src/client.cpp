@@ -638,10 +638,12 @@ try
          "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
          "Negative values are rejected by the library.")
 
-        ("dyn_persistent_tile",
-         value<bool>(&hipblaslt_bench_options::dyn_persistent_tile_enabled())->default_value(false),
-         "Request the hipBLASLt dynamic persistent tile (work-stealing StreamK) scheduler "
-         "via the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT extension attribute.")
+        ("streamk_tile_scheduling",
+         value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
+         "Select the StreamK=5 tile scheduling sub-path via the "
+         "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
+         "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
+         "leaves the attribute unset so the library default (auto) applies.")
 
         ("help,h", "produces this help message")
 
@@ -753,6 +755,32 @@ try
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
         return 1;
+    }
+
+    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
+    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
+    // means "unset": leave the attribute untouched so the library default applies.
+    {
+        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        int32_t resolved = -1;
+        if(mode.empty())
+            resolved = -1;
+        else if(mode == "off" || mode == "0")
+            resolved = 0;
+        else if(mode == "on" || mode == "1")
+            resolved = 1;
+        else if(mode == "auto" || mode == "2")
+            resolved = 2;
+        else
+        {
+            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
+                           << std::endl;
+            return 1;
+        }
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
     }
 
     // transfer local variable state

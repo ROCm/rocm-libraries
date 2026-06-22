@@ -1,5 +1,5 @@
 .. meta::
-  :description: Verifying ROCm Performance Primitives installations 
+  :description: Verifying ROCm Performance Primitives installations
   :keywords: rpp, ROCm Performance Primitives, ROCm, documentation, installing, verifuing
 
 ********************************************************************
@@ -25,7 +25,7 @@ You can verify your installation using the CTest module. You will need to instal
 To test RPP's functionality, run ``testALLScript.sh``:
 
 .. tab-set::
- 
+
   .. tab-item:: HIP
 
     .. code:: shell
@@ -36,7 +36,6 @@ To test RPP's functionality, run ``testALLScript.sh``:
   .. tab-item:: CPU-only
 
     .. code:: shell
-      
+
         cd rpp/utilities/rpp-unittests/HOST_NEW
         ./testAllScript.sh
-    
