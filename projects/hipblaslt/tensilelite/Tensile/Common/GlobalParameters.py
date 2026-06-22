@@ -813,7 +813,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate. Three categories:
     #   - Dead (no consumer anywhere; safe to silently drop):
-    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
     "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
     "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
     "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
