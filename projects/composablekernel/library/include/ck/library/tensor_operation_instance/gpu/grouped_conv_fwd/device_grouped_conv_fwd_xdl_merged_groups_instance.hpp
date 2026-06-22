@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "ck/ck.hpp"
+#include "ck/cmake_gpu_targets.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
+#include "ck/utility/tuple_cat_t.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -46,13 +48,13 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances = std::tuple<
+using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_base = std::tuple<
     // clang-format off
         //########################################|     NumDim|      A|      B|          Ds|      E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer| ACompute| BCompute| BlockGemm| NumGroups|
         //########################################|    Spatial| Layout| Layout|      Layout| Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization| Specialization| Prefetch|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|     Type|     Type|  Pipeline|   ToMerge|
         //########################################|           |       |       |            |       |      |      |        |         |            |      |   Operation|   Operation|   Operation|               |               |    Stage|      |      |      |      |    |    |     |     | Wave| Wave| Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|         |         | Scheduler|          |
         //########################################|           |       |       |            |       |      |      |        |         |            |      |            |            |            |               |               |         |      |      |      |      |    |    |     |     |     |     |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |         |         |          |          |
-        // Instances with NumGroupsPerBatch > 1
+        // KPerBlock=16 instances (universal, all architectures)
         DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,     16,   4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, BF16, BF16, LoopScheduler::Default, 8>,
         DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,     16,   4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, BF16, BF16, LoopScheduler::Default, 16>,
         DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,  BF16,  BF16,     F32,     BF16,    DsDataTypes,  BF16, PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,     16,   4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, BF16, BF16, LoopScheduler::Default, 32>,
@@ -65,7 +67,7 @@ using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances = std::tuple<
     // clang-format on
     >;
 
-// double rate mfma instances on gfx950
+// GFX950-only: KPerBlock=32 instances (double-rate MFMA)
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -74,7 +76,7 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x = std::tuple<
+using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_gfx950 = std::tuple<
     // clang-format off
         //########################################|     NumDim|      A|      B|          Ds|      E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer| ACompute| BCompute| BlockGemm| NumGroups|
         //########################################|    Spatial| Layout| Layout|      Layout| Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization| Specialization| Prefetch|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|     Type|     Type|  Pipeline|   ToMerge|
@@ -95,6 +97,7 @@ using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_2x = std::tuple<
     // clang-format on
     >;
 
+// Public alias: base instances + GFX950 extras (when targeting GFX950)
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -103,7 +106,38 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_xdl_merged_groups_f16_instances = std::tuple<
+using device_grouped_conv_fwd_xdl_merged_groups_bf16_instances = ck::tuple_cat_t<
+    std::conditional_t<!ck::cmakeTargetsContainOnly(0x0950),
+                       device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_base<NDimSpatial,
+                                                                                     ALayout,
+                                                                                     BLayout,
+                                                                                     DsLayout,
+                                                                                     ELayout,
+                                                                                     ConvSpec,
+                                                                                     DsDataTypes,
+                                                                                     OutElementOp>,
+                       std::tuple<>>,
+    std::conditional_t<
+        ck::cmakeTargetsContain(0x0950),
+        device_grouped_conv_fwd_xdl_merged_groups_bf16_instances_gfx950<NDimSpatial,
+                                                                        ALayout,
+                                                                        BLayout,
+                                                                        DsLayout,
+                                                                        ELayout,
+                                                                        ConvSpec,
+                                                                        DsDataTypes,
+                                                                        OutElementOp>,
+        std::tuple<>>>;
+
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionForwardSpecialization ConvSpec,
+          typename DsDataTypes  = Tuple<>,
+          typename OutElementOp = PassThrough>
+using device_grouped_conv_fwd_xdl_merged_groups_f16_instances_base = std::tuple<
     // clang-format off
         //########################################|     NumDim|      A|      B|          Ds|      E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
         //########################################|    Spatial| Layout| Layout|      Layout| Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization| Specialization| Prefetch|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
@@ -122,7 +156,7 @@ using device_grouped_conv_fwd_xdl_merged_groups_f16_instances = std::tuple<
     // clang-format on
     >;
 
-// double rate mfma instances on gfx950
+// GFX950-only: KPerBlock=32 instances (double-rate MFMA)
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -131,7 +165,7 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_xdl_merged_groups_f16_instances_2x = std::tuple<
+using device_grouped_conv_fwd_xdl_merged_groups_f16_instances_gfx950 = std::tuple<
     // clang-format off
         //########################################|     NumDim|      A|      B|          Ds|      E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
         //########################################|    Spatial| Layout| Layout|      Layout| Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization| Specialization| Prefetch|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
@@ -154,6 +188,37 @@ using device_grouped_conv_fwd_xdl_merged_groups_f16_instances_2x = std::tuple<
     // clang-format on
     >;
 
+// Public alias: base instances + GFX950 extras (when targeting GFX950)
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionForwardSpecialization ConvSpec,
+          typename DsDataTypes  = Tuple<>,
+          typename OutElementOp = PassThrough>
+using device_grouped_conv_fwd_xdl_merged_groups_f16_instances = ck::tuple_cat_t<
+    std::conditional_t<!ck::cmakeTargetsContainOnly(0x0950),
+                       device_grouped_conv_fwd_xdl_merged_groups_f16_instances_base<NDimSpatial,
+                                                                                    ALayout,
+                                                                                    BLayout,
+                                                                                    DsLayout,
+                                                                                    ELayout,
+                                                                                    ConvSpec,
+                                                                                    DsDataTypes,
+                                                                                    OutElementOp>,
+                       std::tuple<>>,
+    std::conditional_t<ck::cmakeTargetsContain(0x0950),
+                       device_grouped_conv_fwd_xdl_merged_groups_f16_instances_gfx950<NDimSpatial,
+                                                                                      ALayout,
+                                                                                      BLayout,
+                                                                                      DsLayout,
+                                                                                      ELayout,
+                                                                                      ConvSpec,
+                                                                                      DsDataTypes,
+                                                                                      OutElementOp>,
+                       std::tuple<>>>;
+
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -175,12 +240,6 @@ using device_grouped_conv_fwd_xdl_merged_groups_f32_instances = std::tuple<
     // clang-format on
     >;
 
-#if defined(CK_USE_GFX950)
-constexpr auto _k_per_block = 32;
-#else
-constexpr auto _k_per_block = 16;
-#endif
-
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -189,18 +248,68 @@ template <index_t NDimSpatial,
           ConvolutionForwardSpecialization ConvSpec,
           typename DsDataTypes  = Tuple<>,
           typename OutElementOp = PassThrough>
-using device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances = std::tuple<
+using device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances_base = std::tuple<
     // clang-format off
         //########################################|     NumDim|      A|      B|          Ds|      E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|           GEMM| NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
         //########################################|    Spatial| Layout| Layout|      Layout| Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization| Specialization| Prefetch|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
         //########################################|           |       |       |            |       |      |      |        |         |            |      |   Operation|   Operation|   Operation|               |               |    Stage|      |      |      |      |    |    |     |     | Wave| Wave| Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
         //########################################|           |       |       |            |       |      |      |        |         |            |      |            |            |            |               |               |         |      |      |      |      |    |    |     |     |     |     |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |
-        // Instances with NumGroupsPerBatch > 1
-        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,_k_per_block,4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 8>,
-        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,_k_per_block,4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 16>,
-        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,_k_per_block,4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 32>
+        // KPerBlock=16 instances (universal, all architectures)
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      16, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 8>,
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      16, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 16>,
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      16, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 32>
     // clang-format on
     >;
+
+// GFX950-only: KPerBlock=32 instances (double-rate TF32 MFMA)
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionForwardSpecialization ConvSpec,
+          typename DsDataTypes  = Tuple<>,
+          typename OutElementOp = PassThrough>
+using device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances_gfx950 = std::tuple<
+    // clang-format off
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      32, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 8>,
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      32, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 16>,
+        DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<NDimSpatial,ALayout,BLayout,    DsLayout,ELayout,    F32,     F32,     F32,     F32, DsDataTypes,   F32,  PassThrough, PassThrough, OutElementOp,                  ConvSpec, GemmMNKPadding,  1,  64,    64,    16,      32, 4, 4,  16,   16,    4,    1,  S< 4, 16,  1>, S<0, 2, 1>,     S<0, 2, 1>,                   1,              4,              4,      1,  S< 4, 16,  1>,   S<1, 0, 2>,     S<1, 0, 2>,             2,              1,              4,      1,           1,           1,   S<1, 16, 1, 4>,                  1, TF32, TF32, LoopScheduler::Default, 32>
+    // clang-format on
+    >;
+
+// Public alias: base instances + GFX950 extras (when targeting GFX950)
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionForwardSpecialization ConvSpec,
+          typename DsDataTypes  = Tuple<>,
+          typename OutElementOp = PassThrough>
+using device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances = ck::tuple_cat_t<
+    std::conditional_t<
+        !ck::cmakeTargetsContainOnly(0x0950),
+        device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances_base<NDimSpatial,
+                                                                          ALayout,
+                                                                          BLayout,
+                                                                          DsLayout,
+                                                                          ELayout,
+                                                                          ConvSpec,
+                                                                          DsDataTypes,
+                                                                          OutElementOp>,
+        std::tuple<>>,
+    std::conditional_t<
+        ck::cmakeTargetsContain(0x0950),
+        device_grouped_conv_fwd_xdl_merged_groups_f32_tf32_instances_gfx950<NDimSpatial,
+                                                                            ALayout,
+                                                                            BLayout,
+                                                                            DsLayout,
+                                                                            ELayout,
+                                                                            ConvSpec,
+                                                                            DsDataTypes,
+                                                                            OutElementOp>,
+        std::tuple<>>>;
 
 template <index_t NDimSpatial,
           typename ALayout,

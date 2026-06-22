@@ -4,11 +4,13 @@
 #pragma once
 
 #include "ck/ck.hpp"
+#include "ck/cmake_gpu_targets.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle_v1.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
+#include "ck/utility/tuple_cat_t.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -443,45 +445,86 @@ using device_grouped_conv_bwd_data_xdl_f32_optimized_loads_instances =
         // clang-format on
         >;
 
-#if defined(CK_USE_GFX950)
-constexpr auto _k_per_block = 32;
-#else
-constexpr auto _k_per_block = 16;
-#endif
+// Base TF32 optimized loads instances (KPerBlock=16, universal for all architectures)
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
           typename DsLayout,
           typename ELayout,
           ConvolutionBackwardDataSpecialization ConvSpec>
-using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances =
+using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_base =
     std::tuple<
         // clang-format off
        // ##############################################|       NDim| ALayout| BLayout|    DsLayout| ELayout| AData| BData| AccData| CShuffle|      DsData| EData| AElementwise| BElementwise| CDEElementwise| ConvolutionBackward| DoPad| DoPad|      NumGemmK| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer|    MXdl|    NXdl|    ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|    BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds| CShuffleMXdl| CShuffleNXdl|   CDEBlockTransfer| CDEBlockTransfer|
        // ##############################################|    Spatial|        |        |            |        |  Type|  Type|    Type| DataType|        Type|  Type|    Operation|    Operation|      Operation|  DataSpecialization| GemmM| GemmN| PrefetchStage|  Size| Block| Block| Block|    |    |  XDL|  XDL| PerWave| PerWave|     ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar|    ExtraM|     ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar|    ExtraN|      PerWave|      PerWave|  _MBlock_MPerBlock|  ScalarPerVector|
        // ##############################################|           |        |        |            |        |      |      |        |         |            |      |             |             |               |                    |      |      |              |      |      |      |      |    |    |     |     |        |        | Lengths_AK0_M_AK1|   ArrangeOrder|               |               |      PerVector|  PerVector_AK1|          | Lengths_BK0_N_BK1|   ArrangeOrder|               |               |      PerVector|  PerVector_BK1|          |   PerShuffle|   PerShuffle|  _NBlock_NPerBlock|       _NPerBlock|
        // ##############################################|           |        |        |            |        |      |      |        |         |            |      |             |             |               |                    |      |      |              |      |      |      |      |    |    |     |     |        |        |                  |               |               |               |               |               |          |                  |               |               |               |               |               |          |             |             |                   |                 |
-       // A K1 one access for each thread per load 
-       // 32x32
+       // 32x32 -- KPerBlock=32, AK1=8, BK1=8
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   8,    8,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 4, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 32, 1, 8>,                4, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,_k_per_block,4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 4, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 32, 1, 8>,                4, make_default_loop_scheduler(), TF32, TF32>,
+       // 32x32 -- KPerBlock=16, AK1=4, BK1=4
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    16,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 4, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 32, 1, 8>,                4, make_default_loop_scheduler(), TF32, TF32>,
 
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   8,    8,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 8, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 16, 1, 16>,               2, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,_k_per_block,4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 16, 1, 16>,               2, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    16,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 16, 1, 16>,               2, make_default_loop_scheduler(), TF32, TF32>,
 
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   8,    8,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 8, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 8, 1, 32>,                1, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,_k_per_block,4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 8, 1, 32>,                1, make_default_loop_scheduler(), TF32, TF32>,
-        // 16x16
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    16,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 8, 1, 32>,                1, make_default_loop_scheduler(), TF32, TF32>,
+       // 16x16 -- KPerBlock=32, AK1=8, BK1=8
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   8,    8,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 2, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 64, 1, 4>,                4, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,_k_per_block,4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 2, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 64, 1, 4>,                4, make_default_loop_scheduler(), TF32, TF32>,
+       // 16x16 -- KPerBlock=16, AK1=4, BK1=4
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    16,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 2, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 64, 1, 4>,                4, make_default_loop_scheduler(), TF32, TF32>,
 
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   8,    8,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 8, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 32, 1, 8>,                2, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,_k_per_block,4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 32, 1, 8>,                2, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    16,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 32, 1, 8>,                2, make_default_loop_scheduler(), TF32, TF32>,
 
         DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   8,    8,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              8,              4,         1,        S<4, 8, 8>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 16, 1, 16>,               1, make_default_loop_scheduler(), TF32, TF32>,
-        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,_k_per_block,4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 16, 1, 16>,               1, make_default_loop_scheduler(), TF32, TF32>
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    16,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 16, 1, 16>,               1, make_default_loop_scheduler(), TF32, TF32>
         // clang-format on
         >;
+
+// GFX950-only TF32 optimized loads instances (KPerBlock=32, AK1=4, BK1=4 -- double-rate MFMA)
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionBackwardDataSpecialization ConvSpec>
+using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_gfx950 = std::tuple<
+    // clang-format off
+       // 32x32 -- KPerBlock=32, AK1=4, BK1=4
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 4, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 32, 1, 8>,                4, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 16, 1, 16>,               2, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,  F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,  128,    32,    32,   4,    4,  32,   32,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 8, 1, 32>,                1, make_default_loop_scheduler(), TF32, TF32>,
+       // 16x16 -- KPerBlock=32, AK1=4, BK1=4
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 2, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              8,              1,         1,            1,            1,     S<1, 64, 1, 4>,                4, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 8, 4>,      S<0, 2, 1>,     S<0, 2, 1>,              1,              2,              1,         1,            1,            1,     S<1, 32, 1, 8>,                2, make_default_loop_scheduler(), TF32, TF32>,
+        DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1< NDimSpatial, ALayout, BLayout,    DsLayout, ELayout,   F32,   F32,     F32,     F32,  Empty_Tuple,   F32,  PassThrough,  PassThrough,    PassThrough,            ConvSpec,  true,  true,             1,    256,   64,    16,    32,   4,    4,  16,   16,       1,       1,       S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,        S<4, 16, 4>,     S<0, 2, 1>,     S<0, 2, 1>,              1,              1,              1,         1,            1,            1,     S<1, 16, 1, 16>,               1, make_default_loop_scheduler(), TF32, TF32>
+    // clang-format on
+    >;
+
+// Public alias: base instances + GFX950 extras (when targeting GFX950)
+template <index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ConvolutionBackwardDataSpecialization ConvSpec>
+using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances = ck::tuple_cat_t<
+    device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_base<NDimSpatial,
+                                                                             ALayout,
+                                                                             BLayout,
+                                                                             DsLayout,
+                                                                             ELayout,
+                                                                             ConvSpec>,
+    std::conditional_t<
+        ck::cmakeTargetsContain(0x0950),
+        device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_gfx950<NDimSpatial,
+                                                                                   ALayout,
+                                                                                   BLayout,
+                                                                                   DsLayout,
+                                                                                   ELayout,
+                                                                                   ConvSpec>,
+        std::tuple<>>>;
 
 template <index_t NDimSpatial,
           typename ALayout,

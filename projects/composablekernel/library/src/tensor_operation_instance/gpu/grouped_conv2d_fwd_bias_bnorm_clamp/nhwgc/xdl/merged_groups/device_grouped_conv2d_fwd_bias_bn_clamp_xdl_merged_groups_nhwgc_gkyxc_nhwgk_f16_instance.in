@@ -3,7 +3,6 @@
 
 #include "ck/library/tensor_operation_instance/add_device_operation_instance.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_conv_fwd/device_grouped_conv_fwd_xdl_merged_groups_instance.hpp"
-#include "ck/host_utility/device_prop.hpp"
 #include "ck/utility/filter_tuple.hpp"
 
 namespace ck {
@@ -27,50 +26,25 @@ using device_grouped_conv2d_fwd_bias_bn_clamp_xdl_merged_groups_nhwgc_gkyxc_nhwg
 template <int Shards, int ShardIndex>
 void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f16_instances_shard(device_grouped_conv2d_fwd_bias_bn_clamp_xdl_merged_groups_nhwgc_gkyxc_nhwgk_f16_instances& instances)
 {
-    if(ck::get_device_name() == "gfx950")
-    {
-        add_device_operation_instances(
-            instances, ck::util::filter_tuple_by_modulo_t<
-            device_grouped_conv_fwd_xdl_merged_groups_f16_instances_2x<2,
-                                                                       NHWGC,
-                                                                       GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
-                                                                       NHWGK,
-                                                                       ConvFwdDefault,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
-                                       Shards,
-                                       ShardIndex>{});
+    add_device_operation_instances(
+        instances, ck::util::filter_tuple_by_modulo_t<
+        device_grouped_conv_fwd_xdl_merged_groups_f16_instances<2,
+                                                                NHWGC,
+                                                                GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
+                                                                NHWGK,
+                                                                ConvFwdDefault,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
+                                   Shards,
+                                   ShardIndex>{});
 
-        add_device_operation_instances(
-            instances, ck::util::filter_tuple_by_modulo_t<
-            device_grouped_conv_fwd_xdl_merged_groups_f16_instances_2x<2,
-                                                                       NHWGC,
-                                                                       GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
-                                                                       NHWGK,
-                                                                       ConvFwd3x3,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
-                                       Shards,
-                                       ShardIndex>{});
-    }
-    else
-    {
-        add_device_operation_instances(
-            instances, ck::util::filter_tuple_by_modulo_t<
-            device_grouped_conv_fwd_xdl_merged_groups_f16_instances<2,
-                                                                    NHWGC,
-                                                                    GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
-                                                                    NHWGK,
-                                                                    ConvFwdDefault,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
-                                       Shards,
-                                       ShardIndex>{});
-
-        add_device_operation_instances(
-            instances, ck::util::filter_tuple_by_modulo_t<
-            device_grouped_conv_fwd_xdl_merged_groups_f16_instances<2,
-                                                                    NHWGC,
-                                                                    GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
-                                                                    NHWGK,
-                                                                    ConvFwd3x3,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
-                                       Shards,
-                                       ShardIndex>{});
-    }
+    add_device_operation_instances(
+        instances, ck::util::filter_tuple_by_modulo_t<
+        device_grouped_conv_fwd_xdl_merged_groups_f16_instances<2,
+                                                                NHWGC,
+                                                                GKYXC, Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
+                                                                NHWGK,
+                                                                ConvFwd3x3,Tuple<F16, F16, F16, F16, F16>, BiasNormalizeInInferClamp>,
+                                   Shards,
+                                   ShardIndex>{});
 }
 
 } // namespace instance
