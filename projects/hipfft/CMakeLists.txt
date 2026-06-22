@@ -37,6 +37,10 @@ else()
     "Install path prefix, prepended onto install directories" )
 endif()
 
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
+endif()
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.
 # MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -78,6 +82,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -223,6 +228,7 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

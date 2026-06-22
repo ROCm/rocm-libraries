@@ -26,12 +26,15 @@
 
 #pragma once
 
+#include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext-op.h>
+#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
+#include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_random.hpp"
-#include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
@@ -44,9 +47,6 @@
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
-#include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
-#include <hipblaslt/hipblaslt.h>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -1216,60 +1216,75 @@ void testing_aux_matmul_sm_count_target(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
 }
 
-void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
+void testing_aux_matmul_streamk_tile_scheduling_ext(const Arguments& arg)
 {
     size_t                sizeWritten = 0;
     hipblasLtMatmulDesc_t matmul      = nullptr;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
 
-    // Default is disabled (0).
+    // Default is OFF (0); set sm_count_target > 0 to engage the heuristic.
     int32_t value_r = -1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 0);
 
-    // Enable then disable.
+    // ON then OFF round-trip.
     int32_t enable = 1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &enable,
                                                           sizeof(enable)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 1);
 
-    // Any nonzero value gets clamped to 1.
-    int32_t three = 3;
+    // AUTO (2) is also accepted and round-trips.
+    int32_t auto_mode = 2;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
-                                                          &three,
-                                                          sizeof(three)),
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &auto_mode,
+                                                          sizeof(auto_mode)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(value_r == 1);
+    ASSERT_TRUE(value_r == 2);
+
+    // Values outside {0,1,2} are rejected with INVALID_VALUE (previously
+    // any nonzero value was silently clamped to 1).
+    int32_t three = 3;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &three,
+                                                          sizeof(three)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    int32_t negative = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                          &negative,
+                                                          sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
 
     int32_t disable = 0;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &disable,
                                                           sizeof(disable)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
