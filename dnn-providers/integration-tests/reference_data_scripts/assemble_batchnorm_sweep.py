@@ -54,7 +54,7 @@ def rewrite_dvc_paths(dvc_text: str) -> str:
         stripped = line.strip()
         if stripped.startswith("- path: "):
             tensor_suffix = stripped.split(".tensor", 1)[1]
-            line = "  - path: tensor" + tensor_suffix
+            line = "- path: tensor" + tensor_suffix
         rewritten_lines.append(line)
     return "\n".join(rewritten_lines) + "\n"
 
