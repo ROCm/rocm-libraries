@@ -845,13 +845,7 @@ void get_rank_load_callbacks_funcptr(const fft_params&                          
                                      bool                                       round_trip_inverse,
                                      std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
-    int mpi_rank = 0;
-#ifdef ROCFFT_MPI_ENABLE
-    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
-    {
-        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
-    }
-#endif
+    int mpi_rank = params.get_process_rank();
 
     // Copy callback pointer from current device and add to output vec
     auto add_load_cb = [&]() {
@@ -929,13 +923,7 @@ void get_rank_callback_jit(const fft_params&                          params,
                            std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
                            get_rank_callback                          type)
 {
-    int mpi_rank = 0;
-#ifdef ROCFFT_MPI_ENABLE
-    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
-    {
-        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
-    }
-#endif
+    int mpi_rank = params.get_process_rank();
 
     switch(type)
     {
@@ -1049,13 +1037,7 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
                                       bool                                       round_trip_inverse,
                                       std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
-    int mpi_rank = 0;
-#ifdef ROCFFT_MPI_ENABLE
-    if(params.mp_lib == fft_params::fft_mp_lib_mpi)
-    {
-        MPI_Comm_rank(*static_cast<MPI_Comm*>(params.mp_comm), &mpi_rank);
-    }
-#endif
+    int mpi_rank = params.get_process_rank();
 
     // Copy callback pointer from current device and add to output vec
     auto add_store_cb = [&]() {

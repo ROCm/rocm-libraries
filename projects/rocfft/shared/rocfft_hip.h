@@ -64,9 +64,10 @@ public:
 
     static int current_device()
     {
-        int currentDevice = hipInvalidDeviceId;
-        if(hipGetDevice(&currentDevice) != hipSuccess)
-            throw std::runtime_error("failed to get HIP device");
+        int        currentDevice = hipInvalidDeviceId;
+        const auto ret           = hipGetDevice(&currentDevice);
+        if(ret != hipSuccess)
+            throw hip_runtime_error("failed to get HIP device", ret);
         return currentDevice;
     }
 

@@ -422,7 +422,7 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token->add_flag("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
+    non_token->add_option("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
         ->default_val("none")
         ->check(CLI::IsMember({"none", "funcptr", "jit"}));
     non_token

@@ -74,7 +74,7 @@ set( hipfft-test_source
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
 
-find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
+find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
 target_link_libraries( hipfft-test PRIVATE hiprtc::hiprtc )
 
 set( TEST_TARGETS hipfft-test )
