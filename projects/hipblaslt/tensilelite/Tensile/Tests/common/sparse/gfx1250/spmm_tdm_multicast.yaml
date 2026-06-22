@@ -27,7 +27,6 @@ GlobalParameters:
   PrintLevel: 2
   # UseGPUTimer: False
   ForceGenerateKernel: [True]
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
 ########################################################

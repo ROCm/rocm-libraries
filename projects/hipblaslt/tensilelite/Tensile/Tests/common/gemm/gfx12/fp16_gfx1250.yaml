@@ -14,7 +14,6 @@ GlobalParameters:
   EnqueuesPerSync: 1
   Architecture: gfx1250
   CpuThreads: 1
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################

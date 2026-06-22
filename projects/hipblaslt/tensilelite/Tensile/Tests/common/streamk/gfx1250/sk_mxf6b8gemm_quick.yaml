@@ -25,7 +25,6 @@ GlobalParameters:
   # KeepBuildTmp: True
   PrintLevel: 2
   ISA: [[12, 5, 0]]
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
