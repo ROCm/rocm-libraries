@@ -1791,10 +1791,11 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const conv::ProblemDescription& probl
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
-                                               const TensorDescriptor& dyDesc,
-                                               const TensorDescriptor& dxDesc)
+GemmDescriptor CreateGemmDescriptorConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -1807,8 +1808,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                     wei_spatial.end(),
@@ -1818,8 +1819,8 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb = problem.IsLayoutNHWC() ? k : n;
+    int ldc = problem.IsLayoutNHWC() ? m : n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -2234,11 +2235,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const conv::ProblemDescription& 
 }
 
 // dx = Col2Im(transpose(w) * dy)
-GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDesc,
-                                                    const TensorDescriptor& dyDesc,
-                                                    const TensorDescriptor& dxDesc,
-                                                    int groupCount)
+GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const conv::ProblemDescription& problem)
 {
+    decltype(auto) dyDesc = problem.GetIn();
+    decltype(auto) wDesc  = problem.GetWeights();
+    decltype(auto) dxDesc = problem.GetOut();
+    const int groupCount  = problem.GetGroupCount();
 #ifndef NDEBUG
     assert(wDesc.GetType() == dxDesc.GetType() && wDesc.GetType() == dyDesc.GetType());
 #endif
@@ -2251,8 +2253,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
                        std::views::take(dyDesc.GetLengths().size() - 2);
 
-    bool isColMajor = false;
-    bool transA     = true;
+    bool isColMajor = problem.IsLayoutNHWC();
+    bool transA     = !problem.IsLayoutNHWC();
     bool transB     = false;
     int m           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
                                                                    wei_spatial.end(),
@@ -2262,11 +2264,11 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
         out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
-    int ldb         = n;
-    int ldc         = n;
+    int ldb = problem.IsLayoutNHWC() ? groupCount * k : n;
+    int ldc = problem.IsLayoutNHWC() ? m : n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
-    auto strideB    = static_cast<long long>(k) * n;
+    auto strideB    = problem.IsLayoutNHWC() ? k : static_cast<long long>(k) * n;
     auto strideC    = static_cast<long long>(m) * n;
     float alpha     = 1.;
     float beta      = 0.;
