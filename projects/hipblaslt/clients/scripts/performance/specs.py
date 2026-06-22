@@ -40,14 +40,11 @@ def get_amdsmi_specs(devicenum: int = 0) -> dict:
     """
     Collects per-device GPU specs using ``amd-smi`` structured JSON output.
 
-    This is the modern replacement for scraping ``rocm-smi`` text output. The
-    returned values mirror the fields previously parsed from rocm-smi so that
-    the rest of get_machine_specs is unchanged:
+    Returns a dict with the following fields (any field that cannot be
+    resolved is returned as None):
 
       vbios_version, gpuid, vram (bytes), performance_level,
       memory_clk, system_clk
-
-    Any field that cannot be resolved is returned as None.
     """
     g = str(devicenum)
     static = _run_amdsmi_json(
