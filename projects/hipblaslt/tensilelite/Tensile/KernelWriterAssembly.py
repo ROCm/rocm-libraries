@@ -17230,7 +17230,7 @@ class KernelWriterAssembly(KernelWriter):
         # Does not support hi/lo yet
         if kernel["ProblemType"]["ComputeDataType"].isSingle():
           if biasDataType.isHalf():
-            module.add(VCvtF32toF16(dst=vgpr(tmpVgprN), src=vgpr(tmpVgprN), comment="convert to FP16"))
+            module.add(ECvtF32toF16(dst=vgpr(tmpVgprN), src=vgpr(tmpVgprN), sel=HighBitSel.LOW, comment="convert to FP16"))
             if vi % 2 == 1 and enablePack:
               module.add(VPackF16toB32(dst=vgpr(tmpVgprN - 1), src0=vgpr(tmpVgprN - 1), src1=vgpr(tmpVgprN), \
                          comment="Pack with neighbor"))
