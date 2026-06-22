@@ -28,8 +28,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -57,7 +57,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [3]
         - TDMInst: [3]
         - StaggerU: [0]
@@ -113,8 +113,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -131,7 +131,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [3]
         - TDMInst: [3]
         - StaggerU: [0]

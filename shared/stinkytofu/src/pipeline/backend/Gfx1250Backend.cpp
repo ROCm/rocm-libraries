@@ -96,7 +96,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     registerAllAnalyses(pm.getAnalysisManager());
 
     auto debugStreams = createDebugOutputStreams(moduleOptions);
-    configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
+    configureStandardInstrumentations(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     const bool runScheduler = optLevel != OptLevel::O0;
     if (runScheduler || moduleOptions.EnableESM2) {
@@ -112,24 +112,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // share one region adaptor. Either gate is enough to enter this block.
     if (runScheduler || moduleOptions.EnableWaitCntInsertion) {
         PassFeatureConfig passFeatureConfig;
-        std::shared_ptr<DAGScheduleJsonCollector> snapshotCollector;
         if (runScheduler) {
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
-            passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
-            snapshotCollector = createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions,
-                                                                 module.getName());
-            passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch+noLoadLoopBody";
         }
 
         PassManager innerPM;
         registerAllAnalyses(innerPM.getAnalysisManager());
         innerPM.setPassFeatureConfig(passFeatureConfig);
-        if (snapshotCollector) {
-            configurePassOrderSnapshot(innerPM, snapshotCollector);
-        }
-        configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
-                             debugStreams);
+        configureStandardInstrumentations(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
+                                          debugStreams);
         PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
         addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                runScheduler);
@@ -167,7 +159,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                      "label_ASM_Start", "noLoadLoopBody"));
             PassManager innerPM;
             registerAllAnalyses(innerPM.getAnalysisManager());
-            configureDebugOutput(innerPM, moduleOptions, "expertScheduleMode2", debugStreams);
+            configureStandardInstrumentations(innerPM, moduleOptions, "expertScheduleMode2",
+                                              debugStreams);
             innerPM.addPass(createLongBranchLoweringPass());
             innerPM.addPass(createCFGBuilderPass());
             innerPM.addPass(createInsertWaitAluPass());
