@@ -136,6 +136,38 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         mnemonic = generateMXMFMAMnemonic(data->m, data->n, data->k, data->block, data->instType);
     }
     // ====================================================================
+    // Special Instructions: SWaitAlu, SchedulingFence
+    // ====================================================================
+    else if (irInst->getOpcode() == logical::SWaitAlu) {
+        const SWaitAluLogicalData* data = irInst->asSWaitAlu();
+        if (!data) {
+            STINKY_UNREACHABLE("SWaitAlu instruction has no SWaitAluLogicalData");
+            return nullptr;
+        }
+        isaOpcode = getMnemonicToIsaOpcode("s_wait_alu", arch);
+        const HwInstDesc* desc = getMCIDByIsaOp(isaOpcode, arch);
+        if (!desc) {
+            STINKY_UNREACHABLE("SWaitAlu: s_wait_alu not supported on this architecture");
+            return nullptr;
+        }
+        StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(desc);
+        SWaitAluData waitAluData(data->va_vdst, data->va_sdst, data->va_ssrc,
+                                 data->hold_cnt, data->vm_vsrc, data->va_vcc, data->sa_sdst);
+        asmInst->addModifier<SWaitAluData>(waitAluData);
+        if (!irInst->comment.empty()) {
+            asmInst->addModifier(CommentData(irInst->comment));
+        }
+        return asmInst;
+    } else if (irInst->getOpcode() == logical::SchedulingFence) {
+        static const HwInstDesc fenceMCID{
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(&fenceMCID);
+        if (!irInst->comment.empty()) {
+            asmInst->addModifier(CommentData(irInst->comment));
+        }
+        return asmInst;
+    }
+    // ====================================================================
     // Regular instructions: per-arch map only (LogicalToAsmMappings_generated.inc)
     // Every lowering for each arch must be in the map; no fallback.
     // ====================================================================

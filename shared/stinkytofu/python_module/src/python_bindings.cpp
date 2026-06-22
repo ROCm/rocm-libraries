@@ -597,6 +597,34 @@ NB_MODULE(_stinkytofu, m) {
         nb::arg("metadata"), nb::arg("neg") = false, nb::arg("comment") = "",
         "Create an SMFMA instruction");
 
+    // SWaitAlu - Dependency counter wait instruction
+    m.def(
+        "SWaitAlu",
+        [](int va_vdst, int va_sdst, int va_ssrc, int hold_cnt, int vm_vsrc, int va_vcc,
+           int sa_sdst, const std::string& comment) {
+            auto* inst = IRBase::createIR<LogicalInstruction>(logical::SWaitAlu);
+            auto* data = new SWaitAluLogicalData(va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc,
+                                                 va_vcc, sa_sdst);
+            inst->setSpecialData(data);
+            inst->comment = comment;
+            return makeLogicalInstructionShared(inst);
+        },
+        nb::arg("va_vdst") = -1, nb::arg("va_sdst") = -1, nb::arg("va_ssrc") = -1,
+        nb::arg("hold_cnt") = -1, nb::arg("vm_vsrc") = -1, nb::arg("va_vcc") = -1,
+        nb::arg("sa_sdst") = -1, nb::arg("comment") = "",
+        "Create an SWaitAlu instruction");
+
+    // SchedulingFence - Scheduling barrier pseudo-instruction
+    m.def(
+        "SchedulingFence",
+        [](const std::string& comment) {
+            auto* inst = IRBase::createIR<LogicalInstruction>(logical::SchedulingFence);
+            inst->comment = comment;
+            return makeLogicalInstructionShared(inst);
+        },
+        nb::arg("comment") = "",
+        "Create a SchedulingFence pseudo-instruction");
+
     // TensorLoadToLds - Higher-level tensor load operation
     m.def(
         "TensorLoadToLds",

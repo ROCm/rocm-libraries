@@ -125,6 +125,33 @@ struct SMFMAData {
 // ========================================================================
 
 /**
+ * @brief Data for SWaitAlu instructions (logical IR)
+ *
+ * Carries the 7 optional dependency counter fields.
+ * A field value of -1 means "not specified" (omit from emitted instruction).
+ */
+struct SWaitAluLogicalData {
+    int va_vdst;
+    int va_sdst;
+    int va_ssrc;
+    int hold_cnt;
+    int vm_vsrc;
+    int va_vcc;
+    int sa_sdst;
+
+    SWaitAluLogicalData(int va_vdst_ = -1, int va_sdst_ = -1, int va_ssrc_ = -1,
+                        int hold_cnt_ = -1, int vm_vsrc_ = -1, int va_vcc_ = -1,
+                        int sa_sdst_ = -1)
+        : va_vdst(va_vdst_),
+          va_sdst(va_sdst_),
+          va_ssrc(va_ssrc_),
+          hold_cnt(hold_cnt_),
+          vm_vsrc(vm_vsrc_),
+          va_vcc(va_vcc_),
+          sa_sdst(sa_sdst_) {}
+};
+
+/**
  * @brief Data for Label instructions (logical IR)
  * Note: Different from asm::LabelData which is a modifier
  */

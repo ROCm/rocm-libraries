@@ -329,6 +329,10 @@ static bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"Label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"IntrinsicCall\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"SWaitAlu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"SchedulingFence\";\n";
 
     out << "    default:\n";
     out << "        return \"INVALID\";\n";
@@ -359,6 +363,10 @@ static bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"intrinsic_call\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"s_wait_alu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"scheduling_fence\";\n";
 
     out << "    default:\n";
     out << "        return \"invalid\";\n";

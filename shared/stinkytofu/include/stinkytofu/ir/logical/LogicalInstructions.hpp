@@ -286,6 +286,17 @@ class LogicalInstruction : public IRBase {
     }
 
     /**
+     * @brief Get SWaitAlu data (returns nullptr if not SWaitAlu)
+     */
+    SWaitAluLogicalData* asSWaitAlu() {
+        return (opcode_ == logical::SWaitAlu) ? static_cast<SWaitAluLogicalData*>(specialData_) : nullptr;
+    }
+
+    const SWaitAluLogicalData* asSWaitAlu() const {
+        return (opcode_ == logical::SWaitAlu) ? static_cast<const SWaitAluLogicalData*>(specialData_) : nullptr;
+    }
+
+    /**
      * @brief Get Label data (returns nullptr if not Label)
      */
     LogicalLabelData* asLabel() {
@@ -333,6 +344,12 @@ class LogicalInstruction : public IRBase {
                 break;
             case logical::IntrinsicCall:
                 delete static_cast<IntrinsicCallData*>(specialData_);
+                break;
+            case logical::SWaitAlu:
+                delete static_cast<SWaitAluLogicalData*>(specialData_);
+                break;
+            case logical::SchedulingFence:
+                // No special data for SchedulingFence
                 break;
             default:
                 // No special data for regular instructions

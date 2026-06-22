@@ -1226,11 +1226,11 @@ class TestCollectLogicalInsts(unittest.TestCase):
     def test_skips_dummy_instruction_classes(self):
         # Dummy instruction shims whose ``__getattr__`` returns a no-op that
         # yields ``None``. The collector must skip them rather than smuggling
-        # ``None`` into the logical IR module. We pick ``SSchedulingFence``
+        # ``None`` into the logical IR module. We pick ``SAddPCI64_SIMM``
         # here because it has no logical IR entry and remains a dummy.
-        from rocisa_stinkytofu_adaptor.instruction import SSchedulingFence  # noqa: WPS433
+        from rocisa_stinkytofu_adaptor.instruction import SAddPCI64_SIMM  # noqa: WPS433
         m = Module()
-        m.add(SSchedulingFence())
+        m.add(SAddPCI64_SIMM())
         self.assertEqual(m._collect_logical_insts(), [])
 
     def test_textblocks_and_logical_mixed(self):

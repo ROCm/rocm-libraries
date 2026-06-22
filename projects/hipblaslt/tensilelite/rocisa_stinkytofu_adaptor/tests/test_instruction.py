@@ -305,6 +305,8 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SWaitCnt,
     SWaitXCnt,
     SWaitTensorcnt,
+    SWaitAlu,
+    SSchedulingFence,
     _to_stinky_register,
 )
 
@@ -2690,6 +2692,89 @@ class TestWaitCntInstructions(unittest.TestCase):
         m.add(SWaitTensorcnt(cnt=0))
         m.add(SWaitXCnt(cnt=0))
         self.assertEqual(len(m._collect_logical_insts()), 3)
+
+
+class TestSWaitAlu(unittest.TestCase):
+    """SWaitAlu — dependency counter wait instruction."""
+
+    def test_default_construction(self):
+        inst = SWaitAlu()
+        self.assertIsInstance(inst, Instruction)
+        self.assertEqual(inst.va_vdst, -1)
+        self.assertEqual(inst.va_sdst, -1)
+        self.assertEqual(inst.va_ssrc, -1)
+        self.assertEqual(inst.hold_cnt, -1)
+        self.assertEqual(inst.vm_vsrc, -1)
+        self.assertEqual(inst.va_vcc, -1)
+        self.assertEqual(inst.sa_sdst, -1)
+
+    def test_keyword_construction(self):
+        inst = SWaitAlu(vm_vsrc=0, va_vdst=3, comment="wait valu")
+        self.assertEqual(inst.vm_vsrc, 0)
+        self.assertEqual(inst.va_vdst, 3)
+        self.assertEqual(inst.va_sdst, -1)
+        self.assertEqual(inst.comment, "wait valu")
+
+    def test_deepcopy(self):
+        inst = SWaitAlu(va_vdst=2, hold_cnt=1, comment="dc")
+        dup = copy.deepcopy(inst)
+        self.assertIsNot(inst, dup)
+        self.assertEqual(dup.va_vdst, 2)
+        self.assertEqual(dup.hold_cnt, 1)
+        self.assertEqual(dup.comment, "dc")
+        self.assertEqual(dup.vm_vsrc, -1)
+
+    def test_has_to_stinky_logical(self):
+        inst = SWaitAlu(vm_vsrc=0)
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_to_stinky_logical(self):
+        inst = SWaitAlu(va_vdst=1, vm_vsrc=0, comment="test")
+        logical = inst.to_stinky_logical()
+        self.assertIsNotNone(logical)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SWaitAlu(vm_vsrc=0))
+        m.add(SWaitAlu(va_vdst=3, va_sdst=1))
+        self.assertEqual(len(m._collect_logical_insts()), 2)
+
+
+class TestSSchedulingFence(unittest.TestCase):
+    """SSchedulingFence — scheduling barrier pseudo-instruction."""
+
+    def test_default_construction(self):
+        inst = SSchedulingFence()
+        self.assertIsInstance(inst, Instruction)
+        self.assertEqual(inst.comment, "")
+
+    def test_with_comment(self):
+        inst = SSchedulingFence(comment="barrier")
+        self.assertEqual(inst.comment, "barrier")
+
+    def test_deepcopy(self):
+        inst = SSchedulingFence(comment="fence")
+        dup = copy.deepcopy(inst)
+        self.assertIsNot(inst, dup)
+        self.assertEqual(dup.comment, "fence")
+
+    def test_has_to_stinky_logical(self):
+        inst = SSchedulingFence()
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_to_stinky_logical(self):
+        inst = SSchedulingFence(comment="test fence")
+        logical = inst.to_stinky_logical()
+        self.assertIsNotNone(logical)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(SSchedulingFence())
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 if __name__ == "__main__":

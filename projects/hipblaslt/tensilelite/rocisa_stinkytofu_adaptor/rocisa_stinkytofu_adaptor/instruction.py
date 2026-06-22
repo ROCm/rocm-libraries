@@ -2520,7 +2520,66 @@ class SWaitTensorcnt(Instruction):
         return dup
 
 
-SWaitAlu = make_dummy_class(f"{_P}.SWaitAlu")
+class SWaitAlu(Instruction):
+    """SWaitAlu — dependency counter wait instruction.
+
+    Carries 7 optional counter fields; -1 means "not specified".
+    Emits a LogicalIR SWaitAlu instruction with specialData.
+    """
+
+    __slots__ = ("va_vdst", "va_sdst", "va_ssrc", "hold_cnt", "vm_vsrc", "va_vcc", "sa_sdst")
+
+    def __init__(self, va_vdst=-1, va_sdst=-1, va_ssrc=-1,
+                 hold_cnt=-1, vm_vsrc=-1, va_vcc=-1, sa_sdst=-1,
+                 comment=""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.va_vdst = va_vdst
+        self.va_sdst = va_sdst
+        self.va_ssrc = va_ssrc
+        self.hold_cnt = hold_cnt
+        self.vm_vsrc = vm_vsrc
+        self.va_vcc = va_vcc
+        self.sa_sdst = sa_sdst
+        self.setInst("s_wait_alu")
+
+    def getParams(self):
+        return [self.va_vdst, self.va_sdst, self.va_ssrc,
+                self.hold_cnt, self.vm_vsrc, self.va_vcc, self.sa_sdst]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def to_stinky_logical(self, _module=None):
+        import stinkytofu as st
+        return st.SWaitAlu(
+            va_vdst=self.va_vdst,
+            va_sdst=self.va_sdst,
+            va_ssrc=self.va_ssrc,
+            hold_cnt=self.hold_cnt,
+            vm_vsrc=self.vm_vsrc,
+            va_vcc=self.va_vcc,
+            sa_sdst=self.sa_sdst,
+            comment=self.comment,
+        )
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SWaitAlu(
+            va_vdst=self.va_vdst,
+            va_sdst=self.va_sdst,
+            va_ssrc=self.va_ssrc,
+            hold_cnt=self.hold_cnt,
+            vm_vsrc=self.vm_vsrc,
+            va_vcc=self.va_vcc,
+            sa_sdst=self.sa_sdst,
+            comment=self.comment,
+        )
+        memo[id(self)] = dup
+        return dup
 # logicalIR: SDelayAlu
 SDelayAlu = _make_imm_no_dest_class("SDelayAlu", "s_delay_alu")
 # logicalIR: VAddF16
@@ -2693,7 +2752,38 @@ VPermB32 = _make_ternary_class("VPermB32", "v_perm_b32", InstType.INST_B32)
 VPermlane16SwapB32 = _make_scalar_unary_class("VPermlane16SwapB32", "v_permlane16_swap_b32", InstType.INST_B32)
 # logicalIR: VPermlane32SwapB32
 VPermlane32SwapB32 = _make_scalar_unary_class("VPermlane32SwapB32", "v_permlane32_swap_b32", InstType.INST_B32)
-SSchedulingFence = make_dummy_class(f"{_P}.SSchedulingFence")
+class SSchedulingFence(Instruction):
+    """SSchedulingFence — scheduling barrier pseudo-instruction.
+
+    Emits a SchedulingFence LogicalIR instruction that lowers to a FENCE
+    in the hardware scheduler (no assembly output, just a DAG barrier).
+    """
+
+    __slots__ = ()
+
+    def __init__(self, comment=""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.setInst("scheduling_fence")
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def to_stinky_logical(self, _module=None):
+        import stinkytofu as st
+        return st.SchedulingFence(comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SSchedulingFence(comment=self.comment)
+        memo[id(self)] = dup
+        return dup
 
 
 # ==========================================================================
