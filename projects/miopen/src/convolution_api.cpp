@@ -490,6 +490,8 @@ miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
                                               size_t* minWorkspaceSize,
                                               size_t* maxWorkspaceSize)
 {
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
     MIOPEN_LOG_FUNCTION(handle, wDesc, xDesc, convDesc, yDesc);
     return miopen::try_([&] {
         auto ctx               = ExecutionContext{};
@@ -1350,6 +1352,8 @@ miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
                                                    size_t* minWorkspaceSize,
                                                    size_t* maxWorkspaceSize)
 {
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
     MIOPEN_LOG_FUNCTION(handle, dyDesc, wDesc, convDesc, dxDesc);
     return miopen::try_([&] {
         auto ctx               = ExecutionContext{};
@@ -1386,6 +1390,8 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
                                                       size_t* minWorkspaceSize,
                                                       size_t* maxWorkspaceSize)
 {
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
     MIOPEN_LOG_FUNCTION(handle, dyDesc, xDesc, convDesc, dwDesc);
     return miopen::try_([&] {
         auto ctx               = ExecutionContext{};
