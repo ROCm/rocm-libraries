@@ -114,6 +114,39 @@ static bool isMi308Device(hipStream_t stream)
     return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
 }
 
+// Validate that every forward-pass byte stride fits in uint32_t.  The ASM
+// kernarg struct stores strides as uint32 so values that overflow silently
+// truncate, producing wrong results.  Checked early in isApplicable so the
+// engine declines rather than dispatching with bad strides.
+static bool wouldFwdByteStridesFitUint32(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+{
+    constexpr int64_t K_BF16_BYTES = 2;
+
+    auto checkTensor
+        = [](const char* prefix, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
+              const auto* s = t.strides();
+              bool ok = true;
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("batch_stride_") + prefix).c_str(), s->Get(0), K_BF16_BYTES);
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("nhead_stride_") + prefix).c_str(), s->Get(1), K_BF16_BYTES);
+              ok &= plan_utils::byteStrideFitsU32(
+                  (std::string("stride_") + prefix).c_str(), s->Get(2), K_BF16_BYTES);
+              return ok;
+          };
+
+    bool ok = true;
+    ok &= checkTensor("q", q);
+    ok &= checkTensor("k", k);
+    ok &= checkTensor("v", v);
+    ok &= checkTensor("o", o);
+    return ok;
+}
+
 static std::string getKernelCoPath(std::string coName, const std::string& archId, bool isMi308)
 {
     if(archId == "gfx942")
@@ -249,6 +282,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
                                "Could not find matching kernel for parameter combination");
+
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor),
+        "Forward byte strides overflow uint32_t kernarg fields");
 
     return true;
 }
