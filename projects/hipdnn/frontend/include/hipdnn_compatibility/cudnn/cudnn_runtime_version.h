@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN, used under the MIT license. 
+// Portions derived from NVIDIA cuDNN, used under the MIT license.
 
 /**
  * @file cudnn_runtime_version.h

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 //
 // Portions derived from NVIDIA cuDNN frontend (include/cudnn_frontend_version.h),
-// used under the MIT license. 
+// used under the MIT license.
 
 /**
  * @file cudnn_frontend_version.h
