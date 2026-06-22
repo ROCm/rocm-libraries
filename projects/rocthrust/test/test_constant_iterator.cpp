@@ -174,6 +174,11 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
 
   ASSERT_EQ(13, *iter1);
   ASSERT_EQ(7, iter1 - iter0);
+
+  // ensure CTAD words
+  constant_iterator deduced_iter{42};
+  static_assert(_THRUST_STD::is_same_v<decltype(deduced_iter), constant_iterator<int>>);
+  ASSERT_EQ(42, *deduced_iter);
 }
 
 TYPED_TEST(ConstantIteratorTests, TestConstantIteratorCopy)
