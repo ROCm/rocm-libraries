@@ -96,6 +96,19 @@ class BarrierTest : public ::testing::Test {
         return inst;
     }
 
+    /// Create an s_barrier_signal_isfirst instruction with the given literal operand.
+    /// Optionally attach a MemTokenData modifier with \p memTokens.
+    StinkyInstruction* createSBarrierSignalIsFirst(int literal,
+                                                   const std::vector<int>& memTokens = {}) {
+        AsmIRBuilder builder(*bb, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal_isfirst, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addSrcReg(StinkyRegister(literal));
+        if (!memTokens.empty()) inst->addModifier<MemTokenData>(MemTokenData{memTokens});
+        return inst;
+    }
+
     /// Create an s_barrier_wait instruction with the given literal operand.
     /// Optionally attach a MemTokenData modifier with \p memTokens.
     StinkyInstruction* createSBarrierWait(int literal, const std::vector<int>& memTokens = {}) {
@@ -172,6 +185,57 @@ TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
         << "Second legalized instruction should be s_barrier_wait";
     EXPECT_TRUE(isSplitBarrierAllWave(*result.last))
         << "s_barrier_wait should carry -1 (all-wave) operand";
+}
+
+// The barrier-signal predicate split must distinguish plain `s_barrier_signal`
+// from `s_barrier_signal_isfirst`:
+//   - isPlainBarrierSignal: plain signal only.
+//   - isBarrierSignal:      either signal opcode.
+// InsertClusterBarrierPass relies on this split so that `s_barrier_signal_isfirst`
+// (which writes SCC) never satisfies the cluster plain-signal idempotency checks,
+// even though it shares the barrier-id operand shape.
+TEST_F(BarrierTest, BarrierSignalPredicates_DistinguishIsFirst) {
+    StinkyInstruction* plain = createSBarrierSignal(-1);
+    StinkyInstruction* isFirst = createSBarrierSignalIsFirst(-1);
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(isFirst, nullptr) << "s_barrier_signal_isfirst not available for Gfx1250";
+
+    // (1) isPlainBarrierSignal is true only for the plain signal opcode.
+    EXPECT_TRUE(isPlainBarrierSignal(*plain))
+        << "isPlainBarrierSignal must accept s_barrier_signal";
+    EXPECT_FALSE(isPlainBarrierSignal(*isFirst))
+        << "isPlainBarrierSignal must reject s_barrier_signal_isfirst";
+
+    // (2) isBarrierSignal is true for both signal opcodes.
+    EXPECT_TRUE(isBarrierSignal(*plain)) << "isBarrierSignal must accept s_barrier_signal";
+    EXPECT_TRUE(isBarrierSignal(*isFirst))
+        << "isBarrierSignal must accept s_barrier_signal_isfirst";
+
+    // Neither signal opcode is classified as a wait.
+    EXPECT_FALSE(isBarrierWait(*plain));
+    EXPECT_FALSE(isBarrierWait(*isFirst));
+}
+
+// Cluster-barrier idempotency hinges on `s_barrier_signal_isfirst` being rejected
+// by isPlainBarrierSignal even when it carries the cluster barrier id (-3) — the
+// exact operand shape InsertClusterBarrierPass's isClusterBarrierSignal matches.
+// Without the predicate split, an isfirst signal with id -3 would be mistaken for
+// a synthesized cluster signal and the pass would skip required work on re-run.
+TEST_F(BarrierTest, BarrierSignalPredicates_IsFirstWithClusterIdIsNotPlain) {
+    constexpr int kClusterBarrierId = -3;
+    StinkyInstruction* plainCluster = createSBarrierSignal(kClusterBarrierId);
+    StinkyInstruction* isFirstCluster = createSBarrierSignalIsFirst(kClusterBarrierId);
+    ASSERT_NE(plainCluster, nullptr);
+    ASSERT_NE(isFirstCluster, nullptr) << "s_barrier_signal_isfirst not available for Gfx1250";
+
+    EXPECT_TRUE(isPlainBarrierSignal(*plainCluster))
+        << "s_barrier_signal -3 must be a plain signal";
+    EXPECT_FALSE(isPlainBarrierSignal(*isFirstCluster))
+        << "s_barrier_signal_isfirst -3 must not be treated as a plain (cluster) signal";
+
+    // Both still register as barrier signals regardless of the id operand.
+    EXPECT_TRUE(isBarrierSignal(*plainCluster));
+    EXPECT_TRUE(isBarrierSignal(*isFirstCluster));
 }
 
 // Three independent memory-token groups are emitted into one block.
