@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from rocisa.code import Label, Module, TextBlock
 from rocisa.instruction import SBarrier, SBarrierSignalIsFirst, SCBranchSCC0
+from Tensile.Common.GlobalParameters import globalParameters
 
 
 def subtileClusterBarrier(writer, kernel, label="") -> Module:
@@ -25,11 +26,21 @@ def subtileClusterBarrier(writer, kernel, label="") -> Module:
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only the first-arriving wave signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
     mod.add(skipPreSignal)
+
+    emitTrace = globalParameters.get("EmitMainloopTraceMarker", False)
+    if emitTrace:
+        base = {"PRELOOP": 0x00, "MAINLOOP": 0x10, "NGLL": 0x20,
+                "NLL": 0x30, "TAILLOOP": 0x40}
+        kind, _, suffix = label.partition("_C")
+        loopId = (base.get(kind, 0xf0) + (int(suffix) if suffix.isdigit() else 0)) & 0xff
+        # Pre-wait marker: emitted before the cluster barrier wait so the
+        # delta between this and the post-wait marker shows WG arrival drift.
+        mod.add(TextBlock(f"s_ttracedata_imm {0xc000 | loopId:#06x}\n"))
+
     mod.add(SBarrier(True, True, True, "cluster_barrier wait"))
-    # SQTT trace marker tagging which loop section this barrier belongs to.
-    base = {"PRELOOP": 0x00, "MAINLOOP": 0x10, "NGLL": 0x20,
-            "NLL": 0x30, "TAILLOOP": 0x40}
-    kind, _, suffix = label.partition("_C")
-    loopId = (base.get(kind, 0xf0) + (int(suffix) if suffix.isdigit() else 0)) & 0xff
-    mod.add(TextBlock(f"s_ttracedata_imm {0xc100 | loopId:#06x}\n"))
+
+    if emitTrace:
+        # Post-wait marker: emitted after the cluster barrier wait.
+        mod.add(TextBlock(f"s_ttracedata_imm {0xc100 | loopId:#06x}\n"))
+
     return mod
