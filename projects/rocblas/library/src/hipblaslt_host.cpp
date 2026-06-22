@@ -192,7 +192,7 @@ namespace
         rocblas_internal_ostream msg;                                                        \
         print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
                              << rocblas_status_to_string(e));                                \
-        RETURN_STATUS = (e != rocblas_status_success) ? e : RETURN_STATUS;                   \
+        RETURN_STATUS = (RETURN_STATUS == rocblas_status_success) ? e : RETURN_STATUS;       \
     }
 
 #define HANDLE_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
