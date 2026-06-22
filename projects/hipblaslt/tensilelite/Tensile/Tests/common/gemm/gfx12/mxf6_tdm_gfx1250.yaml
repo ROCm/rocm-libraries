@@ -21,7 +21,6 @@ GlobalParameters:
   PrintWinnersOnly: False
   Architecture: gfx1250
   PrintLevel: 2
-  MaxLDS: 163840
 
 BenchmarkProblems:
   #######################################

@@ -25,7 +25,6 @@ GlobalParameters:
   DataInitTypeScaleB: 1
   # Failures due to this
   BoundsCheck: 2
-  MaxLDS: 163840
 
 BenchmarkProblems:
 

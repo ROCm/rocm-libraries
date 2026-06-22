@@ -20,7 +20,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxLDS: 163840
   MXScaleFormat: 1
 
 BenchmarkProblems:

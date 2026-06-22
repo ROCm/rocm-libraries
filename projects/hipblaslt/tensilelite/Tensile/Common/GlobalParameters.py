@@ -811,7 +811,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    # Keys with a sanctioned opt-out from the strict gate. Three categories:
+    # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
@@ -819,12 +819,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
     "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
     "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
-    #   - Misplaced solution parameter: registered in
-    #     defaultBenchmarkCommonParameters (solution-level), not
-    #     globalParameters; YAMLs that put it under GlobalParameters:
-    #     have the value silently dropped. Follow-up: relocate to
-    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
-    "MaxLDS",
 ]
 
 

@@ -19,7 +19,6 @@ GlobalParameters:
   KeepBuildTmp: True
   #EnqueuesPerSync: 10
   #NumWarmups: 1
-  MaxLDS: 163840
   #AsmDebug: True
 
 BenchmarkProblems:
