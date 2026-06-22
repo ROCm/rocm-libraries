@@ -37,6 +37,28 @@ namespace hipblaslt_bench
     // points (CLI, YAML, run_measurement) call this as their single source of truth.
     inline std::string validate_adaptive_config(const TimingConfig& cfg)
     {
+        // Reject negative inputs up front: a negative time floor (measure_time) would be
+        // instantly satisfied and a negative warmup_time would skip warmup, both yielding
+        // subtly wrong measurements; negative thresholds would silently read as "disabled".
+        if(cfg.warmup_time < 0.0f)
+            return "warmup_time (" + std::to_string(cfg.warmup_time) + " ms) must be >= 0";
+        if(cfg.sample_time < 0.0f)
+            return "sample_time (" + std::to_string(cfg.sample_time) + " ms) must be >= 0";
+        if(cfg.measure_time < 0.0f)
+            return "measure_time (" + std::to_string(cfg.measure_time) + " ms) must be >= 0";
+        if(cfg.max_measure_time < 0.0f)
+            return "max_measure_time (" + std::to_string(cfg.max_measure_time)
+                   + " ms) must be >= 0";
+        if(cfg.min_iters < 0)
+            return "min_iters (" + std::to_string(cfg.min_iters) + ") must be >= 0";
+        if(cfg.max_iters < 0)
+            return "max_iters (" + std::to_string(cfg.max_iters) + ") must be >= 0";
+        if(cfg.noise_threshold < 0.0f)
+            return "noise_threshold (" + std::to_string(cfg.noise_threshold) + ") must be >= 0";
+        if(cfg.stability_threshold < 0.0f)
+            return "stability_threshold (" + std::to_string(cfg.stability_threshold)
+                   + ") must be >= 0";
+
         if(cfg.max_iters > 0 && cfg.min_iters > cfg.max_iters)
             return "min_iters (" + std::to_string(cfg.min_iters) + ") > max_iters ("
                    + std::to_string(cfg.max_iters) + ")";
