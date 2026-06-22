@@ -421,6 +421,8 @@ int main(int argc, char** argv)
         }
 
         hipblaslt_bench::TimingConfig tmp;
+        tmp.warmup_time         = rv.gs.warmup_time;
+        tmp.sample_time         = rv.gs.sample_time;
         tmp.min_iters           = rv.gs.min_iters;
         tmp.max_iters           = rv.gs.max_iters;
         tmp.measure_time        = rv.gs.measure_time;

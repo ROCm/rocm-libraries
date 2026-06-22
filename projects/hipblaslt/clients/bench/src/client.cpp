@@ -759,6 +759,8 @@ try
         }
         {
             hipblaslt_bench::TimingConfig tmp;
+            tmp.warmup_time         = arg.warmup_time;
+            tmp.sample_time         = arg.sample_time;
             tmp.min_iters           = arg.min_iters;
             tmp.max_iters           = arg.max_iters;
             tmp.measure_time        = arg.measure_time;
