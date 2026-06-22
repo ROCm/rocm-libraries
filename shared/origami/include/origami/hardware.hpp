@@ -160,7 +160,7 @@ class ORIGAMI_EXPORT hardware_t {
                 1.21875121875121875122 * 7,
                 6,
                 4,
-                std::make_tuple(-0.000013, 0.007070, 0.027355),
+                std::make_tuple(-0.0000194, 0.008772, 0.007898),
                 1.5};
       case architecture_t::gfx1201:
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};

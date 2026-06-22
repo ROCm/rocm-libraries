@@ -1579,7 +1579,9 @@ double compute_epilogue_latency(const problem_t& problem,
 
     // 3) Store: per-tile bytes through per-CU bandwidth share
     // Split-K WGs write partials as f32 (4 bytes) to workspace, not d_dtype.
-    double store_elem_bytes = (splitting_factor > 1 && !is_parallel_reduction)
+    // This holds for both the in-kernel tree reduction and the separate parallel
+    // (PostGSU) reduction, so it is gated on splitting_factor alone.
+    double store_elem_bytes = (splitting_factor > 1)
                                   ? static_cast<double>(heuristic.epilogue_workspace_bytes_per_elem)
                                   : d_bytes;
     double store_bytes      = static_cast<double>(tile_m) * tile_n * store_elem_bytes;
