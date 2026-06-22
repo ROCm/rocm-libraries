@@ -38,6 +38,15 @@ operand_traffic_t compute_operand_traffic(
     const context_t& context,
     size_t transaction_bytes = heuristic_defaults_t::DRAM_SECTOR_BYTES);
 
+// Safe Tensile-params accessor: returns the config's tensile params if present,
+// else a default-constructed instance.  The prediction model must not throw for
+// configs without a Tensile backend (tests, Python bindings, direct callers);
+// only PredictionLibrary populates the backend.
+static const tensile_params_t& tparams(const config_t& config) {
+  static const tensile_params_t kDefaultTensile{};
+  return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* context_t constructor                                                                    */
 /* ---------------------------------------------------------------------------------------- */
@@ -126,13 +135,13 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
     OLOG_DEBUG("CacheHintsD: " << int(config.cache_hints_d));
-    OLOG_DEBUG("DirectToLdsA: " << int(config.tensile().direct_to_lds_a));
-    OLOG_DEBUG("DirectToLdsB: " << int(config.tensile().direct_to_lds_b));
+    OLOG_DEBUG("DirectToLdsA: " << int(tparams(config).direct_to_lds_a));
+    OLOG_DEBUG("DirectToLdsB: " << int(tparams(config).direct_to_lds_b));
     OLOG_DEBUG("CUOccupancy(cfg): " << int(config.occupancy));
-    OLOG_DEBUG("LocalSplitU: " << int(config.tensile().local_split_u));
-    OLOG_DEBUG("OneLDSBuffer: " << int(config.tensile().one_lds_buffer));
-    OLOG_DEBUG("PrefetchGlobalRead: " << int(config.tensile().prefetch_global_read));
-    OLOG_DEBUG("Wave: " << int(config.tensile().wave_group_m) << "x" << int(config.tensile().wave_group_n));
+    OLOG_DEBUG("LocalSplitU: " << int(tparams(config).local_split_u));
+    OLOG_DEBUG("OneLDSBuffer: " << int(tparams(config).one_lds_buffer));
+    OLOG_DEBUG("PrefetchGlobalRead: " << int(tparams(config).prefetch_global_read));
+    OLOG_DEBUG("Wave: " << int(tparams(config).wave_group_m) << "x" << int(tparams(config).wave_group_n));
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));
@@ -1565,8 +1574,8 @@ double compute_epilogue_latency(const problem_t& problem,
   constexpr size_t STORE_PATTERN_SCALAR_EDGE = 3;
   constexpr size_t STORE_PATTERN_NONCONTIG = 4;
 
-  const size_t wave_group_m_epi = std::max<size_t>(static_cast<size_t>(config.tensile().wave_group_m), 1);
-  const size_t wave_group_n_epi = std::max<size_t>(static_cast<size_t>(config.tensile().wave_group_n), 1);
+  const size_t wave_group_m_epi = std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_m), 1);
+  const size_t wave_group_n_epi = std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_n), 1);
   const size_t wave_num_epi     = std::max<size_t>(wave_group_m_epi * wave_group_n_epi, 1);
   const size_t wave_issue_parallelism = std::min(wave_num_epi, SIMD_PER_CU);
   const double wave_batches =
@@ -1588,7 +1597,7 @@ double compute_epilogue_latency(const problem_t& problem,
       (config.gwvw_d > 0) ? static_cast<size_t>(config.gwvw_d)
                                       : max_isa_store_elems);
   const size_t sector_bytes = std::max<size_t>(heuristic.epilogue_cache_line_bytes, 1);
-  const bool store_axis_m   = config.tensile().source_swap;
+  const bool store_axis_m   = tparams(config).source_swap;
 
   // Natural contiguous accumulator run along the store axis.  SourceSwap stores
   // along M, the stride-1 D axis, and MFMA output contributes contiguous M rows
@@ -1890,7 +1899,7 @@ double compute_epilogue_latency(const problem_t& problem,
     OLOG_DEBUG("epi_natural_svw: " << natural_svw);
     OLOG_DEBUG("epi_max_isa_svw: " << max_isa_store_elems);
     OLOG_DEBUG("epi_store_svw_meta: " << config.gwvw_d);
-    OLOG_DEBUG("epi_source_swap: " << config.tensile().source_swap);
+    OLOG_DEBUG("epi_source_swap: " << tparams(config).source_swap);
     OLOG_DEBUG("epi_wave_issue_parallelism: " << wave_issue_parallelism);
     OLOG_DEBUG("epi_wave_batches: " << wave_batches);
     OLOG_DEBUG("epi_store_pattern: " << selected_epilogue.pattern);
@@ -1933,7 +1942,7 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
 
   // Per-wave M-store width (in DRAM sectors): the dominant NTD4 traffic driver,
   // counting the D output in 64 B sectors.
-  const size_t MIWG_M_ntd = std::max<size_t>(config.tensile().wave_group_m, 1);
+  const size_t MIWG_M_ntd = std::max<size_t>(tparams(config).wave_group_m, 1);
   const double per_wave_m_rows =
       static_cast<double>(config.mt.m) / static_cast<double>(MIWG_M_ntd);
   constexpr double sector_bytes = static_cast<double>(heuristic_defaults_t::DRAM_SECTOR_BYTES);
@@ -2085,7 +2094,7 @@ double compute_tile_latency(const problem_t& problem,
   const size_t MT_K = config.mt.k;
   const int    a_bits = datatype_to_bits(problem.a_dtype);
   const int    b_bits = datatype_to_bits(problem.b_dtype);
-  const long   pgr    = static_cast<long>(config.tensile().prefetch_global_read);
+  const long   pgr    = static_cast<long>(tparams(config).prefetch_global_read);
 
   const size_t splitting_factor = context.splitting_factor;
   const size_t k_per_split      = context.k_per_split;
@@ -2121,8 +2130,8 @@ double compute_tile_latency(const problem_t& problem,
     const size_t MT_N_pw   = config.mt.n;
     const size_t MI_M_pw   = std::max<size_t>(config.mi.m, 1);
     const size_t MI_N_pw   = std::max<size_t>(config.mi.n, 1);
-    const size_t MIWG_M_pw = std::max<size_t>(config.tensile().wave_group_m, 1);
-    const size_t MIWG_N_pw = std::max<size_t>(config.tensile().wave_group_n, 1);
+    const size_t MIWG_M_pw = std::max<size_t>(tparams(config).wave_group_m, 1);
+    const size_t MIWG_N_pw = std::max<size_t>(tparams(config).wave_group_n, 1);
     const size_t MIWT_M_pw = std::max<size_t>(MT_M_pw / (MI_M_pw * MIWG_M_pw), 1);
     const size_t MIWT_N_pw = std::max<size_t>(MT_N_pw / (MI_N_pw * MIWG_N_pw), 1);
     const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw;
@@ -2493,7 +2502,7 @@ double compute_tile_latency(const problem_t& problem,
     if (ceil_M_tiles > 1 && (M_problem % MT_M_local) != 0) {
       const size_t last_tile_M       = M_problem % MT_M_local;
       const size_t MI_M_active       = std::max<size_t>(config.mi.m, 1);
-      const size_t miwg_m            = std::max<size_t>(config.tensile().wave_group_m, 1);
+      const size_t miwg_m            = std::max<size_t>(tparams(config).wave_group_m, 1);
       const size_t miwt_m_for_waste  = std::max<size_t>(MT_M_local / (MI_M_active * miwg_m), 1);
       const size_t rows_per_wave_row = MI_M_active * miwt_m_for_waste;
       const size_t wave_rows_needed  = math::safe_ceil_div(last_tile_M, rows_per_wave_row);
@@ -2760,8 +2769,8 @@ static double compute_formocast_latency(const problem_t& problem,
   prob_info.bpeCompute     = static_cast<uint32_t>(datatype_to_bits(problem.mi_dtype) / 8);
   prob_info.transA         = (problem.a_transpose == transpose_t::T);
   prob_info.transB         = (problem.b_transpose == transpose_t::T);
-  prob_info.swizzleTensorA = config.tensile().swizzle_a;
-  prob_info.swizzleTensorB = config.tensile().swizzle_b;
+  prob_info.swizzleTensorA = tparams(config).swizzle_a;
+  prob_info.swizzleTensorB = tparams(config).swizzle_b;
   prob_info.dataType       = problem.mi_dtype;
 
   // Convert config_t to Formocast::SizeMapping
@@ -2775,36 +2784,36 @@ static double compute_formocast_latency(const problem_t& problem,
   size_mapping.matrixInstruction[3] = 1;  // Default
 
   // Use depth_u if set, otherwise use mt.k
-  size_mapping.depthU = (config.tensile().depth_u > 0) ? config.tensile().depth_u : config.mt.k;
+  size_mapping.depthU = (tparams(config).depth_u > 0) ? tparams(config).depth_u : config.mt.k;
 
-  size_mapping.globalSplitU       = config.tensile().global_split_u;
-  size_mapping.globalAccumulation = config.tensile().global_accumulation;
-  size_mapping.LocalSplitU        = config.tensile().local_split_u;
+  size_mapping.globalSplitU       = tparams(config).global_split_u;
+  size_mapping.globalAccumulation = tparams(config).global_accumulation;
+  size_mapping.LocalSplitU        = tparams(config).local_split_u;
 
-  size_mapping.DirectToVgprA = config.tensile().direct_to_vgpr_a;
-  size_mapping.DirectToVgprB = config.tensile().direct_to_vgpr_b;
-  size_mapping.DirectToLdsA  = config.tensile().direct_to_lds_a;
-  size_mapping.DirectToLdsB  = config.tensile().direct_to_lds_b;
+  size_mapping.DirectToVgprA = tparams(config).direct_to_vgpr_a;
+  size_mapping.DirectToVgprB = tparams(config).direct_to_vgpr_b;
+  size_mapping.DirectToLdsA  = tparams(config).direct_to_lds_a;
+  size_mapping.DirectToLdsB  = tparams(config).direct_to_lds_b;
 
-  size_mapping.NumLoadsCoalescedA = config.tensile().num_loads_coalesced_a;
-  size_mapping.NumLoadsCoalescedB = config.tensile().num_loads_coalesced_b;
+  size_mapping.NumLoadsCoalescedA = tparams(config).num_loads_coalesced_a;
+  size_mapping.NumLoadsCoalescedB = tparams(config).num_loads_coalesced_b;
   size_mapping.VectorWidthA       = config.vector_width_a;
   size_mapping.VectorWidthB       = config.vector_width_b;
 
-  size_mapping.waveNum      = config.tensile().wave_num;
-  size_mapping.waveGroup[0] = static_cast<int>(config.tensile().wave_group_m);
-  size_mapping.waveGroup[1] = static_cast<int>(config.tensile().wave_group_n);
+  size_mapping.waveNum      = tparams(config).wave_num;
+  size_mapping.waveGroup[0] = static_cast<int>(tparams(config).wave_group_m);
+  size_mapping.waveGroup[1] = static_cast<int>(tparams(config).wave_group_n);
 
   size_mapping.workGroupMapping         = config.workgroup_mapping;
-  size_mapping.workGroupMappingXCC      = config.tensile().workgroup_mapping_xcc;
-  size_mapping.workGroupMappingXCCGroup = config.tensile().workgroup_mapping_xcc_group;
-  size_mapping.globalSplitUCoalesced    = config.tensile().global_split_u_coalesced;
+  size_mapping.workGroupMappingXCC      = tparams(config).workgroup_mapping_xcc;
+  size_mapping.workGroupMappingXCCGroup = tparams(config).workgroup_mapping_xcc_group;
+  size_mapping.globalSplitUCoalesced    = tparams(config).global_split_u_coalesced;
   size_mapping.globalSplitUWorkGroupMappingRoundRobin =
-      config.tensile().global_split_u_wgm_round_robin;
+      tparams(config).global_split_u_wgm_round_robin;
 
   size_mapping.CUOccupancy            = config.occupancy;
-  size_mapping.PrefetchGlobalRead     = config.tensile().prefetch_global_read;
-  size_mapping.MathClocksUnrolledLoop = config.tensile().math_clocks_unrolled_loop;
+  size_mapping.PrefetchGlobalRead     = tparams(config).prefetch_global_read;
+  size_mapping.MathClocksUnrolledLoop = tparams(config).math_clocks_unrolled_loop;
 
   // Set problem, solution, and hardware in Formocast
   formocast.setProblem(prob_info);
