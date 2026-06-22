@@ -5,7 +5,6 @@ TestParameters:
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   CMakeBuildType: Release
-  # PrintLevel: 1
   #ForceRedoBenchmarkProblems: True
   #ForceRedoLibraryLogic: True
   #ForceRedoLibraryClient: True

@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
-  PrintLevel: 1
   PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release

@@ -24,7 +24,6 @@ GlobalParameters:
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
-  PrintLevel: 2
   ForceGenerateKernel: [True]
  
 BenchmarkProblems:

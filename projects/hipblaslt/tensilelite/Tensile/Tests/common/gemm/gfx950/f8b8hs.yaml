@@ -8,7 +8,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   EnqueuesPerSync: 1
   SleepPercent: 0
-  PrintLevel: 1
   PrintSolutionRejectionReason: True
   #Device: 0
   CMakeBuildType: Release

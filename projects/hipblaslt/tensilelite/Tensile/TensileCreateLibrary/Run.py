@@ -933,6 +933,8 @@ def run():
 
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
+    globalParameterArguments = dict(arguments)
+    globalParameterArguments.pop("PrintLevel", None)
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
     cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
         arguments["CxxCompiler"],
@@ -951,7 +953,7 @@ def run():
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
-    assignGlobalParameters(arguments, isaInfoMap)
+    assignGlobalParameters(globalParameterArguments, isaInfoMap)
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,

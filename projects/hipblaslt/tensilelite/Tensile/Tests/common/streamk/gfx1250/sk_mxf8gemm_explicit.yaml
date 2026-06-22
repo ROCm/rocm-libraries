@@ -24,7 +24,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   Architecture: gfx1250
-  PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
   ISA: [[12, 5, 0]]

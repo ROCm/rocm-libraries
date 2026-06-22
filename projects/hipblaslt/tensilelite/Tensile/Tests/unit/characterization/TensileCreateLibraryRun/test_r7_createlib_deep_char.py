@@ -624,11 +624,11 @@ class TestRunCLIEntryPoint:
         _, info_map = _make_isa_info_map("gfx942")
 
         with patch.object(M, "parseArguments", return_value=base_args), \
-             patch.object(M, "setVerbosity"), \
+             patch.object(M, "setVerbosity") as mock_set_verbosity, \
              patch.object(M, "validateToolchain", return_value=(
                  "/fake/hipcc", None, "/fake/bundler", None, None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
-             patch.object(M, "assignGlobalParameters"), \
+             patch.object(M, "assignGlobalParameters") as mock_assign_gp, \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
              patch.object(M, "makeSourceToolchain", return_value=MagicMock()), \
              patch.object(M, "generateLogicDataAndSolutions",
@@ -643,10 +643,21 @@ class TestRunCLIEntryPoint:
              patch.object(M.LibraryIO, "write"), \
              patch.object(M.shutil, "rmtree"):
             M.run()
+            return mock_set_verbosity, mock_assign_gp
 
     def test_run_completes_without_exception(self, logic_dir, output_dir):
         """Lines 881-1086: run() must complete without raising."""
         self._run_with_stubs(logic_dir, output_dir)
+
+    def test_run_consumes_print_level_before_global_parameters(self, logic_dir, output_dir):
+        """PrintLevel is a create-library CLI option, not a global parameter."""
+        mock_set_verbosity, mock_assign_gp = self._run_with_stubs(
+            logic_dir, output_dir, {"PrintLevel": 3}
+        )
+
+        mock_set_verbosity.assert_called_once_with(3)
+        assigned_args = mock_assign_gp.call_args.args[0]
+        assert "PrintLevel" not in assigned_args
 
     def test_run_uses_lazy_library_loading_branch(self, logic_dir, output_dir):
         """Lines 1053-1054: LazyLibraryLoading=True uses 'TensileLibrary_lazy_' prefix."""

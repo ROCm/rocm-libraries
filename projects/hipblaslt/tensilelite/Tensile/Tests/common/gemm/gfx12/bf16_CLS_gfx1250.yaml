@@ -23,7 +23,6 @@ GlobalParameters:
   # PrintTensorD: 0x3          # Print TensorD.  0x1=after init; 0x2=after copy-back; 0x3=both
   #PrintTensorRef: 1
   # print logs
-  PrintLevel: 2                # how much info to print in generator. 0=none, 1=standard, 2=verbose
   NumWarmups: 0
   EnqueuesPerSync: 1
   # PrintWinnersOnly: True

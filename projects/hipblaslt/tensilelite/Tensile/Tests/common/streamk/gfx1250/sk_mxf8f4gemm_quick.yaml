@@ -25,7 +25,6 @@ GlobalParameters:
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
-  PrintLevel: 2
   ISA: [[12, 5, 0]]
 
 BenchmarkProblems:

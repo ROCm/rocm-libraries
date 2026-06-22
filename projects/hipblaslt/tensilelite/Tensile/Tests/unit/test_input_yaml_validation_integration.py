@@ -80,7 +80,6 @@ def test_clean_real_config_passes():
     gp = {
         "NumElementsToValidate": 0,
         "BoundsCheck": 0,
-        "PrintLevel": 0,
     }
     assignGlobalParameters(gp, {})
 

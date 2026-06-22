@@ -799,7 +799,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     #     globalParameters registry (each has its own argparse dest or
     #     direct arguments[...] reader) ---
     "Architecture",       # build-arch list, read directly in Tensile.py
-    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
     "Device",             # device id, read from config in Tensile.py
     "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
     "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
