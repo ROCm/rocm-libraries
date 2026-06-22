@@ -37,7 +37,7 @@ InputTensorMap makeTensors(const std::vector<int64_t>& uids)
 TEST(TestSynthesisTracker, AllFreeSucceeds)
 {
     auto inputs = makeTensors({1, 2, 3});
-    std::vector<int64_t> owned = {1, 2, 3};
+    const std::vector<int64_t> owned = {1, 2, 3};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -53,7 +53,7 @@ TEST(TestSynthesisTracker, AllFreeSucceeds)
 TEST(TestSynthesisTracker, UndeclaredInputFails)
 {
     auto inputs = makeTensors({1, 2, 3});
-    std::vector<int64_t> owned = {1, 2, 3};
+    const std::vector<int64_t> owned = {1, 2, 3};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -70,7 +70,7 @@ TEST(TestSynthesisTracker, UndeclaredInputFails)
 TEST(TestSynthesisTracker, StructuredInputFails)
 {
     auto inputs = makeTensors({1, 2});
-    std::vector<int64_t> owned = {1, 2};
+    const std::vector<int64_t> owned = {1, 2};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -87,7 +87,7 @@ TEST(TestSynthesisTracker, StructuredInputFails)
 TEST(TestSynthesisTracker, DerivedInputFails)
 {
     auto inputs = makeTensors({1, 2});
-    std::vector<int64_t> owned = {1, 2};
+    const std::vector<int64_t> owned = {1, 2};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -104,7 +104,7 @@ TEST(TestSynthesisTracker, DerivedInputFails)
 TEST(TestSynthesisTracker, ZeroUidIgnored)
 {
     auto inputs = makeTensors({1});
-    std::vector<int64_t> owned = {1};
+    const std::vector<int64_t> owned = {1};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -119,7 +119,7 @@ TEST(TestSynthesisTracker, ZeroUidIgnored)
 TEST(TestSynthesisTracker, NonOwnedUidIgnored)
 {
     auto inputs = makeTensors({1, 99});
-    std::vector<int64_t> owned = {1};
+    const std::vector<int64_t> owned = {1};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
@@ -134,9 +134,9 @@ TEST(TestSynthesisTracker, NonOwnedUidIgnored)
 TEST(TestSynthesisTracker, EmptyOwnedSucceeds)
 {
     InputTensorMap inputs;
-    std::vector<int64_t> owned;
+    const std::vector<int64_t> owned;
 
-    SynthesisTracker tracker(owned, inputs);
+    const SynthesisTracker tracker(owned, inputs);
 
     const auto result = tracker.finish("TestOp");
     EXPECT_TRUE(result.filled);
@@ -146,7 +146,7 @@ TEST(TestSynthesisTracker, EmptyOwnedSucceeds)
 TEST(TestSynthesisTracker, MixedFailuresReportAll)
 {
     auto inputs = makeTensors({1, 2, 3});
-    std::vector<int64_t> owned = {1, 2, 3};
+    const std::vector<int64_t> owned = {1, 2, 3};
     std::mt19937 rng(42);
 
     SynthesisTracker tracker(owned, inputs);
