@@ -32,6 +32,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_GRUExtra_*"
   - "*/GPU_TestActivation*"
   - "*/GPU_HipBLASLtGEMMTest*"
+  - "*/GPU_Gemm*_LargeMemory_*"
   - "*/GPU_KernelTuningNetTestConv*"
   - "*/GPU_Kthvalue_*"
   - "*/GPU_LayerNormTest*"
