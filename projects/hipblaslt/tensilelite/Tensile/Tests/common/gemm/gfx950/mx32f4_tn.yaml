@@ -20,7 +20,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   NumElementsToValidate: -1
   BoundsCheck: 0
-  MaxFileName: 128
   MaxLDS: 163840
 #  PrintTensorA: True
 #  PrintTensorB: True

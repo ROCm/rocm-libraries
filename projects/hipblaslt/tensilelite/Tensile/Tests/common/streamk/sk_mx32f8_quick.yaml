@@ -22,7 +22,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxFileName: 128
   MaxLDS: 163840
   MXScaleFormat: 1
 

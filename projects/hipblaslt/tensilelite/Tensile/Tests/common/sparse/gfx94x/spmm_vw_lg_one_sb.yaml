@@ -6,7 +6,6 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
-  MaxFileName: 256
   # PrintTensorD: 0x2
   #DataInitTypeA: 1
   #DataInitTypeB: 8
