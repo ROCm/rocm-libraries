@@ -2147,7 +2147,7 @@ class VNop(Instruction):
 
     def to_stinky_logical(self, _module=None):
         import stinkytofu as _st
-        return _st.VNop(_to_stinky_register(self.count), self.comment)
+        return _st.VNop(self.comment)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
