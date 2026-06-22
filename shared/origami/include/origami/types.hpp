@@ -169,6 +169,22 @@ enum class grid_selection_t : std::uint32_t {
 };
 
 /**
+ * @brief Runtime Stream-K launch overrides for origami latency modeling.
+ *
+ * Mirrors Tensile Stream-K env / descriptor hints passed into
+ * ContractionSolution::getSKGrid. When a field is zero or none, origami uses
+ * its default (full hardware N_CU, algorithmic grid selection, config.grid_selection).
+ */
+struct streamk_launch_overrides_t {
+  /// CU budget for grid sizing, active_cus, and timesteps (0 = use hardware.N_CU).
+  size_t max_cus = 0;
+  /// Fixed workgroup count (0 = use grid_selection algorithm).
+  size_t fixed_num_wgs = 0;
+  /// When not none, overrides config.grid_selection for grid sizing.
+  grid_selection_t grid_selection = grid_selection_t::none;
+};
+
+/**
  * @brief Reduction strategy types for StreamK.
  *
  * Different algorithms for reduction operations in StreamK.

@@ -144,6 +144,12 @@ NB_MODULE(origami, m) {
       .def_rw("global_split_u_wgm_round_robin",
               &origami::tensile_params_t::global_split_u_wgm_round_robin);
 
+  nanobind::class_<origami::streamk_launch_overrides_t>(m, "streamk_launch_overrides_t")
+      .def(nanobind::init<>())
+      .def_rw("max_cus", &origami::streamk_launch_overrides_t::max_cus)
+      .def_rw("fixed_num_wgs", &origami::streamk_launch_overrides_t::fixed_num_wgs)
+      .def_rw("grid_selection", &origami::streamk_launch_overrides_t::grid_selection);
+
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
       .def_rw("mt", &origami::config_t::mt)
@@ -381,6 +387,13 @@ NB_MODULE(origami, m) {
                                const origami::config_t&,
                                size_t max_cus)>(&origami::gemm::compute_total_latency),
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
+  m.def("compute_total_latency",
+        static_cast<double (*)(const origami::problem_t&,
+                               const origami::hardware_t&,
+                               const origami::config_t&,
+                               const origami::streamk_launch_overrides_t&)>(
+            &origami::gemm::compute_total_latency),
+        "Compute total latency with Stream-K launch overrides");
 
   // Attention functions
   m.def("att_compute_total_latency",

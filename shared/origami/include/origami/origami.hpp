@@ -87,13 +87,16 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs List of candidate configurations to rank
  * @param model Model type to use for ranking (gemm or attention)
+ * @param launch_overrides Optional Stream-K launch overrides for grid/CU modeling
  * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
  * (best first)
  */
 ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
-                                              model_t model = model_t::gemm);
+                                              model_t model = model_t::gemm,
+                                              const streamk_launch_overrides_t& launch_overrides
+                                              = {});
 
 /**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.

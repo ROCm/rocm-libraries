@@ -14,6 +14,13 @@
 namespace origami {
 namespace gemm {
 
+/// Effective CU budget from launch overrides: min(hardware.N_CU, max_cus) when max_cus > 0.
+inline size_t streamk_cu_budget(const streamk_launch_overrides_t& overrides,
+                                const hardware_t& hardware) {
+  if (overrides.max_cus == 0) return hardware.N_CU;
+  return std::min(overrides.max_cus, hardware.N_CU);
+}
+
 /**
  * @brief Per-operand cache hit rates for L1, L2, and MALL.
  *
@@ -79,8 +86,12 @@ struct ORIGAMI_EXPORT context_t {
    * @param problem Problem description (M, N, K, etc.)
    * @param hardware Hardware characteristics (@see origami::hardware_t)
    * @param config Kernel configuration.
+   * @param launch_overrides Optional Stream-K launch overrides (@see streamk_launch_overrides_t).
    */
-  context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config);
+  context_t(const problem_t& problem,
+            const hardware_t& hardware,
+            const config_t& config,
+            const streamk_launch_overrides_t& launch_overrides = {});
 
   /**
    * @brief Check if the context is valid.
@@ -150,7 +161,8 @@ ORIGAMI_EXPORT workgroup_mapping_t predict_workgroup_mapping(const problem_t& pr
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection Different algorithms to select the grid size for kernel execution.
- * @param max_cus maximum number of CU's
+ * @param max_cus Maximum CUs for grid sizing and occupancy (0 = use hardware.N_CU).
+ * @param fixed_num_wgs Fixed workgroup count (0 = use grid_selection algorithm).
  * @return tuple<reduction_t, size_t, size_t, size_t, size_t>
  *         (reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
  */
@@ -159,7 +171,8 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     const hardware_t& hardware,
     const config_t& config,
     grid_selection_t grid_selection,
-    size_t max_cus);
+    size_t max_cus,
+    size_t fixed_num_wgs = 0);
 
 /**
  * @brief Check if MT fits in LDS
@@ -494,13 +507,21 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param max_cus
+ * @param max_cus Maximum CUs for occupancy modeling (0 = use hardware.N_CU).
  * @return double Latency in cycles.
  */
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
-                             const hardware_t& hardware,
-                             const config_t& config,
-                             size_t max_cus);
+                                            const hardware_t& hardware,
+                                            const config_t& config,
+                                            size_t max_cus);
+
+/**
+ * @brief Compute total GEMM latency with full Stream-K launch overrides.
+ */
+ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
+                                            const hardware_t& hardware,
+                                            const config_t& config,
+                                            const streamk_launch_overrides_t& launch_overrides);
 
 }  // namespace gemm
 }  // namespace origami

@@ -33,7 +33,10 @@ static double compute_formocast_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* context_t constructor                                                                    */
 /* ---------------------------------------------------------------------------------------- */
-context_t::context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
+context_t::context_t(const problem_t& problem,
+                     const hardware_t& hardware,
+                     const config_t& config,
+                     const streamk_launch_overrides_t& launch_overrides) {
   // Extract parameters
   const size_t NUM_XCD = hardware.NUM_XCD;
   const size_t N_CU    = hardware.N_CU;
@@ -59,8 +62,11 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   num_output_tiles = grid_m * grid_n * batch;
 
   // Launch parameters
-  auto [reduction, wgs, cus, timesteps, split] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, 0);
+  const grid_selection_t grid_selection =
+      (launch_overrides.grid_selection != grid_selection_t::none) ? launch_overrides.grid_selection
+                                                                  : config.grid_selection;
+  auto [reduction, wgs, cus, timesteps, split] = compute_launch_parameters(
+      problem, hardware, config, grid_selection, launch_overrides.max_cus, launch_overrides.fixed_num_wgs);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -72,9 +78,10 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   active_cus           = cus;
   mem_bw_limited       = compute_mem_bw_from_occupancy(hardware, active_cus);
   write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_output_tiles);
-  real_occupancy       = std::min(
+  const size_t cu_budget = streamk_cu_budget(launch_overrides, hardware);
+  real_occupancy           = std::min(
       std::max(config.occupancy, static_cast<int>(1)),
-      static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU)));
+      static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, cu_budget)));
   occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
 
   // Tile-derived values
@@ -357,13 +364,18 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     const hardware_t& hardware,
     const config_t& config,
     grid_selection_t grid_selection,
-    size_t max_cus) {
+    size_t max_cus,
+    size_t fixed_num_wgs) {
   const reduction_t reduction_strategy =
       streamk::select_reduction(problem, hardware, config, grid_selection);
   auto config_with_reduction               = config;
   config_with_reduction.reduction_strategy = reduction_strategy;
-  const size_t num_wgs =
-      streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
+
+  const size_t cu_budget = (max_cus > 0) ? std::min(max_cus, hardware.N_CU) : hardware.N_CU;
+  const size_t num_wgs   = (fixed_num_wgs > 0)
+                               ? fixed_num_wgs
+                               : streamk::select_grid_size(
+                                     problem, hardware, config_with_reduction, grid_selection, max_cus);
 
   const size_t num_mts = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
@@ -373,9 +385,9 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   // computations in Origami. With current implementation, it is hard to capture that
   // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
   // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
-  const size_t num_active_cus   = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
-  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, hardware.N_CU)
-                                                    : math::safe_ceil_div(num_mts, hardware.N_CU);
+  const size_t num_active_cus = std::min(num_wgs, cu_budget);
+  const size_t num_timesteps  = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, cu_budget)
+                                                : math::safe_ceil_div(num_mts, cu_budget);
   const size_t splitting_factor = math::safe_ceil_div(num_wgs, num_mts);
 
   return std::make_tuple(
@@ -1845,6 +1857,15 @@ double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              size_t max_cus) {
+  streamk_launch_overrides_t launch_overrides;
+  launch_overrides.max_cus = max_cus;
+  return compute_total_latency(problem, hardware, config, launch_overrides);
+}
+
+double compute_total_latency(const problem_t& problem,
+                             const hardware_t& hardware,
+                             const config_t& config,
+                             const streamk_launch_overrides_t& launch_overrides) {
   assert(config.is_valid());
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
@@ -1914,7 +1935,7 @@ double compute_total_latency(const problem_t& problem,
   }
 
   // 1) Setup context (computes grid dims, launch params, WGM, etc.)
-  context_t context(problem, hardware, config);
+  context_t context(problem, hardware, config, launch_overrides);
 
   // 2) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);

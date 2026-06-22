@@ -167,12 +167,31 @@ namespace TensileLite
 
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            // Rank against the capped CU count when TENSILE_STREAMK_MAX_CUS limits the grid.
-            origami::hardware_t analytical_hardware = *(pAMDGPU->analyticalHardware);
+            // Prediction libraries on CDNA are Stream-K only. Pass Stream-K launch hints into
+            // origami so grid size, active_cus, and timesteps match ContractionSolution::getSKGrid.
+            origami::streamk_launch_overrides_t launch_overrides;
+            size_t                              cuBudget = pAMDGPU->analyticalHardware->N_CU;
             if(pAMDGPU->skMaxCUs > 0)
             {
-                analytical_hardware.N_CU = std::min(
-                    analytical_hardware.N_CU, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                cuBudget = std::min(cuBudget, static_cast<size_t>(pAMDGPU->skMaxCUs));
+            }
+            if(problem.getParams().smCountTarget() > 0)
+            {
+                cuBudget
+                    = std::min(cuBudget, static_cast<size_t>(problem.getParams().smCountTarget()));
+            }
+            if(cuBudget < pAMDGPU->analyticalHardware->N_CU)
+            {
+                launch_overrides.max_cus = cuBudget;
+            }
+            if(pAMDGPU->skFixedGrid > 0)
+            {
+                launch_overrides.fixed_num_wgs = static_cast<size_t>(pAMDGPU->skFixedGrid);
+            }
+            else if(pAMDGPU->skDynamicGrid > 0)
+            {
+                launch_overrides.grid_selection
+                    = static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid);
             }
 
             auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
@@ -194,7 +213,11 @@ namespace TensileLite
             };
 
             auto prediction_result = origami::rank_configs(
-                origami_problem, analytical_hardware, origami_config_list);
+                origami_problem,
+                *(pAMDGPU->analyticalHardware),
+                origami_config_list,
+                origami::model_t::gemm,
+                launch_overrides);
 
             for(const auto& r : prediction_result)
             {

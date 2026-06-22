@@ -555,7 +555,8 @@ staggerU_t select_staggerU(const problem_t& problem,
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
-                                              model_t model) {
+                                              model_t model,
+                                              const streamk_launch_overrides_t& launch_overrides) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
   struct prediction_result_wrapper_t {
@@ -587,7 +588,8 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                    << ") REJECTED: LDS capacity exceeded");
         continue;
       }
-      latency = attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      latency = attention::compute_total_latency(
+          problem, hardware, config, gemm::streamk_cu_budget(launch_overrides, hardware));
     } else {
       // Default to GEMM model
       fits_in_lds = gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype);
@@ -597,7 +599,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                    << ") REJECTED: LDS capacity exceeded");
         continue;
       }
-      latency = gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      latency = gemm::compute_total_latency(problem, hardware, config, launch_overrides);
     }
 
     if (latency != std::numeric_limits<double>::max())

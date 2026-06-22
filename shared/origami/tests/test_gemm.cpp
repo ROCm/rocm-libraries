@@ -357,6 +357,36 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
       auto result_max_cus = origami::gemm::compute_launch_parameters(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, 150);
       REQUIRE(std::get<2>(result_max_cus) <= 150);
+
+      // Fixed grid overrides algorithmic grid selection
+      auto result_fixed_grid = origami::gemm::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::k_split_aware, 0, 17);
+      REQUIRE(std::get<1>(result_fixed_grid) == 17);
+      REQUIRE(std::get<2>(result_fixed_grid) == 17);
+
+      // CU budget caps active_cus when grid exceeds budget
+      auto result_capped_grid = origami::gemm::compute_launch_parameters(
+          problem, hardware, config, origami::grid_selection_t::k_split_aware, 64, 200);
+      REQUIRE(std::get<1>(result_capped_grid) == 200);
+      REQUIRE(std::get<2>(result_capped_grid) == 64);
+    }
+  }
+}
+
+TEST_CASE("GEMM: compute_total_latency launch overrides", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - launch overrides affect latency path") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 1024);
+      auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
+
+      origami::streamk_launch_overrides_t overrides;
+      overrides.fixed_num_wgs = 17;
+      overrides.max_cus       = 64;
+
+      const double latency = origami::gemm::compute_total_latency(problem, hardware, config, overrides);
+      REQUIRE(latency < std::numeric_limits<double>::max());
+      REQUIRE(latency > 0.0);
     }
   }
 }
