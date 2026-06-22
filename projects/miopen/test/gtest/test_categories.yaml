@@ -73,6 +73,10 @@ test_categories:
 
     exclude:
       - "*/GPU_MIOpenDriver*"
+      # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
+      # ('hip/hip_runtime.h' not found). Re-enable once fixed. FP32 still runs.
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
