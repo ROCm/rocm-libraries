@@ -36,7 +36,6 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::half_t>(
             a_layout, b_layout, arg_parser);
     }
-#if 0 // TODO: Temporarily disabled types to save compile time.
     else if(data_type == "bf16")
     {
         return run_gemm_example_prec_type<GemmConfig, Invoker, ck_tile::bf16_t>(
@@ -92,7 +91,6 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
             throw std::runtime_error("Unsupported data type for this operation !!!");
         }
     }
-#endif
     else
     {
         throw std::runtime_error("Unsupported data type for this operation !!!");
