@@ -359,7 +359,7 @@ void testing_sb2st_hb2st(Arguments& argus)
     size_t size_Vres = 0; // todo: not yet checked
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || kd < 0 || ldab < 3 * kd - 1 || ldv < 2 * kd);
+    bool invalid_size = (n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd);
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, uplo, n, kd, (T*)nullptr, ldab,
