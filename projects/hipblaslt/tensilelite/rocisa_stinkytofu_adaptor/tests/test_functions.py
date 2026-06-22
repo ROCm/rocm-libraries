@@ -76,29 +76,6 @@ FUNCTIONS_DUMMY_EXPORTS: tuple[str, ...] = (
     "BranchIfNotZero",
     # Cast helper
     "VSaturateCastInt",
-    # Vector math
-    "vectorStaticDivideAndRemainder",
-    "vectorStaticDivide",
-    "vectorUInt32DivideAndRemainder",
-    "vectorUInt32CeilDivideAndRemainder",
-    "vectorStaticRemainder",
-    "vectorStaticMultiply",
-    "vectorStaticMultiplyAdd",
-    "vectorAddMultiplyBpe",
-    "vectorMultiplyBpe",
-    "vectorMultiply64Bpe",
-    # Scalar math
-    "scalarStaticDivideAndRemainder",
-    "scalarStaticCeilDivide",
-    "scalarStaticRemainder",
-    "scalarUInt24DivideAndRemainder",
-    "scalarUInt32DivideAndRemainder",
-    "scalarStaticMultiply64",
-    "scalarMultiplyBpe",
-    "scalarMultiply64Bpe",
-    # Magic divide
-    "sMagicDiv",
-    "sMagicDiv2",
     # DS init
     "DSInit",
 )
@@ -340,10 +317,34 @@ class TestFunctionsModuleExports(unittest.TestCase):
     def test_dummy_registry_matches_module(self):
         # Guard against adding a dummy to functions.py without updating tests.
         _skip = frozenset({
-            "annotations", "make_dummy_func",
+            "annotations", "make_dummy_func", "math",
             "ArgumentLoader",
-            "Module", "TextBlock", "sgpr", "Any",
+            "Module", "TextBlock", "sgpr", "vgpr", "Any",
+            "ContinuousRegister", "EXEC", "VCC",
             "SLoadB32", "SLoadB64", "SLoadB128", "SLoadB256", "SLoadB512",
+            "SAddCU32", "SAddU32", "SAndB32", "SCmpLgU32",
+            "SLShiftLeftB32", "SLShiftLeftB64", "SLShiftRightB32",
+            "SLShiftRightB64", "SMulHIU32", "SMulI32", "SMovB32", "SMovB64",
+            "SNop", "SSubU32",
+            "VAddCCOU32", "VAddLShiftLeftU32", "VAddU32", "VAndB32",
+            "VCmpNeU32", "VCmpXEqU32", "VCmpXGeU32", "VCmpXGtU32",
+            "VCvtF32toU32", "VCvtF64toU32", "VCvtU32toF32", "VCvtU32toF64",
+            "VLShiftLeftAddU32", "VLShiftLeftB32", "VLShiftLeftB64",
+            "VLShiftRightB32", "VLShiftRightB64", "VMadU32U24", "VMovB32",
+            "VMulF32", "VMulF64", "VMulHIU32", "VMulLOU32", "VMulU32U24",
+            "VRcpF64", "VRcpIFlagF32", "VReadfirstlaneB32", "VSubU32",
+            # Real math functions (no longer dummies)
+            "vectorStaticDivideAndRemainder", "vectorStaticDivide",
+            "vectorUInt32DivideAndRemainder",
+            "vectorUInt32CeilDivideAndRemainder",
+            "vectorStaticRemainder", "vectorStaticMultiply",
+            "vectorStaticMultiplyAdd", "vectorAddMultiplyBpe",
+            "vectorMultiplyBpe", "vectorMultiply64Bpe",
+            "scalarStaticDivideAndRemainder", "scalarStaticCeilDivide",
+            "scalarStaticRemainder", "scalarUInt24DivideAndRemainder",
+            "scalarUInt32DivideAndRemainder", "scalarStaticMultiply64",
+            "scalarMultiplyBpe", "scalarMultiply64Bpe",
+            "sMagicDiv", "sMagicDiv2",
         })
         module_dummies = {
             name for name in dir(_functions)
