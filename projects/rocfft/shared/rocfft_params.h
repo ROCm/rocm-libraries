@@ -29,10 +29,6 @@
 #include "rocfft/rocfft.h"
 #include "rocfft_enums_vs_fft_enums.h"
 
-#ifdef ROCFFT_MPI_ENABLE
-#include <mpi.h>
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
@@ -759,28 +755,6 @@ private:
             throw std::runtime_error("too many split dimensions");
         }
         return splitDims;
-    }
-
-    int get_process_rank() const
-    {
-        int process_rank = -1; // invalid initialization
-        if(mp_lib == fft_mp_lib_mpi)
-        {
-#ifdef ROCFFT_MPI_ENABLE
-            if(!mp_comm)
-                throw std::runtime_error("Multi-process communicator is not defined");
-            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
-            if(ret != MPI_SUCCESS || process_rank < 0)
-                throw std::runtime_error("Rank of current process couldn't be set");
-#else
-            throw std::runtime_error("MPI is not enabled");
-#endif
-        }
-        else
-        {
-            process_rank = 0;
-        }
-        return process_rank;
     }
 };
 

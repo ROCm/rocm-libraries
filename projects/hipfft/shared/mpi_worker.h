@@ -611,29 +611,23 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     // execute FFTs
     std::chrono::time_point<std::chrono::steady_clock> start, stop;
 
-    // initialize JIT callbacks prior to plan create
-    std::vector<gpubuf_t<callback_test_data>> all_cb_data;
-    if(params.run_callbacks == fft_callback_type_jit)
-    {
-        params.load_cb_symbol = "load_callback";
-        get_rank_callback_jit(params,
-                              params.load_cb_func,
-                              params.load_cb_data,
-                              false,
-                              all_cb_data,
-                              get_rank_callback::LOAD);
-        params.store_cb_symbol = "store_callback";
-        get_rank_callback_jit(params,
-                              params.store_cb_func,
-                              params.store_cb_data,
-                              false,
-                              all_cb_data,
-                              get_rank_callback::LOAD);
-    }
-
     // call rocfft_plan_create
     for(auto& p : all_params)
+    {
+        // initialize JIT callbacks prior to plan create
+        std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+        if(p.run_callbacks == fft_callback_type_jit)
+        {
+            p.load_cb_symbol = "load_callback";
+            get_rank_callback_jit(
+                p, p.load_cb_func, p.load_cb_data, false, all_cb_data, get_rank_callback::LOAD);
+            p.store_cb_symbol = "store_callback";
+            get_rank_callback_jit(
+                p, p.store_cb_func, p.store_cb_data, false, all_cb_data, get_rank_callback::STORE);
+        }
+
         p.create_plan();
+    }
 
     for(size_t i = 0; i < testcases.size(); ++i)
     {

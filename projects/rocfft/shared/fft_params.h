@@ -36,6 +36,10 @@
 #include <valarray>
 #include <vector>
 
+#ifdef ROCFFT_MPI_ENABLE
+#include <mpi.h>
+#endif
+
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
 #include "../shared/client_data_layout_helpers.h"
@@ -2831,6 +2835,28 @@ public:
         // other ret's members should be irrelevant for cpu reference calculations
         // (default values)
         return ret;
+    }
+
+    int get_process_rank() const
+    {
+        int process_rank = -1; // invalid initialization
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+#ifdef ROCFFT_MPI_ENABLE
+            if(!mp_comm)
+                throw std::runtime_error("Multi-process communicator is not defined");
+            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
+            if(ret != MPI_SUCCESS || process_rank < 0)
+                throw std::runtime_error("Rank of current process couldn't be set");
+#else
+            throw std::runtime_error("MPI is not enabled");
+#endif
+        }
+        else
+        {
+            process_rank = 0;
+        }
+        return process_rank;
     }
 };
 
