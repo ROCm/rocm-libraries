@@ -56,7 +56,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 // If norm( xhat ) == 0, LAPACK sets tau = 0 and H = I,
 // whereas this will set tau = 2 and H = [ -1 0 ].
 //                                       [  0 I ]
-//, std::enable_if_t<! rocblas_is_complex<T>, int> = 0>
+//
 template <typename T, typename I, typename S = decltype(std::real(T{}))>
 __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
 {
@@ -137,6 +137,7 @@ __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
 // C := H C if on left,
 // C := C H if on right.
 // To apply H^H, pass in conj( tau ).
+//
 template <typename T, typename I>
 __device__ void
     sb2st_larf(const I xid, const I yid, rocblas_side side, I m, I n, T* v, T tau, T* C, I ldc, T* s_work)
@@ -216,6 +217,7 @@ __device__ void
 // Assumes the whole Hermitian block is set, both upper and lower.
 // (In LAPACK, this is larfy, which doesn't fit well into LAPACK's naming
 // conventions. I guess y comes from sy.)
+//
 template <typename T, typename I>
 __device__ void sb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I ldc, T* s_work)
 {
@@ -255,7 +257,7 @@ __device__ void sb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
         T value = 0;
         for(I i = xid; i < n; i += DIMX)
         {
-            value += conj(s_work[xid]) * v[xid];
+            value += conj(s_work[i]) * v[i];
         }
         value += shift_left(value, 16);
         value += shift_left(value, 8);
@@ -274,7 +276,7 @@ __device__ void sb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
     {
         for(I i = xid; i < n; i += DIMX)
         {
-            s_work[xid] -= s_alpha * v[xid];
+            s_work[i] -= s_alpha * v[i];
         }
     }
     __syncthreads();
