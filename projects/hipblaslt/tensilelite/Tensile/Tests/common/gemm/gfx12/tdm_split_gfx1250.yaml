@@ -5,7 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
@@ -54,7 +54,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  1, 1]
           - [16, 16, 32, 1,  1,  1, 1,  2, 2]
@@ -83,14 +83,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -130,7 +130,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [True]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 128, 1,  1,  4, 4,  2, 1]
@@ -160,14 +160,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - AssertSummationElementMultiple: [16]
       BenchmarkForkParameters:
       JoinParameters:
@@ -208,7 +208,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
@@ -237,14 +237,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - AssertSummationElementMultiple: [32]
       BenchmarkForkParameters:
       JoinParameters:
