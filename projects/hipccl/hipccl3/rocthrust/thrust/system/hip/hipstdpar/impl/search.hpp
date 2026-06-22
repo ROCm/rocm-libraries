@@ -533,7 +533,7 @@ inline ForwardIt1 find_end(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::find_end(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::find_end(first, last, s_first, s_last, _THRUST_STD::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -593,7 +593,7 @@ inline ForwardIt1 find_first_of(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::find_first_of(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::find_first_of(first, last, s_first, s_last, _THRUST_STD::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -649,7 +649,7 @@ inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::adjacent_find(f, l, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::adjacent_find(f, l, _THRUST_STD::equal_to<>{});
 }
 
 template <typename I, typename P, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -970,7 +970,7 @@ search(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::search(first, last, s_first, s_last, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::search(first, last, s_first, s_last, _THRUST_STD::equal_to<>{});
 }
 
 template <class ForwardIt1,
@@ -1031,7 +1031,7 @@ inline ForwardIt search_n(
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::search_n(first, last, count, value, thrust::equal_to<>{});
+  return THRUST_NS_QUALIFIER::search_n(first, last, count, value, _THRUST_STD::equal_to<>{});
 }
 
 template <class ForwardIt, enable_if_t<!::hipstd::is_offloadable_iterator<ForwardIt>()>* = nullptr>

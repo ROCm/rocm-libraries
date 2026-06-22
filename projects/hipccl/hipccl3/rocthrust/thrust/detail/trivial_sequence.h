@@ -50,7 +50,7 @@ struct _trivial_sequence
 
 // trivial case
 template <typename Iterator, typename DerivedPolicy>
-struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
+struct _trivial_sequence<Iterator, DerivedPolicy, _THRUST_STD::true_type>
 {
   using iterator_type = Iterator;
   Iterator first, last;
@@ -83,7 +83,7 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
 
 // non-trivial case
 template <typename Iterator, typename DerivedPolicy>
-struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::false_type>
+struct _trivial_sequence<Iterator, DerivedPolicy, _THRUST_STD::false_type>
 {
   using iterator_value = it_value_t<Iterator>;
   using iterator_type  = typename thrust::detail::temporary_array<iterator_value, DerivedPolicy>::iterator;

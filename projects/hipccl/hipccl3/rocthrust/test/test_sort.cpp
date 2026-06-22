@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
-template <class Key, class Item, class CompareFunction = thrust::less<Key>>
+template <class Key, class Item, class CompareFunction = _THRUST_STD::less<Key>>
 struct ParamsSort
 {
   using key_type         = Key;
@@ -41,8 +41,8 @@ public:
 };
 
 using SortTestsParams =
-  ::testing::Types<ParamsSort<unsigned short, int, thrust::less<unsigned short>>,
-                   ParamsSort<unsigned short, int, thrust::greater<unsigned short>>,
+  ::testing::Types<ParamsSort<unsigned short, int, _THRUST_STD::less<unsigned short>>,
+                   ParamsSort<unsigned short, int, _THRUST_STD::greater<unsigned short>>,
                    ParamsSort<unsigned short, int, custom_compare_less<unsigned short>>,
                    ParamsSort<unsigned short, double>,
                    ParamsSort<int, long long>>;
@@ -324,8 +324,8 @@ TYPED_TEST(SortVectorPrimitives, TestSortAscendingKey)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      thrust::sort(h_data.begin(), h_data.end(), thrust::less<T>());
-      thrust::sort(d_data.begin(), d_data.end(), thrust::less<T>());
+      thrust::sort(h_data.begin(), h_data.end(), _THRUST_STD::less<T>());
+      thrust::sort(d_data.begin(), d_data.end(), _THRUST_STD::less<T>());
 
       ASSERT_EQ(h_data, d_data);
     }
@@ -346,8 +346,8 @@ TEST(SortTests, TestSortDescendingKey)
       get_random_data<int>(n, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
     thrust::device_vector<int> d_data = h_data;
 
-    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
-    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
+    thrust::sort(h_data.begin(), h_data.end(), _THRUST_STD::greater<int>());
+    thrust::sort(d_data.begin(), d_data.end(), _THRUST_STD::greater<int>());
 
     ASSERT_EQ(h_data, d_data);
   }
@@ -388,8 +388,8 @@ TEST(SortTests, TestSortBoolDescending)
       get_random_data<bool>(n, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed);
     thrust::device_vector<bool> d_data = h_data;
 
-    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
-    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
+    thrust::sort(h_data.begin(), h_data.end(), _THRUST_STD::greater<bool>());
+    thrust::sort(d_data.begin(), d_data.end(), _THRUST_STD::greater<bool>());
 
     ASSERT_EQ(h_data, d_data);
   }

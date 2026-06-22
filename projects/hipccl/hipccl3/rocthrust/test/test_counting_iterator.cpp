@@ -250,19 +250,19 @@ TEST(CountingIteratorTests, TestCountingIteratorDistance)
   thrust::counting_iterator<int> iter1(0);
   thrust::counting_iterator<int> iter2(5);
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 5);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 5);
 
   iter1++;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 4);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 4);
 
   iter2 += 100;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 104);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 104);
 
   iter2 += 1000;
 
-  ASSERT_EQ(thrust::distance(iter1, iter2), 1104);
+  ASSERT_EQ(_THRUST_STD::distance(iter1, iter2), 1104);
 }
 
 TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)

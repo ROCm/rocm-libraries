@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,7 @@ int main(void)
   int init = 0;
 
   // binary operation used to reduce values
-  thrust::plus<int> binary_op;
+  _THRUST_STD::plus<int> binary_op;
 
   // compute sum on the device
   int sum = thrust::reduce(d_vec.begin(), d_vec.end(), init, binary_op);

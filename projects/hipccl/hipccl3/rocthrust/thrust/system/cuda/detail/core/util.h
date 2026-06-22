@@ -233,7 +233,7 @@ struct has_enough_shmem_impl<V, A, S, typelist<>>
   {
     value = V
   };
-  using type = ::cuda::std::conditional_t<value, thrust::detail::true_type, thrust::detail::false_type>;
+  using type = ::cuda::std::conditional_t<value, _THRUST_STD::true_type, _THRUST_STD::false_type>;
 };
 
 template <class Agent, size_t MAX_SHMEM>
