@@ -41,7 +41,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
 {
     explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs&    specs,
                                          const StockhamPartialPassParams& params)
-        : StockhamPartialPassKernel(specs, params)
+        : StockhamPartialPassKernel(specs, params, LDSColumnPattern::NON_INTERLEAVED)
     {
         length_off_dim = params.parent_length[params.off_dim];
 

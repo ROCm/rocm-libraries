@@ -2025,7 +2025,7 @@ void Real3DPPNode::AssignParams_internal()
 
             yzPlan->AssignParams();
         }
-        else // forward transform, r2c
+        else // inverse transform, r2c
         {
             // yz plan is z col 1D-FFT + partial pass(es) along y
             // xy plan is partial pass(es) along y + x row 1D-FFT

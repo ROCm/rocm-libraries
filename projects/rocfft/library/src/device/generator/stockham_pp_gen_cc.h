@@ -42,7 +42,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs&    specs,
                                          const StockhamPartialPassParams& params,
                                          bool largeTwdBatchIsTransformCount)
-        : StockhamPartialPassKernel(specs, params)
+        : StockhamPartialPassKernel(specs, params, LDSColumnPattern::OFF_DIM_INTERLEAVED)
         , largeTwdBatchIsTransformCount(largeTwdBatchIsTransformCount)
 
     {
