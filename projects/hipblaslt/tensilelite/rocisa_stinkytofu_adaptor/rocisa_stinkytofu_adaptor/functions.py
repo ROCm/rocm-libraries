@@ -323,7 +323,48 @@ def BranchIfNotZero(sgprName: str, computeDataType, label) -> Module:
 
     return module
 
-VSaturateCastInt = make_dummy_func(f"{_P}.VSaturateCastInt")
+def VSaturateCastInt(SumIdxVgpr: Any, tmpVgprIdx: int, tmpSgprIdx: int,
+                     lowerBound: int, upperBound: int,
+                     type: Any = None, initGpr: bool = True) -> Module:
+    """Saturate-cast integer (f_cast.cpp)."""
+    from .enum import SaturateCastType  # noqa: WPS433
+    from .instruction import SMovkI32, VMed3I32, VMinI32, VMaxI32  # noqa: WPS433
+
+    if type is None:
+        type = SaturateCastType.NORMAL
+
+    initGprStr = "with init gpr" if initGpr else "without init gpr"
+    module = Module("SaturateCastInt " + initGprStr)
+
+    if type == SaturateCastType.NORMAL:
+        tmpLowerBoundSgpr = sgpr(tmpSgprIdx)
+        tmpUpperBoundVgpr = vgpr(tmpVgprIdx)
+
+        if initGpr:
+            module.add(SMovkI32(dst=tmpLowerBoundSgpr, src=lowerBound,
+                                comment=str(lowerBound)))
+            module.add(VMovB32(dst=tmpUpperBoundVgpr, src=upperBound,
+                               comment=str(upperBound)))
+
+        module.add(VMed3I32(
+            dst=SumIdxVgpr, src0=SumIdxVgpr, src1=tmpLowerBoundSgpr,
+            src2=tmpUpperBoundVgpr,
+            comment=f"x= min({upperBound}, max({lowerBound}, x))",
+        ))
+    elif type == SaturateCastType.DO_NOTHING:
+        pass
+    elif type == SaturateCastType.UPPER:
+        module.add(VMinI32(
+            dst=SumIdxVgpr, src0=upperBound, src1=SumIdxVgpr,
+            comment=f"x = min({upperBound}, x)",
+        ))
+    elif type == SaturateCastType.LOWER:
+        module.add(VMaxI32(
+            dst=SumIdxVgpr, src0=lowerBound, src1=SumIdxVgpr,
+            comment=f"x = max({lowerBound}, x)",
+        ))
+
+    return module
 
 # ---------------------------------------------------------------------------
 # Math helper utilities

@@ -71,8 +71,6 @@ from rocisa_stinkytofu_adaptor.functions import ArgumentLoader  # noqa: E402
 # ---------------------------------------------------------------------------
 
 FUNCTIONS_DUMMY_EXPORTS: tuple[str, ...] = (
-    # Cast helper
-    "VSaturateCastInt",
     # DS init
     "DSInit",
 )
@@ -348,6 +346,10 @@ class TestFunctionsModuleExports(unittest.TestCase):
             "scalarUInt32DivideAndRemainder", "scalarStaticMultiply64",
             "scalarMultiplyBpe", "scalarMultiply64Bpe",
             "sMagicDiv", "sMagicDiv2",
+            # Real cast helper (no longer dummy)
+            "VSaturateCastInt",
+            "SMovkI32", "VMed3I32", "VMinI32", "VMaxI32",
+            "SaturateCastType",
         })
         module_dummies = {
             name for name in dir(_functions)

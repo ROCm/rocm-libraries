@@ -102,10 +102,7 @@ Not yet done (dummy):
       the stinkytofu left-path runs ``InsertVgprMsbPass`` instead. The
       rocisa ``__str__`` output therefore lacks the MSB preamble for
       now (only matters when the right-path is exercised).
-    - Extension functions: ``SLongBranch*``, ``SCLongBranch*``,
-      ``SGetPositivePCOffset``, ``SMulInt64to32``, ``ECvtF16toF32``,
-      ``ECvtF32toF16``, ``ECvtPkFP8toF32``, ``ECvtPkBF8toF32``,
-      ``VCvtBF16toFP32``.
+    - (None remaining — all extension functions implemented.)
 
 logicalIR correspondence (strict name match):
     A class carries a ``# logicalIR: <OpName>`` comment iff
@@ -4128,14 +4125,174 @@ def SCLongBranchVccnz(label, tmpSgprRes, noBranchLabelStr,
         module.add(SLongBranch(label, tmpSgprRes, positiveLabelStr, comment))
     module.add(noBranchLabel)
     return module
-SMulInt64to32 = make_dummy_func(f"{_P}.SMulInt64to32")
-# True16 conversion helpers (extension.hpp). Each ``ECvt*`` returns either a
-# native true16 op (NoSDWA / gfx11+) or the SDWA-encoded equivalent depending
-# on the active arch cap; here we just expose the name so ``from
-# rocisa.instruction import ECvtPkFP8toF32`` resolves.
-ECvtF16toF32 = make_dummy_func(f"{_P}.ECvtF16toF32")
-ECvtF32toF16 = make_dummy_func(f"{_P}.ECvtF32toF16")
-ECvtPkFP8toF32 = make_dummy_func(f"{_P}.ECvtPkFP8toF32")
-ECvtPkBF8toF32 = make_dummy_func(f"{_P}.ECvtPkBF8toF32")
-VCvtBF16toFP32 = make_dummy_func(f"{_P}.VCvtBF16toFP32")
+def SMulInt64to32(dst0: Any, dst1: Any, src0: Any, src1: Any,
+                  tmpVgprRes: Any, hasSMulHi: bool, sign: bool = False,
+                  comment: str = "") -> Any:
+    """64-bit = 32×32 multiply, result in dst0:dst1 (extension.hpp:391)."""
+    Module, _, ContinuousRegister, _ = _ext_lazy()
+    from .container import vgpr  # noqa: WPS433
+
+    module = Module("SMulInt64to32")
+    if hasattr(tmpVgprRes, "size") and tmpVgprRes.size < 2:
+        raise RuntimeError("ContinuousRegister size must be at least 2.")
+
+    if hasSMulHi:
+        if sign:
+            module.add(SMulHII32(dst=dst1, src0=src0, src1=src1, comment=comment))
+        else:
+            module.add(SMulHIU32(dst=dst1, src0=src0, src1=src1, comment=comment))
+        module.add(SMulI32(dst=dst0, src0=src0, src1=src1, comment=comment))
+    else:
+        idx = tmpVgprRes.idx if hasattr(tmpVgprRes, "idx") else int(tmpVgprRes)
+        vgprTmp = vgpr(idx)
+        vgprTmp1 = vgpr(idx + 1)
+        swapSrc0, swapSrc1 = (src0, src1) if _is_container(src1) else (src1, src0)
+        module.add(VMovB32(dst=vgprTmp, src=swapSrc0, comment=comment))
+        if sign:
+            module.add(VMulHII32(dst=vgprTmp1, src0=vgprTmp, src1=swapSrc1,
+                                 comment=comment))
+        else:
+            module.add(VMulHIU32(dst=vgprTmp1, src0=vgprTmp, src1=swapSrc1,
+                                 comment=comment))
+        module.add(VReadfirstlaneB32(dst=dst1, src=vgprTmp1, comment=comment))
+        module.add(VMulLOU32(dst=vgprTmp1, src0=vgprTmp, src1=swapSrc1,
+                             comment=comment))
+        module.add(VReadfirstlaneB32(dst=dst0, src=vgprTmp1, comment=comment))
+    return module
+
+
+def _is_container(val: Any) -> bool:
+    """Check if val is a Container-like object (not a scalar int/hex)."""
+    return hasattr(val, "toString")
+# ==========================================================================
+# True16 / conversion helpers (extension.hpp:473-627)
+#
+# Each factory checks hardware capabilities and returns a single instruction
+# with the appropriate SDWA, VOP3P, or True16 modifiers.
+# ==========================================================================
+
+
+class _True16Wrap:
+    """Wraps a register/input and appends a True16 ``.h``/``.l`` suffix."""
+
+    __slots__ = ("_inner", "_suffix")
+
+    def __init__(self, inner: Any, sel: Any) -> None:
+        from .enum import HighBitSel  # noqa: WPS433
+        self._inner = inner
+        self._suffix = ".h" if sel == HighBitSel.HIGH else ".l"
+
+    def toString(self) -> str:
+        return _input_to_str(self._inner) + self._suffix
+
+    def __str__(self) -> str:
+        return self.toString()
+
+
+def ECvtF16toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
+    """Convert F16 → F32, selecting src half-word by *sel* (extension.hpp:474)."""
+    from .base import getArchCaps  # noqa: WPS433
+    from .container import SDWAModifiers  # noqa: WPS433
+    from .enum import HighBitSel, SelectBit  # noqa: WPS433
+
+    if getArchCaps().get("NoSDWA", 0):
+        return VCvtF16toF32(dst=dst, src=_True16Wrap(src, sel), comment=comment)
+
+    src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
+    return VCvtF16toF32(
+        dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel), comment=comment,
+    )
+
+
+def ECvtF32toF16(dst: Any, src: Any, sel: Any = None, comment: str = "") -> Any:
+    """Convert F32 → F16 with optional half-word packing (extension.hpp:506)."""
+    from .base import getArchCaps  # noqa: WPS433
+    from .container import SDWAModifiers  # noqa: WPS433
+    from .enum import HighBitSel, SelectBit  # noqa: WPS433
+
+    if sel is None:
+        return VCvtF32toF16(dst=dst, src=src, comment=comment)
+
+    if getArchCaps().get("NoSDWA", 0):
+        return VCvtF32toF16(dst=_True16Wrap(dst, sel), src=src, comment=comment)
+
+    dst_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
+    return VCvtF32toF16(
+        dst=dst, src=src, sdwa=SDWAModifiers(dst_sel=dst_sel), comment=comment,
+    )
+
+
+def ECvtPkFP8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
+    """Unpack packed-FP8 → 2×F32, selecting src half-word (extension.hpp:537)."""
+    from .base import getArchCaps  # noqa: WPS433
+    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .enum import HighBitSel, SelectBit  # noqa: WPS433
+
+    sel_int = 1 if sel == HighBitSel.HIGH else 0
+    if getArchCaps().get("NoSDWA", 0):
+        inst = VCvtPkFP8toF32(
+            dst=dst, src=_True16Wrap(src, sel), comment=comment,
+        )
+        inst.vop3 = VOP3PModifiers(op_sel=[sel_int])
+        return inst
+
+    src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
+    return VCvtPkFP8toF32(
+        dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel), comment=comment,
+    )
+
+
+def ECvtPkBF8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
+    """Unpack packed-BF8 → 2×F32, selecting src half-word (extension.hpp:566)."""
+    from .base import getArchCaps  # noqa: WPS433
+    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .enum import HighBitSel, SelectBit  # noqa: WPS433
+
+    sel_int = 1 if sel == HighBitSel.HIGH else 0
+    if getArchCaps().get("NoSDWA", 0):
+        inst = VCvtPkBF8toF32(
+            dst=dst, src=_True16Wrap(src, sel), comment=comment,
+        )
+        inst.vop3 = VOP3PModifiers(op_sel=[sel_int])
+        return inst
+
+    src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
+    return VCvtPkBF8toF32(
+        dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel), comment=comment,
+    )
+
+
+def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
+                   comment: str = "") -> Any:
+    """BF16 → FP32 conversion with architecture dispatch (extension.hpp:594)."""
+    from .base import getAsmCaps, getArchCaps  # noqa: WPS433
+    from .container import SDWAModifiers, VOP3PModifiers  # noqa: WPS433
+    from .enum import HighBitSel, SelectBit  # noqa: WPS433
+
+    if not getAsmCaps().get("HasBF16CVT", 0):
+        if (vi % 2) == 1:
+            if vgprMask is None:
+                raise RuntimeError("vgprMask is null")
+            return VAndB32(
+                dst=dst, src0=src, src1=vgprMask,
+                comment="cvt bf16 to fp32. " + comment,
+            )
+        return VLShiftLeftB32(
+            dst=dst, src0=16, src1=src,
+            comment="cvt bf16 to fp32. " + comment,
+        )
+
+    if getArchCaps().get("NoSDWA", 0):
+        sel = HighBitSel.HIGH if (vi % 2) == 1 else HighBitSel.LOW
+        inst = PVCvtBF16toFP32(
+            dst=dst, src=_True16Wrap(src, sel), comment="cvt bf16 to f32",
+        )
+        inst.vop3 = VOP3PModifiers(op_sel=[vi % 2])
+        return inst
+
+    src0_sel = SelectBit.WORD_1 if (vi % 2) == 1 else SelectBit.WORD_0
+    return PVCvtBF16toFP32(
+        dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel),
+        comment="cvt bf16 to f32",
+    )
 
