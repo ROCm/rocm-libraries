@@ -305,16 +305,23 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
     std::mt19937 rng(static_cast<std::mt19937::result_type>(
         _bundle->metadata.seed.value_or(K_DEFAULT_SEED)));
 
+    SynthesisTracker tracker(allLeafInputUids, inputs);
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
     {
         const auto& node = wrapper.getNode(i);
-        const SynthesisResult outcome
-            = synthesizeNodeInputs(node, allLeafInputUids, inputs, rng);
+        const SynthesisResult outcome = synthesizeNodeInputs(node, tracker, rng);
         if(!outcome.filled)
         {
             skipUnverifiable(outcome.reason);
             return false;
         }
+    }
+
+    const SynthesisResult finalResult = tracker.finish("synthesis");
+    if(!finalResult.filled)
+    {
+        skipUnverifiable(finalResult.reason);
+        return false;
     }
 
     _bundle->tensors = std::move(inputs);

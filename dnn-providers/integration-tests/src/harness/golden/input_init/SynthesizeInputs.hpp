@@ -9,18 +9,20 @@ namespace hipdnn_integration_tests::golden
 {
 
 // ── Per-op fill functions ─────────────────────────────────────────────────────
-// Each function synthesizes inputs for one node in the graph. A node "owns" the
-// leaf input tensors declared in its flatbuffer attributes — virtual tensors
-// (inter-node edges in a fused graph) and output tensors are excluded.
+// Each function declares inputs for one node in the graph. A single
+// SynthesisTracker is shared across all nodes in the graph — the caller
+// (synthesizeInputs in the harness .cpp) creates it with the whole-graph leaf
+// input UIDs, passes it through each fill function, then calls finish() once
+// after all nodes have been processed. This graph-level tracking is essential
+// for fused/multi-node graphs: each node only accounts for its own UIDs, and
+// the final finish() verifies that every leaf input was covered by some node.
 //
 // Every function follows the same pattern:
 //   1. Cast the node to its concrete attribute type.
-//   2. Create a SynthesisTracker with the node's owned uids.
-//   3. Declare each input as FREE (fill with random values), STRUCTURED (can't
+//   2. Declare each input as FREE (fill with random values), STRUCTURED (can't
 //      synthesize — needs specific format), or DERIVED (must come from another
 //      op's output). See SynthesisTracker.hpp for role definitions.
-//   4. Call finish() — returns ok() if all owned inputs were filled, or
-//      unsupported() with a diagnostic listing what couldn't be synthesized.
+//   3. Return ok() if the attribute cast succeeded, or unsupported() if not.
 //
 // Fills must be deterministic given `rng` so re-running the same graph produces
 // identical inputs for reproducible comparisons.
@@ -32,8 +34,7 @@ namespace hipdnn_integration_tests::golden
 // ── Convolution ───────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillConvFwdInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                     const std::vector<int64_t>& ownedLeafInputUids,
-                                     InputTensorMap& inputs,
+                                     SynthesisTracker& tracker,
                                      std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionFwdAttributes();
@@ -41,15 +42,13 @@ inline SynthesisResult fillConvFwdInputs(const hipdnn_flatbuffers_sdk::data_obje
     {
         return SynthesisResult::unsupported("not ConvolutionFwdAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->w_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("ConvolutionFwd");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->w_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 inline SynthesisResult fillConvBwdDataInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         const std::vector<int64_t>& ownedLeafInputUids,
-                                         InputTensorMap& inputs,
+                                         SynthesisTracker& tracker,
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionBwdAttributes();
@@ -57,15 +56,13 @@ inline SynthesisResult fillConvBwdDataInputs(const hipdnn_flatbuffers_sdk::data_
     {
         return SynthesisResult::unsupported("not ConvolutionBwdAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->w_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("ConvolutionBwdData");
+    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->w_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 inline SynthesisResult fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                            const std::vector<int64_t>& ownedLeafInputUids,
-                                            InputTensorMap& inputs,
+                                            SynthesisTracker& tracker,
                                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionWrwAttributes();
@@ -73,18 +70,16 @@ inline SynthesisResult fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::da
     {
         return SynthesisResult::unsupported("not ConvolutionWrwAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("ConvolutionBwdWeights");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── Batchnorm ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillBatchnormInferenceInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributes();
@@ -92,19 +87,17 @@ inline SynthesisResult fillBatchnormInferenceInputs(
     {
         return SynthesisResult::unsupported("not BatchnormInferenceAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
-    acct.fillFree(a->inv_variance_tensor_uid(), 0.5f, 1.5f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("BatchnormInference");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->inv_variance_tensor_uid(), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 inline SynthesisResult fillBatchnormInferenceVarianceInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
@@ -112,22 +105,20 @@ inline SynthesisResult fillBatchnormInferenceVarianceInputs(
     {
         return SynthesisResult::unsupported("not BatchnormInferenceAttributesVarianceExt");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
-    acct.fillFree(a->variance_tensor_uid(), 0.5f, 1.5f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    return acct.finish("BatchnormInferenceVarianceExt");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->variance_tensor_uid(), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // peer_stats holds references to other GPUs' memory for multi-GPU batchnorm —
 // randomly generated values would point to invalid cross-device memory.
 inline SynthesisResult fillBatchnormTrainingInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormAttributes();
@@ -135,31 +126,29 @@ inline SynthesisResult fillBatchnormTrainingInputs(
     {
         return SynthesisResult::unsupported("not BatchnormAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    acct.fillFree(a->prev_running_mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    acct.fillFree(a->prev_running_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
-    acct.fillFree(a->momentum_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
+    tracker.fillFree(a->prev_running_mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->prev_running_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->momentum_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
         for(const int64_t uid : *a->peer_stats_tensor_uid())
         {
-            acct.markStructured(uid, "peer_stats");
+            tracker.markStructured(uid, "peer_stats");
         }
     }
 
-    return acct.finish("BatchnormTraining");
+    return SynthesisResult::ok();
 }
 
 // mean/inv_variance are optional (may come from forward). peer_stats: see above.
 inline SynthesisResult fillBatchnormBackwardInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormBackwardAttributes();
@@ -167,29 +156,27 @@ inline SynthesisResult fillBatchnormBackwardInputs(
     {
         return SynthesisResult::unsupported("not BatchnormBackwardAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    acct.fillFree(a->inv_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->inv_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
         for(const int64_t uid : *a->peer_stats_tensor_uid())
         {
-            acct.markStructured(uid, "peer_stats");
+            tracker.markStructured(uid, "peer_stats");
         }
     }
 
-    return acct.finish("BatchnormBackward");
+    return SynthesisResult::ok();
 }
 
 // ── Matmul ────────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillMatmulInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                    const std::vector<int64_t>& ownedLeafInputUids,
-                                    InputTensorMap& inputs,
+                                    SynthesisTracker& tracker,
                                     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_MatmulAttributes();
@@ -197,17 +184,15 @@ inline SynthesisResult fillMatmulInputs(const hipdnn_flatbuffers_sdk::data_objec
     {
         return SynthesisResult::unsupported("not MatmulAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->a_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->b_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("Matmul");
+    tracker.fillFree(a->a_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->b_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── Pointwise ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       const std::vector<int64_t>& ownedLeafInputUids,
-                                       InputTensorMap& inputs,
+                                       SynthesisTracker& tracker,
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_PointwiseAttributes();
@@ -215,19 +200,17 @@ inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_ob
     {
         return SynthesisResult::unsupported("not PointwiseAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->in_0_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->in_1_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    acct.fillFree(a->in_2_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    acct.fillFree(a->axis_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    return acct.finish("Pointwise");
+    tracker.fillFree(a->in_0_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->in_1_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->in_2_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->axis_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── Reduction ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillReductionInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       const std::vector<int64_t>& ownedLeafInputUids,
-                                       InputTensorMap& inputs,
+                                       SynthesisTracker& tracker,
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ReductionAttributes();
@@ -235,16 +218,14 @@ inline SynthesisResult fillReductionInputs(const hipdnn_flatbuffers_sdk::data_ob
     {
         return SynthesisResult::unsupported("not ReductionAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->in_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("Reduction");
+    tracker.fillFree(a->in_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── LayerNorm ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillLayernormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       const std::vector<int64_t>& ownedLeafInputUids,
-                                       InputTensorMap& inputs,
+                                       SynthesisTracker& tracker,
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormAttributes();
@@ -252,20 +233,18 @@ inline SynthesisResult fillLayernormInputs(const hipdnn_flatbuffers_sdk::data_ob
     {
         return SynthesisResult::unsupported("not LayernormAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    return acct.finish("Layernorm");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // mean and inv_variance are computed by the forward pass — a standalone backward
 // can't produce correct gradients without them.
 inline SynthesisResult fillLayernormBackwardInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormBackwardAttributes();
@@ -273,21 +252,19 @@ inline SynthesisResult fillLayernormBackwardInputs(
     {
         return SynthesisResult::unsupported("not LayernormBackwardAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.markDerived(a->mean_tensor_uid().value_or(0), "mean (forward output)");
-    acct.markDerived(a->inv_variance_tensor_uid().value_or(0), "inv_variance (forward output)");
-    acct.fillFree(a->epsilon_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
-    return acct.finish("LayernormBackward");
+    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.markDerived(a->mean_tensor_uid().value_or(0), "mean (forward output)");
+    tracker.markDerived(a->inv_variance_tensor_uid().value_or(0), "inv_variance (forward output)");
+    tracker.fillFree(a->epsilon_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── RMSNorm ───────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                     const std::vector<int64_t>& ownedLeafInputUids,
-                                     InputTensorMap& inputs,
+                                     SynthesisTracker& tracker,
                                      std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormAttributes();
@@ -295,19 +272,17 @@ inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_obje
     {
         return SynthesisResult::unsupported("not RMSNormAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    acct.fillFree(a->bias_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    return acct.finish("RMSNorm");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // inv_rms is computed by the forward pass.
 inline SynthesisResult fillRmsnormBackwardInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormBackwardAttributes();
@@ -315,19 +290,17 @@ inline SynthesisResult fillRmsnormBackwardInputs(
     {
         return SynthesisResult::unsupported("not RMSNormBackwardAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.markDerived(a->inv_rms_tensor_uid(), "inv_rms (forward output)");
-    return acct.finish("RMSNormBackward");
+    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.markDerived(a->inv_rms_tensor_uid(), "inv_rms (forward output)");
+    return SynthesisResult::ok();
 }
 
 // ── Resample ──────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         const std::vector<int64_t>& ownedLeafInputUids,
-                                         InputTensorMap& inputs,
+                                         SynthesisTracker& tracker,
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ResampleFwdAttributes();
@@ -335,9 +308,8 @@ inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_
     {
         return SynthesisResult::unsupported("not ResampleFwdAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("ResampleFwd");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── Block-scale quantization ──────────────────────────────────────────────────
@@ -346,8 +318,7 @@ inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_
 // quantized data — random scales would produce garbage dequantized values.
 inline SynthesisResult fillBlockScaleDequantizeInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleDequantizeAttributes();
@@ -355,16 +326,14 @@ inline SynthesisResult fillBlockScaleDequantizeInputs(
     {
         return SynthesisResult::unsupported("not BlockScaleDequantizeAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.markStructured(a->scale_tensor_uid(), "scale (block quantization scales)");
-    return acct.finish("BlockScaleDequantize");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.markStructured(a->scale_tensor_uid(), "scale (block quantization scales)");
+    return SynthesisResult::ok();
 }
 
 inline SynthesisResult fillBlockScaleQuantizeInputs(
     const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    const std::vector<int64_t>& ownedLeafInputUids,
-    InputTensorMap& inputs,
+    SynthesisTracker& tracker,
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleQuantizeAttributes();
@@ -372,9 +341,8 @@ inline SynthesisResult fillBlockScaleQuantizeInputs(
     {
         return SynthesisResult::unsupported("not BlockScaleQuantizeAttributes");
     }
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
-    acct.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    return acct.finish("BlockScaleQuantize");
+    tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
+    return SynthesisResult::ok();
 }
 
 // ── SDPA ──────────────────────────────────────────────────────────────────────
@@ -385,8 +353,7 @@ inline SynthesisResult fillBlockScaleQuantizeInputs(
 // seed/offset must match between forward and backward passes.
 // Most of these are optional — absent ones (uid 0) are silently ignored.
 inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         const std::vector<int64_t>& ownedLeafInputUids,
-                                         InputTensorMap& inputs,
+                                         SynthesisTracker& tracker,
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaAttributes();
@@ -395,23 +362,21 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
         return SynthesisResult::unsupported("not SdpaAttributes");
     }
 
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
+    tracker.fillFree(a->q_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
 
-    acct.fillFree(a->q_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    acct.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+    tracker.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
+    tracker.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
+    tracker.markStructured(a->page_table_k_tensor_uid().value_or(0), "page_table_k");
+    tracker.markStructured(a->page_table_v_tensor_uid().value_or(0), "page_table_v");
+    tracker.markStructured(a->block_mask_tensor_uid().value_or(0), "block_mask");
+    tracker.markStructured(a->seed_tensor_uid().value_or(0), "dropout_seed");
+    tracker.markStructured(a->offset_tensor_uid().value_or(0), "dropout_offset");
 
-    acct.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
-    acct.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
-    acct.markStructured(a->page_table_k_tensor_uid().value_or(0), "page_table_k");
-    acct.markStructured(a->page_table_v_tensor_uid().value_or(0), "page_table_v");
-    acct.markStructured(a->block_mask_tensor_uid().value_or(0), "block_mask");
-    acct.markStructured(a->seed_tensor_uid().value_or(0), "dropout_seed");
-    acct.markStructured(a->offset_tensor_uid().value_or(0), "dropout_offset");
-
-    return acct.finish("Sdpa");
+    return SynthesisResult::ok();
 }
 
 // Q/K/V/dO accept random values. O (the forward output) and stats (softmax
@@ -420,8 +385,7 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
 // inter-node tensors (not owned, so silently skipped). A standalone backward
 // without a forward is refused.
 inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                          const std::vector<int64_t>& ownedLeafInputUids,
-                                          InputTensorMap& inputs,
+                                          SynthesisTracker& tracker,
                                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaBackwardAttributes();
@@ -430,17 +394,15 @@ inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data
         return SynthesisResult::unsupported("not SdpaBackwardAttributes");
     }
 
-    SynthesisTracker acct(ownedLeafInputUids, inputs);
+    tracker.fillFree(a->q_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->do_tensor_uid(), -1.0f, 1.0f, rng);
 
-    acct.fillFree(a->q_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
-    acct.fillFree(a->do_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.markDerived(a->o_tensor_uid(), "o (forward output)");
+    tracker.markDerived(a->stats_tensor_uid(), "stats (forward softmax stats)");
 
-    acct.markDerived(a->o_tensor_uid(), "o (forward output)");
-    acct.markDerived(a->stats_tensor_uid(), "stats (forward softmax stats)");
-
-    return acct.finish("SdpaBackward");
+    return SynthesisResult::ok();
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -451,8 +413,7 @@ inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data
 // a diagnostic when the op is unrecognized or an input can't be synthesized.
 
 inline SynthesisResult synthesizeNodeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                        const std::vector<int64_t>& ownedLeafInputUids,
-                                        InputTensorMap& inputs,
+                                        SynthesisTracker& tracker,
                                         std::mt19937& rng)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
@@ -460,43 +421,43 @@ inline SynthesisResult synthesizeNodeInputs(const hipdnn_flatbuffers_sdk::data_o
     switch(node.attributes_type())
     {
     case NA::ConvolutionFwdAttributes:
-        return fillConvFwdInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillConvFwdInputs(node, tracker, rng);
     case NA::ConvolutionBwdAttributes:
-        return fillConvBwdDataInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillConvBwdDataInputs(node, tracker, rng);
     case NA::ConvolutionWrwAttributes:
-        return fillConvBwdWeightsInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillConvBwdWeightsInputs(node, tracker, rng);
     case NA::BatchnormInferenceAttributes:
-        return fillBatchnormInferenceInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBatchnormInferenceInputs(node, tracker, rng);
     case NA::BatchnormInferenceAttributesVarianceExt:
-        return fillBatchnormInferenceVarianceInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBatchnormInferenceVarianceInputs(node, tracker, rng);
     case NA::BatchnormAttributes:
-        return fillBatchnormTrainingInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBatchnormTrainingInputs(node, tracker, rng);
     case NA::BatchnormBackwardAttributes:
-        return fillBatchnormBackwardInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBatchnormBackwardInputs(node, tracker, rng);
     case NA::MatmulAttributes:
-        return fillMatmulInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillMatmulInputs(node, tracker, rng);
     case NA::PointwiseAttributes:
-        return fillPointwiseInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillPointwiseInputs(node, tracker, rng);
     case NA::ReductionAttributes:
-        return fillReductionInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillReductionInputs(node, tracker, rng);
     case NA::LayernormAttributes:
-        return fillLayernormInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillLayernormInputs(node, tracker, rng);
     case NA::LayernormBackwardAttributes:
-        return fillLayernormBackwardInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillLayernormBackwardInputs(node, tracker, rng);
     case NA::RMSNormAttributes:
-        return fillRmsnormInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillRmsnormInputs(node, tracker, rng);
     case NA::RMSNormBackwardAttributes:
-        return fillRmsnormBackwardInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillRmsnormBackwardInputs(node, tracker, rng);
     case NA::ResampleFwdAttributes:
-        return fillResampleFwdInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillResampleFwdInputs(node, tracker, rng);
     case NA::BlockScaleDequantizeAttributes:
-        return fillBlockScaleDequantizeInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBlockScaleDequantizeInputs(node, tracker, rng);
     case NA::BlockScaleQuantizeAttributes:
-        return fillBlockScaleQuantizeInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillBlockScaleQuantizeInputs(node, tracker, rng);
     case NA::SdpaAttributes:
-        return fillSdpaForwardInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillSdpaForwardInputs(node, tracker, rng);
     case NA::SdpaBackwardAttributes:
-        return fillSdpaBackwardInputs(node, ownedLeafInputUids, inputs, rng);
+        return fillSdpaBackwardInputs(node, tracker, rng);
     default:
         return SynthesisResult::unsupported("no input synthesis registered for this op");
     }
