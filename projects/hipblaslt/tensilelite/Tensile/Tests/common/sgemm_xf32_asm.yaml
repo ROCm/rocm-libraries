@@ -16,7 +16,7 @@ GlobalParameters:
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   KernelTime: True
-  PrintIndexAssignments: 1
+  PrintIndexAssignmentInfo: true
   # PrintSolutionRejectionReason: 1
   Device: 0
   PrintWinnersOnly: True

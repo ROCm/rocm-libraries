@@ -819,11 +819,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
     "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
     "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
-    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
-    #     dc2c963c Mar2025); kept so the one stale YAML
-    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
-    #     rename the YAML key to PrintIndexAssignmentInfo.
-    "PrintIndexAssignments",
     #   - Misplaced solution parameter: registered in
     #     defaultBenchmarkCommonParameters (solution-level), not
     #     globalParameters; YAMLs that put it under GlobalParameters:
