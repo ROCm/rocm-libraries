@@ -72,6 +72,10 @@ struct ROCFFT_FAIL : public std::runtime_error
     {                                                                               \
         GTEST_SKIP() << "Unimplemented exception: " << e.what();                    \
     }                                                                               \
+    catch(const std::exception& e)                                                  \
+    {                                                                               \
+        GTEST_FAIL() << e.what();                                                   \
+    }                                                                               \
     catch(...)                                                                      \
     {                                                                               \
         GTEST_FAIL() << "unidentified exception caught during test.";               \

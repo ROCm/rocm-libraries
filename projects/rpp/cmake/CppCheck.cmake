@@ -39,6 +39,7 @@ set(CPPCHECK_BUILD_DIR ${CMAKE_BINARY_DIR}/cppcheck-build)
 file(MAKE_DIRECTORY ${CPPCHECK_BUILD_DIR})
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${CPPCHECK_BUILD_DIR})
 
+## Enable a cppcheck analyzer target for the configured source set.
 macro(enable_cppcheck)
     set(options FORCE)
     set(oneValueArgs)

@@ -3,7 +3,7 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
@@ -22,7 +22,7 @@ GlobalParameters:
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
-  CodeObjectVersion: 4
+  CodeObjectVersion: "4"
   ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
