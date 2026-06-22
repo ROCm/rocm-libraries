@@ -410,6 +410,16 @@ int main(int argc, char** argv)
 
     if(rv.gs.adaptive)
     {
+        // Adaptive timing and graph mode are mutually exclusive: graph mode times a single
+        // fixed-count replay, while adaptive timing self-sizes and samples in a launch loop.
+        // Reject the combination rather than silently letting graph mode win.
+        if(rv.gs.graph_mode)
+        {
+            hipblaslt_cerr << "error: Adaptive and UseGraphMode cannot be enabled together"
+                           << std::endl;
+            return 1;
+        }
+
         hipblaslt_bench::TimingConfig tmp;
         tmp.min_iters           = rv.gs.min_iters;
         tmp.max_iters           = rv.gs.max_iters;
@@ -623,6 +633,8 @@ int main(int argc, char** argv)
     hipblaslt_bench::TimingResult timing;
     if(rv.gs.graph_mode)
     {
+        // Graph mode is mutually exclusive with adaptive timing (rejected at config load),
+        // so this fixed-count replay path never runs in adaptive mode.
         // Capture `iters` enqueues into a graph and time a single replay.
         CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
         for(int i = 0; i < iters; i++)
