@@ -6,7 +6,7 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   PruneSparseMode: 0
@@ -62,7 +62,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]
@@ -119,7 +119,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0, 1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -175,7 +175,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -230,7 +230,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]

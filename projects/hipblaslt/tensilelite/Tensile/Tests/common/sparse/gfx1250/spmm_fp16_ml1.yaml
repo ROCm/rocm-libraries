@@ -5,7 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: False
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -60,7 +60,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -72,7 +72,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
@@ -122,7 +122,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -134,7 +134,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
@@ -184,7 +184,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -196,7 +196,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
@@ -246,7 +246,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -258,7 +258,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
@@ -308,7 +308,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -320,12 +320,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -370,7 +370,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -382,12 +382,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [0,1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -432,7 +432,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -444,12 +444,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -494,7 +494,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [0]
         - LdsPadB: [0]
         - LdsPadMetadata: [0]
@@ -506,12 +506,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:

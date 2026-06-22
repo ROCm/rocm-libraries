@@ -200,6 +200,22 @@ class TestProviderEngineResult:
         assert d["provider"] == "pytorch"
         assert "comparison_to_baseline" not in d
 
+    def test_warnings_serialize_for_reference_timing_rows(self):
+        pe = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            role="reference",
+            warnings=[
+                "RMSNormBackwardAttributes uses a manual formula; "
+                "PyTorch reference timing is not solely built-in PyTorch operator time."
+            ],
+        )
+
+        d = pe.to_dict()
+
+        assert d["warnings"] == pe.warnings
+
     def test_error_serializes_without_timing(self):
         """ProviderEngineResult with status='error' serializes with
         status, error_message, no timing data."""

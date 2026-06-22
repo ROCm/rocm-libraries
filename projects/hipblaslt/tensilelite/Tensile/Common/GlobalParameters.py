@@ -197,6 +197,20 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
+# Each list entry causes ClientProblemFactory to replay every base
+# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
+# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
+# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
+# deterministically exercise both SK5 sub-paths in a single sweep run;
+# AUTO is supported as well, but in a sweep it leaves the per-launch
+# sub-path up to the runtime heuristic, so [0, 1] is preferred when
+# the YAML's job is sub-path coverage. AUTO is most useful when
+# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
+# to run the heuristic end-to-end on a real problem. Ignored at the
+# host for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
+globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -337,6 +351,9 @@ globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the
 
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
 
+# Enable SQTT markers around mainloop iteration (subtile kernels only).
+globalParameters["EmitMainloopTraceMarker"] = False
+
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
 # StinkyTofu debug level (applies per-PM: outer PM + each ScopeAdaptor inner PM)
@@ -377,6 +394,22 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 globalParameters["StinkyTofuEnableRemarks"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
+
+# Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
+# When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
+# probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
+# This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
+# must be set solely from the args.cpuOnly flag. Listed here so restoreDefaultGlobalParameters
+# resets it to False between runs/tests.
+globalParameters["CpuOnly"] = False
+
+# Companion plumbing for --cpu-only: the target gfx arch the belt spoof in
+# _detectGlobalCurrentISA returns when the direct ISA-detection path is reached
+# without an arch (e.g. a test calling detectGlobalCurrentISA directly). The primary
+# path supplies the arch via --gpu-targets and never reaches detection. Undocumented;
+# not exposed via --global-parameters. Reset here so restoreDefaultGlobalParameters
+# clears it between runs/tests.
+globalParameters["CpuOnlyArch"] = "gfx942"
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
@@ -454,6 +487,7 @@ defaultBenchmarkCommonParameters = [
     {"OptNoLoadLoop": [1]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
+    {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprMXSA": [False]},
@@ -905,18 +939,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
         printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
-
-    from .TypeValidationErrors import _STRICT_GATE_ENABLED
-
-    if not _STRICT_GATE_ENABLED:
-        for key in config:
-            if key in ignoreKeys:
-                continue
-            value = config[key]
-            if key not in globalParameters:
-                printWarning("Global parameter %s = %s unrecognised." % (key, value))
-            globalParameters[key] = value
-        return
 
     _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
