@@ -56,6 +56,8 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(tuple)
+#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -489,6 +491,16 @@ public:
       : m_iterator_tuple(iterator_tuple)
   {}
 
+  //! This constructor creates a new \p zip_iterator from multiple iterators.
+  //!
+  //! \param iterators The iterators to zip.
+  template <class... Iterators,
+            _THRUST_STD::enable_if_t<(sizeof...(Iterators) != 0), int>                                  = 0,
+            _THRUST_STD::enable_if_t<_THRUST_STD::is_constructible_v<IteratorTuple, Iterators...>, int> = 0>
+  inline THRUST_HOST_DEVICE zip_iterator(Iterators&&... iterators)
+      : m_iterator_tuple(_THRUST_STD::forward<Iterators>(iterators)...)
+  {}
+
   //! This copy constructor creates a new \p zip_iterator from another \p zip_iterator.
   //!
   //! \param other The \p zip_iterator to copy.
@@ -619,6 +631,9 @@ private:
 
   //! \endcond
 };
+
+template <class... Iterators>
+THRUST_HOST_DEVICE zip_iterator(Iterators...) -> zip_iterator<_THRUST_STD::tuple<Iterators...>>;
 
 //! \p make_zip_iterator creates a \p zip_iterator from a \p tuple of iterators.
 //!
