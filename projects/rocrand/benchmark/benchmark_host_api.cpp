@@ -19,99 +19,201 @@
 // THE SOFTWARE.
 
 #include "benchmark_host_api.hpp"
+#include <vector>
 
-#define QUEUE_POISSON(engine, ordering, poisson_lambda)                                \
-    executor.queue<host_api_benchmark<uint32_t, DISTRIBUTION_POISSON>>(engine,         \
-                                                                       ordering,       \
-                                                                       dimensions,     \
-                                                                       offset,         \
-                                                                       benchmark_host, \
-                                                                       poisson_lambda)
+template<typename T, auto Dist, typename EngineType, typename OrderingType, typename... Args>
+void queue_host_bench(primbench::executor& executor,
+                      EngineType           engine,
+                      OrderingType         ordering,
+                      size_t               dimensions,
+                      size_t               offset,
+                      bool                 benchmark_host,
+                      Args... args)
+{
+    executor.queue<host_api_benchmark<T, Dist>>(engine,
+                                                ordering,
+                                                dimensions,
+                                                offset,
+                                                benchmark_host,
+                                                args...);
+}
 
-#define QUEUE(T, engine, ordering, Distribution)                    \
-    executor.queue<host_api_benchmark<T, Distribution>>(engine,     \
-                                                        ordering,   \
-                                                        dimensions, \
-                                                        offset,     \
-                                                        benchmark_host)
-
-// HIP vs CUDA implementation differences:
-// - HIP (rocRAND) benchmarks sub-32-bit integers (`uint8_t`, `uint16_t`) and 
-//   half-precision floats (`__half`) across various distributions.
-// - CUDA (cuRAND) dynamically checks the `engine` type at runtime to route 
-//   `uint32_t` vs `unsigned long long` for uniform integer generation, and 
-//   only benchmarks standard `float` and `double` types.
+template<auto Engine, auto Ordering>
+void queue_host_permutations(primbench::executor&       executor,
+                             size_t                     dimensions,
+                             size_t                     offset,
+                             bool                       benchmark_host,
+                             const std::vector<double>& poisson_lambdas)
+{
 #ifdef __HIP__
-    #define QUEUE_DISTRIBUTIONS(engine, ordering)                     \
-        do                                                            \
-        {                                                             \
-            QUEUE(uint32_t, engine, ordering, DISTRIBUTION_UNIFORM);  \
-            QUEUE(uint8_t, engine, ordering, DISTRIBUTION_UNIFORM);   \
-            QUEUE(uint16_t, engine, ordering, DISTRIBUTION_UNIFORM);  \
-                                                                      \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_UNIFORM);    \
-            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);     \
-            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);    \
-                                                                      \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_NORMAL);     \
-            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);      \
-            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);     \
-                                                                      \
-            QUEUE(__half, engine, ordering, DISTRIBUTION_LOG_NORMAL); \
-            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);  \
-            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL); \
-                                                                      \
-            for(auto poisson_lambda : poisson_lambdas)                \
-            {                                                         \
-                QUEUE_POISSON(engine, ordering, poisson_lambda);      \
-            }                                                         \
-        }                                                             \
-        while(0)
+    queue_host_bench<uint32_t, DISTRIBUTION_UNIFORM>(executor,
+                                                     Engine,
+                                                     Ordering,
+                                                     dimensions,
+                                                     offset,
+                                                     benchmark_host);
+    queue_host_bench<uint8_t, DISTRIBUTION_UNIFORM>(executor,
+                                                    Engine,
+                                                    Ordering,
+                                                    dimensions,
+                                                    offset,
+                                                    benchmark_host);
+    queue_host_bench<uint16_t, DISTRIBUTION_UNIFORM>(executor,
+                                                     Engine,
+                                                     Ordering,
+                                                     dimensions,
+                                                     offset,
+                                                     benchmark_host);
+
+    queue_host_bench<__half, DISTRIBUTION_UNIFORM>(executor,
+                                                   Engine,
+                                                   Ordering,
+                                                   dimensions,
+                                                   offset,
+                                                   benchmark_host);
+    queue_host_bench<__half, DISTRIBUTION_NORMAL>(executor,
+                                                  Engine,
+                                                  Ordering,
+                                                  dimensions,
+                                                  offset,
+                                                  benchmark_host);
+    queue_host_bench<__half, DISTRIBUTION_LOG_NORMAL>(executor,
+                                                      Engine,
+                                                      Ordering,
+                                                      dimensions,
+                                                      offset,
+                                                      benchmark_host);
 #elif defined(__CUDACC__)
-    #define QUEUE_DISTRIBUTIONS(engine, ordering)                                                  \
-        do                                                                                         \
-        {                                                                                          \
-            if(engine != CURAND_RNG_QUASI_SOBOL64 && engine != CURAND_RNG_QUASI_SCRAMBLED_SOBOL64) \
-            {                                                                                      \
-                QUEUE(uint32_t, engine, ordering, DISTRIBUTION_UNIFORM);                           \
-            }                                                                                      \
-            else                                                                                   \
-            {                                                                                      \
-                QUEUE(unsigned long long, engine, ordering, DISTRIBUTION_UNIFORM);                 \
-            }                                                                                      \
-                                                                                                   \
-            QUEUE(float, engine, ordering, DISTRIBUTION_UNIFORM);                                  \
-            QUEUE(double, engine, ordering, DISTRIBUTION_UNIFORM);                                 \
-                                                                                                   \
-            QUEUE(float, engine, ordering, DISTRIBUTION_NORMAL);                                   \
-            QUEUE(double, engine, ordering, DISTRIBUTION_NORMAL);                                  \
-                                                                                                   \
-            QUEUE(float, engine, ordering, DISTRIBUTION_LOG_NORMAL);                               \
-            QUEUE(double, engine, ordering, DISTRIBUTION_LOG_NORMAL);                              \
-                                                                                                   \
-            for(auto poisson_lambda : poisson_lambdas)                                             \
-            {                                                                                      \
-                QUEUE_POISSON(engine, ordering, poisson_lambda);                                   \
-            }                                                                                      \
-        }                                                                                          \
-        while(0)
+    if constexpr(Engine == CURAND_RNG_QUASI_SOBOL64 || Engine == CURAND_RNG_QUASI_SCRAMBLED_SOBOL64)
+    {
+        queue_host_bench<unsigned long long, DISTRIBUTION_UNIFORM>(executor,
+                                                                   Engine,
+                                                                   Ordering,
+                                                                   dimensions,
+                                                                   offset,
+                                                                   benchmark_host);
+    }
+    else
+    {
+        queue_host_bench<uint32_t, DISTRIBUTION_UNIFORM>(executor,
+                                                         Engine,
+                                                         Ordering,
+                                                         dimensions,
+                                                         offset,
+                                                         benchmark_host);
+    }
 #endif
 
-// Quoting programmers-guide.rst:
-// ``ROCRAND_ORDERING_PSEUDO_DYNAMIC`` is not supported for generators
-// created with ``rocrand_create_generator_host``.
-#define QUEUE_PSEUDO(engine)                                           \
-    do                                                                 \
-    {                                                                  \
-        QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DEFAULT);     \
-        if(!benchmark_host)                                            \
-        {                                                              \
-            QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_PSEUDO_DYNAMIC); \
-        }                                                              \
-    }                                                                  \
-    while(0)
+    queue_host_bench<float, DISTRIBUTION_UNIFORM>(executor,
+                                                  Engine,
+                                                  Ordering,
+                                                  dimensions,
+                                                  offset,
+                                                  benchmark_host);
+    queue_host_bench<double, DISTRIBUTION_UNIFORM>(executor,
+                                                   Engine,
+                                                   Ordering,
+                                                   dimensions,
+                                                   offset,
+                                                   benchmark_host);
 
-#define QUEUE_QUASI(engine) QUEUE_DISTRIBUTIONS(engine, RAND_ORDERING_QUASI_DEFAULT)
+    queue_host_bench<float, DISTRIBUTION_NORMAL>(executor,
+                                                 Engine,
+                                                 Ordering,
+                                                 dimensions,
+                                                 offset,
+                                                 benchmark_host);
+    queue_host_bench<double, DISTRIBUTION_NORMAL>(executor,
+                                                  Engine,
+                                                  Ordering,
+                                                  dimensions,
+                                                  offset,
+                                                  benchmark_host);
+
+    queue_host_bench<float, DISTRIBUTION_LOG_NORMAL>(executor,
+                                                     Engine,
+                                                     Ordering,
+                                                     dimensions,
+                                                     offset,
+                                                     benchmark_host);
+    queue_host_bench<double, DISTRIBUTION_LOG_NORMAL>(executor,
+                                                      Engine,
+                                                      Ordering,
+                                                      dimensions,
+                                                      offset,
+                                                      benchmark_host);
+
+    for(double lambda : poisson_lambdas)
+    {
+        queue_host_bench<uint32_t, DISTRIBUTION_POISSON>(executor,
+                                                         Engine,
+                                                         Ordering,
+                                                         dimensions,
+                                                         offset,
+                                                         benchmark_host,
+                                                         lambda);
+    }
+}
+
+template<auto Engine>
+void queue_host_pseudo_permutations(primbench::executor&       executor,
+                                    size_t                     dimensions,
+                                    size_t                     offset,
+                                    bool                       benchmark_host,
+                                    const std::vector<double>& poisson_lambdas)
+{
+    queue_host_permutations<Engine, RAND_ORDERING_PSEUDO_DEFAULT>(executor,
+                                                                  dimensions,
+                                                                  offset,
+                                                                  benchmark_host,
+                                                                  poisson_lambdas);
+
+    if(!benchmark_host)
+    {
+        queue_host_permutations<Engine, RAND_ORDERING_PSEUDO_DYNAMIC>(executor,
+                                                                      dimensions,
+                                                                      offset,
+                                                                      benchmark_host,
+                                                                      poisson_lambdas);
+    }
+}
+
+template<auto EngineVal, auto OrderingVal>
+struct engine_ordering
+{
+    static constexpr auto Engine   = EngineVal;
+    static constexpr auto Ordering = OrderingVal;
+};
+
+template<auto... Engines>
+void queue_all_pseudo_permutations(primbench::executor&       executor,
+                                   size_t                     dimensions,
+                                   size_t                     offset,
+                                   bool                       benchmark_host,
+                                   const std::vector<double>& poisson_lambdas)
+{
+    (queue_host_pseudo_permutations<Engines>(executor,
+                                             dimensions,
+                                             offset,
+                                             benchmark_host,
+                                             poisson_lambdas),
+     ...);
+}
+
+template<typename... Configs>
+void queue_all_permutations(primbench::executor&       executor,
+                            size_t                     dimensions,
+                            size_t                     offset,
+                            bool                       benchmark_host,
+                            const std::vector<double>& poisson_lambdas)
+{
+    (queue_host_permutations<Configs::Engine, Configs::Ordering>(executor,
+                                                                 dimensions,
+                                                                 offset,
+                                                                 benchmark_host,
+                                                                 poisson_lambdas),
+     ...);
+}
 
 int main(int argc, char* argv[])
 {
@@ -125,43 +227,62 @@ int main(int argc, char* argv[])
 
     auto dimensions
         = executor.get<size_t>("dimensions", 1, "Number of dimensions of quasi-random values");
-
     auto offset = executor.get<size_t>("offset", 0, "Offset of generated pseudo-random values");
-
+    auto benchmark_host
+        = executor.get<bool>("host", false, "Run benchmarks on the host instead of on the device");
     auto poisson_lambdas = executor.get<std::vector<double>>(
         "lambda",
         {10.0},
         "Space-separated list of lambdas of Poisson distribution");
 
-    auto benchmark_host
-        = executor.get<bool>("host", false, "Run benchmarks on the host instead of on the device");
-
 #ifdef __HIP__
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_LFSR113);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_MRG31K3P);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_MRG32K3A);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_MTGP32);
-    QUEUE_DISTRIBUTIONS(ROCRAND_RNG_PSEUDO_MT19937, ROCRAND_ORDERING_PSEUDO_DEFAULT);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_PHILOX4_32_10);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_THREEFRY2_32_20);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_THREEFRY2_64_20);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_THREEFRY4_32_20);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_THREEFRY4_64_20);
-    QUEUE_PSEUDO(ROCRAND_RNG_PSEUDO_XORWOW);
-    QUEUE_QUASI(ROCRAND_RNG_QUASI_SOBOL32);
-    QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    QUEUE_QUASI(ROCRAND_RNG_QUASI_SOBOL64);
-    QUEUE_QUASI(ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+    queue_all_pseudo_permutations<ROCRAND_RNG_PSEUDO_LFSR113,
+                                  ROCRAND_RNG_PSEUDO_MRG31K3P,
+                                  ROCRAND_RNG_PSEUDO_MRG32K3A,
+                                  ROCRAND_RNG_PSEUDO_MTGP32,
+                                  ROCRAND_RNG_PSEUDO_PHILOX4_32_10,
+                                  ROCRAND_RNG_PSEUDO_THREEFRY2_32_20,
+                                  ROCRAND_RNG_PSEUDO_THREEFRY2_64_20,
+                                  ROCRAND_RNG_PSEUDO_THREEFRY4_32_20,
+                                  ROCRAND_RNG_PSEUDO_THREEFRY4_64_20,
+                                  ROCRAND_RNG_PSEUDO_XORWOW>(executor,
+                                                             dimensions,
+                                                             offset,
+                                                             benchmark_host,
+                                                             poisson_lambdas);
+
+    queue_all_permutations<
+        engine_ordering<ROCRAND_RNG_PSEUDO_MT19937, ROCRAND_ORDERING_PSEUDO_DEFAULT>,
+        engine_ordering<ROCRAND_RNG_QUASI_SOBOL32, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<ROCRAND_RNG_QUASI_SOBOL64, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64, RAND_ORDERING_QUASI_DEFAULT>>(
+        executor,
+        dimensions,
+        offset,
+        benchmark_host,
+        poisson_lambdas);
 #elif defined(__CUDACC__)
-    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MRG32K3A);
-    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_MTGP32);
-    QUEUE_DISTRIBUTIONS(CURAND_RNG_PSEUDO_MT19937, CURAND_ORDERING_PSEUDO_DEFAULT);
-    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_PHILOX4_32_10);
-    QUEUE_PSEUDO(CURAND_RNG_PSEUDO_XORWOW);
-    QUEUE_QUASI(CURAND_RNG_QUASI_SOBOL32);
-    QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL32);
-    QUEUE_QUASI(CURAND_RNG_QUASI_SOBOL64);
-    QUEUE_QUASI(CURAND_RNG_QUASI_SCRAMBLED_SOBOL64);
+    queue_all_pseudo_permutations<CURAND_RNG_PSEUDO_MRG32K3A,
+                                  CURAND_RNG_PSEUDO_MTGP32,
+                                  CURAND_RNG_PSEUDO_PHILOX4_32_10,
+                                  CURAND_RNG_PSEUDO_XORWOW>(executor,
+                                                            dimensions,
+                                                            offset,
+                                                            benchmark_host,
+                                                            poisson_lambdas);
+
+    queue_all_permutations<
+        engine_ordering<CURAND_RNG_PSEUDO_MT19937, CURAND_ORDERING_PSEUDO_DEFAULT>,
+        engine_ordering<CURAND_RNG_QUASI_SOBOL32, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<CURAND_RNG_QUASI_SCRAMBLED_SOBOL32, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<CURAND_RNG_QUASI_SOBOL64, RAND_ORDERING_QUASI_DEFAULT>,
+        engine_ordering<CURAND_RNG_QUASI_SCRAMBLED_SOBOL64, RAND_ORDERING_QUASI_DEFAULT>>(
+        executor,
+        dimensions,
+        offset,
+        benchmark_host,
+        poisson_lambdas);
 #endif
 
     executor.run();
