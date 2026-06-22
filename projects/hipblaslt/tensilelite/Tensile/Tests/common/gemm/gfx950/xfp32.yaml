@@ -54,7 +54,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
         - DirectToLds: [0,1]
@@ -62,7 +62,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [4]
         - VectorWidthA: [-1,4,1]
         - VectorWidthB: [-1,4,1]
-        - TailloopInNll: [0,1]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -84,9 +84,9 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ClusterLocalRead: [0, 1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [4]
@@ -130,7 +130,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -164,10 +164,10 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
-        - TailloopInNll: [0,1]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -187,9 +187,9 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ClusterLocalRead: [0, 1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [4]
@@ -233,7 +233,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
         - UsePLRPack: [0,1]
@@ -271,11 +271,11 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
         - DirectToLds: [0,1]
-        - TailloopInNll: [0,1]
+        - TailloopInNll: [false, true]
         - ClusterLocalRead: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -303,7 +303,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,1]
         - VectorWidthB: [-1,1]
         - UsePLRPack: [0,1]
@@ -340,8 +340,8 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - TailloopInNll: [0,1]
+        - SourceSwap: [true]
+        - TailloopInNll: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -368,7 +368,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,4]
         - GlobalReadVectorWidthB: [1,2,4]
         - LocalReadVectorWidth: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
         - UsePLRPack: [0,1]

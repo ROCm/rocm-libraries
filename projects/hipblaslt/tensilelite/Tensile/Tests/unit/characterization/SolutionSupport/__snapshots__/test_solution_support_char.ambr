@@ -1,0 +1,280 @@
+# serializer version: 1
+# name: test_activation_args_all_with_enum
+  dict({
+    'settings': list([
+      'Relu',
+    ]),
+    'total': 1,
+  })
+# ---
+# name: test_activation_args_none_early_return
+  dict({
+    'settings': 0,
+    'str': '''
+      ActivationArgs
+  
+    ''',
+    'total': 0,
+  })
+# ---
+# name: test_activation_args_specific_type_branch
+  dict({
+    'settings': list([
+      'Relu',
+    ]),
+    'total': 1,
+  })
+# ---
+# name: test_bias_type_args_disabled
+  dict({
+    'biasTypes': list([
+    ]),
+    'str': '''
+      BiasTypesArgs
+  
+    ''',
+    'total': 0,
+  })
+# ---
+# name: test_bias_type_args_enabled
+  dict({
+    'biasTypes': list([
+      'Float',
+    ]),
+    'total': 1,
+  })
+# ---
+# name: test_bias_type_args_unsupported_dtype_warns
+  dict({
+    'biasTypes': list([
+      'Double',
+    ]),
+    'total': 1,
+  })
+# ---
+# name: test_collector_get_returns_copy
+  dict({
+    'UseBeta|int|bool': dict({
+      'count': 999,
+      'files': list([
+        'a.yaml',
+      ]),
+      'values': list([
+        '0',
+        '1',
+      ]),
+    }),
+  })
+# ---
+# name: test_collector_merge_new_and_existing
+  dict({
+    'A|int|bool': dict({
+      'count': 3,
+      'files': list([
+        'x.yaml',
+        'y.yaml',
+      ]),
+      'values': list([
+        '0',
+        '1',
+      ]),
+    }),
+    'B|float|int': dict({
+      'count': 5,
+      'files': list([
+        'z.yaml',
+      ]),
+      'values': list([
+        '1.5',
+      ]),
+    }),
+  })
+# ---
+# name: test_factor_dim_args_bad_dim_warns
+  dict({
+    'factorDims': list([
+      0,
+      5,
+    ]),
+    'total': 2,
+  })
+# ---
+# name: test_factor_dim_args_disabled
+  dict({
+    'factorDims': list([
+    ]),
+    'str': '''
+      FactorDimArgs
+  
+    ''',
+    'total': 0,
+  })
+# ---
+# name: test_factor_dim_args_enabled
+  dict({
+    'factorDims': list([
+      0,
+      1,
+    ]),
+    'total': 2,
+  })
+# ---
+# name: test_fbs_enum
+  dict({
+    'Batch': 1,
+    'Free': 0,
+    'Sum': 2,
+  })
+# ---
+# name: test_get_expected_types_synthetic
+  dict({
+    'BoolParam': list([
+      'bool',
+    ]),
+    'IntParam': list([
+      'int',
+    ]),
+    'MixedParam': list([
+      'int',
+      'str',
+    ]),
+    'StrParam': list([
+      'str',
+    ]),
+  })
+# ---
+# name: test_is_extractable_index[A]
+  dict({
+    0: True,
+    3: False,
+    9: False,
+  })
+# ---
+# name: test_is_extractable_index[B]
+  dict({
+    0: False,
+    3: True,
+    9: False,
+  })
+# ---
+# name: test_is_extractable_index[x]
+  dict({
+    0: True,
+    3: True,
+    9: False,
+  })
+# ---
+# name: test_is_packed_index
+  dict({
+    'free0_packed': True,
+    'indices_free': list([
+      0,
+      1,
+    ]),
+    'nonfree_packed': False,
+  })
+# ---
+# name: test_print_summary_empty_returns_zero
+  dict({
+    'return': 0,
+    'stdout': '',
+  })
+# ---
+# name: test_print_summary_empty_with_files
+  dict({
+    'return': 0,
+    'stdout': '''
+      Checked 7 YAML logic files - no type mismatches found.
+  
+    ''',
+  })
+# ---
+# name: test_print_summary_populated
+  dict({
+    'return': 4,
+    'stdout': '''
+      
+      ===========================================================
+      WARNING: YAML parameter type mismatches detected (4 total across 2 files):
+      ===========================================================
+        DepthU: found float in 1 solutions (values: 8.0) - expected int
+        UseBeta: found int in 3 solutions (values: 0, 1) - expected bool
+      -----------------------------------------------------------
+        This will cause std::bad_cast at runtime because msgpack
+        serializes bool and int as different wire types.
+        Fix these to prevent future build failures.
+      ===========================================================
+  
+    ''',
+  })
+# ---
+# name: test_skip_type_check_roster
+  list([
+    'ComputeDataType',
+    'DataType',
+    'DataTypeA',
+    'DataTypeAmaxA',
+    'DataTypeAmaxB',
+    'DataTypeAmaxC',
+    'DataTypeAmaxD',
+    'DataTypeB',
+    'DataTypeC',
+    'DataTypeD',
+    'DataTypeE',
+    'DataTypeMXSA',
+    'DataTypeMXSB',
+    'DestDataType',
+    'F32XdlMathOp',
+    'ISA',
+    'MacDataTypeA',
+    'MacDataTypeB',
+  ])
+# ---
+# name: test_validate_clean
+  dict({
+  })
+# ---
+# name: test_validate_mismatch_accumulates
+  dict({
+    'BufferLoad|int|bool': dict({
+      'count': 2,
+      'files': list([
+        'a.yaml',
+        'b.yaml',
+      ]),
+      'values': list([
+        '1',
+        '2',
+      ]),
+    }),
+  })
+# ---
+# name: test_validate_mismatch_no_srcfile
+  dict({
+    'BufferLoad|int|bool': dict({
+      'count': 1,
+      'files': list([
+      ]),
+      'values': list([
+        '1',
+      ]),
+    }),
+  })
+# ---
+# name: test_validate_mismatch_with_srcfile
+  dict({
+    'BufferLoad|int|bool': dict({
+      'count': 1,
+      'files': list([
+        'f.yaml',
+      ]),
+      'values': list([
+        '1',
+      ]),
+    }),
+  })
+# ---
+# name: test_validate_skips_unknown_and_skiplist
+  dict({
+  })
+# ---

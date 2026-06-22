@@ -808,7 +808,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     Tensor<double> k({1, 1, 2, 2});
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
-    Tensor<float> lse({1, 1, 2});
+    Tensor<float> lse({1, 1, 2, 1});
 
     q.fillWithValue(0.0);
     k.fillWithValue(0.0);
@@ -837,14 +837,14 @@ TEST(TestCpuFpReferenceSdpaFp64, LseOutputMatchesFormula)
     const float sumExp0 = std::exp(scale - maxVal0) + std::exp(0.0f - maxVal0);
     const float expectedLse0 = maxVal0 + std::log(sumExp0);
 
-    EXPECT_NEAR(lse.getHostValue(0, 0, 0), expectedLse0, 1e-5f);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), expectedLse0, 1e-5f);
 
     // For sq=1: dot products are [0,1] → scores = [0, scale]
     const float maxVal1 = scale;
     const float sumExp1 = std::exp(0.0f - maxVal1) + std::exp(scale - maxVal1);
     const float expectedLse1 = maxVal1 + std::log(sumExp1);
 
-    EXPECT_NEAR(lse.getHostValue(0, 0, 1), expectedLse1, 1e-5f);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 1, 0), expectedLse1, 1e-5f);
 }
 
 TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
@@ -856,7 +856,7 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
     Tensor<InT> k({1, 2, 4, 8});
     Tensor<InT> v({1, 2, 4, 8});
     Tensor<InT> o({1, 2, 4, 8});
-    Tensor<float> lse({1, 2, 4});
+    Tensor<float> lse({1, 2, 4, 1});
 
     q.fillWithRandomValues(safeTestTypeCast<InT>(-1.0f), safeTestTypeCast<InT>(1.0f), 100);
     k.fillWithRandomValues(safeTestTypeCast<InT>(-1.0f), safeTestTypeCast<InT>(1.0f), 101);
@@ -872,7 +872,7 @@ TYPED_TEST(CpuFpReferenceSdpaFwd, LseAlwaysFloatType)
         {
             for(int sq = 0; sq < 4; ++sq)
             {
-                const float lseVal = lse.getHostValue(b, h, sq);
+                const float lseVal = lse.getHostValue(b, h, sq, 0);
                 EXPECT_FALSE(std::isnan(lseVal)) << "NaN at [" << b << "," << h << "," << sq << "]";
                 // LSE typically in range [-10, 10] for random inputs with default scale
                 EXPECT_GT(lseVal, -20.0f)
@@ -892,7 +892,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
     Tensor<double> k({2, 4, 16, 32});
     Tensor<double> v({2, 4, 16, 32});
     Tensor<double> o({2, 4, 16, 32});
-    Tensor<float> lse({2, 4, 16});
+    Tensor<float> lse({2, 4, 16, 1});
 
     q.fillWithRandomValues(-1.0, 1.0, 200);
     k.fillWithRandomValues(-1.0, 1.0, 201);
@@ -908,7 +908,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithMultipleBatchHeads)
         {
             for(int sq = 0; sq < 16; ++sq)
             {
-                const float lseVal = lse.getHostValue(b, h, sq);
+                const float lseVal = lse.getHostValue(b, h, sq, 0);
                 EXPECT_TRUE(std::isfinite(lseVal))
                     << "LSE not finite at [" << b << "," << h << "," << sq << "]";
             }
@@ -925,7 +925,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     Tensor<double> k({1, 1, 4, 8});
     Tensor<double> v({1, 1, 4, 8});
     Tensor<double> o({1, 1, 4, 8});
-    Tensor<float> lse({1, 1, 4});
+    Tensor<float> lse({1, 1, 4, 1});
 
     q.fillWithValue(1.0);
     k.fillWithValue(1.0);
@@ -939,10 +939,10 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithCausalMask)
     // sq=3: 4 valid positions → larger sumExp → larger LSE
     // LSE should increase monotonically as sq increases
 
-    const float lse0 = lse.getHostValue(0, 0, 0);
-    const float lse1 = lse.getHostValue(0, 0, 1);
-    const float lse2 = lse.getHostValue(0, 0, 2);
-    const float lse3 = lse.getHostValue(0, 0, 3);
+    const float lse0 = lse.getHostValue(0, 0, 0, 0);
+    const float lse1 = lse.getHostValue(0, 0, 1, 0);
+    const float lse2 = lse.getHostValue(0, 0, 2, 0);
+    const float lse3 = lse.getHostValue(0, 0, 3, 0);
 
     EXPECT_LT(lse0, lse1) << "LSE should increase with more unmasked positions";
     EXPECT_LT(lse1, lse2);
@@ -958,7 +958,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     Tensor<double> k({1, 1, 2, 2});
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
-    Tensor<float> lse({1, 1, 2});
+    Tensor<float> lse({1, 1, 2, 1});
 
     q.fillWithValue(1.0);
     k.fillWithValue(1.0);
@@ -976,14 +976,14 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithFullyMaskedRow)
     CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, maskPtr, false, &lse);
 
     // sq=0: all masked → LSE = -inf (or NaN due to -inf - (-inf) in exp)
-    const float lse0 = lse.getHostValue(0, 0, 0);
+    const float lse0 = lse.getHostValue(0, 0, 0, 0);
     // When all scores are -inf: maxVal = -inf, exp(-inf - (-inf)) = exp(NaN) = NaN
     // So LSE may be NaN rather than -inf. Both indicate "no valid attention weights"
     EXPECT_TRUE((std::isinf(lse0) && lse0 < 0) || std::isnan(lse0))
         << "LSE should be -inf or NaN for fully masked row, got: " << lse0;
 
     // sq=1: normal → LSE finite
-    const float lse1 = lse.getHostValue(0, 0, 1);
+    const float lse1 = lse.getHostValue(0, 0, 1, 0);
     EXPECT_TRUE(std::isfinite(lse1)) << "LSE should be finite for normal row";
 }
 
@@ -996,8 +996,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o1({1, 1, 2, 2});
     Tensor<double> o2({1, 1, 2, 2});
-    Tensor<float> lse1({1, 1, 2});
-    Tensor<float> lse2({1, 1, 2});
+    Tensor<float> lse1({1, 1, 2, 1});
+    Tensor<float> lse2({1, 1, 2, 1});
 
     // One-hot Q/K for predictable scores
     q.fillWithValue(0.0);
@@ -1020,8 +1020,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithAdditiveMask)
     CpuFpReferenceSdpa::forward(q, k, v, o2, std::nullopt, &mask, false, &lse2);
 
     // LSE should differ between masked and unmasked cases
-    const float lseNomask = lse1.getHostValue(0, 0, 0);
-    const float lseWithmask = lse2.getHostValue(0, 0, 0);
+    const float lseNomask = lse1.getHostValue(0, 0, 0, 0);
+    const float lseWithmask = lse2.getHostValue(0, 0, 0, 0);
 
     EXPECT_NE(lseNomask, lseWithmask) << "LSE should change with additive mask";
 
@@ -1036,8 +1036,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongRank)
     Tensor<double> v({1, 1, 2, 2});
     Tensor<double> o({1, 1, 2, 2});
 
-    // Wrong rank: rank-4 instead of rank-3
-    Tensor<float> lseWrong({1, 1, 2, 1});
+    // Wrong rank: rank-3 instead of rank-4
+    Tensor<float> lseWrong({1, 1, 2});
 
     EXPECT_THROW(
         {
@@ -1057,8 +1057,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWrongShape)
     Tensor<double> v({2, 4, 16, 32});
     Tensor<double> o({2, 4, 16, 32});
 
-    // Wrong shape: [2, 4, 8] instead of [2, 4, 16]
-    Tensor<float> lseWrong({2, 4, 8});
+    // Wrong shape: [2, 4, 8, 1] instead of [2, 4, 16, 1]
+    Tensor<float> lseWrong({2, 4, 8, 1});
 
     EXPECT_THROW(
         {
@@ -1078,8 +1078,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseMismatchedBatch)
     Tensor<double> v({2, 1, 4, 8});
     Tensor<double> o({2, 1, 4, 8});
 
-    // Wrong batch: [1, 1, 4] instead of [2, 1, 4]
-    Tensor<float> lseWrong({1, 1, 4});
+    // Wrong batch: [1, 1, 4, 1] instead of [2, 1, 4, 1]
+    Tensor<float> lseWrong({1, 1, 4, 1});
 
     EXPECT_THROW(
         {
@@ -1101,7 +1101,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
     Tensor<double> k({1, 2, 16, 32});
     Tensor<double> v({1, 2, 16, 32});
     Tensor<double> o({1, 8, 16, 32});
-    Tensor<float> lse({1, 8, 16});
+    Tensor<float> lse({1, 8, 16, 1});
 
     q.fillWithRandomValues(-1.0, 1.0, 300);
     k.fillWithRandomValues(-1.0, 1.0, 301);
@@ -1115,7 +1115,7 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
     {
         for(int sq = 0; sq < 16; ++sq)
         {
-            const float lseVal = lse.getHostValue(0, h, sq);
+            const float lseVal = lse.getHostValue(0, h, sq, 0);
             EXPECT_TRUE(std::isfinite(lseVal)) << "LSE not finite at h=" << h << ", sq=" << sq;
             EXPECT_GT(lseVal, -20.0f);
             EXPECT_LT(lseVal, 20.0f);
@@ -1124,8 +1124,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LseWithGqa)
 
     // Different Q heads using same KV head should have different LSE
     // (because Q differs, even though K/V are shared)
-    const float lseH0 = lse.getHostValue(0, 0, 0);
-    const float lseH1 = lse.getHostValue(0, 1, 0);
+    const float lseH0 = lse.getHostValue(0, 0, 0, 0);
+    const float lseH1 = lse.getHostValue(0, 1, 0, 0);
 
     // With random Q, LSE should almost certainly differ
     EXPECT_NE(lseH0, lseH1) << "LSE should differ for different Q heads even with shared KV";
@@ -1373,7 +1373,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardWithLSE)
     Tensor<float> k({1, 2, 4, 8});
     Tensor<float> v({1, 2, 4, 8});
     Tensor<float> o({1, 2, 4, 8});
-    Tensor<float> lse({1, 2, 4});
+    Tensor<float> lse({1, 2, 4, 1});
     Tensor<float> dO({1, 2, 4, 8});
     Tensor<float> dQWithLse({1, 2, 4, 8});
     Tensor<float> dKWithLse({1, 2, 4, 8});
@@ -2083,7 +2083,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongRank)
     Tensor<float> dQ({1, 1, 4, 8});
     Tensor<float> dK({1, 1, 4, 8});
     Tensor<float> dV({1, 1, 4, 8});
-    Tensor<float> lseWrong({1, 1, 4, 1}); // rank-4 instead of rank-3
+    Tensor<float> lseWrong({1, 1, 4}); // rank-3 instead of rank-4
 
     q.fillWithRandomValues(-1.0f, 1.0f, 700);
     k.fillWithRandomValues(-1.0f, 1.0f, 701);
@@ -2106,7 +2106,7 @@ TEST(TestCpuFpReferenceSdpaBwd, BackwardLseWrongShape)
     Tensor<float> dQ({2, 4, 16, 8});
     Tensor<float> dK({2, 4, 16, 8});
     Tensor<float> dV({2, 4, 16, 8});
-    Tensor<float> lseWrong({2, 4, 8}); // Sq=8 instead of Sq=16
+    Tensor<float> lseWrong({2, 4, 8, 1}); // Sq=8 instead of Sq=16
 
     q.fillWithRandomValues(-1.0f, 1.0f, 710);
     k.fillWithRandomValues(-1.0f, 1.0f, 711);

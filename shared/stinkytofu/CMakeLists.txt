@@ -176,38 +176,62 @@ set(STINKYTOFU_GENERATED_SOURCES
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
-target_link_libraries(stinkytofu PRIVATE stinkytofu-warnings)
+
+# dladdr() used in IntrinsicRegistry.cpp requires -ldl
+# Threads required for std::call_once (separate libpthread on glibc < 2.34)
+find_package(Threads REQUIRED)
+
+# Private link deps shared by stinkytofu_objs, stinkytofu, and stinkytofu_static.
+# All three need the same libraries for linking/include propagation.
+set(STINKYTOFU_PRIVATE_LINK_LIBS
+    stinkytofu-warnings
+    amd_comgr
+    ${CMAKE_DL_LIBS}
+    Threads::Threads
+)
+
+# Public include dirs shared by stinkytofu and stinkytofu_static.
+set(STINKYTOFU_PUBLIC_INCLUDE_DIRS
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+)
+
+# All sources are compiled once into an OBJECT library. The shared/static
+# stinkytofu targets and the test-only stinkytofu_static target all reuse
+# these object files, avoiding redundant compilation.
+add_library(stinkytofu_objs OBJECT ${STINKYTOFU_GENERATED_SOURCES})
+# OBJECT libraries don't inherit -fPIC from their consumers on Linux; set it explicitly.
+set_property(TARGET stinkytofu_objs PROPERTY POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(stinkytofu_objs PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+# CMake auto-defines <target>_EXPORTS for SHARED/STATIC targets but not for
+# OBJECT libraries. Explicitly define stinkytofu_EXPORTS so STINKYTOFU_EXPORT
+# expands to dllexport (not dllimport) when compiling the object files.
+target_compile_definitions(stinkytofu_objs PRIVATE stinkytofu_EXPORTS)
+target_include_directories(stinkytofu_objs
+    PRIVATE
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
+        "${TABLEGEN_OUTPUT_DIR}"
+        "${HW_ARCH_HEADERS_DIR}"
+)
+add_dependencies(stinkytofu_objs tablegen_generated)
+
+# stinkytofu: shared (default) or static depending on BUILD_SHARED_LIBS.
+# External consumers (rocisa, stinkytofu-opt) link this target.
+# stinkytofu_objs is PRIVATE so it does not appear in the install export set.
+# Public include dirs are set directly on stinkytofu so consumers get them.
+add_library(stinkytofu $<TARGET_OBJECTS:stinkytofu_objs>)
+target_link_libraries(stinkytofu PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+target_include_directories(stinkytofu
+    PUBLIC
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
+        $<INSTALL_INTERFACE:include/stinkytofu>
+)
 set_target_properties(stinkytofu PROPERTIES
     VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
     SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
 if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
 endif()
-target_include_directories(stinkytofu
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:include/stinkytofu>
-    PRIVATE
-        # Make the generated files' directories available to the library
-        # This allows source files to #include the generated .inc files
-        "${TABLEGEN_OUTPUT_DIR}"
-        # Generated GfxXXX.hpp and ArchHelper_includes.inc (from hardware/CMakeLists.txt)
-        # PRIVATE: do not expose to consumers of stinkytofu
-        "${HW_ARCH_HEADERS_DIR}"
-)
-
-# Make stinkytofu depend on the generated ISA definition files from tablegen
-# This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
-add_dependencies(stinkytofu tablegen_generated)
-
-# dladdr() used in IntrinsicRegistry.cpp requires -ldl
-# Threads required for std::call_once (separate libpthread on glibc < 2.34)
-find_package(Threads REQUIRED)
-target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
-
-target_link_libraries(stinkytofu PRIVATE amd_comgr)
 
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
@@ -224,6 +248,20 @@ endif()
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)
+
+# When building shared + tests: provide a static twin so unit_tests can access
+# non-exported symbols for white-box coverage testing. Not needed when
+# BUILD_SHARED_LIBS=OFF because stinkytofu itself is already a static lib.
+if(BUILD_SHARED_LIBS AND STINKYTOFU_BUILD_TESTS)
+    add_library(stinkytofu_static STATIC $<TARGET_OBJECTS:stinkytofu_objs>)
+    target_link_libraries(stinkytofu_static PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+    target_include_directories(stinkytofu_static PUBLIC ${STINKYTOFU_PUBLIC_INCLUDE_DIRS})
+    target_compile_definitions(stinkytofu_static PUBLIC STINKYTOFU_STATIC)
+    if(WIN32)
+        target_link_options(stinkytofu_static INTERFACE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu_static INTERFACE delayimp)
+    endif()
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Example plugins
