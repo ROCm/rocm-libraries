@@ -136,6 +136,12 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
                 MmaOp::kCMPerLane / MmaOp::kCMNumAccess; // Tentative
             static constexpr index_t kN = MmaOp::kN;     // Tentative
             static constexpr index_t kM = MmaOp::kM;     // Tentative
+
+            // Seems to be entire M size excluding blocks. Dubious for gfx1250, needs attention.
+            static constexpr index_t kAMLane =
+                is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>
+                    ? 16
+                    : MmaOp::kM / MmaOp::kCMBlocks;
         };
     };
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
