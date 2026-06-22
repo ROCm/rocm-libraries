@@ -808,11 +808,10 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         static_assert(PipelineType != MxGemmPipelineType::WeightPreshuffle);
 
 #if !defined(CK_USE_GFX950)
-        (void)Ms;
-        (void)Ns;
-        (void)Ks;
+        (void)M;
+        (void)N;
+        (void)K;
         (void)kbatch;
-        (void)group_count;
         GTEST_SKIP() << "RunAllGpu requires CK_USE_GFX950.";
 #else
         using namespace ck_tile::literals;

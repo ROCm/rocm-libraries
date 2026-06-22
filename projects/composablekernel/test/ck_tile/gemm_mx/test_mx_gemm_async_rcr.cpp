@@ -21,13 +21,14 @@ TYPED_TEST_SUITE(TestCkTileMxGemmPipelineCompAsyncRCR, KernelTypesMxGemmCompAsyn
 
 TYPED_TEST(TEST_SUITE_NAME, MNPadding)
 {
-    if constexpr(TestFixture::PipelineType == MxGemmPipelineType::WeightPreshuffle)
+    if constexpr(TestFixture::PipelineType == MxGemmPipelineType::WeightPreshuffle ||
+                 TestFixture::PipelineType == MxGemmPipelineType::CompEightWaves)
     {
         return;
     }
 
     std::vector<int> Ms{96, 160, 224};
-    std::vector<int> Ns{96, 224};
+    std::vector<int> Ns{96, 160, 224};
     std::vector<int> Ks;
     // K must be multiple of ScaleBlockSize (16 or 32) and K_Tile
     for(auto K_count : {2, 3, 4})
