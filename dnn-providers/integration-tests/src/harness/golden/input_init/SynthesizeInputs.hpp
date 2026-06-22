@@ -37,7 +37,7 @@ inline SynthesisResult fillConvFwdInputs(const hipdnn_flatbuffers_sdk::data_obje
                                      std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionFwdAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not ConvolutionFwdAttributes");
     }
@@ -53,7 +53,7 @@ inline SynthesisResult fillConvBwdDataInputs(const hipdnn_flatbuffers_sdk::data_
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionBwdAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not ConvolutionBwdAttributes");
     }
@@ -69,7 +69,7 @@ inline SynthesisResult fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::da
                                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionWrwAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not ConvolutionWrwAttributes");
     }
@@ -88,7 +88,7 @@ inline SynthesisResult fillBatchnormInferenceInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BatchnormInferenceAttributes");
     }
@@ -108,7 +108,7 @@ inline SynthesisResult fillBatchnormInferenceVarianceInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BatchnormInferenceAttributesVarianceExt");
     }
@@ -131,7 +131,7 @@ inline SynthesisResult fillBatchnormTrainingInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BatchnormAttributes");
     }
@@ -163,7 +163,7 @@ inline SynthesisResult fillBatchnormBackwardInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormBackwardAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BatchnormBackwardAttributes");
     }
@@ -193,7 +193,7 @@ inline SynthesisResult fillMatmulInputs(const hipdnn_flatbuffers_sdk::data_objec
                                     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_MatmulAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not MatmulAttributes");
     }
@@ -211,7 +211,7 @@ inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_ob
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_PointwiseAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not PointwiseAttributes");
     }
@@ -231,7 +231,7 @@ inline SynthesisResult fillReductionInputs(const hipdnn_flatbuffers_sdk::data_ob
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ReductionAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not ReductionAttributes");
     }
@@ -248,7 +248,7 @@ inline SynthesisResult fillLayernormInputs(const hipdnn_flatbuffers_sdk::data_ob
                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not LayernormAttributes");
     }
@@ -269,7 +269,7 @@ inline SynthesisResult fillLayernormBackwardInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormBackwardAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not LayernormBackwardAttributes");
     }
@@ -291,7 +291,7 @@ inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_obje
                                      std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not RMSNormAttributes");
     }
@@ -311,7 +311,7 @@ inline SynthesisResult fillRmsnormBackwardInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormBackwardAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not RMSNormBackwardAttributes");
     }
@@ -331,7 +331,7 @@ inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ResampleFwdAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not ResampleFwdAttributes");
     }
@@ -351,7 +351,7 @@ inline SynthesisResult fillBlockScaleDequantizeInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleDequantizeAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BlockScaleDequantizeAttributes");
     }
@@ -368,7 +368,7 @@ inline SynthesisResult fillBlockScaleQuantizeInputs(
     std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleQuantizeAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not BlockScaleQuantizeAttributes");
     }
@@ -390,7 +390,7 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
                                          std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not SdpaAttributes");
     }
@@ -425,7 +425,7 @@ inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data
                                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaBackwardAttributes();
-    if(!a)
+    if(a == nullptr)
     {
         return SynthesisResult::unsupported("not SdpaBackwardAttributes");
     }

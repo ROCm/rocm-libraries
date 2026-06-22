@@ -79,6 +79,40 @@ inline VerificationMode parseVerificationMode(std::string value)
                              + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
 }
 
+// Resolve verification mode: CLI value wins, then env var, then nullopt (caller
+// defaults to AUTO). Factored out of TestConfig::initialize() so the resolution
+// logic is independently testable.
+inline std::optional<VerificationMode>
+    resolveVerificationMode(std::optional<VerificationMode> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
+    if(!envVal.empty())
+    {
+        return parseVerificationMode(envVal);
+    }
+    return std::nullopt;
+}
+
+// Resolve golden data dir: CLI value wins, then env var, then nullopt.
+inline std::optional<std::filesystem::path>
+    resolveGoldenDataDir(std::optional<std::filesystem::path> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
+    if(!envVal.empty())
+    {
+        return std::filesystem::path(envVal);
+    }
+    return std::nullopt;
+}
+
 // Singleton class for storing CLI-based test configuration.
 // All arguments are independently optional:
 //   - articlePath: omit to use hipDNN's default plugin discovery
@@ -163,28 +197,8 @@ public:
             }
         }
 
-        instance._goldenDataDir = std::move(goldenDataDir);
-        if(!instance._goldenDataDir.has_value())
-        {
-            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
-            if(!envVal.empty())
-            {
-                instance._goldenDataDir = std::filesystem::path(envVal);
-            }
-        }
-
-        // Verification mode: CLI flag wins; else HIPDNN_TEST_VERIFICATION_MODE env
-        // var; else default AUTO (resolved at the accessor). An invalid value
-        // (CLI or env) throws — parseVerificationMode reports the offending value.
-        instance._verificationMode = verificationMode;
-        if(!instance._verificationMode.has_value())
-        {
-            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
-            if(!envVal.empty())
-            {
-                instance._verificationMode = parseVerificationMode(envVal);
-            }
-        }
+        instance._goldenDataDir = resolveGoldenDataDir(std::move(goldenDataDir));
+        instance._verificationMode = resolveVerificationMode(verificationMode);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).

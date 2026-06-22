@@ -222,6 +222,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
     }
 
     // GPU ref (non-final): capability miss or runtime error -> fall through.
+    bool gpuRefErrored = false;
     {
         OutputTensors refOutputs;
         const RefRunResult gpu
@@ -233,6 +234,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
         }
         if(gpu.status == RefStatus::RUNTIME_ERROR)
         {
+            gpuRefErrored = true;
             recordRefError("GPU reference errored (auto mode, falling through to CPU): "
                            + gpu.message);
         }
@@ -246,9 +248,14 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
         switch(cpu.status)
         {
         case RefStatus::CAPABILITY_MISS:
-            skipUnverifiable("no reference available (golden absent; GPU and CPU ref "
-                             "cannot run this op): "
-                             + cpu.message);
+            skipUnverifiable(
+                gpuRefErrored
+                    ? "no usable reference (golden absent; GPU ref errored, CPU ref "
+                      "cannot run this op; see reference-error report): "
+                          + cpu.message
+                    : "no reference available (golden absent; GPU and CPU ref "
+                      "cannot run this op): "
+                          + cpu.message);
             return;
         case RefStatus::RUNTIME_ERROR:
             recordRefError("CPU reference errored (auto mode, last resort): " + cpu.message);

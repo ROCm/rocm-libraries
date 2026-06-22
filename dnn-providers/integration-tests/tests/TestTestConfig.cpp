@@ -90,6 +90,49 @@ TEST(ParseVerificationMode, ThrowsOnInvalidValue)
     EXPECT_THROW(hipdnn_integration_tests::parseVerificationMode(""), std::runtime_error);
 }
 
+// resolveVerificationMode / resolveGoldenDataDir are free functions that
+// implement the "CLI wins, then env, then nullopt" precedence chain.
+// They don't touch the singleton so they can be tested freely.
+
+TEST(ResolveVerificationMode, CliValueWinsOverEnv)
+{
+    using hipdnn_integration_tests::resolveVerificationMode;
+    using hipdnn_integration_tests::VerificationMode;
+
+    // Even if the env var were set, the CLI value takes precedence.
+    const auto result = resolveVerificationMode(VerificationMode::GPU);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, VerificationMode::GPU);
+}
+
+TEST(ResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
+{
+    using hipdnn_integration_tests::resolveVerificationMode;
+
+    // Assuming HIPDNN_TEST_VERIFICATION_MODE is not set in the test env.
+    const auto result = resolveVerificationMode(std::nullopt);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(ResolveGoldenDataDir, CliValueWinsOverEnv)
+{
+    using hipdnn_integration_tests::resolveGoldenDataDir;
+
+    const std::filesystem::path cliPath = "/explicit/golden/dir";
+    const auto result = resolveGoldenDataDir(cliPath);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, cliPath);
+}
+
+TEST(ResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
+{
+    using hipdnn_integration_tests::resolveGoldenDataDir;
+
+    // Assuming HIPDNN_TEST_GOLDEN_DATA_DIR is not set in the test env.
+    const auto result = resolveGoldenDataDir(std::nullopt);
+    EXPECT_FALSE(result.has_value());
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
@@ -157,6 +200,16 @@ TEST_F(TestConfigInitialized, GetVerificationModeDefaultsToAuto)
     // No CLI flag and (assuming) no env var -> AUTO.
     EXPECT_EQ(TestConfig::get().getVerificationMode(),
               hipdnn_integration_tests::VerificationMode::AUTO);
+}
+
+TEST_F(TestConfigInitialized, HasGoldenDataDirReturnsFalseWhenNotProvided)
+{
+    EXPECT_FALSE(TestConfig::get().hasGoldenDataDir());
+}
+
+TEST_F(TestConfigInitialized, GetGoldenDataDirThrowsWhenNotProvided)
+{
+    EXPECT_THROW(TestConfig::get().getGoldenDataDir(), std::runtime_error);
 }
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)
