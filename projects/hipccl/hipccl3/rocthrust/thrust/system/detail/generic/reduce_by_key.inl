@@ -111,12 +111,12 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   // compute head flags
   thrust::detail::temporary_array<FlagType, ExecutionPolicy> head_flags(exec, n);
   thrust::transform(
-    exec, keys_first, keys_last - 1, keys_first + 1, head_flags.begin() + 1, thrust::not_fn(binary_pred));
+    exec, keys_first, keys_last - 1, keys_first + 1, head_flags.begin() + 1, _THRUST_STD::not_fn(binary_pred));
   head_flags[0] = 1;
 
   // compute tail flags
   thrust::detail::temporary_array<FlagType, ExecutionPolicy> tail_flags(exec, n); // COPY INSTEAD OF TRANSFORM
-  thrust::transform(exec, keys_first, keys_last - 1, keys_first + 1, tail_flags.begin(), thrust::not_fn(binary_pred));
+  thrust::transform(exec, keys_first, keys_last - 1, keys_first + 1, tail_flags.begin(), _THRUST_STD::not_fn(binary_pred));
   tail_flags[n - 1] = 1;
 
   // scan the values by flag
@@ -131,7 +131,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
     detail::reduce_by_key_functor<ValueType, FlagType, BinaryFunction>(binary_op));
 
   thrust::exclusive_scan(
-    exec, tail_flags.begin(), tail_flags.end(), scanned_tail_flags.begin(), FlagType(0), thrust::plus<FlagType>());
+    exec, tail_flags.begin(), tail_flags.end(), scanned_tail_flags.begin(), FlagType(0), _THRUST_STD::plus<FlagType>());
 
   // number of unique keys
   FlagType N = scanned_tail_flags[n - 1] + 1;
@@ -159,9 +159,9 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
 {
   using KeyType = thrust::detail::it_value_t<InputIterator1>;
 
-  // use equal_to<KeyType> as default BinaryPredicate
+  // use _THRUST_STD::equal_to<KeyType> as default BinaryPredicate
   return thrust::reduce_by_key(
-    exec, keys_first, keys_last, values_first, keys_output, values_output, thrust::equal_to<KeyType>());
+    exec, keys_first, keys_last, values_first, keys_output, values_output, _THRUST_STD::equal_to<KeyType>());
 } // end reduce_by_key()
 
 template <typename ExecutionPolicy,
@@ -187,7 +187,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
 
   // use plus<T> as default BinaryFunction
   return thrust::reduce_by_key(
-    exec, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, thrust::plus<T>());
+    exec, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, _THRUST_STD::plus<T>());
 } // end reduce_by_key()
 
 } // end namespace generic

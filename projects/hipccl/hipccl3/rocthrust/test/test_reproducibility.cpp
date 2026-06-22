@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ TYPED_TEST(ReproducibilityTests, Scan)
   using Vector = typename TestFixture::input_type;
   using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
-  using ScanOp = eepy_scan_op<thrust::plus<T>>;
+  using ScanOp = eepy_scan_op<_THRUST_STD::plus<T>>;
 
   bwr_utils::TokenHelper token_helper;
 
@@ -115,7 +115,10 @@ TYPED_TEST(ReproducibilityTests, Scan)
         thrust::host_vector<T> h_data = d_input;
 
         token_helper.build_input_token(
-          "thrust::inclusive_scan", h_data.begin(), h_data.end(), {bwr_utils::get_functor_token<T>("thrust::plus")});
+          "thrust::inclusive_scan",
+          h_data.begin(),
+          h_data.end(),
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::inclusive_scan(policy, d_input.begin(), d_input.end(), d_output_1.begin(), ScanOp(true));
@@ -140,7 +143,7 @@ TYPED_TEST(ReproducibilityTests, Scan)
           "thrust::exclusive_scan",
           h_data.begin(),
           h_data.end(),
-          {bwr_utils::get_scalar_token(T{42}), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_scalar_token(T{42}), bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::exclusive_scan(policy, d_input.begin(), d_input.end(), d_output_1.begin(), T{42}, ScanOp(true));
@@ -163,7 +166,7 @@ TYPED_TEST(ReproducibilityTests, ScanByKey)
   using Vector = typename TestFixture::input_type;
   using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
-  using ScanOp = eepy_scan_op<thrust::plus<T>>;
+  using ScanOp = eepy_scan_op<_THRUST_STD::plus<T>>;
 
   hipDeviceProp_t attributes;
   HIP_CHECK(hipGetDeviceProperties(&attributes, 0));
@@ -213,7 +216,13 @@ TYPED_TEST(ReproducibilityTests, ScanByKey)
 
       // inclusive
       thrust::inclusive_scan_by_key(
-        policy, d_keys.begin(), d_keys.end(), d_input.begin(), d_output_0.begin(), thrust::equal_to<T>{}, ScanOp(false));
+        policy,
+        d_keys.begin(),
+        d_keys.end(),
+        d_input.begin(),
+        d_output_0.begin(),
+        _THRUST_STD::equal_to<T>{},
+        ScanOp(false));
 
       if (inter_run_bwr::enabled)
       {
@@ -225,11 +234,18 @@ TYPED_TEST(ReproducibilityTests, ScanByKey)
           h_keys.begin(),
           h_keys.end(),
           h_input.begin(),
-          {bwr_utils::get_functor_token<T>("thrust::equal_to"), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::equal_to"),
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::inclusive_scan_by_key(
-        policy, d_keys.begin(), d_keys.end(), d_input.begin(), d_output_1.begin(), thrust::equal_to<T>{}, ScanOp(true));
+        policy,
+        d_keys.begin(),
+        d_keys.end(),
+        d_input.begin(),
+        d_output_1.begin(),
+        _THRUST_STD::equal_to<T>{},
+        ScanOp(true));
 
       if (inter_run_bwr::enabled)
       {
@@ -255,7 +271,7 @@ TYPED_TEST(ReproducibilityTests, ScanByKey)
           h_keys.begin(),
           h_keys.end(),
           h_input.begin(),
-          {bwr_utils::get_scalar_token(T{123}), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_scalar_token(T{123}), bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::exclusive_scan_by_key(
@@ -279,7 +295,7 @@ TYPED_TEST(ReproducibilityTests, ReduceByKey)
   using Vector = typename TestFixture::input_type;
   using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
-  using ScanOp = eepy_scan_op<thrust::plus<T>>;
+  using ScanOp = eepy_scan_op<_THRUST_STD::plus<T>>;
 
   bwr_utils::TokenHelper token_helper;
 
@@ -326,7 +342,7 @@ TYPED_TEST(ReproducibilityTests, ReduceByKey)
         d_vals.begin(),
         d_keys_output_0.begin(),
         d_vals_output_0.begin(),
-        thrust::equal_to<T>{},
+        _THRUST_STD::equal_to<T>{},
         ScanOp(false));
 
       if (inter_run_bwr::enabled)
@@ -339,7 +355,8 @@ TYPED_TEST(ReproducibilityTests, ReduceByKey)
           h_keys.begin(),
           h_keys.end(),
           h_vals.begin(),
-          {bwr_utils::get_functor_token<T>("thrust::equal_to"), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::equal_to"),
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::reduce_by_key(
@@ -349,7 +366,7 @@ TYPED_TEST(ReproducibilityTests, ReduceByKey)
         d_vals.begin(),
         d_keys_output_1.begin(),
         d_vals_output_1.begin(),
-        thrust::equal_to<T>{},
+        _THRUST_STD::equal_to<T>{},
         ScanOp(true));
 
       if (inter_run_bwr::enabled)
@@ -371,7 +388,7 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
   using Vector = typename TestFixture::input_type;
   using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
-  using ScanOp = eepy_scan_op<thrust::plus<T>>;
+  using ScanOp = eepy_scan_op<_THRUST_STD::plus<T>>;
 
   bwr_utils::TokenHelper token_helper;
 
@@ -395,7 +412,7 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
       Vector d_output_1(size);
 
       thrust::transform_inclusive_scan(
-        policy, d_input.begin(), d_input.end(), d_output_0.begin(), thrust::negate<T>(), ScanOp(false));
+        policy, d_input.begin(), d_input.end(), d_output_0.begin(), _THRUST_STD::negate<T>(), ScanOp(false));
 
       if (inter_run_bwr::enabled)
       {
@@ -405,11 +422,12 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
           "thrust::transform_inclusive_scan",
           h_data.begin(),
           h_data.end(),
-          {bwr_utils::get_functor_token<T>("thrust::negate"), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::negate"),
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::transform_inclusive_scan(
-        policy, d_input.begin(), d_input.end(), d_output_1.begin(), thrust::negate<T>(), ScanOp(true));
+        policy, d_input.begin(), d_input.end(), d_output_1.begin(), _THRUST_STD::negate<T>(), ScanOp(true));
 
       if (inter_run_bwr::enabled)
       {
@@ -422,7 +440,7 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
       assert_reproducible(d_output_0, d_output_1);
 
       thrust::transform_exclusive_scan(
-        policy, d_input.begin(), d_input.end(), d_output_0.begin(), thrust::negate<T>(), (T) 11, ScanOp(false));
+        policy, d_input.begin(), d_input.end(), d_output_0.begin(), _THRUST_STD::negate<T>(), (T) 11, ScanOp(false));
 
       if (inter_run_bwr::enabled)
       {
@@ -432,13 +450,13 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
           "thrust::transform_exclusive_scan",
           h_data.begin(),
           h_data.end(),
-          {bwr_utils::get_functor_token<T>("thrust::negate"),
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::negate"),
            bwr_utils::get_scalar_token((T) 11),
-           bwr_utils::get_functor_token<T>("thrust::plus")});
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::transform_exclusive_scan(
-        policy, d_input.begin(), d_input.end(), d_output_1.begin(), thrust::negate<T>(), (T) 11, ScanOp(true));
+        policy, d_input.begin(), d_input.end(), d_output_1.begin(), _THRUST_STD::negate<T>(), (T) 11, ScanOp(true));
 
       if (inter_run_bwr::enabled)
       {
@@ -454,7 +472,7 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
       d_output_0 = d_input;
       d_output_1 = d_input;
       thrust::transform_inclusive_scan(
-        policy, d_output_0.begin(), d_output_0.end(), d_output_0.begin(), thrust::negate<T>(), ScanOp(false));
+        policy, d_output_0.begin(), d_output_0.end(), d_output_0.begin(), _THRUST_STD::negate<T>(), ScanOp(false));
 
       if (inter_run_bwr::enabled)
       {
@@ -464,11 +482,12 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
           "thrust::transform_inclusive_scan",
           h_data.begin(),
           h_data.end(),
-          {bwr_utils::get_functor_token<T>("thrust::negate"), bwr_utils::get_functor_token<T>("thrust::plus")});
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::negate"),
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::transform_inclusive_scan(
-        policy, d_output_1.begin(), d_output_1.end(), d_output_1.begin(), thrust::negate<T>(), ScanOp(true));
+        policy, d_output_1.begin(), d_output_1.end(), d_output_1.begin(), _THRUST_STD::negate<T>(), ScanOp(true));
 
       if (inter_run_bwr::enabled)
       {
@@ -483,7 +502,13 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
       d_output_0 = d_input;
       d_output_1 = d_input;
       thrust::transform_exclusive_scan(
-        policy, d_output_0.begin(), d_output_0.end(), d_output_0.begin(), thrust::negate<T>(), (T) 11, ScanOp(false));
+        policy,
+        d_output_0.begin(),
+        d_output_0.end(),
+        d_output_0.begin(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        ScanOp(false));
 
       if (inter_run_bwr::enabled)
       {
@@ -493,13 +518,19 @@ TYPED_TEST(ReproducibilityTests, TransformScan)
           "thrust::transform_exclusive_scan",
           h_data.begin(),
           h_data.end(),
-          {bwr_utils::get_functor_token<T>("thrust::negate"),
+          {bwr_utils::get_functor_token<T>("_THRUST_STD::negate"),
            bwr_utils::get_scalar_token((T) 11),
-           bwr_utils::get_functor_token<T>("thrust::plus")});
+           bwr_utils::get_functor_token<T>("_THRUST_STD::plus")});
       }
 
       thrust::transform_exclusive_scan(
-        policy, d_output_1.begin(), d_output_1.end(), d_output_1.begin(), thrust::negate<T>(), (T) 11, ScanOp(true));
+        policy,
+        d_output_1.begin(),
+        d_output_1.end(),
+        d_output_1.begin(),
+        _THRUST_STD::negate<T>(),
+        (T) 11,
+        ScanOp(true));
 
       if (inter_run_bwr::enabled)
       {
