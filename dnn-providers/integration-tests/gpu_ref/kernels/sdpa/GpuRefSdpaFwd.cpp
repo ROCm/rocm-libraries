@@ -5,9 +5,11 @@
 // Compiled via HipRTC with -DQ_TYPE=<type> -DK_TYPE=<type> -DV_TYPE=<type>
 // -DO_TYPE=<type> -DCOMPUTE_TYPE=<type>.
 // One thread per output element (b, h, sq, dv). Uses stride-based indexing.
-// Reproduces the algorithm of CpuFpReferenceSdpa::forward; outputs agree with the
-// CPU oracle within the test tolerance (host libm vs device math, and the softmax
-// reduction ordering, are not bit-identical).
+// Reproduces the algorithm of CpuFpReferenceSdpa::forward. FMA contraction is
+// enabled so the matmuls round like the provider asm kernel (fused multiply-add),
+// which makes the GPU reference diverge from the CPU oracle by both FMA-vs-separate
+// multiply/add noise and host-libm-vs-device-math differences; the two agree only
+// within the (relaxed) test tolerance, not bit-for-bit.
 
 #include "GpuRefSdpaArgs.h"
 #include "GpuRefTypes.h"

@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
+#include <stdexcept>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -18,6 +21,29 @@
 namespace hipdnn_test_sdk::detail
 {
 
+// A graph stats/LSE tensor is conventionally rank-4 [B, H, Sq, 1], but the SDPA
+// reference requires the LSE output to be rank-3 [B, H, Sq]. Drop a single trailing
+// size-1 dim; a rank-3 input passes through unchanged. Any other shape is unsupported.
+inline std::vector<int64_t> squeezeTrailingUnitDim(const std::vector<int64_t>& dims)
+{
+    if(dims.size() == 3)
+    {
+        return dims;
+    }
+    if(dims.size() == 4 && dims.back() == 1)
+    {
+        return {dims.begin(), dims.end() - 1};
+    }
+    throw std::invalid_argument(
+        "SdpaFwdPlan: stats/LSE tensor must be rank-3 [B, H, Sq] or rank-4 [B, H, Sq, 1]");
+}
+
+// Truncate a stride vector to match a squeezed dims vector by dropping trailing entries.
+inline std::vector<int64_t> squeezeToRank(const std::vector<int64_t>& strides, size_t rank)
+{
+    return {strides.begin(), strides.begin() + static_cast<std::ptrdiff_t>(rank)};
+}
+
 struct SdpaFwdParams
 {
     SdpaFwdParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
@@ -29,6 +55,8 @@ struct SdpaFwdParams
                   int64_t rightBound,
                   bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
+                  = nullptr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
@@ -41,6 +69,9 @@ struct SdpaFwdParams
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
+        , lseTensor(lseAttributes != nullptr
+                        ? std::make_optional(unpackTensorAttributes(*lseAttributes))
+                        : std::nullopt)
     {
     }
 
@@ -53,6 +84,7 @@ struct SdpaFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -66,6 +98,10 @@ public:
 
     std::vector<int64_t> getOutputTensorIds() const override
     {
+        if(_params.lseTensor.has_value())
+        {
+            return {_params.oTensor.uid, _params.lseTensor->uid};
+        }
         return {_params.oTensor.uid};
     }
 
@@ -87,6 +123,19 @@ public:
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
+        // The graph stats tensor is rank-4 [B, H, Sq, 1], but forward() requires LSE to be
+        // rank-3 [B, H, Sq]. Drop the trailing size-1 dim (and its stride) so the shapes line
+        // up without relaxing the reference's strict rank check.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowLseTensor;
+        if(_params.lseTensor.has_value())
+        {
+            auto squeezedLse = *_params.lseTensor;
+            squeezedLse.dims = squeezeTrailingUnitDim(squeezedLse.dims);
+            squeezedLse.strides = squeezeToRank(squeezedLse.strides, squeezedLse.dims.size());
+            shallowLseTensor
+                = createShallowTensor<float>(squeezedLse, variantPack.at(_params.lseTensor->uid));
+        }
+
         utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
             *shallowQTensor,
             *shallowKTensor,
@@ -96,7 +145,8 @@ public:
             shallowAttnMaskTensor.get(),
             _params.leftBound,
             _params.rightBound,
-            _params.topLeftAlignment);
+            _params.topLeftAlignment,
+            shallowLseTensor.get());
     }
 
 private:
@@ -188,12 +238,23 @@ public:
             return false;
         }
 
-        // Unsupported: softmax stats outputs
-        if(nodeAttributes->stats_tensor_uid().has_value()
-           || nodeAttributes->max_tensor_uid().has_value()
+        // Unsupported: max / running-sum softmax stats outputs (the reference does not
+        // produce these). The log-sum-exp stats tensor IS supported and handled below.
+        if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
+        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
+        // in execute().
+        if(nodeAttributes->stats_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->stats_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         return true;
@@ -220,6 +281,10 @@ public:
         const auto* attnMaskPtr = nodeAttributes->attn_mask_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
+
+        const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
+                                 : nullptr;
 
         int64_t leftBound = (nodeAttributes->left_bound().has_value())
                                 ? nodeAttributes->left_bound().value()
@@ -270,7 +335,8 @@ public:
                           leftBound,
                           rightBound,
                           isTopLeft,
-                          attnMaskPtr));
+                          attnMaskPtr,
+                          lsePtr));
     }
 };
 

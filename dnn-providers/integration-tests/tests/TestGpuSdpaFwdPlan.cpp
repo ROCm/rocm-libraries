@@ -4,11 +4,16 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_gpu_ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/gpu_graph_executor/detail/GpuSdpaFwdPlan.hpp"
@@ -29,13 +34,17 @@ constexpr int64_t O_UID = 13;
 // unsupported-mode optional uids whose mere presence must make the plan inapplicable.
 constexpr int64_t UNUSED_UID = 99;
 
+// A valid stats/LSE output uid, distinct from the q/k/v/o uids.
+constexpr int64_t STATS_UID = 14;
+
 // Plain [B=1, H=2, Sq=8, D=16] SDPA shape (head_dim_v = 16).
 const std::vector<int64_t> DIMS = {1, 2, 8, 16};
 
-flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs = {})
+flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs = {},
+                                         std::optional<int64_t> statsUid = std::nullopt)
 {
     return createSdpaFwdGraph(
-        Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::FLOAT, attrs);
+        Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::FLOAT, attrs, statsUid);
 }
 
 } // namespace
@@ -126,10 +135,108 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
+        // max_tensor_uid (running max softmax stat) is not produced by the reference.
         SdpaAttributesT attrs;
-        attrs.stats_tensor_uid = UNUSED_UID;
+        attrs.max_tensor_uid = UNUSED_UID;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
+    {
+        // sum_exp_tensor_uid (running sum-exp softmax stat) is not produced by the reference.
+        SdpaAttributesT attrs;
+        attrs.sum_exp_tensor_uid = UNUSED_UID;
+        EXPECT_FALSE(isApplicableWith(attrs));
+    }
+}
+
+TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableWithStatsOutput)
+{
+    // A graph with a valid FLOAT stats/LSE output tensor is supported: the plan must be
+    // applicable and buildNodePlan must produce the concrete GpuSdpaFwdPlan.
+    auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+    auto builtPlan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const bool result
+        = dynamic_cast<GpuSdpaFwdPlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
+    EXPECT_TRUE(result);
+}
+
+// End-to-end device test of the LSE graph path: the graph declares a rank-4 [B, H, Sq, 1]
+// stats output, and execute() must squeeze it to rank-3, bind it from the variant pack, and
+// have the kernel write LSE into it. This is the path the unit-level LSE tests (which call
+// fprop() directly with a rank-3 lse) do not cover. Validates against a direct fprop() call
+// with identical inputs; the LSE buffer is pre-filled with a sentinel so an unwritten output
+// would not accidentally pass.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+
+    const int64_t batch = DIMS[0];
+    const int64_t numHeads = DIMS[1];
+    const int64_t seqQ = DIMS[2];
+    const std::vector<int64_t> lseDims = {batch, numHeads, seqQ};
+
+    auto graphBuilder = makeGraph(/*attrs=*/{}, /*statsUid=*/STATS_UID);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
+    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
+    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+
+    Tensor<float> oPlan(DIMS);
+    Tensor<float> lsePlan(lseDims);
+    lsePlan.fillWithValue(-987.0f); // sentinel: an unwritten LSE would retain this
+
+    // execute() consumes raw device pointers; deviceData() uploads the host inputs.
+    std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {STATS_UID, lsePlan.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    // The plan wrote through its own shallow views; tell our tensors the device is now current.
+    oPlan.markDeviceModified();
+    lsePlan.markDeviceModified();
+
+    // Reference: the same kernel via a direct fprop() with a rank-3 lse and identical inputs.
+    Tensor<float> oRef(DIMS);
+    Tensor<float> lseRef(lseDims);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
+                                                                 k,
+                                                                 v,
+                                                                 oRef,
+                                                                 std::nullopt,
+                                                                 /*attnMask=*/nullptr,
+                                                                 /*leftBound=*/-1,
+                                                                 /*rightBound=*/-1,
+                                                                 /*topLeftAlignment=*/true,
+                                                                 &lseRef);
+
+    // Same kernel + identical inputs, so plan and direct outputs match within a tight bound.
+    const float tolerance = 1e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oRef, oPlan)) << "Plan output differs from direct fprop output";
+    EXPECT_TRUE(validation.allClose(lseRef, lsePlan))
+        << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
 }
 
 TEST(TestGpuSdpaFwdPlanBuilder, ThrowsOnBothCausalFlags)

@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
+#include <stdexcept>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -20,6 +23,29 @@
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
 
+// A graph stats/LSE tensor is conventionally rank-4 [B, H, Sq, 1], but the SDPA
+// reference requires the LSE output to be rank-3 [B, H, Sq]. Drop a single trailing
+// size-1 dim; a rank-3 input passes through unchanged. Any other shape is unsupported.
+inline std::vector<int64_t> squeezeTrailingUnitDim(const std::vector<int64_t>& dims)
+{
+    if(dims.size() == 3)
+    {
+        return dims;
+    }
+    if(dims.size() == 4 && dims.back() == 1)
+    {
+        return {dims.begin(), dims.end() - 1};
+    }
+    throw std::invalid_argument(
+        "GpuSdpaFwdPlan: stats/LSE tensor must be rank-3 [B, H, Sq] or rank-4 [B, H, Sq, 1]");
+}
+
+// Truncate a stride vector to match a squeezed dims vector by dropping trailing entries.
+inline std::vector<int64_t> squeezeToRank(const std::vector<int64_t>& strides, size_t rank)
+{
+    return {strides.begin(), strides.begin() + static_cast<std::ptrdiff_t>(rank)};
+}
+
 struct GpuSdpaFwdParams
 {
     GpuSdpaFwdParams(
@@ -31,7 +57,8 @@ struct GpuSdpaFwdParams
         int64_t leftBound,
         int64_t rightBound,
         bool topLeftAlignment,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr)
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr)
         : qTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(qAttributes))
         , kTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(kAttributes))
         , vTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(vAttributes))
@@ -44,6 +71,10 @@ struct GpuSdpaFwdParams
                              ? std::make_optional(hipdnn_test_sdk::detail::unpackTensorAttributes(
                                    *attnMaskAttributes))
                              : std::nullopt)
+        , lseTensor(lseAttributes != nullptr
+                        ? std::make_optional(
+                              hipdnn_test_sdk::detail::unpackTensorAttributes(*lseAttributes))
+                        : std::nullopt)
     {
     }
 
@@ -56,6 +87,7 @@ struct GpuSdpaFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
 };
 
 template <typename QDataType,
@@ -90,6 +122,19 @@ public:
                                    _params.attnMaskTensor->strides);
         }
 
+        // The graph stats tensor is rank-4 [B, H, Sq, 1], but fprop requires LSE to be
+        // rank-3 [B, H, Sq]. Drop the trailing size-1 dim (and its stride) so the shapes
+        // line up without relaxing the reference's strict rank check.
+        std::optional<hipdnn_gpu_ref::ShallowGpuTensor<float>> lseTensor;
+        if(_params.lseTensor.has_value())
+        {
+            const auto squeezedDims = squeezeTrailingUnitDim(_params.lseTensor->dims);
+            const auto squeezedStrides
+                = squeezeToRank(_params.lseTensor->strides, squeezedDims.size());
+            lseTensor.emplace(
+                variantPack.at(_params.lseTensor->uid), squeezedDims, squeezedStrides);
+        }
+
         hipdnn_gpu_ref::GpuFpReferenceSdpa::
             fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
                 qTensor,
@@ -100,7 +145,8 @@ public:
                 attnMaskTensor.has_value() ? &attnMaskTensor.value() : nullptr,
                 _params.leftBound,
                 _params.rightBound,
-                _params.topLeftAlignment);
+                _params.topLeftAlignment,
+                lseTensor.has_value() ? &lseTensor.value() : nullptr);
     }
 
 private:
@@ -192,12 +238,23 @@ public:
             return false;
         }
 
-        // Unsupported: softmax stats outputs
-        if(nodeAttributes->stats_tensor_uid().has_value()
-           || nodeAttributes->max_tensor_uid().has_value()
+        // Unsupported: max / running-sum softmax stats outputs (the reference does not
+        // produce these). The log-sum-exp stats tensor IS supported and handled below.
+        if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
+        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
+        // in execute().
+        if(nodeAttributes->stats_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->stats_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         return true;
@@ -224,6 +281,10 @@ public:
         const auto* attnMaskPtr = nodeAttributes->attn_mask_tensor_uid().has_value()
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
+
+        const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
+                                 : nullptr;
 
         int64_t leftBound = (nodeAttributes->left_bound().has_value())
                                 ? nodeAttributes->left_bound().value()
@@ -274,7 +335,8 @@ public:
                              leftBound,
                              rightBound,
                              isTopLeft,
-                             attnMaskPtr));
+                             attnMaskPtr,
+                             lsePtr));
     }
 };
 

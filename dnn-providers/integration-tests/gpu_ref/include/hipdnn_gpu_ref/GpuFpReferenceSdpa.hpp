@@ -33,9 +33,6 @@ inline std::vector<std::string> buildSdpaDefines()
     defines.emplace_back(std::string("-DV_TYPE=") + HipRtcTypeName<VDataType>::VALUE);
     defines.emplace_back(std::string("-DO_TYPE=") + HipRtcTypeName<ODataType>::VALUE);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
-    // Disable FMA contraction so the GPU reference matches the CPU reference
-    // (which accumulates with discrete multiply/add operations).
-    defines.emplace_back("-ffp-contract=off");
     return defines;
 }
 
