@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: 128
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -44,7 +44,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 32 ]
@@ -55,7 +55,7 @@ BenchmarkProblems:
         # - LocalReadVectorWidth: [8]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 4,6, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]

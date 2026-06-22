@@ -1,0 +1,64 @@
+# serializer version: 1
+# name: test_gfx1100_emit_digests
+  list([
+    dict({
+      'file': 'DB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT16x16x16_SN_LDSB0_cwuCvvUuC8kdadYqDARrCIuBkWJmEtgfqfVscwwPgvA=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT16x16x8_SN_LDSB0_AJ8zPH-zLP26s2FnwvsvdDJjjBnYhHu0pzVFZr26oopM=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT8x8x16_SN_LDSB0_AFgXFhfhzVQjiU9MHCopQkMt-L7anZDpgJgrSBOzPWgDo=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_D_B_UserArgs_MT8x8x8_SN_LDSB0_AFCiFOcsL1pdDasnbfcIwNOZMTIiuTwGs7vtwFu16-8y-Y=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HSS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT348dwD9Fhz7Ppe8sdn5T_PeluDd4qmD_a3Xca2t1kJVk=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT9mjyBxX8VJho0_8xtzdbiT7KFR5_s6gJFPEsYu84e_XU=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT9szjK8ctnVYWAIbytBwDnER0AaMJvaHoW8s8qE6Bn__Q=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'SB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT16x1LGEpVNETqMEdtR6DYcG-VXBfLvW2ixx3_Dzm6fX157Y=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT16x1rx5gP59xPm-ojvEAu1sNgZirNC4TgTnJjmkOnTARc4s=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT8x8xN3OszkBfrgLDt9wuYB8qEZivi0OInX6cIQ22ByJrCVs=',
+          'err': 0,
+        }),
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT8x8xXy-Dqx4IK6Bo_AWjYLOR7aIRtKREc38wIvsPfeoU1wI=',
+          'err': 0,
+        }),
+      ]),
+    }),
+  ])
+# ---
