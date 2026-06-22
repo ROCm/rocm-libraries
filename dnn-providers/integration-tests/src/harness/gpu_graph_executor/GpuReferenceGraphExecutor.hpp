@@ -8,6 +8,7 @@
 
 #include "detail/GpuPlanBuilderRegistry.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor
 {
@@ -83,8 +84,8 @@ private:
         {
             const std::string nodeName
                 = node.name() == nullptr ? " unknown" : " " + node.name()->str();
-            throw std::runtime_error("GPU plan builder is not applicable for the given node:"
-                                     + nodeName);
+            throw ReferenceCapabilityError("GPU plan builder is not applicable for the given node:"
+                                           + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
@@ -123,15 +124,17 @@ private:
         case NodeAttrs::BlockScaleQuantizeAttributes:
         {
             const std::string nodeName = node.name() == nullptr ? "unknown" : node.name()->str();
-            throw std::runtime_error("GPU plan not yet implemented for node '" + nodeName
-                                     + "'. Register a GPU plan for this operation type.");
+            throw ReferenceCapabilityError("GPU plan not yet implemented for node '" + nodeName
+                                           + "'. Register a GPU plan for this operation type.");
         }
 
         case NodeAttrs::CustomOpAttributes:
-            throw std::runtime_error("GPU reference executor does not support custom operations");
+            throw ReferenceCapabilityError(
+                "GPU reference executor does not support custom operations");
 
         default:
-            throw std::runtime_error("Unsupported node type for GPU signature key generation");
+            throw ReferenceCapabilityError(
+                "Unsupported node type for GPU signature key generation");
         }
     }
 

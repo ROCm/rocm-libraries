@@ -35,6 +35,50 @@ enum class ReferenceExecutorType
     GPU,
 };
 
+// How a bundle's engine output is verified (RFC 0010 §4.4). This governs the
+// BUNDLE tests only and is independent of ReferenceExecutorType (which governs
+// the parameterized tests' choice of which ref executor to exercise).
+//
+//   AUTO   — per-test fallback: golden -> GPU ref -> CPU ref -> SKIP+report
+//   GOLDEN — golden data only; SKIP if a bundle has no golden outputs
+//   GPU    — ignore golden; compare engine against the GPU reference executor
+//   CPU    — ignore golden; compare engine against the CPU reference executor
+enum class VerificationMode
+{
+    AUTO,
+    GOLDEN,
+    GPU,
+    CPU,
+};
+
+// Parse a verification-mode string (case-insensitive) into the enum. Throws
+// std::runtime_error on an unrecognized value. Shared by the CLI flag parser and
+// the env-var fallback so both accept exactly the same spellings.
+inline VerificationMode parseVerificationMode(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if(value == "auto")
+    {
+        return VerificationMode::AUTO;
+    }
+    if(value == "golden")
+    {
+        return VerificationMode::GOLDEN;
+    }
+    if(value == "gpu")
+    {
+        return VerificationMode::GPU;
+    }
+    if(value == "cpu")
+    {
+        return VerificationMode::CPU;
+    }
+    throw std::runtime_error("Invalid verification mode '" + value
+                             + "'; expected 'auto', 'golden', 'gpu', or 'cpu'");
+}
+
 // Singleton class for storing CLI-based test configuration.
 // All arguments are independently optional:
 //   - articlePath: omit to use hipDNN's default plugin discovery
@@ -64,7 +108,8 @@ public:
                            std::optional<ReferenceExecutorType> referenceExecutorType
                            = std::nullopt,
                            bool allowBundles = false,
-                           std::optional<std::filesystem::path> goldenDataDir = std::nullopt)
+                           std::optional<std::filesystem::path> goldenDataDir = std::nullopt,
+                           std::optional<VerificationMode> verificationMode = std::nullopt)
     {
         TestConfig& instance = get();
         if(instance._initialized)
@@ -125,6 +170,19 @@ public:
             if(!envVal.empty())
             {
                 instance._goldenDataDir = std::filesystem::path(envVal);
+            }
+        }
+
+        // Verification mode: CLI flag wins; else HIPDNN_TEST_VERIFICATION_MODE env
+        // var; else default AUTO (resolved at the accessor). An invalid value
+        // (CLI or env) throws — parseVerificationMode reports the offending value.
+        instance._verificationMode = verificationMode;
+        if(!instance._verificationMode.has_value())
+        {
+            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VERIFICATION_MODE");
+            if(!envVal.empty())
+            {
+                instance._verificationMode = parseVerificationMode(envVal);
             }
         }
 
@@ -291,6 +349,14 @@ public:
         return _goldenDataDir.value();
     }
 
+    // Bundle verification mode. Resolved once at init: CLI flag >
+    // HIPDNN_TEST_VERIFICATION_MODE env var > AUTO default.
+    VerificationMode getVerificationMode() const
+    {
+        throwIfNotInitialized();
+        return _verificationMode.value_or(VerificationMode::AUTO);
+    }
+
 private:
     TestConfig() = default;
 
@@ -307,6 +373,7 @@ private:
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
+    std::optional<VerificationMode> _verificationMode;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

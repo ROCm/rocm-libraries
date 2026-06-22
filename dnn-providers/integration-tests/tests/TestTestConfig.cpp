@@ -67,6 +67,29 @@ TEST(TestConfigUninitialized, GetReferenceExecutorTypeThrowsWhenUninitialized)
     EXPECT_THROW(TestConfig::get().getReferenceExecutorType(), std::runtime_error);
 }
 
+// parseVerificationMode is a free function (no singleton state), so it can be
+// exercised regardless of initialization.
+TEST(ParseVerificationMode, AcceptsAllValidValuesCaseInsensitive)
+{
+    using hipdnn_integration_tests::parseVerificationMode;
+    using hipdnn_integration_tests::VerificationMode;
+
+    EXPECT_EQ(parseVerificationMode("auto"), VerificationMode::AUTO);
+    EXPECT_EQ(parseVerificationMode("golden"), VerificationMode::GOLDEN);
+    EXPECT_EQ(parseVerificationMode("gpu"), VerificationMode::GPU);
+    EXPECT_EQ(parseVerificationMode("cpu"), VerificationMode::CPU);
+
+    EXPECT_EQ(parseVerificationMode("AUTO"), VerificationMode::AUTO);
+    EXPECT_EQ(parseVerificationMode("Golden"), VerificationMode::GOLDEN);
+    EXPECT_EQ(parseVerificationMode("GPU"), VerificationMode::GPU);
+}
+
+TEST(ParseVerificationMode, ThrowsOnInvalidValue)
+{
+    EXPECT_THROW(hipdnn_integration_tests::parseVerificationMode("bogus"), std::runtime_error);
+    EXPECT_THROW(hipdnn_integration_tests::parseVerificationMode(""), std::runtime_error);
+}
+
 // ---------------------------------------------------------------------------
 // Suite 2 – initialized singleton (all args provided)
 // ---------------------------------------------------------------------------
@@ -127,6 +150,13 @@ TEST_F(TestConfigInitialized, GetReferenceExecutorTypeDefaultsToCpu)
 {
     EXPECT_EQ(TestConfig::get().getReferenceExecutorType(),
               hipdnn_integration_tests::ReferenceExecutorType::CPU);
+}
+
+TEST_F(TestConfigInitialized, GetVerificationModeDefaultsToAuto)
+{
+    // No CLI flag and (assuming) no env var -> AUTO.
+    EXPECT_EQ(TestConfig::get().getVerificationMode(),
+              hipdnn_integration_tests::VerificationMode::AUTO);
 }
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)
