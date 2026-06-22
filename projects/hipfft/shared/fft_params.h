@@ -337,8 +337,9 @@ inline void set_input(std::vector<hostbuf>&      input,
                                                      field_contig_dist);
 
         if(itype == fft_array_type_hermitian_interleaved)
-            impose_hermitian_symmetry_interleaved<Tfloat>(
-                input, ioffset, length, istride, idist, nbatch);
+            impose_hermitian_symmetry_interleaved(
+                reinterpret_cast<rocfft_complex<Tfloat>*>(input[0].data()),
+                ioffset, length, istride, idist, nbatch);
 
         break;
     }

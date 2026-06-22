@@ -64,8 +64,8 @@ std::tuple<T1, T1, T1> make_unit_stride(const std::tuple<T1, T1, T1>& whole_leng
 // Below are some example kernels which impose Hermitian symmetry on a complex array
 // of the given dimensions.
 
-template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&      vals,
+template <typename Tcomplex, typename Tsize>
+static void impose_hermitian_symmetry_interleaved_1D(Tcomplex*     vals,
                                                      const std::vector<size_t>& ioffset,
                                                      const std::vector<Tsize>&  length,
                                                      const std::vector<Tsize>&  istride,
@@ -74,7 +74,7 @@ static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&      
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
+        auto data = vals + ioffset[0] + ibatch * idist;
 
         data[0].y = 0.0;
 
@@ -106,8 +106,8 @@ static void impose_hermitian_symmetry_planar_1D(std::vector<hostbuf>&     vals,
     }
 }
 
-template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     vals,
+template <typename Tcomplex, typename Tsize>
+static void impose_hermitian_symmetry_interleaved_2D(Tcomplex*     vals,
                                                      const std::vector<Tsize>& ioffset,
                                                      const std::vector<Tsize>& length,
                                                      const std::vector<Tsize>& istride,
@@ -116,7 +116,7 @@ static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
+        auto data = vals + ioffset[0] + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -200,8 +200,8 @@ static void impose_hermitian_symmetry_planar_2D(std::vector<hostbuf>&     vals,
     }
 }
 
-template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     vals,
+template <typename Tcomplex, typename Tsize>
+static void impose_hermitian_symmetry_interleaved_3D(Tcomplex*     vals,
                                                      const std::vector<Tsize>& ioffset,
                                                      const std::vector<Tsize>& length,
                                                      const std::vector<Tsize>& istride,
@@ -210,7 +210,7 @@ static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ioffset[0] + ibatch * idist;
+        auto data = vals + ioffset[0] + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -744,8 +744,8 @@ static void generate_real_data(std::vector<hostbuf>&      input,
     }
 }
 
-template <typename Tfloat, typename Tsize>
-static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&      vals,
+template <typename Tcomplex, typename Tsize>
+static void impose_hermitian_symmetry_interleaved(Tcomplex* vals,
                                                   const std::vector<size_t>& ioffset,
                                                   const std::vector<Tsize>&  length,
                                                   const std::vector<Tsize>&  istride,
@@ -755,16 +755,13 @@ static void impose_hermitian_symmetry_interleaved(std::vector<hostbuf>&      val
     switch(length.size())
     {
     case 1:
-        impose_hermitian_symmetry_interleaved_1D<Tfloat>(
-            vals, ioffset, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_1D(vals, ioffset, length, istride, idist, nbatch);
         break;
     case 2:
-        impose_hermitian_symmetry_interleaved_2D<Tfloat>(
-            vals, ioffset, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_2D(vals, ioffset, length, istride, idist, nbatch);
         break;
     case 3:
-        impose_hermitian_symmetry_interleaved_3D<Tfloat>(
-            vals, ioffset, length, istride, idist, nbatch);
+        impose_hermitian_symmetry_interleaved_3D(vals, ioffset, length, istride, idist, nbatch);
         break;
     default:
         throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
