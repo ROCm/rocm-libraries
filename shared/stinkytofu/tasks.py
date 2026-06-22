@@ -447,10 +447,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
+    # unit_tests links stinkytofu_static (coverage embedded in the exe).
+    # api_tests links stinkytofu shared, so include the shared lib too so
+    # llvm-cov can resolve its binary ID and avoid "mismatched data" warnings.
     obj_names = (
         "libstinkytofu.so",
         "stinkytofu.dll",
         "unit_tests",
+        "api_tests",
         "stinkytofu-opt",
         "stinkytofu-check",
         "test_gen_instructions",
@@ -460,14 +464,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         objects += [
             p
             for p in bld.rglob(f"{name}*")
-            if p.is_file() and p.suffix.lower() in (".exe", ".dll")
+            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", "")
         ]
     if not objects:
         raise SystemExit("ERROR: no instrumented binaries found to report on.")
     obj_args = " ".join(f'-object "{o.as_posix()}"' for o in objects)
 
     # Keep the report focused on library/tool sources, not test or 3rd-party code.
-    ignore = '--ignore-filename-regex="(tests|examples|build|_deps|rocisa|/usr/)"'
+    ignore = '--ignore-filename-regex="([/\\\\]tests[/\\\\]|[/\\\\]examples[/\\\\]|[/\\\\]build[^/\\\\]*[/\\\\]|_deps|rocisa|/usr/)"'
 
     # 6. HTML report, lcov export for CI, and a console summary.
     html_dir = bld / "coverage-report"

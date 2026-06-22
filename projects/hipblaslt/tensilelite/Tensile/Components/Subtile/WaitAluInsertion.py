@@ -20,6 +20,7 @@ from rocisa.instruction import (
 
 # Number of WMMAs that must issue between a swap XOR and its dependent ds_read
 # for the v_xor latency to be fully hidden (no s_wait_alu required).
+# Conversative value based on s_wait_alu latency.
 MIN_MMA_BEFORE_LR_READ = 4
 
 _isMMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
@@ -30,6 +31,21 @@ def _vgprIndices(container):
   if not isinstance(container, RegisterContainer) or container.regType != 'v':
     return ()
   return range(container.regIdx, container.regIdx + container.regNum)
+
+
+def setMatrixAReuse(module, writer, kernel):
+  """Enable the gfx1250 WMMA matrix-A reuse hint where it is safe.
+
+  No-op unless gfx1250 (HasWmmaArbStallBit).  Mutates instructions in place.
+  """
+  if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    return module
+
+  mmas = [inst for inst in module.flatitems() if _isMMA(inst)]
+  for prev, cur in zip(mmas, mmas[1:]):
+    if tuple(_vgprIndices(cur.a)) and _vgprIndices(cur.a) == _vgprIndices(prev.a):
+      prev.reuseA = True
+  return module
 
 
 def insertLRSwapWaitAlu(module, writer, kernel):
