@@ -295,9 +295,9 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
         inner_lid += 256;
     }
 #endif // NUM_IM_BLKS && STRIDE_GT_1
-#else
+#else  // Very large support
 
-    index_t tid = get_global_id(0);
+    index_t tid = (index_t)blockIdx.x * blockDim.x + threadIdx.x;
     while(tid < (index_t)out_h * out_w * wei_w * wei_h * NUM_CH_TOTAL)
     {
         // which row of the output to write to
@@ -325,7 +325,8 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
         {
             col[col_off] = 0.;
         }
-        tid += get_global_size(0);
+        tid += (index_t)gridDim.x * blockDim.x;
     }
 #endif
 }
+#endif // LAYOUT_NHWC else
