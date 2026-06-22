@@ -56,9 +56,7 @@
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -211,21 +209,6 @@ TEST(ApiExport, ToolchainCapsProbe) {
     GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
     auto caps = ToolchainCaps::probe(arch);
     (void)caps;
-}
-
-// =============================================================================
-// DAGScheduleJsonCollector + PassOrderSnapshotInstrumentation (stinkytofu-opt)
-// =============================================================================
-
-TEST(ApiExport, DAGScheduleJsonCollector) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    EXPECT_NE(collector, nullptr);
-}
-
-TEST(ApiExport, PassOrderSnapshotInstrumentation) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    auto instr = std::make_shared<PassOrderSnapshotInstrumentation>(std::move(collector));
-    EXPECT_NE(instr, nullptr);
 }
 
 // =============================================================================

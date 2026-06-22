@@ -6,8 +6,8 @@ GlobalParameters:
   SleepPercent: 50
   NumElementsToValidate: -1
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   PruneSparseMode: 0
   MaxLDS: 163840
   DeviceLDS: 163840
@@ -24,8 +24,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -46,11 +46,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [128]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -86,8 +86,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -108,11 +108,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [128]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -148,8 +148,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: false
+      TransposeB: true
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -170,11 +170,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [128]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -210,8 +210,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: false
+      TransposeB: true
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -232,11 +232,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [128]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -272,8 +272,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -294,11 +294,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -334,8 +334,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -356,11 +356,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -396,8 +396,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: false
+      TransposeB: true
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -418,11 +418,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -458,8 +458,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: false
+      TransposeB: true
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -480,11 +480,11 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
-        - SourceSwap: [1]
+        - ExpandPointerSwap: [false]
+        - SourceSwap: [true]
         - TransposeLDS: [-1]
         - TransposeLDSMetadata: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]

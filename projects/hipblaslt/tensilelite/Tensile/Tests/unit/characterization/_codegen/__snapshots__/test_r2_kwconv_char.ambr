@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_kwconv_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_B_A_S_UserArgs_MT64x1HrNQfJvUo7SLqxrLvQbkEQnfzZW2vwQ4zpwDSosAdxo=',
+      'err': 0,
+    }),
+  ])
+# ---
