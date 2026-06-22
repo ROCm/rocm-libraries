@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <iterator>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/errors.hpp>
@@ -154,6 +155,43 @@ ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<int>&& pad_,
                            std::vector<int>&& stride_,
                            std::vector<int>&& dilation_,
+                           int groups_,
+                           miopenDataType_t type_,
+                           miopenTensorLayout_t layout)
+    : ConvTestCase(TensorDescriptorParams{type_, layout, std::move(x_)},
+                   TensorDescriptorParams{type_, layout, std::move(w_)},
+                   type_,
+                   ConvolutionDescriptorParams{
+                       std::move(pad_), std::move(stride_), std::move(dilation_), groups_})
+
+{
+}
+
+ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
+                           std::vector<size_t>&& w_,
+                           std::vector<int>&& pad_,
+                           std::vector<int>&& stride_,
+                           std::vector<int>&& dilation_,
+                           miopenDataType_t type_,
+                           miopenTensorLayout_t layout_)
+    : ConvTestCase(std::move(x_),
+                   std::move(w_),
+                   std::move(pad_),
+                   std::move(stride_),
+                   std::move(dilation_),
+                   type_,
+                   type_,
+                   type_,
+                   layout_,
+                   layout_)
+{
+}
+
+ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
+                           std::vector<size_t>&& w_,
+                           std::vector<int>&& pad_,
+                           std::vector<int>&& stride_,
+                           std::vector<int>&& dilation_,
                            miopenDataType_t type_x_,
                            miopenDataType_t type_w_,
                            miopenDataType_t type_y_)
@@ -180,6 +218,43 @@ ConvTestCase::ConvTestCase(TensorDescriptorParams&& x_,
     {
         throw std::runtime_error("wrong test case format");
     }
+}
+
+ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
+                           std::vector<size_t>&& w_,
+                           std::vector<int>&& pad_,
+                           std::vector<int>&& stride_,
+                           std::vector<int>&& dilation_,
+                           miopenDataType_t type_x_,
+                           miopenDataType_t type_w_,
+                           miopenDataType_t type_y_,
+                           miopenTensorLayout_t layout_x_,
+                           miopenTensorLayout_t layout_w_)
+    : ConvTestCase(
+          TensorDescriptorParams{type_x_, layout_x_, std::move(x_)},
+          TensorDescriptorParams{type_w_, layout_w_, std::move(w_)},
+          type_y_,
+          ConvolutionDescriptorParams{std::move(pad_), std::move(stride_), std::move(dilation_)})
+{
+}
+
+ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
+                           std::vector<size_t>&& w_,
+                           std::vector<int>&& pad_,
+                           std::vector<int>&& stride_,
+                           std::vector<int>&& dilation_,
+                           miopenDataType_t type_x_,
+                           miopenDataType_t type_w_,
+                           miopenDataType_t type_y_,
+                           miopenTensorLayout_t layout_x_,
+                           miopenTensorLayout_t layout_w_,
+                           int number_of_groups)
+    : ConvTestCase(TensorDescriptorParams{type_x_, layout_x_, std::move(x_)},
+                   TensorDescriptorParams{type_w_, layout_w_, std::move(w_)},
+                   type_y_,
+                   ConvolutionDescriptorParams{
+                       std::move(pad_), std::move(stride_), std::move(dilation_), number_of_groups})
+{
 }
 
 miopen::TensorDescriptor ConvTestCase::GetXTensorDescriptor() const
@@ -589,7 +664,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     auto output = tensor<Tout>{output_desc};
 
-    output.generate(GenConvData<Tout, Tin>{weights.desc.GetLengths()});
+    output.generate(GenConvData<Tout, Tin>{output.desc.GetLengths()});
     weights.generate(GenConvData<Twei, Tin>{weights.desc.GetLengths()});
     std::fill(input.begin(), input.end(), Tin());
 
@@ -715,8 +790,10 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     auto output = tensor<Tout>{output_desc};
 
-    input.generate(GenConvData<Tin, Twei>{output_desc.GetLengths()});
-    output.generate(GenConvData<Tout, Twei>{output_desc.GetLengths()});
+    input.generate(GenConvData<Tin, Twei>{conv_config.GetXTensorDescriptor().GetLengths(),
+                                          conv_desc.GetGroupCount()});
+    output.generate(GenConvData<Tout, Twei>{conv_config.GetXTensorDescriptor().GetLengths(),
+                                            conv_desc.GetGroupCount()});
     std::fill(weights.begin(), weights.end(), Twei());
 
     auto&& handle = get_handle();
