@@ -813,7 +813,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate. Three categories:
     #   - Dead (no consumer anywhere; safe to silently drop):
-    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
     "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
     "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
     "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
