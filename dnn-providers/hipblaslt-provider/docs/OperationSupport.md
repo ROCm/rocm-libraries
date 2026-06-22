@@ -54,5 +54,8 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 
 ### Datatypes
 - **FP16**: Half-precision floating point (16-bit)
-- **BFP16**: Brain floating point (16-bit)
+- **BF16**: Brain floating point (16-bit)
 - **FP32**: Single-precision floating point (32-bit)
+- **FP8_E4M3**: OCP FP8, 4 exponent / 3 mantissa bits (8-bit)
+- **FP8_E5M2**: OCP FP8, 5 exponent / 2 mantissa bits (8-bit)
+- **FP8_E8M0**: UE8M0 block-scale type, 8-bit unsigned exponent (MX scales)
