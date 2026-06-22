@@ -261,19 +261,13 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # Make test executables prefer the build/install tree next to the executable before any
     # toolchain paths. This prevents stale installed hipDNN libraries in /opt/rocm from shadowing
     # the freshly built test dependencies.
-    # Include both the main lib directory and the engine plugin directories.
-    set(TEST_LOCAL_RPATH
-        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
-    )
     set_target_properties(
         ${TARGET}
         PROPERTIES
-            BUILD_RPATH
-            "${TEST_LOCAL_RPATH}"
             INSTALL_RPATH
-            "${TEST_LOCAL_RPATH}"
+            "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
+            BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH_USE_LINK_PATH TRUE
-            BUILD_RPATH_USE_ORIGIN TRUE
     )
 
     # Install test executables to bin directory
