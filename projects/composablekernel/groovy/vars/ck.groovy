@@ -453,8 +453,12 @@ def devicesUp() {
     sh(returnStatus:true, script:'test -e /dev/kfd && ls /dev/dri/renderD* >/dev/null 2>&1') == 0
 }
 def cacheWritable() { sh(returnStatus:true, script:'D=${SCCACHE_DIR:-/.cache/sccache}; mkdir -p "$D/probe" 2>/dev/null') == 0 }
-def diskOk(String path='/var/jenkins/workspace', int minGb=5) {
+def diskOk(String path='/var/jenkins', int minGb=5) {
     echo "Preflight: checking disk space on ${path} (minimum ${minGb}GB)"
+    if (sh(returnStatus:true, script:"test -d ${path}") != 0) {
+        echo "Preflight: disk check path ${path} does not exist, skipping"
+        return true
+    }
     sh(returnStdout:true, script:"df --output=avail -BG ${path} | tail -1 | tr -dc '0-9'").trim().toInteger() >= minGb
 }
 
