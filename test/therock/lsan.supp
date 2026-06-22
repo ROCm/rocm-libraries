@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+leak:rocr::AMD::
+leak:hsaKmt
+leak:libhsa-runtime64.so

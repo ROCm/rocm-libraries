@@ -31,8 +31,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -84,7 +84,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -93,7 +93,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -126,8 +126,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -165,7 +165,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -174,7 +174,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -197,8 +197,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -236,7 +236,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -245,7 +245,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -268,8 +268,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -307,7 +307,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -316,7 +316,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [16]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -340,8 +340,8 @@ BenchmarkProblems:
       ComputeDataType: s
       F32XdlMathOp: X
       HighPrecisionAccumulate: False
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -380,7 +380,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -389,7 +389,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -412,8 +412,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: False
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       SwizzleTensorA: True
       UseBeta: True
       Batched: True
@@ -452,7 +452,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -461,7 +461,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,3]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - LocalReadVectorWidth: [2,4,8]
-        - DirectToVgprA: [1]
+        - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

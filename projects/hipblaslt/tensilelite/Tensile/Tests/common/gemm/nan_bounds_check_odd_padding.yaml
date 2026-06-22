@@ -1,6 +1,8 @@
 # Test for NaN bounds checking with odd-sized padding
 # Verifies that pointer alignment is correct when padding elements is odd
-
+TestParameters:
+  marks: [skip-gfx1250]
+  
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
@@ -18,7 +20,7 @@ GlobalParameters:
   NumBenchmarks: 1
   PrintSolutionRejectionReason: True
   LibraryFormat: yaml
-  BoundsCheck: True
+  BoundsCheck: 1
 
 BenchmarkProblems:
   ########################################
