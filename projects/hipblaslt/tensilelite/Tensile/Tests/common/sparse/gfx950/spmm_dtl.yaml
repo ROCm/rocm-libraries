@@ -5,7 +5,6 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: -1
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   PruneSparseMode: 0
