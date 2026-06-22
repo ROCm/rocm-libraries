@@ -97,15 +97,17 @@ static bool isMi308Device(hipStream_t stream)
     auto status = hipStreamGetDevice(stream, &deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipStreamGetDevice failed with error code: "
-                                 + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hipStreamGetDevice failed with error code: " + std::to_string(status));
     }
     int chipId;
     status = hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipDeviceGetAttribute failed with error code: "
-                                 + std::to_string(status));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hipDeviceGetAttribute failed with error code: " + std::to_string(status));
     }
 
     HIPDNN_PLUGIN_LOG_INFO("pciDeviceID  = " << std::hex << std::to_string(chipId));
@@ -267,7 +269,7 @@ void SdpaFwdPlanBuilder::initializeExecutionSettings(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
     Settings& /* executionSettings */) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaFwdPlanBuilder::initializeExecutionContext not implemented");
+    // Forward exposes no knobs — nothing to parse.
 }
 
 void SdpaFwdPlanBuilder::buildPlan(
@@ -287,8 +289,10 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: "
+                + std::string(e.what()));
     }
 
     // Extract SDPA attributes and tensor metadata
@@ -415,7 +419,9 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     if(kernelKey.empty())
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel");
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
@@ -429,7 +435,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto kernel = loadKernelModule(coPath, config.knl_name.c_str());
     if(!kernel)
     {
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module: " + coPath);
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(*kernel), params));
