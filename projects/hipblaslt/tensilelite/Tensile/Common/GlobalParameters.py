@@ -965,7 +965,10 @@ def setupRestoreClocks():
                 # amd-smi set/reset require elevated privileges.
                 # Reset clocks/overdrive to default and return fans to
                 # automatic (driver) control.
-                subprocess.call(["sudo", asmi, "reset", "-g", "0", "--clocks", "--fans"])
+                cmd = [asmi, "reset", "-g", "0", "--clocks", "--fans"]
+                if hasattr(os, "geteuid") and os.geteuid() != 0:
+                    cmd = ["sudo", "-n"] + cmd
+                subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     atexit.register(restoreClocks)
 

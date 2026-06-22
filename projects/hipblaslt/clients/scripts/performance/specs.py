@@ -28,10 +28,10 @@ def _run_amdsmi_json(cmd: list):
     Returns None if amd-smi is unavailable or the output cannot be parsed.
     """
     try:
-        out = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("ascii")
-        return json.loads(out)
+        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if getattr(completed, "returncode", 0) != 0:
+            return None
+        return json.loads(completed.stdout.decode("utf-8", errors="replace"))
     except (FileNotFoundError, json.JSONDecodeError, ValueError):
         return None
 
