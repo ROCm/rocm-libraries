@@ -112,6 +112,11 @@ std::unique_ptr<IReferenceGraphExecutor>
 
 // ---- top-level dispatch ----------------------------------------------------
 
+VerificationMode IntegrationGraphGoldenReferenceVerificationHarness::getVerificationMode() const
+{
+    return TestConfig::get().getVerificationMode();
+}
+
 void IntegrationGraphGoldenReferenceVerificationHarness::runComparison()
 {
     if(_bundle->outputTensorUids.empty())
@@ -125,7 +130,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runComparison()
         return;
     }
 
-    switch(TestConfig::get().getVerificationMode())
+    switch(getVerificationMode())
     {
     case VerificationMode::GOLDEN:
         runGoldenMode();

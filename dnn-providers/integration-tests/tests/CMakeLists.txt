@@ -20,6 +20,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestVerificationPaths.cpp
     TestGoldenVerificationHarness.cpp
     TestSynthesisTracker.cpp
+    TestVerificationModePaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

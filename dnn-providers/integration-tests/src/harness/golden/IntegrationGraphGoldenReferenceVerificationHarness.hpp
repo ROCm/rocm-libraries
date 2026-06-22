@@ -103,6 +103,10 @@ protected:
     virtual std::unique_ptr<IReferenceGraphExecutor>
         makeReferenceExecutor(ReferenceExecutorType type);
 
+    // Returns the active verification mode. Override in tests to inject a mode
+    // without touching the TestConfig singleton.
+    virtual VerificationMode getVerificationMode() const;
+
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
