@@ -493,12 +493,11 @@ def _to_stinky_register(arg: Any) -> Any:
         TypeError: on an unsupported operand type.
     """
     import stinkytofu as _st  # noqa: WPS433  (runtime: optional dep)
+    from .container import Container as _Container  # noqa: WPS433
 
     if hasattr(arg, "to_stinky"):
         return arg.to_stinky()
     if isinstance(arg, bool):
-        # ``bool`` is an ``int`` subclass; stinky Register has no bool
-        # ctor, route through int explicitly.
         return _st.Register(int(arg))
     if isinstance(arg, int):
         return _st.Register(arg)
@@ -506,10 +505,12 @@ def _to_stinky_register(arg: Any) -> Any:
         return _st.Register(arg)
     if isinstance(arg, str):
         return _st.Register(arg)
+    if isinstance(arg, _Container):
+        return _st.Register(arg.toString())
     raise TypeError(
         f"rocisa_stinkytofu_adaptor.instruction: cannot coerce operand of "
         f"type {type(arg).__name__!r} into a stinkytofu Register. Supported "
-        f"types are RegisterContainer (.to_stinky()), int, float, str."
+        f"types are RegisterContainer (.to_stinky()), int, float, str, Container."
     )
 
 
