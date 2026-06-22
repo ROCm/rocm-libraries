@@ -1951,6 +1951,45 @@ namespace rocisa
         }
     };
 
+    struct STtraceData : public Instruction
+    {
+        STtraceData(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_ttracedata");
+        }
+
+        STtraceData(const STtraceData& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<STtraceData>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
     struct SSleep : public Instruction
     {
         SSleep(const int simm16, const std::string& comment = "")
@@ -5535,6 +5574,32 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMovB32>(*this);
+        }
+    };
+
+    // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+    // runtime (indirect VGPR write). CompactLoopStore uses it so one batch body
+    // covers multiple MI accumulator slices -- each CLS loop iter sets M0 to a
+    // different stride and re-runs the same body.
+    struct VMovRelsD2B32 : public CommonInstruction
+    {
+        VMovRelsD2B32(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_movrelsd_2_b32");
+        }
+
+        VMovRelsD2B32(const VMovRelsD2B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMovRelsD2B32>(*this);
         }
     };
 

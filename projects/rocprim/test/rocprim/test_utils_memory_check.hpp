@@ -118,10 +118,9 @@ public:
     // padding_factor is a value in [0, 1] that indicates how much of a buffer we should leave
     // below the available memory.
     // i.e. when a prospective allocation >= free_memory * (1 - padding_factor), assume OOM.
-    MemCheck(const hipStream_t stream = 0, const float padding_factor = 0.1f)
-        : padding_factor(padding_factor)
+    MemCheck(const float padding_factor = 0.1f) : padding_factor(padding_factor)
     {
-        char* env = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
+        char* env       = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
         logging_enabled = (env != nullptr) && (strcmp(env, "1") == 0);
         common::clean_env(env);
     }

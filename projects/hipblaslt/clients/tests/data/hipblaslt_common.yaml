@@ -83,7 +83,7 @@ Common threads and streams: &common_threads_streams
   - { threads: 0,  streams: 0}
   # - { threads: 0, streams: 1 }
   # - { threads: 1, streams: 0 }
-  # - { threads: 3, streams: 3 }
+  - { threads: 3, streams: 3 }
   # - { threads: 5, streams: 5 }
 
 Real precisions: &real_precisions
