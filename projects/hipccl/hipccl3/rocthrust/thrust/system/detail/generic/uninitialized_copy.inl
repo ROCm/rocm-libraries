@@ -72,7 +72,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy(
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator begin = thrust::make_zip_iterator(first, result);
   ZipIterator end   = begin;
 
   // get a zip_iterator pointing to the end
@@ -117,7 +117,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator zipped_first = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator zipped_first = thrust::make_zip_iterator(first, result);
 
   // create a functor
   using InputType  = thrust::detail::it_value_t<InputIterator>;
