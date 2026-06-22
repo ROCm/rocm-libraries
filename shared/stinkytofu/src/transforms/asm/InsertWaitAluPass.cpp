@@ -634,6 +634,10 @@ class InsertWaitAluPassImpl : public Pass {
             // scoreboard so pre-call producer scores don't leak into post-call
             // tracking as phantom dependencies.
             //
+            // Possible callee entry labels (when present) live on the instruction
+            // as `CallTargetData` and are exposed via `getCallTargets()` for call
+            // graph and other analyses; they are not CFG successor edges.
+            //
             // No drain / no callee-return handling is needed: mode2 is confined
             // to the loop region (see insertSchedModeLifecycle), and every
             // s_swappc lives in the mode0 epilogue (GlobalWriteBatch is the sole

@@ -100,7 +100,7 @@ TEST_F(BranchHelpersTest, NonBranchHasNoTargets) {
     EXPECT_EQ(getBranchTarget(*inst), "");
 }
 
-// s_swappc_b64 is an indirect unconditional branch with no static target.
+// s_swappc_b64 is an indirect unconditional branch with no static CFG target.
 TEST_F(BranchHelpersTest, SwappcIsIndirectBranch) {
     AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
@@ -111,6 +111,25 @@ TEST_F(BranchHelpersTest, SwappcIsIndirectBranch) {
     EXPECT_TRUE(isUnconditionalBranch(*inst));
     EXPECT_TRUE(isIndirectBranch(*inst));
     EXPECT_TRUE(getBranchTargets(*inst).empty());
+    EXPECT_TRUE(getCallTargets(*inst).empty());
+}
+
+// CallTargetData lists possible callees for analysis; it must not become CFG targets.
+TEST_F(BranchHelpersTest, SwappcCallTargetDataDoesNotAffectBranchTargets) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
+    inst->addDestReg(StinkyRegister("s", 2, 2));
+    inst->addSrcReg(StinkyRegister("s", 0, 2));
+    inst->addModifier<CallTargetData>(
+        CallTargetData{std::vector<std::string>{"label_Activation_A", "label_Activation_B"}});
+
+    EXPECT_TRUE(isCall(*inst));
+    EXPECT_TRUE(getBranchTargets(*inst).empty());
+
+    auto callees = getCallTargets(*inst);
+    ASSERT_EQ(callees.size(), 2u);
+    EXPECT_EQ(callees[0], "label_Activation_A");
+    EXPECT_EQ(callees[1], "label_Activation_B");
 }
 
 }  // namespace

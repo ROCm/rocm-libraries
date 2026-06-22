@@ -175,9 +175,11 @@ class CFGBuilderPassImpl : public Pass {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
                     // Some valid indirect branches (for example bare s_setpc_b64 /
-                    // s_swappc_b64 without LabelData) do not have statically-known
-                    // targets. In that case getBranchTargets() returns an empty set
-                    // and we simply do not create any branch edges.
+                    // s_swappc_b64 without LabelData) do not have statically-known CFG
+                    // targets. `CallTargetData` on s_swappc_b64 lists possible callees
+                    // for call analysis only and is not fed to getBranchTargets().
+                    // In that case getBranchTargets() returns an empty set and we
+                    // simply do not create any branch edges.
                     const auto targets = getBranchTargets(*termInst);
                     for (const std::string& targetLabel : targets) {
                         auto targetIt = labelMap.find(targetLabel);

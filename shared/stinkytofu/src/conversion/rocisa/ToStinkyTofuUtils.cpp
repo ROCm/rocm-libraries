@@ -325,6 +325,13 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
             return {nullptr, nullptr};
         }
 
+        if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
+            if (!swappc->calleeFuncs.empty()) {
+                inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }

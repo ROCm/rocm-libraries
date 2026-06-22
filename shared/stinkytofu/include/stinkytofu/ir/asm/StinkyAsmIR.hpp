@@ -462,6 +462,17 @@ inline bool isCall(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
 }
 
+/// Possible callee entry labels for a call site (`s_swappc_b64` with optional
+/// `CallTargetData` from the rocisa producer). Empty when unknown or omitted.
+/// This is for call-graph / scheduling analysis only; it is not a CFG successor list.
+inline std::vector<std::string> getCallTargets(const StinkyInstruction& inst) {
+    if (!isCall(inst)) return {};
+    if (const auto* meta = inst.getModifier<CallTargetData>()) {
+        return meta->callees;
+    }
+    return {};
+}
+
 // Label names of basic-block targets for \p given branch instruction.
 //
 // At most one target is returned today. Switch / multi-way branch semantics
@@ -471,6 +482,8 @@ inline bool isCall(const StinkyInstruction& inst) {
 //   - Not a branch → {}
 //   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
 //   - IF_IndirectBranch without LabelData → {}
+//   - `CallTargetData` on `s_swappc_b64` is intentionally ignored here; those
+//     names are possible callees, not definite CFG successors. Use getCallTargets().
 //   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
 //   - Otherwise → {}
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
