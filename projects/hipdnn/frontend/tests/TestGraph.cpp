@@ -9073,6 +9073,59 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
     EXPECT_NE(execResult.err_msg.find("is barred"), std::string::npos) << execResult.err_msg;
 }
 
+// A compiled plan that is both barred and exceeds maxWorkspaceSize must be
+// surfaced exactly once — by the barred loop (carrying the "Plan barred"
+// message), not also by the workspace-skip loop. A second non-barred,
+// in-workspace plan keeps the compiled-plan map non-empty so the benchmark and
+// result-building path (which contains the dedup) runs via the mock backend.
+TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
+
+    // One benchmarkable plan (non-barred, within the limit) keeps the plan map
+    // non-empty so the benchmark + result-building path runs.
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/512, /*barred=*/false);
+    // The plan under test: barred (e.g. by deselect_engines()) AND over the
+    // limit. It satisfies both the workspace-skip and barred conditions.
+    const int64_t barredEngineId = 20;
+    graph.injectValidCompiledPlan(
+        /*engineId=*/barredEngineId, /*workspaceSize=*/8192, /*barred=*/true);
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    std::vector<AutotuneResult> results;
+    void* workspace = reinterpret_cast<void*>(0x1000);
+    auto result
+        = graph.autotune(_handle, pack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    // The barred + oversized plan must appear EXACTLY once, carrying the barred
+    // message ("Plan barred"), not the workspace-skip message ("exceeds limit").
+    int barredEntryCount = 0;
+    for(const auto& r : results)
+    {
+        if(r.engineId == barredEngineId)
+        {
+            ++barredEntryCount;
+            EXPECT_FALSE(r.succeeded);
+            EXPECT_EQ(r.rank, -1);
+            EXPECT_EQ(r.compiledPlanIndex, -1);
+            EXPECT_NE(r.errorMessage.find("Plan barred"), std::string::npos) << r.errorMessage;
+            EXPECT_EQ(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
+        }
+    }
+    EXPECT_EQ(barredEntryCount, 1);
+}
+
 // ============================================================================
 // Ranking tests driving the real autotune::detail::rankAndSelectWinner
 // ============================================================================

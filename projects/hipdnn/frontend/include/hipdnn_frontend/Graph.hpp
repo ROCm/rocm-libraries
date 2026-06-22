@@ -1740,6 +1740,14 @@ private:
                 }
                 const auto& skippedPlan = _compiledPlans[pi];
 
+                // Barred plans are surfaced by the barred loop below; skip them
+                // here so a barred plan that also exceeds the workspace limit is
+                // surfaced once, by the barred loop, rather than also here.
+                if(skippedPlan.barred)
+                {
+                    continue;
+                }
+
                 // Only emit a skipped result if the plan actually exceeds
                 // the limit (it may have been excluded for other reasons,
                 // e.g., engine ID filter or invalid execution plan).
