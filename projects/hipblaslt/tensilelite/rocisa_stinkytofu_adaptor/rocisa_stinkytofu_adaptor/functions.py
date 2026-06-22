@@ -38,8 +38,12 @@ What it does (real, math):
       multiply-add / Bpe family helpers — all ported from C++
       ``functions/f_math.hpp``.
 
+What it does (real, branch):
+    - ``BranchIfZero`` / ``BranchIfNotZero`` — type-dispatched
+      compare-and-branch sequences ported from C++
+      ``functions/f_branch.hpp``.
+
 Not yet done (dummy):
-    - Branch helpers: ``BranchIfZero``, ``BranchIfNotZero``
     - Cast helper: ``VSaturateCastInt``
     - ``DSInit``
 
@@ -60,15 +64,18 @@ from typing import Any
 from ._dummy import make_dummy_func
 from .code import Module, TextBlock
 from .container import ContinuousRegister, EXEC, VCC, sgpr, vgpr
+from .enum import DataTypeEnum
 from .instruction import (
-    SAddCU32, SAddU32, SAndB32, SCmpLgU32, SLShiftLeftB32, SLShiftLeftB64,
-    SLShiftRightB32, SLShiftRightB64, SLoadB32, SLoadB64, SLoadB128,
-    SLoadB256, SLoadB512, SMulHIU32, SMulI32, SMovB32, SMovB64, SNop,
-    SSubU32,
-    VAddCCOU32, VAddLShiftLeftU32, VAddU32, VAndB32, VCmpNeU32,
-    VCmpXEqU32, VCmpXGeU32, VCmpXGtU32, VCvtF32toU32, VCvtF64toU32,
-    VCvtU32toF32, VCvtU32toF64, VLShiftLeftAddU32, VLShiftLeftB32,
-    VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24,
+    SAddCU32, SAddU32, SAndB32, SAndB64, SCBranchSCC0, SCBranchSCC1,
+    SCBranchVCCNZ, SCBranchVCCZ, SCmpEQU32, SCmpEQU64, SCmpLgU32,
+    SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64,
+    SLoadB32, SLoadB64, SLoadB128, SLoadB256, SLoadB512,
+    SMulHIU32, SMulI32, SMovB32, SMovB64, SNop, SSubU32,
+    VAddCCOU32, VAddLShiftLeftU32, VAddU32, VAndB32, VCmpEQF32,
+    VCmpEQF64, VCmpNeU32, VCmpXEqU32, VCmpXGeU32, VCmpXGtU32,
+    VCvtF32toU32, VCvtF64toU32, VCvtU32toF32, VCvtU32toF64,
+    VLShiftLeftAddU32, VLShiftLeftB32, VLShiftLeftB64,
+    VLShiftRightB32, VLShiftRightB64, VMadU32U24,
     VMovB32, VMulF32, VMulF64, VMulHIU32, VMulLOU32, VMulU32U24,
     VRcpF64, VRcpIFlagF32, VReadfirstlaneB32, VSubU32,
 )
@@ -179,8 +186,142 @@ class ArgumentLoader:
         return module
 
 
-BranchIfZero = make_dummy_func(f"{_P}.BranchIfZero")
-BranchIfNotZero = make_dummy_func(f"{_P}.BranchIfNotZero")
+def _sgpr_with_offset(sgprName: str, offset: int) -> str:
+    try:
+        base = int(sgprName)
+        return str(base + offset)
+    except ValueError:
+        return sgprName + "+" + str(offset)
+
+
+def BranchIfZero(sgprName: str, computeDataType, tmpSgprIdx: int,
+                 laneSC: int, label, waveFrontSize: int) -> Module:
+    module = Module("BranchIfZero")
+    sgprStr = "s[" + sgprName + "]"
+    pVCC = VCC()
+
+    if computeDataType == DataTypeEnum.ComplexDouble:
+        tmpSgpr = sgpr(tmpSgprIdx, laneSC)
+        module.add(VCmpEQF64(dst=tmpSgpr, src0=sgpr(sgprName, 2), src1=0.0,
+                              comment=sgprStr + ".real == 0.0 ?"))
+        sgprVar = _sgpr_with_offset(sgprName, 2)
+        module.add(VCmpEQF64(dst=pVCC, src0=sgpr(sgprVar, 2), src1=0.0,
+                              comment=sgprStr + ".imag == 0.0 ?"))
+        if waveFrontSize == 32:
+            module.add(SAndB32(dst=tmpSgpr, src0=pVCC, src1=tmpSgpr,
+                               comment=sgprStr + " == 0 ?"))
+            module.add(SCmpEQU32(src0=tmpSgpr, src1=0,
+                                 comment="branch if " + sgprStr + " == 0"))
+        else:
+            module.add(SAndB64(dst=tmpSgpr, src0=pVCC, src1=tmpSgpr,
+                               comment=sgprStr + " == 0 ?"))
+            module.add(SCmpEQU64(src0=tmpSgpr, src1=0,
+                                 comment="branch if " + sgprStr + " == 0"))
+        module.add(SCBranchSCC0(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " == 0"))
+
+    elif computeDataType == DataTypeEnum.Double:
+        module.add(VCmpEQF64(dst=pVCC, src0=sgpr(sgprName, 2), src1=0.0,
+                              comment=sgprStr + " == 0.0 ?"))
+        module.add(SCBranchVCCNZ(labelName=label.getLabelName(),
+                                 comment="branch if " + sgprStr + " == 0"))
+
+    elif computeDataType == DataTypeEnum.ComplexFloat:
+        tmpSgpr = sgpr(tmpSgprIdx, laneSC)
+        module.add(VCmpEQF32(dst=tmpSgpr, src0=sgpr(sgprName), src1=0.0,
+                              comment=sgprStr + ".real == 0.0f ?"))
+        sgprVar = _sgpr_with_offset(sgprName, 1)
+        module.add(VCmpEQF32(dst=pVCC, src0=sgpr(sgprVar), src1=0.0,
+                              comment=sgprStr + ".imag == 0.0f ?"))
+        if waveFrontSize == 32:
+            module.add(SAndB32(dst=tmpSgpr, src0=pVCC, src1=tmpSgpr,
+                               comment=sgprStr + " == 0 ?"))
+            module.add(SCmpEQU32(src0=tmpSgpr, src1=0,
+                                 comment="branch if " + sgprStr + " == 0"))
+        else:
+            module.add(SAndB64(dst=tmpSgpr, src0=pVCC, src1=tmpSgpr,
+                               comment=sgprStr + " == 0 ?"))
+            module.add(SCmpEQU64(src0=tmpSgpr, src1=0,
+                                 comment="branch if " + sgprStr + " == 0"))
+        module.add(SCBranchSCC0(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " == 0"))
+
+    elif computeDataType in (DataTypeEnum.Float, DataTypeEnum.Half,
+                             DataTypeEnum.BFloat16):
+        module.add(VCmpEQF32(dst=pVCC, src0=sgpr(sgprName), src1=0.0,
+                              comment=sgprStr + " == 0.0f ?"))
+        module.add(SCBranchVCCNZ(labelName=label.getLabelName(),
+                                 comment="branch if " + sgprStr + " == 0"))
+
+    elif computeDataType == DataTypeEnum.Int32:
+        module.add(SCmpEQU32(src0=sgpr(sgprName), src1=0,
+                             comment=sgprStr + " == 0 ?"))
+        module.add(SCBranchSCC1(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " == 0"))
+
+    elif computeDataType == DataTypeEnum.Int64:
+        module.add(SCmpEQU64(src0=sgpr(sgprName, 2), src1=0,
+                             comment=sgprStr + " == 0 ?"))
+        module.add(SCBranchSCC1(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " == 0"))
+    else:
+        raise RuntimeError("Unsupported compute data type")
+
+    return module
+
+
+def BranchIfNotZero(sgprName: str, computeDataType, label) -> Module:
+    module = Module("BranchIfNotZero")
+    sgprStr = "s[" + sgprName + "]"
+    pVCC = VCC()
+
+    if computeDataType == DataTypeEnum.ComplexDouble:
+        module.add(VCmpEQF64(dst=pVCC, src0=sgpr(sgprName, 2), src1=0.0,
+                              comment=sgprStr + ".real == 0.0 ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + ".real != 0"))
+        sgprVar = _sgpr_with_offset(sgprName, 2)
+        module.add(VCmpEQF64(dst=pVCC, src0=sgpr(sgprVar, 2), src1=0.0,
+                              comment=sgprStr + ".imag == 0.0 ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + ".imag != 0"))
+
+    elif computeDataType == DataTypeEnum.Double:
+        module.add(VCmpEQF64(dst=pVCC, src0=sgpr(sgprName, 2), src1=0.0,
+                              comment=sgprStr + " == 0.0 ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " != 0"))
+
+    elif computeDataType == DataTypeEnum.ComplexFloat:
+        module.add(VCmpEQF32(dst=pVCC, src0=sgpr(sgprName), src1=0.0,
+                              comment=sgprStr + ".real == 0.0f ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + ".real != 0"))
+        sgprVar = _sgpr_with_offset(sgprName, 1)
+        module.add(VCmpEQF32(dst=pVCC, src0=sgpr(sgprVar), src1=0.0,
+                              comment=sgprStr + ".imag == 0.0f ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + ".imag != 0"))
+
+    elif computeDataType in (DataTypeEnum.Float, DataTypeEnum.Half,
+                             DataTypeEnum.BFloat16):
+        module.add(VCmpEQF32(dst=pVCC, src0=sgpr(sgprName), src1=0.0,
+                              comment=sgprStr + " == 0.0f ?"))
+        module.add(SCBranchVCCZ(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " != 0"))
+
+    elif computeDataType == DataTypeEnum.Int64:
+        module.add(SCmpEQU64(src0=sgpr(sgprName, 2), src1=0,
+                             comment=sgprStr + " == 0 ?"))
+        module.add(SCBranchSCC0(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " != 0"))
+    else:
+        module.add(SCmpEQU32(src0=sgpr(sgprName), src1=0,
+                             comment=sgprStr + " == 0 ?"))
+        module.add(SCBranchSCC0(labelName=label.getLabelName(),
+                                comment="branch if " + sgprStr + " != 0"))
+
+    return module
 
 VSaturateCastInt = make_dummy_func(f"{_P}.VSaturateCastInt")
 

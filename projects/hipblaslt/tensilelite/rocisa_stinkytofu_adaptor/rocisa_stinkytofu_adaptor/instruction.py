@@ -1815,7 +1815,10 @@ SBranch = _make_branch_class("SBranch", "s_branch")
 SCBranchSCC0 = _make_branch_class("SCBranchSCC0", "s_cbranch_scc0")
 # logicalIR: SCBranchSCC1
 SCBranchSCC1 = _make_branch_class("SCBranchSCC1", "s_cbranch_scc1")
-SAddPCI64_SIMM = make_dummy_class(f"{_P}.SAddPCI64_SIMM")
+SAddPCI64_SIMM = _make_branch_class("SAddPCI64_SIMM", "s_add_pc_i64")
+
+
+SAddPCI64_SIMM.to_stinky_logical = lambda self: None  # no logicalIR mapping
 # logicalIR: SCBranchVCCNZ
 SCBranchVCCNZ = _make_branch_class("SCBranchVCCNZ", "s_cbranch_vccnz")
 # logicalIR: SCBranchVCCZ
@@ -3877,13 +3880,254 @@ def getSMFMAIssueLatency(dataType, matrixInstM, matrixInstB):
 # Extension helpers (exposed as functions)
 # source: rocisa/rocisa/src/instruction/extension.cpp
 # ==========================================================================
-SLongBranch = make_dummy_func(f"{_P}.SLongBranch")
-SGetPositivePCOffset = make_dummy_func(f"{_P}.SGetPositivePCOffset")
-SLongBranchPositive = make_dummy_func(f"{_P}.SLongBranchPositive")
-SLongBranchNegative = make_dummy_func(f"{_P}.SLongBranchNegative")
-SCLongBranchScc0 = make_dummy_func(f"{_P}.SCLongBranchScc0")
-SCLongBranchScc1 = make_dummy_func(f"{_P}.SCLongBranchScc1")
-SCLongBranchVccnz = make_dummy_func(f"{_P}.SCLongBranchVccnz")
+
+def _ext_lazy():
+    """Lazy imports to avoid circular dependency (code.py imports instruction.py)."""
+    from .code import Module, Label  # noqa: F811
+    from .container import ContinuousRegister, sgpr  # noqa: F811
+    return Module, Label, ContinuousRegister, sgpr
+
+
+def SGetPositivePCOffset(sgprIdx, label, tmpSgprRes):
+    """Port of ``rocisa::SGetPositivePCOffset`` (extension.hpp)."""
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    if isinstance(tmpSgprRes, int):
+        tmpSgprRes = ContinuousRegister(tmpSgprRes, 1)
+    labelName = label.getLabelName()
+    module = Module("SGetPositivePCOffset " + labelName)
+    if tmpSgprRes.size < 1:
+        raise RuntimeError("ContinuousRegister size must be at least 1.")
+    tmpSgpr = tmpSgprRes.idx
+    module.add(SGetPCB64(dst=sgpr(sgprIdx, 2), comment="addr of next instr"))
+    module.add(SAddI32(dst=sgpr(tmpSgpr), src0=labelName, src1=4,
+                       comment="target branch offset"))
+    module.add(SAddU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx),
+                       src1=sgpr(tmpSgpr), comment="add target branch offset"))
+    module.add(SAddCU32(dst=sgpr(sgprIdx + 1), src0=sgpr(sgprIdx + 1),
+                        src1=0, comment="add high and carry"))
+    return module
+
+
+def _split_tmp_regs(tmpSgprRes):
+    """Split a >= 3-register ContinuousRegister into (aligned_pair_idx, off_idx)."""
+    if tmpSgprRes.idx % 2 == 0:
+        return tmpSgprRes.idx, tmpSgprRes.idx + 2
+    else:
+        return tmpSgprRes.idx + 1, tmpSgprRes.idx
+
+
+def SLongBranch(label, tmpSgprRes_or_pcPair, offSgpr_or_posLabel=None,
+                positiveLabelStr=None, comment=""):
+    """Port of ``rocisa::SLongBranch`` (extension.hpp).
+
+    Two calling conventions:
+      SLongBranch(label, tmpSgprRes, positiveLabelStr, comment="")
+      SLongBranch(label, pcPair, offSgpr, positiveLabelStr, comment="")
+    """
+    if isinstance(offSgpr_or_posLabel, str) or offSgpr_or_posLabel is None:
+        tmpSgprRes = tmpSgprRes_or_pcPair
+        posLabel = offSgpr_or_posLabel or ""
+        cmt = positiveLabelStr if positiveLabelStr is not None else ""
+        if tmpSgprRes.size < 3:
+            raise RuntimeError("ContinuousRegister size must be at least 3.")
+        tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
+        return _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, posLabel, cmt)
+    else:
+        pcPair = tmpSgprRes_or_pcPair
+        offSgpr = offSgpr_or_posLabel
+        posLabel = positiveLabelStr or ""
+        cmt = comment
+        if pcPair.size < 2 or pcPair.idx % 2 != 0:
+            raise RuntimeError("pcPair must be a 2-aligned pair.")
+        if offSgpr.size < 1:
+            raise RuntimeError("offSgpr must have at least 1 register.")
+        return _SLongBranchImpl(label, pcPair.idx, offSgpr.idx, posLabel, cmt)
+
+
+def _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, positiveLabelStr, comment):
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    labelName = label.getLabelName()
+    module = Module("SLongBranch " + labelName)
+    if comment:
+        module.addComment(comment)
+    positiveLabel = Label(positiveLabelStr, "")
+    module.add(SGetPCB64(dst=sgpr(tmpSgprX2, 2), comment="addr of next instr"))
+    module.add(SAddI32(dst=sgpr(tmpSgprX1), src0=labelName, src1=4,
+                       comment="target branch offset"))
+    module.add(SCmpGeI32(src0=sgpr(tmpSgprX1), src1=0,
+                         comment="check positive or negative"))
+    module.add(SCBranchSCC1(labelName=positiveLabel.getLabelName(),
+                            comment="jump when positive"))
+    module.add(SAbsI32(dst=sgpr(tmpSgprX1), src=sgpr(tmpSgprX1),
+                       comment="abs offset"))
+    module.add(SSubU32(dst=sgpr(tmpSgprX2), src0=sgpr(tmpSgprX2),
+                       src1=sgpr(tmpSgprX1), comment="sub target branch offset"))
+    module.add(SSubBU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
+                        src1=0, comment="sub high and carry"))
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+                         comment="branch to " + labelName))
+    module.add(positiveLabel)
+    module.add(SAddU32(dst=sgpr(tmpSgprX2), src0=sgpr(tmpSgprX2),
+                       src1=sgpr(tmpSgprX1), comment="add target branch offset"))
+    module.add(SAddCU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
+                        src1=0, comment="add high and carry"))
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+                         comment="branch to " + labelName))
+    return module
+
+
+def SLongBranchPositive(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
+                        comment=""):
+    """Port of ``rocisa::SLongBranchPositive`` (extension.hpp).
+
+    Two calling conventions:
+      SLongBranchPositive(label, tmpSgprRes, comment="")
+      SLongBranchPositive(label, pcPair, offSgpr, comment="")
+    """
+    from .base import getAsmCaps
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+
+    if isinstance(offSgpr_or_comment, str) or offSgpr_or_comment is None:
+        cmt = offSgpr_or_comment or ""
+        labelName = label.getLabelName()
+        module = Module("SLongBranchPositive " + labelName)
+        if cmt:
+            module.addComment(cmt)
+        if getAsmCaps().get("HasAdd_PC_i64", 0):
+            module.add(SAddPCI64_SIMM(
+                labelName=labelName + "-.-12",
+                comment="Add PC to " + labelName
+                + ", the constant correction is dependent on the"
+                " current assembler behavior."))
+        else:
+            tmpSgprRes = tmpSgprRes_or_pcPair
+            if tmpSgprRes.size < 3:
+                raise RuntimeError(
+                    "ContinuousRegister size must be at least 3.")
+            tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
+            cr = ContinuousRegister(tmpSgprX1, 1)
+            module.add(SGetPositivePCOffset(tmpSgprX2, label, cr))
+            module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+                                 comment="branch to " + labelName))
+        return module
+    else:
+        pcPair = tmpSgprRes_or_pcPair
+        offSgpr = offSgpr_or_comment
+        cmt = comment
+        labelName = label.getLabelName()
+        module = Module("SLongBranchPositive " + labelName)
+        if cmt:
+            module.addComment(cmt)
+        if pcPair.size < 2 or pcPair.idx % 2 != 0:
+            raise RuntimeError("pcPair must be a 2-aligned pair.")
+        if offSgpr.size < 1:
+            raise RuntimeError("offSgpr must have at least 1 register.")
+        module.add(SGetPositivePCOffset(pcPair.idx, label, offSgpr.idx))
+        module.add(SSetPCB64(src=sgpr(pcPair.idx, 2),
+                             comment="branch to " + labelName))
+        return module
+
+
+def SLongBranchNegative(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
+                        comment=""):
+    """Port of ``rocisa::SLongBranchNegative`` (extension.hpp).
+
+    Two calling conventions:
+      SLongBranchNegative(label, tmpSgprRes, comment="")
+      SLongBranchNegative(label, pcPair, offSgpr, comment="")
+    """
+    if isinstance(offSgpr_or_comment, str) or offSgpr_or_comment is None:
+        tmpSgprRes = tmpSgprRes_or_pcPair
+        cmt = offSgpr_or_comment or ""
+        if tmpSgprRes.size < 3:
+            raise RuntimeError(
+                "ContinuousRegister size must be at least 3.")
+        tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
+        return _SLongBranchNegativeImpl(label, tmpSgprX2, tmpSgprX1, cmt)
+    else:
+        pcPair = tmpSgprRes_or_pcPair
+        offSgpr = offSgpr_or_comment
+        cmt = comment
+        if pcPair.size < 2 or pcPair.idx % 2 != 0:
+            raise RuntimeError("pcPair must be a 2-aligned pair.")
+        if offSgpr.size < 1:
+            raise RuntimeError("offSgpr must have at least 1 register.")
+        return _SLongBranchNegativeImpl(
+            label, pcPair.idx, offSgpr.idx, cmt)
+
+
+def _SLongBranchNegativeImpl(label, tmpSgprX2, tmpSgprX1, comment):
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    labelName = label.getLabelName()
+    module = Module("SLongBranchNegative " + labelName)
+    if comment:
+        module.addComment(comment)
+    module.add(SGetPCB64(dst=sgpr(tmpSgprX2, 2), comment="addr of next instr"))
+    module.add(SAddI32(dst=sgpr(tmpSgprX1), src0=labelName, src1=4,
+                       comment="target branch offset"))
+    module.add(SAbsI32(dst=sgpr(tmpSgprX1), src=sgpr(tmpSgprX1),
+                       comment="abs offset"))
+    module.add(SSubU32(dst=sgpr(tmpSgprX2), src0=sgpr(tmpSgprX2),
+                       src1=sgpr(tmpSgprX1), comment="sub target branch offset"))
+    module.add(SSubBU32(dst=sgpr(tmpSgprX2 + 1), src0=sgpr(tmpSgprX2 + 1),
+                        src1=0, comment="sub high and carry"))
+    module.add(SSetPCB64(src=sgpr(tmpSgprX2, 2),
+                         comment="branch to " + labelName))
+    return module
+
+
+def SCLongBranchScc0(label, tmpSgprRes, noBranchLabelStr,
+                     positiveLabelStr, posNeg=0, comment=""):
+    """Port of ``rocisa::SCLongBranchScc0`` (extension.hpp)."""
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    module = Module("SCLongBranchScc0 " + label.getLabelName())
+    noBranchLabel = Label(noBranchLabelStr, "")
+    module.add(SCBranchSCC1(labelName=noBranchLabel.getLabelName(),
+                            comment="Only branch on scc0"))
+    if posNeg > 0:
+        module.add(SLongBranchPositive(label, tmpSgprRes, comment))
+    elif posNeg < 0:
+        module.add(SLongBranchNegative(label, tmpSgprRes, comment))
+    else:
+        module.add(SLongBranch(label, tmpSgprRes, positiveLabelStr, comment))
+    module.add(noBranchLabel)
+    return module
+
+
+def SCLongBranchScc1(label, tmpSgprRes, noBranchLabelStr,
+                     positiveLabelStr, posNeg=0, comment=""):
+    """Port of ``rocisa::SCLongBranchScc1`` (extension.hpp)."""
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    module = Module("SCLongBranchScc1 " + label.getLabelName())
+    noBranchLabel = Label(noBranchLabelStr, "")
+    module.add(SCBranchSCC0(labelName=noBranchLabel.getLabelName(),
+                            comment="Only branch on scc1"))
+    if posNeg > 0:
+        module.add(SLongBranchPositive(label, tmpSgprRes, comment))
+    elif posNeg < 0:
+        module.add(SLongBranchNegative(label, tmpSgprRes, comment))
+    else:
+        module.add(SLongBranch(label, tmpSgprRes, positiveLabelStr, comment))
+    module.add(noBranchLabel)
+    return module
+
+
+def SCLongBranchVccnz(label, tmpSgprRes, noBranchLabelStr,
+                      positiveLabelStr, posNeg=0, comment=""):
+    """Port of ``rocisa::SCLongBranchVccnz`` (extension.hpp)."""
+    Module, Label, ContinuousRegister, sgpr = _ext_lazy()
+    module = Module("SCLongBranchVccnz " + label.getLabelName())
+    noBranchLabel = Label(noBranchLabelStr, "")
+    module.add(SCBranchVCCZ(labelName=noBranchLabel.getLabelName(),
+                            comment="Only branch on vccz"))
+    if posNeg > 0:
+        module.add(SLongBranchPositive(label, tmpSgprRes, comment))
+    elif posNeg < 0:
+        module.add(SLongBranchNegative(label, tmpSgprRes, comment))
+    else:
+        module.add(SLongBranch(label, tmpSgprRes, positiveLabelStr, comment))
+    module.add(noBranchLabel)
+    return module
 SMulInt64to32 = make_dummy_func(f"{_P}.SMulInt64to32")
 # True16 conversion helpers (extension.hpp). Each ``ECvt*`` returns either a
 # native true16 op (NoSDWA / gfx11+) or the SDWA-encoded equivalent depending

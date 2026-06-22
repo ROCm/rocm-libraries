@@ -71,9 +71,6 @@ from rocisa_stinkytofu_adaptor.functions import ArgumentLoader  # noqa: E402
 # ---------------------------------------------------------------------------
 
 FUNCTIONS_DUMMY_EXPORTS: tuple[str, ...] = (
-    # Branch helpers
-    "BranchIfZero",
-    "BranchIfNotZero",
     # Cast helper
     "VSaturateCastInt",
     # DS init
@@ -321,12 +318,18 @@ class TestFunctionsModuleExports(unittest.TestCase):
             "ArgumentLoader",
             "Module", "TextBlock", "sgpr", "vgpr", "Any",
             "ContinuousRegister", "EXEC", "VCC",
+            "DataTypeEnum",
+            # Real branch helpers (no longer dummies)
+            "BranchIfZero", "BranchIfNotZero",
             "SLoadB32", "SLoadB64", "SLoadB128", "SLoadB256", "SLoadB512",
-            "SAddCU32", "SAddU32", "SAndB32", "SCmpLgU32",
+            "SAddCU32", "SAddU32", "SAndB32", "SAndB64",
+            "SCBranchSCC0", "SCBranchSCC1", "SCBranchVCCNZ", "SCBranchVCCZ",
+            "SCmpEQU32", "SCmpEQU64", "SCmpLgU32",
             "SLShiftLeftB32", "SLShiftLeftB64", "SLShiftRightB32",
             "SLShiftRightB64", "SMulHIU32", "SMulI32", "SMovB32", "SMovB64",
             "SNop", "SSubU32",
             "VAddCCOU32", "VAddLShiftLeftU32", "VAddU32", "VAndB32",
+            "VCmpEQF32", "VCmpEQF64",
             "VCmpNeU32", "VCmpXEqU32", "VCmpXGeU32", "VCmpXGtU32",
             "VCvtF32toU32", "VCvtF64toU32", "VCvtU32toF32", "VCvtU32toF64",
             "VLShiftLeftAddU32", "VLShiftLeftB32", "VLShiftLeftB64",
