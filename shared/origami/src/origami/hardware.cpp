@@ -14,6 +14,7 @@ namespace origami {
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
+                       size_t rf_capacity,
                        size_t NUM_XCD,
                        double mem1_perf_ratio,
                        double mem2_perf_ratio,
@@ -25,6 +26,7 @@ hardware_t::hardware_t(architecture_t arch,
     : arch(arch)
     , N_CU(N_CU)
     , lds_capacity(lds_capacity)
+    , rf_capacity(rf_capacity)
     , mem1_perf_ratio(mem1_perf_ratio)
     , mem2_perf_ratio(mem2_perf_ratio)
     , mem3_perf_ratio(mem3_perf_ratio)
@@ -38,6 +40,7 @@ hardware_t::hardware_t(architecture_t arch,
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
+                       size_t rf_capacity,
                        const architecture_constants& constants,
                        size_t num_xcds,
                        size_t L2_capacity,
@@ -47,6 +50,7 @@ hardware_t::hardware_t(architecture_t arch,
           arch,
           N_CU,
           lds_capacity,
+          rf_capacity,
           num_xcds,
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
           1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
@@ -63,6 +67,7 @@ hardware_t::hardware_t(const hardware_t& other)
     : arch(other.arch)
     , N_CU(other.N_CU)
     , lds_capacity(other.lds_capacity)
+    , rf_capacity(other.rf_capacity)
     , mem1_perf_ratio(other.mem1_perf_ratio)
     , mem2_perf_ratio(other.mem2_perf_ratio)
     , mem3_perf_ratio(other.mem3_perf_ratio)
@@ -109,6 +114,7 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
   return hardware_t(arch_enum,
                     properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
                     properties.sharedMemPerBlock,
+                    properties.regsPerBlock * 4,  // RF capacity from device (regsPerBlock is in 32-bit registers, convert to bytes)
                     constants,
                     num_xcds,
                     properties.l2CacheSize,
@@ -141,6 +147,7 @@ hardware_t hardware_t::get_hardware_for_device(int deviceId) {
 hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
                                              size_t N_CU,
                                              size_t lds_capacity,
+                                             size_t rf_capacity,
                                              size_t L2_capacity,
                                              int compute_clock_khz) {
   if (arch == architecture_t::Count) {
@@ -152,6 +159,7 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
   return hardware_t(arch,
                     N_CU,
                     lds_capacity,
+                    rf_capacity,
                     constants,
                     get_default_num_xcds(arch),
                     L2_capacity,
@@ -191,6 +199,7 @@ void hardware_t::print() const {
   std::cout << "================== Hardware Configuration ==================\n";
   std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";
   std::cout << "LDS capacity              : " << lds_capacity << " bytes\n";
+  std::cout << "RF capacity               : " << rf_capacity << " bytes\n";
   std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
   std::cout << "mem2_perf_ratio           : " << mem2_perf_ratio << "\n";
   std::cout << "mem3_perf_ratio           : " << mem3_perf_ratio << "\n";

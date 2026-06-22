@@ -12,6 +12,10 @@ Documentation for hipBLAS is available at
 * Added the `hipblasGetVersion()` API.
 * Added the `hipblasGetProperty()` API.
 
+### Resolved issues
+
+* Guarded x86-specific code and compiler options
+
 ## hipBLAS 3.4.0
 
 ### Added

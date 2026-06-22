@@ -1,0 +1,131 @@
+# serializer version: 1
+# name: test_get_parameter_name_abbreviation[allcaps]
+  'ABC'
+# ---
+# name: test_get_parameter_name_abbreviation[gsu]
+  'GSU'
+# ---
+# name: test_get_parameter_name_abbreviation[lowercase]
+  ''
+# ---
+# name: test_get_parameter_name_abbreviation[macrotile]
+  'MT'
+# ---
+# name: test_get_parameter_name_abbreviation[trailingdigit]
+  'TT'
+# ---
+# name: test_get_parameter_name_abbreviation[wgm]
+  'WGM'
+# ---
+# name: test_kernel_file_base_custom
+  'ExplicitName'
+# ---
+# name: test_kernel_file_base_generated
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+# ---
+# name: test_kernel_name_min
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+# ---
+# name: test_kernel_name_min_split_gsu_unit
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+# ---
+# name: test_key_no_internal_args[nosplit_gsu0]
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU0_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+# ---
+# name: test_key_no_internal_args[nosplit_gsu4]
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+# ---
+# name: test_key_no_internal_args[split_gsu1]
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+# ---
+# name: test_key_no_internal_args[split_gsu4]
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+# ---
+# name: test_key_no_internal_args_with_codeobject_and_devices
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGMkernels.cogfx942'
+# ---
+# name: test_name_custom_kernel_early_return
+  dict({
+    'full': 'MyHandwrittenKernel',
+    'kernel': 'MyHandwrittenKernel',
+    'min': 'MyHandwrittenKernel',
+  })
+# ---
+# name: test_name_gsu_zero_no_discard
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_GSU0_MIWT2_2'
+# ---
+# name: test_name_no_macrotile
+  'Cij_Aik_Bjk_S_B_UserArgs_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SU0_SUM0_SUS0_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_name_space_filling_algo_nonempty
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SFA0_1_SU0_SUM0_SUS0_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_name_with_custom_main_loop_schedule
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_CMS_SN_DU16_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SU0_SUM0_SUS0_UCMLS1_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_name_with_dict_problem_type
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SU0_SUM0_SUS0_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_name_with_thread_tile_no_matrix_inst
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_SN_DU16_GSU1_GSUC0_GSUWGMRR0_SFCWGM_SU0_SUM0_SUS0_TT4_4_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_primitive_abbrev_bool
+  dict({
+    'false': '0',
+    'true': '1',
+  })
+# ---
+# name: test_primitive_abbrev_float
+  dict({
+    'fraction': '1p50',
+    'fraction_small': '3p07',
+    'whole': '2',
+  })
+# ---
+# name: test_primitive_abbrev_int
+  dict({
+    'neg_one': 'n1',
+    'neg_other': 'n5',
+    'pos': '42',
+    'zero': '0',
+  })
+# ---
+# name: test_primitive_abbrev_problem_type
+  'Cij_Aik_Bjk_S_B_UserArgs'
+# ---
+# name: test_primitive_abbrev_str
+  'SV'
+# ---
+# name: test_primitive_abbrev_unhandled_type_returns_none
+  None
+# ---
+# name: test_shorten_file_base_long
+  dict({
+    'len_le_limit_plus_hash': True,
+    'value': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAzaeT4Heo32jus0m3QFidnro_mIlQLhMnnUvE7nYxUuM=',
+  })
+# ---
+# name: test_shorten_file_base_short
+  'short_kernel'
+# ---
+# name: test_solution_name_full
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SU0_SUM0_SUS0_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_solution_name_min
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SU0_SUM0_SUS0_WGM1_WGMXCC1_WGMXCCG0'
+# ---
+# name: test_value_abbrev_dict
+  '01_23'
+# ---
+# name: test_value_abbrev_isa
+  '94a'
+# ---
+# name: test_value_abbrev_list
+  '2_4'
+# ---
+# name: test_value_abbrev_scalar
+  '4'
+# ---
+# name: test_value_abbrev_tuple
+  '123'
+# ---

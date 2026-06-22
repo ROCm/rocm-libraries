@@ -1,0 +1,21 @@
+outs:
+- path: GqaStats.tensor0.bin
+  md5: 437ad9f6e2b1db28ca900503e09f7a63
+  size: 524288
+  hash: md5
+- path: GqaStats.tensor1.bin
+  md5: 4636dc5e6a3bf843491a10bf2622e1fa
+  size: 131072
+  hash: md5
+- path: GqaStats.tensor2.bin
+  md5: e738b64c40ea4c96494d2a17d23c3710
+  size: 131072
+  hash: md5
+- path: GqaStats.tensor3.bin
+  md5: e187c8b8a481e39f2ad757a485abba31
+  size: 524288
+  hash: md5
+- path: GqaStats.tensor4.bin
+  md5: b1fc79acc036bc714616899ac913312d
+  size: 8192
+  hash: md5

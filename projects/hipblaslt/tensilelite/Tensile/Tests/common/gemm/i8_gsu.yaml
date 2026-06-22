@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -59,7 +59,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -108,7 +108,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -157,7 +157,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:
@@ -206,7 +206,7 @@ BenchmarkProblems:
         - GlobalSplitU: [2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
       BenchmarkForkParameters:

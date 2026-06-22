@@ -1,0 +1,90 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P3 designed KernelWriter feature-breadth config for gfx942.
+#
+# Goal: exercise the uncovered ScheduleIterAlg 1 and ScheduleIterAlg 2 code
+# arms in Tensile/KernelWriter.py (_makeSubIterSchedule, lines 951-1125),
+# plus the beta-only helper-kernel path triggered by GlobalSplitU > 1.
+#
+# Methodology-A missing ranges targeted in KernelWriter.py:
+#   951- 997 : scheduleIterAlg == 1 block
+#              (simple SIA1 interleave: LW after syncCode, GR in middle)
+#   998-1125 : scheduleIterAlg == 2 block
+#              (SIA2: pack interleave, SSetPrior, 1LDSBuffer barrier)
+#   (SIA0 NLL-tail path at lines 882-950 is gated by NLLlast+tailloopInNll
+#    runtime conditions, not a fork param knob.)
+#
+# ProblemType:
+#   BBS (bf16 in / bf16 out / f32 compute), NT, HPA.
+#   Same ProblemType as seed.yaml so the MFMA shape is reused.
+#
+# Constraints resolved:
+#   * SIA=1 with MatrixInstruction on gfx942: works when LocalReadVectorWidth=4
+#     (avoids "LoopIters divisible by WLR-Multiple 2" rejection that occurs with
+#      LRVW=8; SIA=2 forces InnerUnroll=DepthU//MatInstK making LoopIters=1).
+#   * SIA=2 with MatrixInstruction on gfx942: similarly requires LRVW=4.
+#   * ClusterLocalRead=0 avoids ClusterBarrier dependency check on gfx942
+#     (gfx942 HasTDM=False -> ClusterBarrier rejects).
+#   * ExpandPointerSwap=0 for SIA=1; SIA=2 auto-sets ExpandPointerSwap=1.
+#
+# ForkParameters cartesian product:
+#   ScheduleIterAlg: [1, 2]   x  GlobalSplitU: [1, 2]  = 4 fork permutations
+# (SIA=2 + GSU=2 is rejected, so effectively 3 valid kernels <= 8 limit.)
+#
+# Helper kernels:
+#   GSU=2 solutions emit KernelWriterConversion + KernelWriterBetaOnly helpers.
+#   test_r3_kwfeat_char.py exercises them via generateKernelHelperObjects.
+################################################################################
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) NT, HPA
+  # SIA=[1,2] sweep to exercise KernelWriter scheduleIterAlg arms 1 and 2.
+  # GSU=[1,2] to also trigger beta-only + conversion helper-kernel paths.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # MFMA shape with 4 thread tiles (MIWaveGroup=[4,1])
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        # SIA=1 and SIA=2 both require LRVW=4 for this MFMA+DepthU combo.
+        - LocalReadVectorWidth: [4]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        # SIA=[1,2]: exercises the SIA1 block (951-997) and SIA2 block (998-1125).
+        # SIA=2 auto-enables ExpandPointerSwap=1 and 1LDSBuffer=1.
+        - ScheduleIterAlg: [1, 2]
+        - TransposeLDS: [1]
+        # GSU=[1,2]: GSU>1 triggers GlobalSplitU accumulation + helper kernels.
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [True]
+        - ClusterLocalRead: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
