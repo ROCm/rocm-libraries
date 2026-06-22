@@ -180,6 +180,12 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+    return stinkytofu::GLOBALModifiers(rocMod.offset,
+                                       convertTemporalHint(rocMod.th),
+                                       convertMUBUFScope(rocMod.scope));
+}
+
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
     // Convert DelayALUType to SDelayAluData::InstType
     auto convertType = [](rocisa::DelayALUType type) -> SDelayAluData::InstType {
@@ -527,22 +533,6 @@ void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& inst
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
-/// Helper to handle global_prefetch_b8 (gl2-prefetch) temporal-hint / cache-scope
-/// modifiers. Read directly from rocisa's GLOBALModifiers (via getModifier()).
-void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst,
-                                  const rocisa::GlobalPrefetchB8* inst) {
-    const std::optional<rocisa::GLOBALModifiers>& gm = inst->getModifier();
-    if (!gm) return;
-
-    stinkytofu::TemporalHint th = convertTemporalHint(gm->th);
-    stinkytofu::MUBUFScope scope = convertMUBUFScope(gm->scope);
-    if (th == stinkytofu::TemporalHint::TH_NONE && scope == stinkytofu::MUBUFScope::SCOPE_NONE &&
-        gm->offset == 0) {
-        return;
-    }
-    stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
-        stinkytofu::GLOBALModifiers(gm->offset, th, scope));
-}
 
 /// Helper to handle SWaitCnt instruction modifiers
 void handleSWaitCntModifiers(StinkyInstruction* stinkyInst, const rocisa::SWaitCnt* waitCntInst,
@@ -648,6 +638,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -696,9 +687,6 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
                                     stinkytofu::CacheScopeModifiers(
                                         convertMUBUFScope(typedInst->scope))))
 
-            // global_prefetch_b8 (gl2-prefetch): temporal hint + cache scope.
-            else HANDLE_INST_TYPE(rocisa::GlobalPrefetchB8,
-                                handleGlobalPrefetchModifier(stinkyInst, typedInst))
         }
     // clang-format on
 
