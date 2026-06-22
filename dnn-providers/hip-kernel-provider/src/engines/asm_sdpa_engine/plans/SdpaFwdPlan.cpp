@@ -3,6 +3,8 @@
 
 #include "plans/SdpaFwdPlan.hpp"
 #include "asm/SdpaFwdKernelArgs.hpp"
+#include "plans/SdpaPlanUtils.hpp"
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
 #include <utility>
@@ -146,15 +148,21 @@ void SdpaFwdPlan::execute(const Handle& handle,
 
     const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
-    launchKernel("fwd",
-                 _kernel.function(),
-                 &args,
-                 sizeof(args),
-                 gridDimX,
-                 gridDimY,
-                 gridDimZ,
-                 blockDimX,
-                 handle.getStream());
+    if(!launchKernel("fwd",
+                     _kernel.function(),
+                     &args,
+                     sizeof(args),
+                     gridDimX,
+                     gridDimY,
+                     gridDimZ,
+                     blockDimX,
+                     handle.getStream()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlan::execute: hipModuleLaunchKernel failed for SDPA forward");
+    }
+    plan_utils::throwOnLaunchPostError("SDPA forward");
 }
 
 } // namespace asm_sdpa_engine
