@@ -72,6 +72,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/VerifyInstrumentationTest.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/BasicBlockTest.cpp
