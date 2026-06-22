@@ -61,8 +61,16 @@ struct TileDistrEncCalc
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
     static_assert(SFactor == 1, "Swizzle not implemented yet."); // TODO: Implement Swizzle.
 
+    // When AttrNumAccessA != AttrNumAccessB (different LDS types for A and B), we need "packed"
+    // NumAccess layout to match load_transpose behavior. ds_read_tr reads contiguous K elements,
+    // so multiple accesses produce packed (contiguous) data, not interleaved.
+    // Packed (lane reads contiguous K values): K = {kABKLane, NumAccess, VecPerAccess}
+    // Interleaved (lane reads strided K values): K = {NumAccess, kABKLane, VecPerAccess}
+    static constexpr bool UsePackedNumAccess = (AttrNumAccessAV != AttrNumAccessBV);
+
+    // Interleaved layout (default): NumAccess is the outermost K sub-dim
     template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
-    using ABWarpDstrEnc = tile_distribution_encoding<
+    using ABWarpDstrEncInterleaved = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
@@ -72,6 +80,25 @@ struct TileDistrEncCalc
         tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
         sequence<0, 2>>;
+
+    // Packed layout: kABKLane is outermost, NumAccess is within vector (contiguous K per lane)
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncPacked = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<MajorDimSize>,
+              sequence<MmaOp::kK / MmaOp::kABKPerLane,
+                       NumAccess,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<0, 0, 0>>,
+        sequence<2, 2>,
+        sequence<1, 2>>;
+
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEnc = std::conditional_t<
+        (UsePackedNumAccess && NumAccess > 1),
+        ABWarpDstrEncPacked<MajorDimSize, Repeat, NumAccess, CompressionRatio>,
+        ABWarpDstrEncInterleaved<MajorDimSize, Repeat, NumAccess, CompressionRatio>>;
 
     static constexpr auto get_cwarp_dstr_encoding()
     {
