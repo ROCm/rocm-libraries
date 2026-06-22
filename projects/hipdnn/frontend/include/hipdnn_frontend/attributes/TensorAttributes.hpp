@@ -400,7 +400,6 @@ public:
     /// @brief Checks if two tensors are logically identical in terms of shape,
     /// layout, data type, value, and structural role in the graph.
     /// @note This intentionally ignores the human-readable string name.
-
     bool logicallyEquals(const TensorAttributes& other) const
     {
         if(this->_dataType != other._dataType)
@@ -424,36 +423,38 @@ public:
         {
             return false;
         }
+        
+        return true;
+    }
 
-        /// @brief Absolute equality check including non-functional metadata like names.
-        bool operator==(const TensorAttributes& other) const
+    /// @brief Absolute equality check including non-functional metadata like names.
+    bool operator==(const TensorAttributes& other) const
+    {
+
+        if(!logicallyEquals(other))
         {
-
-            if(!logicallyEquals(other))
-            {
-                return false;
-            }
-            if(this->_name != other._name)
-            {
-                return false;
-            }
-            if(this->_uidSet != other._uidSet)
-            {
-                return false;
-            }
-            if(this->_uidSet && (this->_uid != other._uid))
-            {
-                return false;
-            }
-            return true;
-
-            return this->logicallyEquals(other) && (this->_name == other._name);
+            return false;
+        }
+        if(this->_name != other._name)
+        {
+            return false;
+        }
+        if(this->_uidSet != other._uidSet)
+        {
+            return false;
+        }
+        if(this->_uidSet && (this->_uid != other._uid))
+        {
+            return false;
         }
 
-        bool operator!=(const TensorAttributes& other) const
-        {
-            return !(*this == other);
-        }
+        return true;
+    }
+
+    bool operator!=(const TensorAttributes& other) const
+    {
+        return !(*this == other);
+    }
 
     private:
         int64_t _uid = 0;
