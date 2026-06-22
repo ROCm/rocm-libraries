@@ -108,6 +108,7 @@ namespace TensileLite
                 iot::mapOptional(io, "streamK", s.streamK);
                 iot::mapOptional(io, "streamKForceDPOnly", s.streamKForceDPOnly);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
+                iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
                 iot::mapOptional(io, "persistentKernel", s.persistentKernel);
                 iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
@@ -136,6 +137,7 @@ namespace TensileLite
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
+                iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
                 iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);

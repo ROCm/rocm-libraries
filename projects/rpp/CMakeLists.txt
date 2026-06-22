@@ -90,8 +90,8 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 # RPP Default Options
 set(DEFAULT_BUILD_TYPE "Release")
 
-### RPP_AUDIO_SUPPORT - default = ON, NOTE: support currently only on Ubuntu - user to set to OFF otherwise
-option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         ON)
+### RPP_AUDIO_SUPPORT - default = OFF, NOTE: enabled automatically when FFTS is found
+option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
 
 # Set message options
 if(NOT WIN32)
@@ -177,18 +177,19 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-if (RPP_AUDIO_SUPPORT)
-    find_package(FFTS QUIET)
-    if(FFTS_FOUND)
-        add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
-        set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
-        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
+# Check for FFTS and enable audio support if found
+find_package(FFTS QUIET)
+if(FFTS_FOUND)
+    set(RPP_AUDIO_SUPPORT ON)
+    add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
+    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
+    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
+else()
+    if(RPP_AUDIO_SUPPORT)
+        message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but FFTS was not found. Please ensure FFTS is available or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
     else()
-        set(RPP_AUDIO_SUPPORT OFF)              # Disable audio support if FFTS not found
         message("-- ${Yellow}FFTS not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
     endif()
-else()
-    message("-- ${Yellow}${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
 endif()
 
 message("-- ${Cyan}RPP Developer Options${ColourReset}")
@@ -366,7 +367,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVE
 target_include_directories(${PROJECT_NAME}
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>"
-        "${ROCM_PATH}/include"
+        "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/api>"
+        "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>"
+        "$<BUILD_INTERFACE:${ROCM_PATH}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/include/cpu"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/include/common"
@@ -379,8 +383,6 @@ if( "${BACKEND}" STREQUAL "HIP")
         "${CMAKE_CURRENT_SOURCE_DIR}/src/include/hip"
     )
 endif()
-
-add_subdirectory(addkernels)
 
 # Test suite
 enable_testing()

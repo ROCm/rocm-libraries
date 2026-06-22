@@ -21,6 +21,7 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/golden/BundleRegistration.hpp"
 
 namespace
 {
@@ -90,6 +91,15 @@ int main(int argc, char** argv) noexcept
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
+        parser.add_argument("--allow-bundles")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Enable golden reference bundle test registration. "
+                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
+        parser.add_argument("--golden-data-dir")
+            .help("Path to the integration test bundle data directory. "
+                  "Defaults to <exe>/../lib/integration_test_bundles/. "
+                  "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -150,6 +160,15 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --allow-bundles, --golden-data-dir, --verification-mode
+        auto allowBundles = parser.get<bool>("--allow-bundles");
+
+        std::optional<std::filesystem::path> goldenDataDir;
+        if(parser.is_used("--golden-data-dir"))
+        {
+            goldenDataDir = parser.get<std::string>("--golden-data-dir");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -190,7 +209,9 @@ int main(int argc, char** argv) noexcept
                                                          failOnUnsupported,
                                                          skipGraphValidation,
                                                          std::move(configPath),
-                                                         refExecType);
+                                                         refExecType,
+                                                         allowBundles,
+                                                         std::move(goldenDataDir));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -245,6 +266,8 @@ int main(int argc, char** argv) noexcept
             static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
+
+        hipdnn_integration_tests::golden::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
 

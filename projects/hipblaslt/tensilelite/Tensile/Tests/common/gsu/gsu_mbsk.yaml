@@ -8,8 +8,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
   MinKForGSU: 2
@@ -50,7 +50,7 @@ BenchmarkProblems:
         - TransposeLDS: [-1]
         - GlobalSplitU: [2, 4]
         - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

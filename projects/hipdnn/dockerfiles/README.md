@@ -223,7 +223,7 @@ Follow the [quick start steps in the build guide](../docs/Building.md#quick-star
 
 2. **GPU Verification**: Once inside the container, verify GPU access:
    ```bash
-   rocm-smi
+   amd-smi
    ```
    or
    ```bash

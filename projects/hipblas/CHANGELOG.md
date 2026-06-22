@@ -7,8 +7,14 @@ Documentation for hipBLAS is available at
 
 ### Added
 
+* Added `hipblasSetBatchAlphaStride()` and `hipblasGetBatchAlphaStride()` APIs.
+* Added `hipblasSetBatchBetaStride()` and `hipblasGetBatchBetaStride()` APIs.
 * Added the `hipblasGetVersion()` API.
 * Added the `hipblasGetProperty()` API.
+
+### Resolved issues
+
+* Guarded x86-specific code and compiler options
 
 ## hipBLAS 3.4.0
 
