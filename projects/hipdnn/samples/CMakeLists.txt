@@ -237,7 +237,21 @@ if(ROCM_LIBS_SUPERBUILD)
         COMMENT "Installing hipDNN to staging directory for example_engine_plugin"
     )
 
+    # Stage the workspace's fetched nlohmann_json only when FETCHED.
+    if(EXISTS "${CMAKE_BINARY_DIR}/_deps/nlohmann_json-build/cmake_install.cmake")
+        add_custom_command(
+            TARGET example_plugin_hipdnn-staging-install
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                    -DBUILD_DIR=${CMAKE_BINARY_DIR}/_deps/nlohmann_json-build
+                    -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
+            COMMENT "Staging fetched nlohmann_json for example_engine_plugin"
+        )
+    endif()
+
     list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake")
+    list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}")
     list(APPEND _example_plugin_depends example_plugin_hipdnn-staging-install)
 endif()
 
@@ -259,7 +273,6 @@ ExternalProject_Add(example_engine_plugin
         "-Dhip_DIR:PATH=${hip_DIR}"
         "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
-        "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
         "-DBUILD_ADDRESS_SANITIZER:BOOL=${BUILD_ADDRESS_SANITIZER}"
         "-DTEST_ENVIRONMENT:STRING=${TEST_ENVIRONMENT}"
         "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
