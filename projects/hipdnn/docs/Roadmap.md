@@ -60,7 +60,6 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **Benchmarking & performance Python tools** ⏳
   - Core dnn-benchmarking tool (engine comparison, SDPA/PyTorch references, HIP-event timing) landed ✅
   - Cross-platform (Windows) port in progress ⏳
-- Bindings installable as wheels ⏳
 
 ### Support matrix
 - Integration tests emit structured pass/fail per op × datatype × engine × architecture ✅
@@ -68,14 +67,13 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Per-graph engine support-claims model defined (RFC 0015) ✅
 
 ### Heuristics
-- **Engine selection config file support** ⏳
+- **Engine selection config file support** ✅
   - Frontend heuristic policy enumeration API landed (RFC 0007) ✅
 
 ### Core
 - Kernel engine tagging & filtering ✅
   - Behavioral notes for filtering ✅
 - **Graph + execution-plan binary serialize/deserialize** ✅
-- Windows platform support for Python bindings & benchmarking tools ⏳
 
 ## Q3 2026
 
@@ -92,10 +90,13 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - MX GEMMs through the hipBLASLt provider plugin ⏳
 - Documented constraints surfaced for graph builders (alignment, batch, epilogues)
 
+### MOE (Mixture of Experts)
+- MOE frontend and backend POC (limited coverage)
+  
 ### Heuristics
 - Heuristic plugin API
 - Plugin architecture ⏳
-- **Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures**
+- Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures or team may pivot to support heuristics on rocKE
 
 ### Normalization
 - Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
@@ -139,6 +140,10 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Additional layout support
   - Additional datatype support
 
+### Benchmarking & performance testing
+- Bindings installable as wheels
+- App installable as wheel
+  
 ### More framework integrations
 - Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.
 
@@ -146,6 +151,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - **Distributed normalization support**
 
 ### Core
+- Fallback (graph splitting) engine
 - Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
 - AOT graph compilation without devices present (Pre-compile graph support)
 - **hipGraph support**
