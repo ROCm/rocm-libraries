@@ -47,8 +47,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -70,11 +70,11 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [True]
         - TransposeLDS: [1]
         - GlobalSplitU: [1]
-        - SourceSwap: [1]
-        - ActivationFuncCall: [1]
+        - SourceSwap: [True]
+        - ActivationFuncCall: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

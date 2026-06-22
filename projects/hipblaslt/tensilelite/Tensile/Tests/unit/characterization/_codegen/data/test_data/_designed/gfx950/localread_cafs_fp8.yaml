@@ -55,15 +55,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - ConvertAfterDS: [1]
+        - ConvertAfterDS: [True]
       ForkParameters:
         # Two MI shapes for variety
         - MatrixInstruction:
@@ -82,7 +82,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [1, 8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ExpandPointerSwap: [False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -102,15 +102,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - ConvertAfterDS: [1]
+        - ConvertAfterDS: [True]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 2, 2, 2, 2]
@@ -126,7 +126,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [1]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ExpandPointerSwap: [False]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

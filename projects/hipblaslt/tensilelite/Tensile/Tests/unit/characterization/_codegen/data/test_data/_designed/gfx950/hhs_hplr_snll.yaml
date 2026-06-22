@@ -43,8 +43,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -56,7 +56,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
           - [32, 32, 16, 1, 1, 1, 1, 1, 1]
         - HalfPLR: [1]
-        - SuppressNoLoadLoop: [1]
+        - SuppressNoLoadLoop: [True]
         - DepthU: [32]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
@@ -71,7 +71,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - StaggerU: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - StoreVectorWidth: [-1]
         - StreamK: [0]
         - GlobalSplitU: [1]

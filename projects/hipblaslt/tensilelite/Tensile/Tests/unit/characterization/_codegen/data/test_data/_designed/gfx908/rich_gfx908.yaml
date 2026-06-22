@@ -41,8 +41,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       BiasSrc: D
@@ -69,9 +69,9 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [4]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         # GSU=1 (off-path) vs GSU=4 (on-path, MultipleBuffer)
         - GlobalSplitU: [1, 4]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]

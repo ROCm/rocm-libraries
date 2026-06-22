@@ -81,7 +81,7 @@ BenchmarkProblems:
         # StaggerU=32 activates declareStaggerParms; StaggerU=0 skips it
         - StaggerU: [0, 32]
         # EPS=1 enables pointer-swap code branches
-        - ExpandPointerSwap: [0, 1]
+        - ExpandPointerSwap: [False, True]
         # PGR=2 is required for EPS=1; also exercises PGR2 timing code
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
@@ -91,7 +91,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - SourceSwap: [True]
         - WorkGroupMapping: [1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - GlobalReadVectorWidthA: [1]

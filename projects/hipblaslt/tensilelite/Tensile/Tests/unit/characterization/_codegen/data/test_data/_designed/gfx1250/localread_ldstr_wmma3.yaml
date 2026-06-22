@@ -47,8 +47,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -77,7 +77,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ExpandPointerSwap: [False]
         - WavefrontSize: [32]
         - DirectToVgprA: [False]
@@ -98,8 +98,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -124,7 +124,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ExpandPointerSwap: [False]
         - WavefrontSize: [32]
       BenchmarkJoinParameters:

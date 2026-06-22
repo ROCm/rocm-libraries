@@ -37,8 +37,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 0
@@ -51,7 +51,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 8, 2, 2]
         - DepthU: [16]
         - GlobalSplitU: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - PrefetchGlobalRead: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

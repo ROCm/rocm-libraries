@@ -56,8 +56,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -90,7 +90,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0, 3]
-        - SourceSwap: [0, 1]
+        - SourceSwap: [False, True]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]
