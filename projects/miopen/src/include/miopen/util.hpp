@@ -41,7 +41,9 @@ float Col2ImGPU(const Handle& handle,
                 const std::vector<size_t>& in_spatial,
                 Data_t im,
                 std::size_t im_offset,
-                miopenDataType_t type);
+                miopenDataType_t type,
+                bool layoutNHWC,
+                const int num_groups);
 
 float Col2Im3dGPUBatched(const Handle& handle,
                          ConstData_t col,
