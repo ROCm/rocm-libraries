@@ -27,13 +27,10 @@ What this file is:
     helpers, magic-number division, argument loader, DS init).
 
 What it does (real):
-    - ``ArgumentLoader`` — kernel-argument offset accumulator.
-      ``getOffset`` / ``setOffset`` / ``resetOffset`` are real;
-      ``loadKernArg`` / ``loadAllKernArg`` advance ``kernArgOffset``
-      byte-for-byte the same way ``functions/argument.cpp`` does, but
-      return ``None`` instead of an emitted ``SLoadB*`` ``Item`` —
-      real emission is unblocked when
-      ``rocisa_stinkytofu_adaptor.instruction`` graduates from dummies.
+    - ``ArgumentLoader`` — kernel-argument offset accumulator and
+      ``SLoadB*`` emitter. ``loadKernArg`` / ``loadAllKernArg`` emit
+      real ``SLoadB{32,64,128,256,512}`` instructions matching the C++
+      logic in ``functions/argument.hpp``.
 
 Not yet done (dummy):
     - Branch helpers: ``BranchIfZero``, ``BranchIfNotZero``
@@ -54,28 +51,29 @@ logicalIR correspondence:
 
 from __future__ import annotations
 
+from typing import Any
+
 from ._dummy import make_dummy_func
+from .code import Module, TextBlock
+from .container import sgpr
+from .instruction import SLoadB32, SLoadB64, SLoadB128, SLoadB256, SLoadB512
 
 _P = "rocisa.functions"
 
+_SLOAD_BY_BITS = {
+    32: SLoadB32,
+    64: SLoadB64,
+    128: SLoadB128,
+    256: SLoadB256,
+    512: SLoadB512,
+}
+
 
 class ArgumentLoader:
-    """Workaround port of ``rocisa::ArgumentLoader``.
+    """Port of ``rocisa::ArgumentLoader`` (``functions/argument.hpp``).
 
-    Mirrors the offset-bookkeeping half of ``rocisa::ArgumentLoader``
-    (see ``rocisa/include/functions/argument.hpp``). Tensile reads
-    ``getOffset()`` directly to compute SGPR-offset immediates (e.g.
-    ``KernelWriterAssembly.py:2351,2452,2454``); a stale value here
-    would silently produce wrong ``s_load_b*`` immediates.
-
-    Instruction-emission half is stubbed: ``loadKernArg`` and
-    ``loadAllKernArg`` advance ``kernArgOffset`` exactly like the C++
-    but return ``None`` instead of a real ``SLoadB{32,64,128,256,512}``
-    ``Item`` / ``Module``. Tensile feeds the return through
-    ``module.add(...)`` which dummy-swallows ``None`` for now; emission
-    becomes real once ``rocisa_stinkytofu_adaptor.instruction`` is real.
-
-    Keep parity with ``functions/argument.hpp`` if you ever touch this.
+    Manages kernel-argument offset bookkeeping and emits ``SLoadB*``
+    instructions matching the C++ logic exactly.
     """
 
     __slots__ = ("_kernArgOffset",)
@@ -93,35 +91,77 @@ class ArgumentLoader:
         return self._kernArgOffset
 
     def loadKernArg(self, dst, srcAddr, sgprOffset=None, dword: int = 1,
-                    writeSgpr: bool = True):
-        """Advance ``kernArgOffset`` and return ``None`` (stub emission).
+                    writeSgpr: bool = True) -> Any:
+        """Emit an ``SLoadB*`` and advance ``kernArgOffset``.
 
-        Mirrors ``functions/argument.hpp:60-121``. The C++ does
-        ``kernArgOffset += sgprOffset ? 0 : dword * 4`` *outside* the
-        ``if(writeSgpr)`` branch, so ``writeSgpr=False`` still advances
-        the offset (used to skip unused parms). Real emission would
-        produce an ``SLoadB{32,64,128,256,512}`` (writeSgpr=True) or a
-        ``TextBlock("Move offset by N\\n")`` (writeSgpr=False); both
-        deferred until ``rocisa_stinkytofu_adaptor.instruction`` is real.
+        Mirrors ``functions/argument.hpp:60-121``.
         """
+        size = int(dword) * 4
+
+        if writeSgpr:
+            if sgprOffset is not None:
+                comment = (sgprOffset.toString()
+                           if hasattr(sgprOffset, "toString")
+                           else str(sgprOffset))
+            else:
+                comment = str(self._kernArgOffset)
+
+            dst_sgpr = sgpr(dst, dword)
+            src_sgpr = sgpr(srcAddr, 2)
+            offset = sgprOffset if sgprOffset is not None else self._kernArgOffset
+
+            bits = int(dword) * 32
+            cls = _SLOAD_BY_BITS.get(bits)
+            if cls is None:
+                raise ValueError(f"Invalid dword size {dword}")
+            item = cls(dst=dst_sgpr, base=src_sgpr, soffset=offset, comment=comment)
+        else:
+            item = TextBlock("Move offset by " + str(size) + "\n")
+
         if sgprOffset is None:
-            self._kernArgOffset += int(dword) * 4
-        return None
+            self._kernArgOffset += size
+        return item
 
     def loadAllKernArg(self, sgprStartIndex: int, srcAddr, numSgprToLoad: int,
-                       numSgprPreload: int = 0):
-        """Advance ``kernArgOffset`` and return ``None`` (stub emission).
+                       numSgprPreload: int = 0) -> Module:
+        """Emit a ``Module`` of greedy-packed ``SLoadB*`` instructions.
 
-        Mirrors ``functions/argument.hpp:126-199``. The C++ greedily
-        loads in chunks of ``i ∈ {16,8,4,2,1}`` SGPRs, advancing
-        ``kernArgOffset`` by ``i * 4`` per chunk plus ``numSgprPreload
-        * 4`` up front; the *total* advancement is exactly
-        ``numSgprToLoad * 4`` regardless of how the chunks partition.
-        We collapse the loop to a single byte-equivalent add since the
-        emitted ``Module`` is unused while ``instruction.py`` is dummy.
+        Mirrors ``functions/argument.hpp:126-199``.
         """
-        self._kernArgOffset += int(numSgprToLoad) * 4
-        return None
+        module = Module("LoadAllKernArg")
+        actual_load = int(numSgprToLoad) - int(numSgprPreload)
+        sgpr_idx = int(sgprStartIndex) + int(numSgprPreload)
+        self._kernArgOffset += int(numSgprPreload) * 4
+
+        while actual_load > 0:
+            i = 16
+            while i >= 1:
+                is_aligned = False
+                if i >= 4 and sgpr_idx % 4 == 0:
+                    is_aligned = True
+                elif i == 2 and sgpr_idx % 2 == 0:
+                    is_aligned = True
+                elif i == 1:
+                    is_aligned = True
+
+                if is_aligned and actual_load >= i:
+                    actual_load -= i
+                    dst_sgpr = sgpr(sgpr_idx, i)
+                    src_sgpr = sgpr(srcAddr, 2)
+                    comment = str(self._kernArgOffset)
+
+                    bits = i * 32
+                    cls = _SLOAD_BY_BITS.get(bits)
+                    if cls is None:
+                        raise ValueError(f"Invalid SGPR size {i}")
+                    module.add(cls(dst=dst_sgpr, base=src_sgpr,
+                                   soffset=self._kernArgOffset, comment=comment))
+                    sgpr_idx += i
+                    self._kernArgOffset += i * 4
+                    break
+                i //= 2
+
+        return module
 
 
 BranchIfZero = make_dummy_func(f"{_P}.BranchIfZero")

@@ -200,10 +200,19 @@ class TestArgumentLoaderLoadKernArg(unittest.TestCase):
                            dword=2, writeSgpr=False)
         self.assertEqual(loader.getOffset(), 8)
 
-    def test_returns_none(self):
-        # Stubbed emission today; document the contract.
+    def test_returns_sload_instruction(self):
+        from rocisa_stinkytofu_adaptor.instruction import SLoadB32, SLoadB64
         loader = ArgumentLoader()
-        self.assertIsNone(loader.loadKernArg("a", "KernArgAddress"))
+        item = loader.loadKernArg("a", "KernArgAddress", dword=1)
+        self.assertIsInstance(item, SLoadB32)
+        item2 = loader.loadKernArg("b", "KernArgAddress", dword=2)
+        self.assertIsInstance(item2, SLoadB64)
+
+    def test_writeSgpr_false_returns_textblock(self):
+        from rocisa_stinkytofu_adaptor.code import TextBlock
+        loader = ArgumentLoader()
+        item = loader.loadKernArg("x", "y", dword=2, writeSgpr=False)
+        self.assertIsInstance(item, TextBlock)
 
 
 class TestArgumentLoaderLoadAllKernArg(unittest.TestCase):
@@ -243,9 +252,45 @@ class TestArgumentLoaderLoadAllKernArg(unittest.TestCase):
                            sgprOffset=0, dword=2)  # +0
         self.assertEqual(loader.getOffset(), 16 + 8)
 
-    def test_returns_none(self):
+    def test_returns_module(self):
+        from rocisa_stinkytofu_adaptor.code import Module
         loader = ArgumentLoader()
-        self.assertIsNone(loader.loadAllKernArg(0, "KernArgAddress", 4))
+        mod = loader.loadAllKernArg(0, "KernArgAddress", 4)
+        self.assertIsInstance(mod, Module)
+
+    def test_module_contains_sload_instructions(self):
+        from rocisa_stinkytofu_adaptor.instruction import SLoadB128
+        loader = ArgumentLoader()
+        mod = loader.loadAllKernArg(0, "KernArgAddress", 4)
+        self.assertEqual(len(mod.itemList), 1)
+        self.assertIsInstance(mod.itemList[0], SLoadB128)
+
+    def test_greedy_packing(self):
+        from rocisa_stinkytofu_adaptor.instruction import (
+            SLoadB32, SLoadB64, SLoadB128, SLoadB512,
+        )
+        loader = ArgumentLoader()
+        mod = loader.loadAllKernArg(0, "KernArgAddress", 20)
+        self.assertEqual(len(mod.itemList), 2)
+        self.assertIsInstance(mod.itemList[0], SLoadB512)
+        self.assertIsInstance(mod.itemList[1], SLoadB128)
+
+    def test_unaligned_start(self):
+        from rocisa_stinkytofu_adaptor.instruction import (
+            SLoadB32, SLoadB64, SLoadB128,
+        )
+        loader = ArgumentLoader()
+        mod = loader.loadAllKernArg(1, "KernArgAddress", 7)
+        self.assertEqual(len(mod.itemList), 3)
+        self.assertIsInstance(mod.itemList[0], SLoadB32)
+        self.assertIsInstance(mod.itemList[1], SLoadB64)
+        self.assertIsInstance(mod.itemList[2], SLoadB128)
+
+    def test_countSMemLoad_on_output(self):
+        from rocisa_stinkytofu_adaptor import countSMemLoad
+        loader = ArgumentLoader()
+        mod = loader.loadAllKernArg(0, "KernArgAddress", 20)
+        self.assertEqual(countSMemLoad(mod), 2)
 
 
 class TestArgumentLoaderTensileRegression(unittest.TestCase):
@@ -294,12 +339,16 @@ class TestFunctionsModuleExports(unittest.TestCase):
 
     def test_dummy_registry_matches_module(self):
         # Guard against adding a dummy to functions.py without updating tests.
-        _skip = frozenset({"annotations", "make_dummy_func"})
+        _skip = frozenset({
+            "annotations", "make_dummy_func",
+            "ArgumentLoader",
+            "Module", "TextBlock", "sgpr", "Any",
+            "SLoadB32", "SLoadB64", "SLoadB128", "SLoadB256", "SLoadB512",
+        })
         module_dummies = {
             name for name in dir(_functions)
             if not name.startswith("_")
             and name not in _skip
-            and name != "ArgumentLoader"
             and callable(getattr(_functions, name))
         }
         self.assertEqual(set(FUNCTIONS_DUMMY_EXPORTS), module_dummies)
