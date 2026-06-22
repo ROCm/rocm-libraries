@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Integration coverage for the cuDNN-compatibility shim's stub C-API
-// (`cudnn.h`) against the *real* hipDNN backend (RFC 0012 §4.7; ALMIOPEN-2036).
+// (`cudnn.h`) against the *real* hipDNN backend (RFC 0012 §4.7).
 // The frontend unit tests (frontend/tests/TestCudnnShimHandle.cpp) exercise the
 // same entry points against a mock backend; here the same calls run through the
 // live backend wrapper, proving the forwarding actually reaches hipDNN.
@@ -40,7 +40,7 @@ using hipdnn_tests::IntegrationTestFixture;
 TEST(IntegrationCudnnShimVersion, ReportsClaimedRuntimeAndFrontendVersions)
 {
     EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(CUDNN_VERSION));
-    EXPECT_EQ(CUDNN_VERSION, 91400); // claimed cuDNN runtime version (9.14.0)
+    EXPECT_EQ(CUDNN_VERSION, 92200); // claimed cuDNN runtime version (9.22.0)
     EXPECT_EQ(CUDNN_FRONTEND_VERSION, 12400); // pinned cuDNN FE version (1.24.0)
 }
 

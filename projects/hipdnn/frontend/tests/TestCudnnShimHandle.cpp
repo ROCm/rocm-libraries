@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// ALMIOPEN-2036 acceptance criterion #3: a handle-lifecycle / stream-binding
-// unit test for the cuDNN-compatibility shim's stub C-API (`cudnn.h`). The shim
+// Handle-lifecycle / stream-binding unit test for the cuDNN-compatibility
+// shim's stub C-API (`cudnn.h`). The shim
 // entry points forward through hipdnn_frontend::detail::hipdnnBackend(), so this
 // test drives them against the in-tree mock backend (same pattern as
 // TestHandle.cpp). Gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY in the
@@ -125,8 +125,9 @@ TEST_F(TestCudnnShimHandle, GetErrorStringMapsAndForwards)
 
 TEST_F(TestCudnnShimHandle, GetVersionReturnsClaimedRuntimeVersion)
 {
-    // Earmarked for review (ALMIOPEN-2036): claimed cuDNN runtime version 9.14.0.
-    EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(91400));
+    // Claimed cuDNN runtime version 9.22.0 (matches the cuDNN FE v1.24.0
+    // recommendation; see cudnn_runtime_version.h).
+    EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(92200));
     EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(CUDNN_VERSION));
 }
 
@@ -156,27 +157,86 @@ TEST_F(TestCudnnShimHandle, CreateCudnnHandleReturnsManagedHandleAndDestroysOnSc
 
 namespace shim_detail = hipdnn_frontend::compatibility::cudnn_frontend::detail;
 
-// One test per direction for the status translation (detail/status_translation.h):
-// a representative direct mapping, a collapsed/grouped value, and the default
-// fallback for an unmapped input.
-TEST(TestCudnnShimStatusTranslation, HipdnnToCudnn)
+// Status translation (detail/status_translation.h) is covered with one
+// parameterized case per enum mapping, in both directions. Adding or updating a
+// mapping is then a single-row edit here, with full coverage of every switch
+// case (including the grouped/collapsed values and the default fallback).
+
+struct HipdnnToCudnnCase
 {
-    EXPECT_EQ(shim_detail::toCudnnStatus(HIPDNN_STATUS_SUCCESS), CUDNN_STATUS_SUCCESS);
-    // The BAD_PARAM family collapses to CUDNN_STATUS_BAD_PARAM.
-    EXPECT_EQ(shim_detail::toCudnnStatus(HIPDNN_STATUS_BAD_PARAM_NULL_POINTER),
-              CUDNN_STATUS_BAD_PARAM);
-    // PLUGIN_ERROR has no cuDNN equivalent and falls through to the default.
-    EXPECT_EQ(shim_detail::toCudnnStatus(HIPDNN_STATUS_PLUGIN_ERROR), CUDNN_STATUS_INTERNAL_ERROR);
+    hipdnnStatus_t input;
+    cudnnStatus_t expected;
+};
+
+class TestCudnnShimToCudnnStatus : public ::testing::TestWithParam<HipdnnToCudnnCase>
+{
+};
+
+TEST_P(TestCudnnShimToCudnnStatus, MapsToExpected)
+{
+    EXPECT_EQ(shim_detail::toCudnnStatus(GetParam().input), GetParam().expected);
 }
 
-TEST(TestCudnnShimStatusTranslation, CudnnToHipdnn)
+INSTANTIATE_TEST_SUITE_P(
+    AllMappings,
+    TestCudnnShimToCudnnStatus,
+    ::testing::Values(
+        HipdnnToCudnnCase{HIPDNN_STATUS_SUCCESS, CUDNN_STATUS_SUCCESS},
+        HipdnnToCudnnCase{HIPDNN_STATUS_NOT_INITIALIZED, CUDNN_STATUS_NOT_INITIALIZED},
+        // The BAD_PARAM family collapses to CUDNN_STATUS_BAD_PARAM.
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH, CUDNN_STATUS_BAD_PARAM},
+        HipdnnToCudnnCase{HIPDNN_STATUS_NOT_SUPPORTED, CUDNN_STATUS_NOT_SUPPORTED},
+        // The allocation-failure family collapses to CUDNN_STATUS_ALLOC_FAILED.
+        HipdnnToCudnnCase{HIPDNN_STATUS_ALLOC_FAILED, CUDNN_STATUS_ALLOC_FAILED},
+        HipdnnToCudnnCase{HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED,
+                          CUDNN_STATUS_ALLOC_FAILED},
+        HipdnnToCudnnCase{HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED,
+                          CUDNN_STATUS_ALLOC_FAILED},
+        HipdnnToCudnnCase{HIPDNN_STATUS_EXECUTION_FAILED, CUDNN_STATUS_EXECUTION_FAILED},
+        HipdnnToCudnnCase{HIPDNN_STATUS_INTERNAL_ERROR, CUDNN_STATUS_INTERNAL_ERROR},
+        // PLUGIN_ERROR has no cuDNN equivalent and falls through to the default.
+        HipdnnToCudnnCase{HIPDNN_STATUS_PLUGIN_ERROR, CUDNN_STATUS_INTERNAL_ERROR}));
+
+struct CudnnToHipdnnCase
 {
-    EXPECT_EQ(shim_detail::toHipdnnStatus(CUDNN_STATUS_SUCCESS), HIPDNN_STATUS_SUCCESS);
-    // ARCH_MISMATCH maps onto NOT_SUPPORTED.
-    EXPECT_EQ(shim_detail::toHipdnnStatus(CUDNN_STATUS_ARCH_MISMATCH), HIPDNN_STATUS_NOT_SUPPORTED);
-    // A cuDNN-only code with no hipDNN counterpart falls through to the default.
-    EXPECT_EQ(shim_detail::toHipdnnStatus(CUDNN_STATUS_VERSION_MISMATCH),
-              HIPDNN_STATUS_INTERNAL_ERROR);
+    cudnnStatus_t input;
+    hipdnnStatus_t expected;
+};
+
+class TestCudnnShimToHipdnnStatus : public ::testing::TestWithParam<CudnnToHipdnnCase>
+{
+};
+
+TEST_P(TestCudnnShimToHipdnnStatus, MapsToExpected)
+{
+    EXPECT_EQ(shim_detail::toHipdnnStatus(GetParam().input), GetParam().expected);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    AllMappings,
+    TestCudnnShimToHipdnnStatus,
+    ::testing::Values(
+        CudnnToHipdnnCase{CUDNN_STATUS_SUCCESS, HIPDNN_STATUS_SUCCESS},
+        CudnnToHipdnnCase{CUDNN_STATUS_NOT_INITIALIZED, HIPDNN_STATUS_NOT_INITIALIZED},
+        CudnnToHipdnnCase{CUDNN_STATUS_ALLOC_FAILED, HIPDNN_STATUS_ALLOC_FAILED},
+        CudnnToHipdnnCase{CUDNN_STATUS_BAD_PARAM, HIPDNN_STATUS_BAD_PARAM},
+        CudnnToHipdnnCase{CUDNN_STATUS_INVALID_VALUE, HIPDNN_STATUS_BAD_PARAM},
+        CudnnToHipdnnCase{CUDNN_STATUS_NOT_SUPPORTED, HIPDNN_STATUS_NOT_SUPPORTED},
+        // ARCH_MISMATCH maps onto NOT_SUPPORTED.
+        CudnnToHipdnnCase{CUDNN_STATUS_ARCH_MISMATCH, HIPDNN_STATUS_NOT_SUPPORTED},
+        CudnnToHipdnnCase{CUDNN_STATUS_EXECUTION_FAILED, HIPDNN_STATUS_EXECUTION_FAILED},
+        CudnnToHipdnnCase{CUDNN_STATUS_INTERNAL_ERROR, HIPDNN_STATUS_INTERNAL_ERROR},
+        // cuDNN-only codes with no hipDNN counterpart fall through to the default.
+        CudnnToHipdnnCase{CUDNN_STATUS_MAPPING_ERROR, HIPDNN_STATUS_INTERNAL_ERROR},
+        CudnnToHipdnnCase{CUDNN_STATUS_LICENSE_ERROR, HIPDNN_STATUS_INTERNAL_ERROR},
+        CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_PREREQUISITE_MISSING, HIPDNN_STATUS_INTERNAL_ERROR},
+        CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_IN_PROGRESS, HIPDNN_STATUS_INTERNAL_ERROR},
+        CudnnToHipdnnCase{CUDNN_STATUS_RUNTIME_FP_OVERFLOW, HIPDNN_STATUS_INTERNAL_ERROR},
+        CudnnToHipdnnCase{CUDNN_STATUS_VERSION_MISMATCH, HIPDNN_STATUS_INTERNAL_ERROR}));
 
 } // namespace

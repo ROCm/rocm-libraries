@@ -25,7 +25,7 @@
  *       `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` option.
  *
  * @par Status
- * The stub C-API layer (ALMIOPEN-2036) — `cudnn.h` (v9-required C-API types,
+ * The stub C-API layer — `cudnn.h` (v9-required C-API types,
  * handle/stream/error/version entry points, `create_cudnn_handle()`) and the
  * version macros — is wired in below. The type/status round-trip mapping, error
  * aliasing, and the graph/attribute wrappers land in subsequent tickets.

@@ -13,15 +13,18 @@
  * Identity between the two status enums is established by an explicit named
  * mapping, never by a numeric cast between the enum families (RFC 0012 §4.3).
  *
- * @note Internal header — included by `cudnn.h`. It pulls in `cudnn.h` for the
- *       `cudnnStatus_t` definition (and, transitively, `hipdnnStatus_t`), so it
- *       is self-contained, but it lives under `detail/` and is not part of the
- *       shim's public surface.
+ * @note Internal header — included by `cudnn.h`, but self-contained: it pulls
+ *       in `cudnn_status.h` for `cudnnStatus_t` and `<hipdnn_backend.h>` for
+ *       `hipdnnStatus_t` directly, rather than depending on `cudnn.h` (which
+ *       would form an include cycle). It lives under `detail/` and is not part
+ *       of the shim's public surface.
  */
 
 #pragma once
 
-#include <hipdnn_compatibility/cudnn/cudnn.h>
+#include <hipdnn_backend.h>
+
+#include <hipdnn_compatibility/cudnn/cudnn_status.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
@@ -45,12 +48,14 @@ inline cudnnStatus_t toCudnnStatus(hipdnnStatus_t status)
     case HIPDNN_STATUS_NOT_SUPPORTED:
         return CUDNN_STATUS_NOT_SUPPORTED;
     case HIPDNN_STATUS_ALLOC_FAILED:
+    case HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED:
+    case HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED:
+        // Allocation failures (generic, host, and device) all map to the cuDNN
+        // allocation-failure code, which fits closer than INTERNAL_ERROR.
         return CUDNN_STATUS_ALLOC_FAILED;
     case HIPDNN_STATUS_EXECUTION_FAILED:
         return CUDNN_STATUS_EXECUTION_FAILED;
     case HIPDNN_STATUS_INTERNAL_ERROR:
-    case HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED:
-    case HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED:
     case HIPDNN_STATUS_PLUGIN_ERROR:
     default:
         return CUDNN_STATUS_INTERNAL_ERROR;

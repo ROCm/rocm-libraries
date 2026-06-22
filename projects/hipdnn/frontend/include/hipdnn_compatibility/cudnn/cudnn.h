@@ -28,10 +28,13 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_runtime_version.h>
+#include <hipdnn_compatibility/cudnn/cudnn_status.h>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
 // ===========================================================================
@@ -48,25 +51,9 @@ using cudnnHandle_t = ::hipdnnHandle_t;
 static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
               "cudnnHandle_t must alias the hipDNN handle type (RFC 0012 §4.7)");
 
-/// @brief cuDNN library status/return codes (mirrors NVIDIA `cudnnStatus_t`).
-typedef enum
-{
-    CUDNN_STATUS_SUCCESS = 0,
-    CUDNN_STATUS_NOT_INITIALIZED = 1,
-    CUDNN_STATUS_ALLOC_FAILED = 2,
-    CUDNN_STATUS_BAD_PARAM = 3,
-    CUDNN_STATUS_INTERNAL_ERROR = 4,
-    CUDNN_STATUS_INVALID_VALUE = 5,
-    CUDNN_STATUS_ARCH_MISMATCH = 6,
-    CUDNN_STATUS_MAPPING_ERROR = 7,
-    CUDNN_STATUS_EXECUTION_FAILED = 8,
-    CUDNN_STATUS_NOT_SUPPORTED = 9,
-    CUDNN_STATUS_LICENSE_ERROR = 10,
-    CUDNN_STATUS_RUNTIME_PREREQUISITE_MISSING = 11,
-    CUDNN_STATUS_RUNTIME_IN_PROGRESS = 12,
-    CUDNN_STATUS_RUNTIME_FP_OVERFLOW = 13,
-    CUDNN_STATUS_VERSION_MISMATCH = 14,
-} cudnnStatus_t;
+// `cudnnStatus_t` is declared in `cudnn_status.h` (included above) so the
+// status enum is available without the C entry points — this lets
+// `detail/status_translation.h` be self-contained.
 
 // NOTE: This stub intentionally declares only the C-API types the *implemented*
 // entry points use — `cudnnHandle_t` and `cudnnStatus_t`. The remaining v9
@@ -146,7 +133,14 @@ struct CudnnHandleDeleter
     {
         if(handle != nullptr)
         {
-            cudnnDestroy(*handle);
+            // A failed destroy at teardown is not recoverable, so we log and
+            // ignore it (the heap allocation is still freed below).
+            const cudnnStatus_t status = cudnnDestroy(*handle);
+            if(status != CUDNN_STATUS_SUCCESS)
+            {
+                HIPDNN_FE_LOG_WARN("create_cudnn_handle: cudnnDestroy failed with status "
+                                   + std::to_string(static_cast<int>(status)));
+            }
             delete handle;
         }
     }
@@ -156,10 +150,19 @@ struct CudnnHandleDeleter
 ///
 /// The snake_case name intentionally mirrors NVIDIA's helper so mirrored sample
 /// code compiles unchanged; the naming check is suppressed accordingly.
+///
+/// On a backend create failure the error is logged and an empty pointer is
+/// returned, so callers can detect the failure via a null result.
 inline std::unique_ptr<cudnnHandle_t, CudnnHandleDeleter>
     create_cudnn_handle() // NOLINT(readability-identifier-naming)
 {
     auto handle = std::make_unique<cudnnHandle_t>();
-    cudnnCreate(handle.get());
+    const cudnnStatus_t status = cudnnCreate(handle.get());
+    if(status != CUDNN_STATUS_SUCCESS)
+    {
+        HIPDNN_FE_LOG_ERROR("create_cudnn_handle: cudnnCreate failed with status "
+                            + std::to_string(static_cast<int>(status)));
+        return {nullptr, CudnnHandleDeleter()};
+    }
     return {handle.release(), CudnnHandleDeleter()};
 }

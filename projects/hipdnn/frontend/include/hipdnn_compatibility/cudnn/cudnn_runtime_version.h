@@ -17,9 +17,12 @@
  * cuDNN 9.x runtime version here. `cudnn.h`'s `cudnnGetVersion()` returns
  * `CUDNN_VERSION` from this header.
  *
- * @note TODO(ALMIOPEN-2036): the exact runtime version claimed (9.14.0) is a
- *       placeholder pending review — earmarked for confirmation by the shim
- *       owners.
+ * The claimed version (9.22.0) matches the runtime the pinned cuDNN frontend
+ * v1.24.0 release notes recommend (9.22.0 and later).
+ *
+ * @note TODO(ALMIOPEN-2036): the exact runtime version claimed (9.22.0) tracks
+ *       the FE v1.24.0 recommendation for now; revisit before attempting a
+ *       PyTorch integration.
  */
 
 #pragma once
@@ -29,7 +32,7 @@
 // directives that an enum cannot satisfy. Suppress modernize-macro-to-enum.
 // NOLINTBEGIN(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)
 #define CUDNN_MAJOR 9
-#define CUDNN_MINOR 14
+#define CUDNN_MINOR 22
 #define CUDNN_PATCHLEVEL 0
 #define CUDNN_VERSION ((CUDNN_MAJOR * 10000) + (CUDNN_MINOR * 100) + CUDNN_PATCHLEVEL)
 // NOLINTEND(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)
