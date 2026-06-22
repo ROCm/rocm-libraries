@@ -411,7 +411,7 @@ class rocsolver_dispatcher
             {"sy2sb", testing_sy2sb_he2hb<T, rocblas_int>},
             {"sy2sb_64", testing_sy2sb_he2hb<T, int64_t>},
             {"sb2st", testing_sb2st_hb2st<T, rocblas_int>},
-            {"sb2st", testing_sb2st_hb2st<T, int64_t>},
+            {"sb2st_64", testing_sb2st_hb2st<T, int64_t>},
             // sygst
             {"sygs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"sygs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
@@ -523,7 +523,7 @@ class rocsolver_dispatcher
             {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},
             {"he2hb_64", testing_sy2sb_he2hb<T, int64_t>},
             {"hb2st", testing_sb2st_hb2st<T, rocblas_int>},
-            {"hb2st", testing_sb2st_hb2st<T, int64_t>},
+            {"hb2st_64", testing_sb2st_hb2st<T, int64_t>},
             // hegst
             {"hegs2", testing_sygsx_hegsx<false, false, 0, T>},
             {"hegs2_batched", testing_sygsx_hegsx<true, true, 0, T>},
