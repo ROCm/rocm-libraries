@@ -21,7 +21,6 @@ GlobalParameters:
   # PrintSolutionRejectionReason: 1
   Device: 0
   PrintWinnersOnly: True
-  MinKForGSU: 1
 
 BenchmarkProblems:
 

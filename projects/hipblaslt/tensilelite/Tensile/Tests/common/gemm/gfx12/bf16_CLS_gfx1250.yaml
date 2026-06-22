@@ -28,7 +28,6 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   # PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
 
 BenchmarkProblems:

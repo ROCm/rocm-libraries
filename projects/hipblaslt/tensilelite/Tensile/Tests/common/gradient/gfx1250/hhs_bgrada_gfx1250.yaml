@@ -28,7 +28,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 10
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True

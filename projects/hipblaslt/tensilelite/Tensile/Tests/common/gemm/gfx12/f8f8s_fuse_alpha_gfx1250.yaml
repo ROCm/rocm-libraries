@@ -15,7 +15,6 @@ GlobalParameters:
   DataInitTypeBias: 21 # bias to verify correctness
   NumWarmups: 1
   EnqueuesPerSync: 1
-  MinKForGSU: 1
   Architecture: gfx1250
   PrintSolutionRejectionReason: True
   KeepBuildTmp: True

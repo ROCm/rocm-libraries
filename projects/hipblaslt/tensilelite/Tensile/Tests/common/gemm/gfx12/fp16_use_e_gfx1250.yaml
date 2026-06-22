@@ -13,7 +13,6 @@ GlobalParameters:
   DataInitTypeB: 3
   NumWarmups: 1
   EnqueuesPerSync: 1
-  MinKForGSU: 1
   Architecture: gfx1250
 
 BenchmarkProblems:
