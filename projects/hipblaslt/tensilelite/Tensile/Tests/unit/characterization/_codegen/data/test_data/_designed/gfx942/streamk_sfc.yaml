@@ -5,7 +5,7 @@
 # R5 designed StreamK + SpaceFillingAlgo config for gfx942 codegen characterization.
 #
 # Goal: exercise the SpaceFillingAlgo branch in skIndexToWG (StreamK.py:375-377)
-# and the StreamK=2 (TwoTileOriginal) deterministic two-tile path with conditions
+# and the StreamK=3 (TwoTileDPFirst) deterministic two-tile path with conditions
 # that force partial tiles (grid forcing).
 #
 # Target missing ranges (methodology-A):
@@ -14,14 +14,14 @@
 #            SpaceFillingAlgo=[1] with SFCWGM=[[4,4]] triggers the
 #            SNop + SMovB32(StreamKTileID) instructions (lines 376-377)
 #
-# StreamK=2 (TwoTileOriginal) with SpaceFillingAlgo exercises the fixup/partial
+# StreamK=3 (TwoTileDPFirst) with SpaceFillingAlgo exercises the fixup/partial
 # tile code generation path (storeBranchesCommon) while also hitting the
 # SpaceFillingAlgo conditional in skIndexToWG.
 #
 # The SFCWGM=[[4,4]] provides the L1 grid dims for the SFC ordering.
 # SpaceFillingAlgo=[1] is ordering ID 1 (valid range 0-5).
 #
-# limit=4 kernels: StreamK=[2] x SpaceFillingAlgo=[[1]] x StreamKAtomic=[0,1] = 2 combos.
+# limit=4 kernels: StreamK=[3] x SpaceFillingAlgo=[[1]] x StreamKAtomic=[0,1] = 2 combos.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -33,11 +33,11 @@ GlobalParameters:
 BenchmarkProblems:
   ########################################
   # SGEMM (f32 in/out/compute) NT, Batched
-  # StreamK=2 + SpaceFillingAlgo to exercise skIndexToWG SpaceFillingAlgo branch.
+  # StreamK=3 + SpaceFillingAlgo to exercise skIndexToWG SpaceFillingAlgo branch.
   # The SpaceFillingAlgo conditional (line 375) stores StreamKTileID in SGPR
   # (lines 376-377) for use by the WGM space-filling algorithm.
   #
-  # StreamK=2 (TwoTileOriginal) generates:
+  # StreamK=3 (TwoTileDPFirst) generates:
   #   - skTileIndex path (lines 321-361)
   #   - skIndexToWG with SpaceFillingAlgo branch (lines 363-384)
   #   - storeBranchesCommon fixup loop (lines 785-919)
@@ -60,7 +60,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [2]
+        - StreamK: [3]
         - StreamKAtomic: [0, 1]
         - StreamKXCCMapping: [0]
         - SpaceFillingAlgo: [[1]]

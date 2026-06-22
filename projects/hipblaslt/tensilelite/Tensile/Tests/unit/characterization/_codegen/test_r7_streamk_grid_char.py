@@ -9,7 +9,7 @@ Exercises the three large uncovered clusters in ``Tensile/Components/StreamK.py`
   * Lines 630-784  — ``storeBranchesCommon`` tree-reduction arm
                       Gate: ``kernel["StreamKFixupTreeReduction"] == 1``
                             AND ``kernel["StreamKAtomic"] == 0``
-                      Config: StreamK=[1,2], StreamKFixupTreeReduction=1
+                      Config: StreamK=[3,5], StreamKFixupTreeReduction=1
 
   * Lines 2915-3091 — ``StreamKDynamic.graWorkGroup``
                        Gate: ``kernel["StreamK"] == 4`` (StreamKDynamic class)
