@@ -123,6 +123,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
+                                .subtile                   = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,

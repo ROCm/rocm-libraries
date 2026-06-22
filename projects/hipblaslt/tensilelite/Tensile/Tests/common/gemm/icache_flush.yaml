@@ -5,8 +5,8 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: 0
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   # SyncsPerBenchmark must be >= 1: flush_icache kernel is only launched
   # inside the benchmark sync loop (client/main.cpp), not during warmups.
@@ -75,7 +75,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -83,7 +83,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [-1]
         - StaggerU: [32]

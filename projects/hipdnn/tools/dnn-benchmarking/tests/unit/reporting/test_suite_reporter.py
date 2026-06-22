@@ -386,6 +386,43 @@ class TestVerboseReporter:
         assert "Engine ID:" not in out
         assert "Reference: timing baseline (no correctness comparison)" in out
 
+    def test_verbose_reference_row_renders_warnings(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "RMSNormBackwardAttributes uses a manual formula; "
+            "PyTorch reference timing is not solely built-in PyTorch operator time."
+        ]
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(validation=ValidationConfig(provider="pytorch"))
+        )
+
+        out = output.getvalue()
+        assert "Warnings:" in out
+        assert "WARNING: RMSNormBackwardAttributes" in out
+        assert "Reference: timing baseline" in out
+
+    def test_graph_result_table_renders_warning_column(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "manual RMSNorm backward; PyTorch reference timing is not solely "
+            "built-in PyTorch operator time."
+        ]
+        graph = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_graph_result_table(graph)
+
+        out = output.getvalue()
+        assert "warnings" in out
+        assert "manual RMSNorm backward" in out
+
     def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
         """``--metrics-tier off --pmc basic`` leaves every always-on metric
         field unset but still populates ``extra_metrics``. The profiling
@@ -433,6 +470,34 @@ class TestVerboseReporter:
         # …but the profiling block still renders.
         assert "Profiling:" in out
         assert "PMC (basic, gfx942)" in out
+
+    def test_verbose_metrics_render_na_when_no_analytical_model(self) -> None:
+        """Ops without an analytical FLOPs model must show N/A, not 0."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            analytical_flops=None,
+            analytical_flops_partial=True,
+            analytical_io_bytes=4096,
+            gpu_kernel_stats=BenchmarkStats(
+                mean_ms=0.5,
+                std_ms=0.05,
+                min_ms=0.45,
+                max_ms=0.55,
+                p95_ms=0.52,
+                p99_ms=0.54,
+            ),
+        )
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+        reporter.print_verbose_graph_result(gr, SuiteConfig())
+        out = output.getvalue()
+        assert "Derived Metrics:" in out
+        assert "Analytical FLOPs:     N/A (no analytical model)" in out
+        assert "Throughput:           N/A (no analytical model)" in out
+        assert "Analytical FLOPs:     0" not in out
 
     def test_verbose_profiling_surfaces_error_tail_for_each_source(self) -> None:
         """Tool failures in trace/perf/roofline must show in verbose
