@@ -1,10 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN, used under the MIT license. The C-API
-// type names, enumerator names, and entry-point signatures below intentionally
-// mirror NVIDIA's `cudnn.h` so that hipified v9 cuDNN consumers compile against
-// hipDNN unchanged.
+// Portions derived from NVIDIA cuDNN, used under the MIT license. 
 
 /**
  * @file cudnn.h

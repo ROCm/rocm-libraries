@@ -62,7 +62,7 @@ else()
 endif()
 
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
-# tests (RFC 0012; ALMIOPEN-2034). The shim sources always exist in the tree;
+# tests (RFC 0012). The shim sources always exist in the tree;
 # this option controls only whether they are installed and tested.
 option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
     "Enable the cuDNN compatibility shim (headers + tests)" OFF

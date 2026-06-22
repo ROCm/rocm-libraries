@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN, used under the MIT license. The macro
-// names below mirror NVIDIA's `cudnn_version.h` so hipified v9 consumers compile
-// unchanged.
+// Portions derived from NVIDIA cuDNN, used under the MIT license. 
 
 /**
  * @file cudnn_runtime_version.h
@@ -20,7 +18,7 @@
  * The claimed version (9.22.0) matches the runtime the pinned cuDNN frontend
  * v1.24.0 release notes recommend (9.22.0 and later).
  *
- * @note TODO(ALMIOPEN-2036): the exact runtime version claimed (9.22.0) tracks
+ * @note TODO: the exact runtime version claimed (9.22.0) tracks
  *       the FE v1.24.0 recommendation for now; revisit before attempting a
  *       PyTorch integration.
  */
