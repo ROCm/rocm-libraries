@@ -21,7 +21,6 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   MinKForGSU: 1
-  MaxFileName: 256
   KernelTime: True
   MaxLDS: 163840
 

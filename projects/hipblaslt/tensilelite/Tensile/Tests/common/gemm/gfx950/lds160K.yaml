@@ -24,7 +24,6 @@ GlobalParameters:
   #Device: 0
   MinKForGSU: 1
   #MaxWorkspaceSize: 3355443200
-  MaxFileName: 256
   KernelTime: True
   #RotatingBufferSize: 512
   MaxLDS: 163840
