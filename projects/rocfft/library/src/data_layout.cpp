@@ -146,14 +146,14 @@ data_layout_t data_layout_t::full_layout(const std::vector<size_t>& lengths,
 }
 
 data_layout_t data_layout_t::default_full_layout(const std::vector<size_t>& lengths,
-                                                 size_t                     batch,
+                                                 const std::vector<size_t>& batches,
                                                  bool                       real_case_with_padding)
 {
     data_layout_t             ret;
     const std::vector<size_t> empty_for_default_strides_and_dist = {};
     ret.full_range_reset(lengths,
                          empty_for_default_strides_and_dist,
-                         {batch},
+                         batches,
                          empty_for_default_strides_and_dist,
                          real_case_with_padding);
     return ret;
