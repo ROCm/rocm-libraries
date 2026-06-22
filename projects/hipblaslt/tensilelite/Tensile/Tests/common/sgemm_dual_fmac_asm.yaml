@@ -10,7 +10,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   SyncsPerBenchmark: 1
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: True
   NewClient: 2
   PrintWinnersOnly: True
