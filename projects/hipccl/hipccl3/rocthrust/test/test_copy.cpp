@@ -197,15 +197,15 @@ TEST(CopyTests, TestCopyToDiscardIteratorZipped)
 
   // copy from host_vector
   ZipIterator1 h_result = thrust::copy(
-    thrust::make_zip_iterator(thrust::make_tuple(h_input.begin(), h_input.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(h_input.end(), h_input.end())),
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), h_output.begin())));
+    thrust::make_zip_iterator(h_input.begin(), h_input.begin()),
+    thrust::make_zip_iterator(h_input.end(), h_input.end()),
+    thrust::make_zip_iterator(thrust::make_discard_iterator(), h_output.begin()));
 
   // copy from device_vector
   ZipIterator2 d_result = thrust::copy(
-    thrust::make_zip_iterator(thrust::make_tuple(d_input.begin(), d_input.begin())),
-    thrust::make_zip_iterator(thrust::make_tuple(d_input.end(), d_input.end())),
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), d_output.begin())));
+    thrust::make_zip_iterator(d_input.begin(), d_input.begin()),
+    thrust::make_zip_iterator(d_input.end(), d_input.end()),
+    thrust::make_zip_iterator(thrust::make_discard_iterator(), d_output.begin()));
 
   ASSERT_EQ(h_output, h_input);
   ASSERT_EQ(d_output, d_input);
@@ -775,9 +775,9 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
   Vector v3(3, T(0));
   Vector v4(3, T(0));
 
-  thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
-               thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
-               thrust::make_zip_iterator(thrust::make_tuple(v3.begin(), v4.begin())));
+  thrust::copy(thrust::make_zip_iterator(v1.begin(), v2.begin()),
+               thrust::make_zip_iterator(v1.end(), v2.end()),
+               thrust::make_zip_iterator(v3.begin(), v4.begin()));
 
   ASSERT_EQ(v1, v3);
   ASSERT_EQ(v2, v4);
@@ -795,7 +795,7 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
 
   thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
                thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
-               thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
+               thrust::make_zip_iterator(v1.begin(), v2.begin()));
 
   Vector ref1{4, 4, 4};
   Vector ref2{7, 7, 7};

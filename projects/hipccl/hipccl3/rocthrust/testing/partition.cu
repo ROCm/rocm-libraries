@@ -858,8 +858,8 @@ void TestPartitionZipIterator()
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(data1.begin(), data2.begin()));
-  ZipIterator end   = thrust::make_zip_iterator(thrust::make_tuple(data1.end(), data2.end()));
+  ZipIterator begin = thrust::make_zip_iterator(data1.begin(), data2.begin());
+  ZipIterator end   = thrust::make_zip_iterator(data1.end(), data2.end());
 
   ZipIterator iter = thrust::partition(begin, end, is_ordered());
 
@@ -884,7 +884,7 @@ void TestPartitionStencilZipIterator()
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator stencil_begin = thrust::make_zip_iterator(thrust::make_tuple(stencil1.begin(), stencil2.begin()));
+  ZipIterator stencil_begin = thrust::make_zip_iterator(stencil1.begin(), stencil2.begin());
 
   Iterator iter = thrust::partition(data.begin(), data.end(), stencil_begin, is_ordered());
 
@@ -905,8 +905,8 @@ void TestStablePartitionZipIterator()
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(data1.begin(), data2.begin()));
-  ZipIterator end   = thrust::make_zip_iterator(thrust::make_tuple(data1.end(), data2.end()));
+  ZipIterator begin = thrust::make_zip_iterator(data1.begin(), data2.begin());
+  ZipIterator end   = thrust::make_zip_iterator(data1.end(), data2.end());
 
   ZipIterator iter = thrust::stable_partition(begin, end, is_ordered());
 
@@ -931,7 +931,7 @@ void TestStablePartitionStencilZipIterator()
   using IteratorTuple = thrust::tuple<Iterator, Iterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator stencil_begin = thrust::make_zip_iterator(thrust::make_tuple(stencil1.begin(), stencil2.begin()));
+  ZipIterator stencil_begin = thrust::make_zip_iterator(stencil1.begin(), stencil2.begin());
 
   Iterator mid = thrust::stable_partition(data.begin(), data.end(), stencil_begin, is_ordered());
 
