@@ -1198,11 +1198,12 @@ def _find_hipcc() -> str:
 def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str]:
     """Base hipcc flags for compiling FMHA kernels. Shared by JIT and tile engine.
 
-    Source: example/ck_tile/01_fmha/CMakeLists.txt — mirrors CK's own build
+    Source: example/ck_tile/01_fmha/CMakeLists.txt -- mirrors CK's own build
     flags to ensure parity.  Key defines:
+    - CK_CMAKE_GPU_TARGET_IDS: hex target ID for constexpr arch queries
     - CK_TILE_FMHA_FWD_FAST_EXP2: enables fast exp2 on gfx9 (CDNA)
     - CK_TILE_USE_OCP_FP8: uses OCP standard fp8 format
-    - CK_GFX950_SUPPORT / CK_USE_GFX950: enables gfx950-specific code paths
+    - CK_GFX950_SUPPORT: enables gfx950-specific ISA intrinsics
     - CK_USE_XDL: enables MFMA (matrix fused multiply-add) instructions
     - CK_TILE_USE_WMMA: 0 for CDNA (uses MFMA instead)
     - CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3: BWD bf16 conversion mode
@@ -1234,11 +1235,13 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
         "-mllvm",
         "-amdgpu-function-calls=false",
     ]
+    # Define the CMake GPU target ID for constexpr arch queries
+    target_id = int(arch.removeprefix("gfx"), 16)
+    flags.append(f"-DCK_CMAKE_GPU_TARGET_IDS=0x{target_id:04x}")
     if arch.startswith("gfx9"):
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=1")
         flags.append("-DCK_TILE_USE_OCP_FP8")
         flags.append("-DCK_GFX950_SUPPORT")
-        flags.append("-DCK_USE_GFX950")
         flags.append("-DCK_USE_GFX94")
         flags.append("-DCK_USE_XDL")
         flags.append("-DCK_TILE_USE_WMMA=0")
