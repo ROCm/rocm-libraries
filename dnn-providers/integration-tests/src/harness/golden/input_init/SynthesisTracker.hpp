@@ -184,8 +184,11 @@ public:
     // this graph — either because a leaf input is STRUCTURED/DERIVED
     // (we know about it but can't fill it), or because a leaf input was
     // never declared by any node's fill function.
-    // Note: absent optional tensors (uid 0) and virtual inter-node tensors
-    // are not owned, so STRUCTURED/DERIVED calls on them are silently ignored.
+    // Note: virtual inter-node tensors are not owned, so STRUCTURED/DERIVED
+    // calls on them are silently ignored. Absent optional tensors (uid 0 by
+    // hipdnn convention) are the caller's responsibility — fill functions
+    // should guard against calling fillFree/markStructured on uid 0 when the
+    // attribute means "not present."
     SynthesisResult finish(const char* opName) const
     {
         std::vector<std::string> reasons = _refusals;
@@ -215,7 +218,7 @@ public:
 private:
     bool isOwned(int64_t uid) const
     {
-        return uid != 0 && _owned.count(uid) != 0;
+        return _owned.count(uid) != 0;
     }
 
     InputTensorMap& _inputs; // leaf inputs only (non-virtual, non-output tensors)

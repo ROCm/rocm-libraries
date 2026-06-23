@@ -428,7 +428,7 @@ IntegrationGraphGoldenReferenceVerificationHarness::RefRunResult
         ReferenceExecutorType type, OutputTensors& refOutputs)
 {
     refOutputs = allocateSentinelOutputs();
-    const bool useDevice = (type == ReferenceExecutorType::GPU);
+    const bool useDevice = _requiresDevice && (type == ReferenceExecutorType::GPU);
     auto variantPack = buildVariantPack(refOutputs, useDevice);
 
     try
