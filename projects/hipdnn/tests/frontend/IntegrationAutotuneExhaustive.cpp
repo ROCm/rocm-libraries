@@ -14,8 +14,8 @@
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 
-#include "test_plugins/TestPluginEngineIdMap.hpp"
 #include "AutotuneIntegrationFixture.hpp"
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;

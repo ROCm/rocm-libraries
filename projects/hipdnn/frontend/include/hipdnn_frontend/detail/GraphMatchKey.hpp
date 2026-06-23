@@ -71,13 +71,13 @@ struct PrioritizedAutotuneConfigMatchKey
 namespace match_priority
 {
 inline constexpr int CONVOLUTION = 70;
-inline constexpr int SDPA        = 60;
-inline constexpr int MATMUL      = 50;
-inline constexpr int BATCHNORM   = 40;
-inline constexpr int NORM        = 30;
-inline constexpr int REDUCTION   = 20;
-inline constexpr int RESAMPLE    = 20;
-inline constexpr int POINTWISE   = 10;
+inline constexpr int SDPA = 60;
+inline constexpr int MATMUL = 50;
+inline constexpr int BATCHNORM = 40;
+inline constexpr int NORM = 30;
+inline constexpr int REDUCTION = 20;
+inline constexpr int RESAMPLE = 20;
+inline constexpr int POINTWISE = 10;
 } // namespace match_priority
 
 inline bool appendRequiredMatchTensor(AutotuneConfigMatchKey& key,

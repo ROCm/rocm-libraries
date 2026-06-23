@@ -257,7 +257,8 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
 TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, -1, 0};
-    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/10, timer, noopFixedAverageLog);
+    auto outcome
+        = autotune::detail::runFixedAverage(/*timedIterations=*/10, timer, noopFixedAverageLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 10);
@@ -266,7 +267,8 @@ TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 TEST(TestAutotune, RunFixedAverageFailureMidLoopBreaks)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, 2, 0};
-    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
+    auto outcome
+        = autotune::detail::runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
@@ -308,8 +310,8 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
         covByIteration.push_back(cov);
     };
 
-    auto outcome
-        = autotune::detail::runUntilStable(MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
+    auto outcome = autotune::detail::runUntilStable(
+        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
 
     EXPECT_TRUE(outcome.converged);
     ASSERT_EQ(covValidByIteration.size(), 3u);

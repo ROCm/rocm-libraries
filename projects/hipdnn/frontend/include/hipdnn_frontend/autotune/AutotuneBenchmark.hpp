@@ -58,11 +58,12 @@ inline Error benchmarkOnce(hipdnnHandle_t handle,
     // Record start event
     bool startVal = true;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(profilingDesc.get(),
-                                                                        HIPDNN_ATTR_PROFILING_START_EXT,
-                                                                        HIPDNN_TYPE_BOOLEAN,
-                                                                        1,
-                                                                        &startVal),
+        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(),
+            HIPDNN_ATTR_PROFILING_START_EXT,
+            HIPDNN_TYPE_BOOLEAN,
+            1,
+            &startVal),
         "Failed to set profiling start");
 
     // Execute
@@ -72,11 +73,8 @@ inline Error benchmarkOnce(hipdnnHandle_t handle,
     // Record stop event
     bool stopVal = true;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(profilingDesc.get(),
-                                                                        HIPDNN_ATTR_PROFILING_STOP_EXT,
-                                                                        HIPDNN_TYPE_BOOLEAN,
-                                                                        1,
-                                                                        &stopVal),
+        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &stopVal),
         "Failed to set profiling stop");
 
     // Finalize synchronizes events and computes elapsed time
@@ -243,7 +241,7 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
     }
 
     const size_t succeededCount = succeededResults.size();
-    const size_t failedCount    = failedResults.size();
+    const size_t failedCount = failedResults.size();
 
     // Reassemble succeeded-then-failed while assigning ranks and selecting the
     // winner in a single pass. Succeeded results get 0-based ranks in sorted
@@ -258,7 +256,7 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
         if(!winner && succeededResults[i].compiledPlanIndex >= 0)
         {
             activePlanIndex = static_cast<size_t>(succeededResults[i].compiledPlanIndex);
-            winner          = succeededResults[i];
+            winner = succeededResults[i];
         }
         allResults.push_back(std::move(succeededResults[i]));
     }
@@ -303,11 +301,7 @@ inline Error syncDevice()
     }
     bool syncVal = true;
     auto syncStatus = ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-        syncDesc.get(),
-        HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT,
-        HIPDNN_TYPE_BOOLEAN,
-        1,
-        &syncVal);
+        syncDesc.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &syncVal);
     if(syncStatus != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "autotune: device sync setAttribute failed"};

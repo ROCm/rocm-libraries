@@ -24,11 +24,10 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
     {
         if(axis.knobId == autotune::detail::BENCHMARKING_KNOB_NAME)
         {
-            HIPDNN_FE_LOG_WARN(
-                "Stripping internal knob '"
-                << autotune::detail::BENCHMARKING_KNOB_NAME
-                << "' from add_engine_sweep() sweep axis. "
-                << "This knob is managed by autotune() in EXHAUSTIVE mode.");
+            HIPDNN_FE_LOG_WARN("Stripping internal knob '"
+                               << autotune::detail::BENCHMARKING_KNOB_NAME
+                               << "' from add_engine_sweep() sweep axis. "
+                               << "This knob is managed by autotune() in EXHAUSTIVE mode.");
             continue;
         }
         auto knobIt = knobLookup.find(axis.knobId);
@@ -45,10 +44,8 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
             if(valErr.is_bad())
             {
                 return {ErrorCode::INVALID_VALUE,
-                        "Sweep axis knob '" + axis.knobId
-                            + "' has invalid value for engine "
-                            + std::to_string(sweepSpec.engineId) + ": "
-                            + valErr.get_message()};
+                        "Sweep axis knob '" + axis.knobId + "' has invalid value for engine "
+                            + std::to_string(sweepSpec.engineId) + ": " + valErr.get_message()};
             }
         }
     }
@@ -58,11 +55,10 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
     {
         if(knobId == autotune::detail::BENCHMARKING_KNOB_NAME)
         {
-            HIPDNN_FE_LOG_WARN(
-                "Stripping internal knob '"
-                << autotune::detail::BENCHMARKING_KNOB_NAME
-                << "' from add_engine_sweep() fixed settings. "
-                << "This knob is managed by autotune() in EXHAUSTIVE mode.");
+            HIPDNN_FE_LOG_WARN("Stripping internal knob '"
+                               << autotune::detail::BENCHMARKING_KNOB_NAME
+                               << "' from add_engine_sweep() fixed settings. "
+                               << "This knob is managed by autotune() in EXHAUSTIVE mode.");
             continue;
         }
         auto knobIt = knobLookup.find(knobId);
@@ -78,8 +74,7 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
         {
             return {ErrorCode::INVALID_VALUE,
                     "Fixed setting knob '" + knobId + "' has invalid value for engine "
-                        + std::to_string(sweepSpec.engineId) + ": "
-                        + valErr.get_message()};
+                        + std::to_string(sweepSpec.engineId) + ": " + valErr.get_message()};
         }
     }
 

@@ -128,12 +128,10 @@ TEST_F(TestProfilingControlDescriptor, GetAttributeBeforeFinalizeThrows)
     auto desc = getDescriptor();
     float elapsed = 0.0f;
     int64_t elementCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
-                                                  HIPDNN_TYPE_FLOAT,
-                                                  1,
-                                                  &elementCount,
-                                                  &elapsed),
-                               HIPDNN_STATUS_NOT_INITIALIZED);
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed),
+        HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST_F(TestProfilingControlDescriptor, FinalizeBeforeHandleThrows)
@@ -285,8 +283,8 @@ TEST_F(TestGpuProfilingControlDescriptor, DeviceSyncSucceeds)
 {
     auto desc = getDescriptor();
     bool value = true;
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value));
+    ASSERT_NO_THROW(
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value));
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
@@ -301,10 +299,8 @@ TEST_F(TestGpuProfilingControlDescriptor, GetAttributeUnsupportedNameThrows)
     // unsupported-name guard past the finalized check.
     int64_t value = 0;
     int64_t elementCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                  HIPDNN_TYPE_INT64,
-                                                  1,
-                                                  &elementCount,
-                                                  &value),
-                               HIPDNN_STATUS_NOT_SUPPORTED);
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &elementCount, &value),
+        HIPDNN_STATUS_NOT_SUPPORTED);
 }

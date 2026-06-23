@@ -68,15 +68,14 @@ inline Error executeWithPlan(hipdnnHandle_t handle,
                              const std::unordered_map<int64_t, void*>& variantPack,
                              void* workspace)
 {
-    auto variantPackDesc = std::make_unique<ScopedHipdnnBackendDescriptor>(
-        HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
+    auto variantPackDesc
+        = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
     if(!variantPackDesc || !variantPackDesc->valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
     }
 
-    HIPDNN_CHECK_ERROR(
-        populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
+    HIPDNN_CHECK_ERROR(populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(variantPackDesc->get()),
                                      "Failed to finalize variant pack descriptor");
@@ -94,8 +93,8 @@ inline Error executeWithPlan(hipdnnHandle_t handle,
 inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc, int64_t engineId)
 {
     detail::ScopedHipdnnBackendDescriptor engineDesc;
-    auto createErr = hipdnn_frontend::detail::createEngineDescriptorForGraph(
-        engineDesc, graphDesc, engineId);
+    auto createErr
+        = hipdnn_frontend::detail::createEngineDescriptorForGraph(engineDesc, graphDesc, engineId);
     if(createErr.is_bad())
     {
         return 0;
@@ -103,12 +102,12 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc, int
 
     auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
         HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
-    auto setStatus = detail::hipdnnBackend()->backendSetAttribute(
-        engineConfigDesc->get(),
-        HIPDNN_ATTR_ENGINECFG_ENGINE,
-        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-        1,
-        static_cast<const void*>(&engineDesc.get()));
+    auto setStatus
+        = detail::hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
+                                                       HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       1,
+                                                       static_cast<const void*>(&engineDesc.get()));
     if(setStatus != HIPDNN_STATUS_SUCCESS)
     {
         return 0;

@@ -1724,13 +1724,12 @@ private:
             {
                 const auto& spec = filteredSpecs[skipped.specIndex];
 
-                skippedResults.push_back(
-                    autotune::detail::makeSkippedResult(spec.engineId,
-                                                        spec.knobSettings,
-                                                        spec.workspaceSize,
-                                                        skipped.compiledWsSize,
-                                                        config,
-                                                        maxWorkspaceSize));
+                skippedResults.push_back(autotune::detail::makeSkippedResult(spec.engineId,
+                                                                             spec.knobSettings,
+                                                                             spec.workspaceSize,
+                                                                             skipped.compiledWsSize,
+                                                                             config,
+                                                                             maxWorkspaceSize));
             }
         }
         else if(maxWorkspaceSize >= 0)
@@ -1902,8 +1901,8 @@ private:
             bool warmupFailed = false;
             for(int w = 0; w < config.warmupIterations; ++w)
             {
-                auto execErr
-                    = detail::executeWithPlan(handle, *plan.executionPlanDesc, variantPack, workspace);
+                auto execErr = detail::executeWithPlan(
+                    handle, *plan.executionPlanDesc, variantPack, workspace);
                 if(execErr.is_bad())
                 {
                     warmupFailed = true;
@@ -1976,8 +1975,8 @@ private:
                                        << result.engineName << ": iter " << (t + 1) << "/"
                                        << config.timedIterations << ", time=" << elapsed << "ms");
                 };
-                auto outcome
-                    = autotune::detail::runFixedAverage(config.timedIterations, timeOnce, onIteration);
+                auto outcome = autotune::detail::runFixedAverage(
+                    config.timedIterations, timeOnce, onIteration);
                 timings = std::move(outcome.timings);
                 benchmarkFailed = outcome.benchmarkFailed;
                 if(benchmarkFailed)
@@ -3631,7 +3630,8 @@ public:
             {
                 variantSettings.emplace_back(knobId, value);
             }
-            spec.knobSettings = autotune::detail::stripBenchmarkingKnob(variantSettings, "add_engine_variants()");
+            spec.knobSettings
+                = autotune::detail::stripBenchmarkingKnob(variantSettings, "add_engine_variants()");
 
             // Validate knob settings — return hard error for invalid knobs
             auto knobErr = validateKnobSettingsStrict(spec.knobSettings, variant.engineId);
@@ -3716,7 +3716,8 @@ public:
 
             // Compute Cartesian product from filtered axes (benchmarking axis excluded)
             std::vector<std::vector<KnobSetting>> combinations;
-            HIPDNN_CHECK_ERROR(autotune::detail::computeCartesianProduct(filteredAxes, combinations));
+            HIPDNN_CHECK_ERROR(
+                autotune::detail::computeCartesianProduct(filteredAxes, combinations));
 
             // Query workspace once per engine (shared across all knob combinations)
             const int64_t engineWsSize
