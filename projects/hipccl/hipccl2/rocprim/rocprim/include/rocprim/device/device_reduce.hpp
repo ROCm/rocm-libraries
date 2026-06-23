@@ -37,12 +37,10 @@
 #include "detail/device_reduce.hpp"
 #include "device_reduce_config.hpp"
 
-/// \addtogroup devicemodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+/// \addtogroup devicemodule
+/// @{
 
 namespace detail
 {
@@ -265,8 +263,6 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 #undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // namespace detail
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel reduction primitive for device level.
 ///
@@ -551,9 +547,9 @@ inline hipError_t reduce(void*             temporary_storage,
                                               debug_synchronous);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group devicemodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_

@@ -39,12 +39,10 @@
 #include "detail/device_segmented_scan.hpp"
 #include "device_scan.hpp"
 
-/// \addtogroup devicemodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+/// \addtogroup devicemodule
+/// @{
 
 namespace detail
 {
@@ -142,8 +140,6 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 }
 
 } // namespace detail
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel segmented inclusive scan primitive for device level.
 ///
@@ -621,9 +617,9 @@ inline hipError_t segmented_exclusive_scan(void*               temporary_storage
         debug_synchronous);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group devicemodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_SCAN_HPP_

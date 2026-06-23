@@ -42,12 +42,10 @@
 #include <iostream>
 #include <iterator>
 
-/// \addtogroup devicemodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+/// \addtogroup devicemodule
+/// @{
 
 namespace detail
 {
@@ -241,8 +239,6 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 }
 } // namespace run_length_encode
 } // namespace detail
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel run-length encoding for device level.
 ///
@@ -465,9 +461,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
         debug_synchronous);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group devicemodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
