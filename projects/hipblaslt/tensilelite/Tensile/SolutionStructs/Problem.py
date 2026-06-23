@@ -1355,7 +1355,12 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
 ################################################################################
 
 def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
-  # Experiment: force single gate dtype = A (input) type; sub-byte A (fp8/i8)
-  # falls back to compute type (source kernels can't cast fp8 on device).
-  dt = DataType(problem["DataType"])
-  return [dt] if dt.numBytes() > 1 else [DataType(problem["ComputeDataType"])]
+  gList = []
+  for d in ["DataType", "ComputeDataType"]:
+    dtype = DataType(problem[d])
+    if dtype.numBytes() > 1:
+      gList.append(dtype)
+
+  gateResidualDataTypeList = list(set(gList))
+  gateResidualDataTypeList.sort() # Make name unique
+  return gateResidualDataTypeList

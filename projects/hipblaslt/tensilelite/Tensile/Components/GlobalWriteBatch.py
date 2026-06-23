@@ -622,19 +622,14 @@ class GlobalWriteBatchWriter:
             # (see _emitHoistedGateLoadPhase).
             pass
           elif not _multiDtypeGate:
-            # no-opt single-dtype: per-element skip (borrows D's per-element addr, so
-            # the gate load can't be hoisted -> one branch per element).
+            # no-opt single-dtype: unconditional load. Null gate -> SRD num_records==0
+            # -> buffer_load returns 0; identity FMA (gate+s)*acc+gate handles it. No skip.
             _glTgt = loadInputCode if self.kernel["GroupLoadStore"] else module
-            _glSkipL = Label(self.parentWriter.labels.getNameInc("GateLoadSkip_%u"%elementIdx), "")
-            _glTgt.add(self.parentWriter.getSCMPKInstruction(
-                "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
-            _glTgt.add(SCBranchSCC1(_glSkipL.getLabelName(), "skip gate load if disabled (null gate)"))
             gateLoadMod = self.parentWriter.readInput(
                 self.kernel, self.ss, 'Gate',
                 _prologLoadDtype,
                 addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01)
             _glTgt.add(gateLoadMod)
-            _glTgt.add(_glSkipL)
           else:
             # no-opt (edge) multi-dtype: per-dtype dispatcher PER ELEMENT (gate
             # borrows D's per-element addr, so it must stay interleaved here).
@@ -754,6 +749,9 @@ class GlobalWriteBatchWriter:
     # opt + multi-dtype gate: emit the gate prolog load as ONE GateType dispatch
     # (the per-element loop above skipped it on the opt path).
     self._emitHoistedGateLoadPhase(module, bufferOOB)
+
+    # Identity-gate scalar (GateNullOne) is computed once in globalWriteElements,
+    # before the batch loop -- SrdGate+2 is fixed for the kernel, no per-batch recompute.
 
     # Restore SrdC+2 = BufferOOB after subtile NonEdge C-load OOB gating (which may have set it to 0).
     if self.beta and not self.edge:
@@ -1056,11 +1054,8 @@ class GlobalWriteBatchWriter:
             self.kernel, self.ss, 'Gate', gDtype, addrCalc, element[3], dataGate,
             self.gwvw, addrGateVgpr, self.tmpS01))
 
-    # ONE null-gate skip for the whole phase (no-gate problem: loads are unused).
-    module.add(self.parentWriter.getSCMPKInstruction(
-        "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
-    module.add(SCBranchSCC1(endLabel.getLabelName(), "skip gate load if disabled (null gate)"))
-
+    # Identity-gate: NO null-skip. Load unconditionally; null gate -> SRD num_records==0
+    # -> buffer_load returns 0, and the identity FMA (gate+s)*acc+gate handles it.
     if not multi:
       # single-dtype: no GateType dispatch needed, just the loads.
       _emitLoadsFor(gateList[0])
@@ -1230,12 +1225,8 @@ class GlobalWriteBatchWriter:
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
-    # === gate store split : generate the store loop twice (gate / no-gate)
-    # under ONE branch; preserves full per-element interleaving. Non-edge simple path only.
-    self._gateStoreSplitActive = bool((not self.edge) and self.parentWriter.states.useGateResidual
-        and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)
-        and (not self.kernel["GroupLoadStore"]) and (not self.kernel["StoreRemapVectorWidth"])
-        and (not self.atomic) and (not self.kernel.get("UseSubtileImpl")))
+    # IDENTITY: branchless gate FMA -> store-split unnecessary (one pass, no duplication).
+    self._gateStoreSplitActive = False
     _gateStoreSplitPasses = [True, False] if self._gateStoreSplitActive else [None]
     _gateStoreSplitBlocks = []
     _gateStoreSplitStores0 = self.storesIssued
@@ -1429,40 +1420,28 @@ class GlobalWriteBatchWriter:
             gateList = [self.kernel["ProblemType"]["DestDataType"]]
 
           def _emit_gate_fma():
-            """ValuC = gate*ValuC + gate."""
+            """Identity (branchless null): ValuC = (gate+s)*ValuC + gate.
+            GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate."""
             fmaMod = Module("GateFMA")
             for vi in range(0, self.gwvw):
               sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
               vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
+                src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
               fmaMod.add(VFmaF32(
                 dst=vgpr("ValuC+%d"%vgprIdx),
-                src0=vgpr(dataGate + vi),
+                src0=vgpr(self.tmpVgpr),
                 src1=vgpr("ValuC+%d"%vgprIdx),
                 src2=vgpr(dataGate + vi),
-                comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
+                comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
             return fmaMod
 
-          # Gate store split (_gateStoreSplitEmitGate True/False) wraps ALL gate FMAs in one outer branch:
-          #   None  -> normal: per-element skip-guard (HEAD behavior)
-          #   True  -> emit gate FMA, NO per-element guard (outer branch already gated)
-          #   False -> emit nothing (no-gate pass; D = acc)
-          _gateStoreSplitEG = getattr(self, "_gateStoreSplitEmitGate", None)
-          if _gateStoreSplitEG is False:
-            pass  # no-gate pass: skip gate FMA entirely
+          # Identity FMA is branchless (s handles null) -> no per-element guard, no store-split.
+          if len(gateList) == 1:
+            gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
+            gateModule.add(_emit_gate_fma())
           else:
-            _gateSkipLabel = None
-            if _gateStoreSplitEG is None:
-              _gateSkipLabel = Label(self.parentWriter.labels.getNameInc("GateSkip_%u"%elementIdx), "")
-              gateModule.add(self.parentWriter.getSCMPKInstruction(
-                  "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
-              gateModule.add(SCBranchSCC1(_gateSkipLabel.getLabelName(), "skip gate if disabled (null gate)"))
-            if len(gateList) == 1:
-              gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
-              gateModule.add(_emit_gate_fma())
-            else:
-              gateModule.add(_emit_gate_fma())
-            if _gateSkipLabel is not None:
-              gateModule.add(_gateSkipLabel)
+            gateModule.add(_emit_gate_fma())
 
         if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
           vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
