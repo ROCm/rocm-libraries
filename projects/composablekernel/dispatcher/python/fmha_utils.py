@@ -1263,7 +1263,7 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
 def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     """Create a matching fwd_splitkv_combine config for a fwd_splitkv config.
 
-    Source: fmha_fwd.py splitkv_combine tile — fixed (32, hdim_v, 32, 32) tile.
+    Source: fmha_fwd.py splitkv_combine tile - fixed (32, hdim_v, 32, 32) tile.
     The combine_bn1=32 comes from specs.py load_arch_specs() splitkv_combine dict.
     The combine kernel merges partial results from the split stage into the
     final output.  Must be in the same .so as the split kernel for the
@@ -1301,7 +1301,7 @@ def _make_splitkv_combine_config(splitkv_cfg: FmhaKernelConfig) -> FmhaKernelCon
 def _make_bwd_dot_do_o_config(dq_cfg: FmhaKernelConfig) -> FmhaKernelConfig:
     """Create a matching bwd_dot_do_o config for a bwd_dq_dk_dv config.
 
-    Source: fmha_bwd.py FmhaBwdDotDoOTileSize — fixed tile (64, max(hv,128), 32).
+    Source: fmha_bwd.py FmhaBwdDotDoOTileSize - fixed tile (64, max(hv,128), 32).
     Warp tile (32,32,16) with 4 waves in M = standard fp16/bf16 MFMA config.
     The dot_do_o kernel computes d = rowsum(O * dO) and must be in the same
     .so as the dq_dk_dv kernel for the 2-stage BWD pipeline.
@@ -1358,7 +1358,7 @@ def setup_fmha_dispatcher(
     """JIT-compile a single FMHA kernel and return a runner.
 
     Cached: if the .so already exists, loads it directly (~1ms).
-    Fresh build: codegen → parallel compile (kernel + ctypes) → link.
+    Fresh build: codegen -> parallel compile (kernel + ctypes) -> link.
     """
     import time
 
