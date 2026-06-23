@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <omp.h>
 #include <thread>
 
 #ifndef _WIN32
@@ -35,7 +36,7 @@ static unsigned int rocfft_concurrency()
 #ifndef _WIN32
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
-        return CPU_COUNT(&cpuset);
+        return std::min(CPU_COUNT(&cpuset), omp_get_max_threads());
 #endif
-    return std::thread::hardware_concurrency();
+    return std::min(std::thread::hardware_concurrency(), omp_get_max_threads());
 }
