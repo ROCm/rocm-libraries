@@ -608,6 +608,34 @@ def parseLibraryLogicData(
             data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
+def _expandSolutionDefaults(element5):
+    """Expand a defaults+overrides Solutions element into a flat list of solution dicts.
+
+    Supports two formats for element [5] of a library logic file:
+
+    Old format (plain list) — returned unchanged::
+
+        [{"key1": val, "key2": val, ...}, {"key1": val, ...}, ...]
+
+    New format (dict with SolutionDefaults + Solutions) — each override dict is
+    merged on top of a copy of the defaults so the caller receives the same flat
+    list of fully-populated solution dicts::
+
+        {"SolutionDefaults": {"key1": val, "key2": val, ...},
+         "Solutions": [{"key3": override_val}, ...]}
+    """
+    if isinstance(element5, dict) and "SolutionDefaults" in element5:
+        defaults = element5["SolutionDefaults"]
+        overrides_list = element5["Solutions"]
+        expanded = []
+        for override in overrides_list:
+            full = dict(defaults)
+            full.update(override)
+            expanded.append(full)
+        return expanded
+    return element5
+
+
 def parseLibraryLogicList(data, srcFile="?"):
     """Parses the data of a matching table style library logic file."""
     if len(data) < 9:
@@ -619,7 +647,7 @@ def parseLibraryLogicList(data, srcFile="?"):
     rv["ScheduleName"] = data[1]
     rv["DeviceNames"] = data[3]
     rv["ProblemType"] = data[4]
-    rv["Solutions"] = data[5]
+    rv["Solutions"] = _expandSolutionDefaults(data[5])
 
     if type(data[2]) is dict:
         rv["ArchitectureName"] = data[2]["Architecture"]
