@@ -166,11 +166,17 @@ public:
         {
             throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
         }
+        // Signal memory is an 8-byte HSA signal; a smaller size is rejected with
+        // hipErrorInvalidValue. The 32-bit wait/write ops act on its low word.
         throwOnHipError(
             hipExtMallocWithFlags(
-                reinterpret_cast<void**>(&_signal), sizeof(uint32_t), hipMallocSignalMemory),
+                reinterpret_cast<void**>(&_signal), sizeof(uint64_t), hipMallocSignalMemory),
             "hipExtMallocWithFlags");
-        throwOnHipError(hipStreamCreate(&_control), "hipStreamCreate");
+        // Non-blocking so the release write runs concurrently with a stalled
+        // work stream; a blocking control stream would implicitly serialize
+        // with the legacy default stream and deadlock when the gate stalls it.
+        throwOnHipError(
+            hipStreamCreateWithFlags(&_control, hipStreamNonBlocking), "hipStreamCreateWithFlags");
         throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
         throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
     }
