@@ -38,5 +38,5 @@ static unsigned int rocfft_concurrency()
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
         return std::min(CPU_COUNT(&cpuset), omp_get_max_threads());
 #endif
-    return std::min(std::thread::hardware_concurrency(), omp_get_max_threads());
+    return std::min<unsigned int>(std::thread::hardware_concurrency(), omp_get_max_threads());
 }
