@@ -24,7 +24,8 @@ static_assert(::std::is_nothrow_default_constructible_v<hip::jthread>);
 int main(int, char**) {
   {
     hip::jthread jt = {}; // implicit
-    // assert(!jt.get_stop_source().stop_possible()); // stop token not implemented
+    // TODO: stop token not implemented
+    // assert(!jt.get_stop_source().stop_possible());
     assert(jt.get_id() == hip::jthread::id());
   }
 

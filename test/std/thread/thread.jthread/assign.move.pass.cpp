@@ -34,14 +34,17 @@ int main(int, char**) {
   {
     hip::jthread j = support::make_test_jthread([] __device__ () {});
     auto id        = j.get_id();
-    // auto ssource = j.get_stop_source(); // stop token not implemented
+    // TODO: stop token not implemented
+    // auto ssource = j.get_stop_source();
     j              = ::std::move(j);
     assert(j.get_id() == id);
-    // assert(j.get_stop_source() == ssource); // stop token not implemented
+    // TODO: stop token not implemented
+    // assert(j.get_stop_source() == ssource);
   }
 
   // if joinable() is true, calls request_stop() and then join()
   // request_stop is called
+  // TODO: stop token not implemented
   // {
   //   hip::jthread j1 = support::make_test_jthread([] __device__ () {});
   //   bool called     = false;
@@ -50,7 +53,7 @@ int main(int, char**) {
   //   hip::jthread j2 = support::make_test_jthread([] __device__ () {});
   //   j1              = ::std::move(j2);
   //   assert(called);
-  // } // stop token not implemented
+  // }
 
   // if joinable() is true, calls request_stop() and then join()
   // join is called
@@ -84,12 +87,14 @@ int main(int, char**) {
     hip::jthread j1 = support::make_test_jthread([] __device__ () {});
     hip::jthread j2 = support::make_test_jthread([] __device__ () {});
     auto id2        = j2.get_id();
-    // auto ssource2 = j2.get_stop_source(); // stop token not implemented
+    // TODO: stop token not implemented
+    // auto ssource2 = j2.get_stop_source();
 
     j1 = ::std::move(j2);
 
     assert(j1.get_id() == id2);
-    // assert(j1.get_stop_source() == ssource2); // stop token not implemented
+    // TODO: stop token not implemented
+    // assert(j1.get_stop_source() == ssource2);
   }
 
   // sets x to a default constructed state
@@ -99,7 +104,8 @@ int main(int, char**) {
     j1              = ::std::move(j2);
 
     assert(j2.get_id() == hip::jthread::id());
-    // assert(!j2.get_stop_source().stop_possible()); // stop token not implemented
+    // TODO: stop token not implemented
+    // assert(!j2.get_stop_source().stop_possible());
   }
 
   // joinable is false

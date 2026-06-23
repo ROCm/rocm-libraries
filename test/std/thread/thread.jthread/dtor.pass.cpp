@@ -30,7 +30,7 @@ int main(int, char**) {
     assert(!jt.joinable());
   }
 
-  // Divergence from std::jthread: the upstream test block that verifies
+  // TODO: Divergence from std::jthread: the upstream test block that verifies
   // request_stop() and stop_callback firing on destruction is omitted because
   // hip::jthread has no stop-token support (deliberate; future work).
 

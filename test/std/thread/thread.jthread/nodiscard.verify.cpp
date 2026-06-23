@@ -28,7 +28,7 @@ void test() {
   hip::jthread jt;
   jt.joinable();             // expected-warning {{ignoring return value of function}}
   jt.get_id();               // expected-warning {{ignoring return value of function}}
-  // Lines below are commented out because hip::jthread does not expose these
+  // TODO: Lines below are commented out because hip::jthread does not expose these
   // methods (no native_handle / stop-token support yet). The "expected-warning"
   // keyword is intentionally removed so clang -verify does not register stale
   // directives that would never fire.

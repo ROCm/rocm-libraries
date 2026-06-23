@@ -36,6 +36,7 @@ int main(int, char**) {
     assert(j2.get_id() == id1);
   }
 
+  // TODO: stop token not implemented
   // {
   //   // ssource has the value of x.ssource prior to the start of construction
   //   // and x.ssource.stop_possible() is false.
@@ -46,7 +47,7 @@ int main(int, char**) {
   //   assert(ss1 == j2.get_stop_source());
   //   assert(!j1.get_stop_source().stop_possible());
   //   assert(j2.get_stop_source().stop_possible());
-  // } // stop token not implemented
+  // }
 #endif
   return 0;
 }
