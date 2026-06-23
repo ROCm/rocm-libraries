@@ -96,5 +96,5 @@ def test_isRhel8_emits_exact_warning_text_on_match(monkeypatch):
 
     assert result is True
     assert calls == [
-        ("Rhel8 environments may not support all tools for system queries such as rocm-smi.",)
+        ("Rhel8 environments may not support all tools for system queries such as amd-smi.",)
     ]

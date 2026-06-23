@@ -37,9 +37,9 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
         CACHE FILEPATH "Toolchain file"
     )
 endif()
-set(HIPDNN_VERSION "0.0.1")
-
-project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+# Each component carries its own version (see <component>/version.json and
+# cmake/VersionUtils.cmake); the umbrella project is intentionally unversioned.
+project(hipdnn LANGUAGES CXX)
 
 # ----------------------------------------------------------------------------
 # TheRock Feature Flags
