@@ -78,20 +78,19 @@ test_categories:
       # excludes below are reserved for genuine known failures, not for
       # clawing back runtime.
       - "Smoke/*"
-      # CPU tests need no GPU and are fast, so run them all (every tier) in the
-      # pre-commit gate for breadth.
+      # Also run the unprefixed CPU tests (framework / DB / solver-logic checks
+      # that carry no size-tier prefix). They need no GPU and are fast. The
+      # prefixed CPU tests (Smoke/CPU_*) are already covered by Smoke/* above.
       - "CPU_*"
-      - "*/CPU_*"
 
     exclude:
       - "*/GPU_MIOpenDriver*"
       # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
-      # ('hip/hip_runtime.h' not found). Re-enable once fixed. FP32 still runs.
+      # ('hip/hip_runtime.h' not found). Re-enable once fixed. (Only FP16 and
+      # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
+      # The CPU dev-applicability check is unaffected.)
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
-      # CPU_WSuperTensor is tiered (Smoke+Standard already selected above); its
-      # Full tier is 1944 cases and would just duplicate that coverage here.
-      - "Full/CPU_WSuperTensor_*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
@@ -120,6 +119,9 @@ test_categories:
       - "Full/GPU_ConvBiasActivInfer_*"
       - "Full/CPU_WSuperTensor_*"
       - "Full/GPU_CTC_*"
+      # Only FP32 is tiered (Smoke+Standard); FP16/FP64 are Full-only and stay
+      # in standard for dtype coverage.
+      - "Full/GPU_TernaryTensorOps_FP32*"
       - "Full/GPU_UnitTestConvSolverFFTFwd_*"
       - "Full/GPU_UnitTestConvSolverFFTBwd_*"
       - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
