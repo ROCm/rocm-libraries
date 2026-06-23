@@ -16,10 +16,9 @@ behind WMMAs that issue in the gap instead of being exposed as a stall. See
 from __future__ import annotations
 
 from rocisa.code import Label, Module
-from rocisa.container import sgpr, vgpr
+from rocisa.container import sgpr
 from rocisa.instruction import (
     MFMAInstruction, MXMFMAInstruction, SBarrier, SCBranchSCC0, SCmpEQU32,
-    VReadfirstlaneB32,
 )
 
 # Number of WMMAs to issue between the cluster_barrier signal and its wait so the
@@ -49,14 +48,11 @@ def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
     # mainloop's existing workgroup barrier (s_barrier_signal -1/s_barrier_wait -1)
     # by spliceClusterBarrierSignal, so all waves are already synced before wave 0
     # announces the workgroup's arrival to the cluster.
-    # Elect wave 0 to issue the single cluster_barrier signal. readfirstlane of
-    # Serial returns the wave's lowest lane id (= waveId * wavesize), which is 0
-    # only for wave 0.
-    with writer.allocTmpSgpr(1) as tmpSgpr:
-        s = tmpSgpr.idx
-        mod.add(VReadfirstlaneB32(sgpr(s), vgpr("Serial"), "first lane tId (= waveId * wavesize)"))
-        mod.add(SCmpEQU32(sgpr(s), 0, "wave 0?"))
-        mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
+    # Elect wave 0 to issue the single cluster_barrier signal. sgpr("WaveIdx")
+    # holds the wave index (wId = fTid // wavelen), initialized for every TDM
+    # kernel, so wave 0 is simply WaveIdx == 0.
+    mod.add(SCmpEQU32(sgpr("WaveIdx"), 0, "wave 0?"))
+    mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
     mod.add(skipPreSignal)
     return mod
