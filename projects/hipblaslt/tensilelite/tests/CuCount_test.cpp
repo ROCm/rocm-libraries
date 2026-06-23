@@ -586,6 +586,116 @@ TEST(StreamK5HybridModeTest, OffWithSmCountTargetEngagesHeuristic)
         << "OFF + smCountTarget>0 must match AUTO heuristic for the same problem";
 }
 
+origami::streamk_launch_overrides_t buildLaunchOverridesFromDevice(
+    hip::HipAMDGPU const& device, ContractionProblemGemm const& problem)
+{
+    origami::streamk_launch_overrides_t overrides;
+    if(device.skMaxCUs > 0)
+    {
+        overrides.max_cus = std::min(static_cast<size_t>(device.computeUnitCount),
+                                     static_cast<size_t>(device.skMaxCUs));
+    }
+    if(problem.getParams().smCountTarget() > 0)
+    {
+        overrides.sm_count_target = static_cast<size_t>(problem.getParams().smCountTarget());
+    }
+    overrides.stream_k_tile_scheduling_mode = problem.getParams().streamKTileSchedulingMode();
+    if(device.skFixedGrid > 0)
+    {
+        overrides.fixed_num_wgs = static_cast<size_t>(device.skFixedGrid);
+    }
+    else if(device.skDynamicGrid > 0)
+    {
+        overrides.grid_selection
+            = static_cast<origami::grid_selection_t>(device.skDynamicGrid);
+    }
+    if(device.skGridMultiplier > 1)
+    {
+        overrides.grid_multiplier = static_cast<size_t>(device.skGridMultiplier);
+    }
+    return overrides;
+}
+
+origami::config_t buildOrigamiConfig(ContractionSolution const& solution)
+{
+    return origami::config_t{
+        .mt        = {static_cast<size_t>(solution.sizeMapping.macroTile.x),
+                      static_cast<size_t>(solution.sizeMapping.macroTile.y),
+                      static_cast<size_t>(solution.sizeMapping.depthU)},
+        .mi        = {static_cast<size_t>(solution.sizeMapping.matrixInstruction[0]),
+                      static_cast<size_t>(solution.sizeMapping.matrixInstruction[1]),
+                      static_cast<size_t>(solution.sizeMapping.matrixInstruction[2])},
+        .occupancy = std::max(solution.sizeMapping.CUOccupancy, static_cast<int>(1)),
+        .stream_k  = solution.sizeMapping.streamK,
+    };
+}
+
+origami::problem_t buildOrigamiProblem(ContractionProblemGemm const& problem, size_t k)
+{
+    size_t m = 1, n = 1, batch = 1;
+    for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+        m *= problem.freeSizeA(i);
+    for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+        n *= problem.freeSizeB(i);
+    for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+        batch *= problem.batchSize(i);
+    return origami::problem_t{.size = {m, n, k}, .batch = batch};
+}
+
+void expectOrigamiGridMatchesTensile(ContractionSolution const& solution,
+                                     ContractionProblemGemm&    problem,
+                                     hip::HipAMDGPU const&      device,
+                                     origami::hardware_t const& hw)
+{
+    const size_t k     = problem.boundSize(0);
+    const auto   tiles = problem.getNumTiles(solution.sizeMapping, 1);
+    const auto   reduction = solution.getSKReduction(problem, device);
+    const size_t tensile_grid = solution.getSKGrid(problem, device, tiles, reduction);
+
+    const auto origami_problem = buildOrigamiProblem(problem, k);
+    const auto config          = buildOrigamiConfig(solution);
+    const auto overrides       = buildLaunchOverridesFromDevice(device, problem);
+    const auto grid_selection  = (overrides.grid_selection != origami::grid_selection_t::none)
+                                     ? overrides.grid_selection
+                                     : origami::grid_selection_t::k_split_aware;
+    const size_t origami_grid  = origami::streamk::select_sk_grid(
+        origami_problem, hw, config, overrides, grid_selection);
+
+    EXPECT_EQ(origami_grid, tensile_grid);
+}
+
+TEST(OrigamiSkGridParityTest, DynamicGridWithMaxCus)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    env.device.skMaxCUs              = 64;
+
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    expectOrigamiGridMatchesTensile(env.solution, problem, env.device, env.hw);
+}
+
+TEST(OrigamiSkGridParityTest, FixedGrid)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    env.device.skDynamicGrid         = 0;
+    env.device.skFixedGrid           = 17;
+
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    expectOrigamiGridMatchesTensile(env.solution, problem, env.device, env.hw);
+}
+
+TEST(OrigamiSkGridParityTest, MaxCusOnlyWithoutDynamicGrid)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    env.device.skDynamicGrid         = 0;
+    env.device.skMaxCUs              = 64;
+
+    auto problem = makeGemmProblem(4096, 4096, 64);
+    expectOrigamiGridMatchesTensile(env.solution, problem, env.device, env.hw);
+}
+
 // smCountTarget heuristic threshold behavior is covered by origami/tests/test_streamk.cpp.
 
 // ===========================================================================

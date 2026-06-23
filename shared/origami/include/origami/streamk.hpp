@@ -96,5 +96,24 @@ ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const config_t& config,
                                  size_t sm_count_target);
 
+/**
+ * @brief Whether Stream-K=5 uses the SK4 dynamic sub-path for grid sizing.
+ *
+ * Mirrors ContractionSolution::streamK5EffectiveDynamic() without debug env overrides.
+ */
+ORIGAMI_EXPORT bool sk5_effective_dynamic(const problem_t& problem,
+                                          const hardware_t& hardware,
+                                          const config_t& config,
+                                          const streamk_launch_overrides_t& overrides);
+
+/**
+ * @brief Select Stream-K grid size mirroring ContractionSolution::getSKGridImpl().
+ */
+ORIGAMI_EXPORT size_t select_sk_grid(const problem_t& problem,
+                                     const hardware_t& hardware,
+                                     const config_t& config,
+                                     const streamk_launch_overrides_t& overrides,
+                                     grid_selection_t grid_selection);
+
 }  // namespace streamk
 }  // namespace origami

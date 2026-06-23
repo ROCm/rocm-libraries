@@ -170,28 +170,31 @@ namespace TensileLite
             // Prediction libraries on CDNA are Stream-K only. Pass Stream-K launch hints into
             // origami so grid size, active_cus, and timesteps match ContractionSolution::getSKGrid.
             origami::streamk_launch_overrides_t launch_overrides;
-            size_t                              cuBudget = pAMDGPU->analyticalHardware->N_CU;
             if(pAMDGPU->skMaxCUs > 0)
             {
-                cuBudget = std::min(cuBudget, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                launch_overrides.max_cus = std::min(pAMDGPU->analyticalHardware->N_CU,
+                                                      static_cast<size_t>(pAMDGPU->skMaxCUs));
             }
             if(problem.getParams().smCountTarget() > 0)
             {
-                cuBudget
-                    = std::min(cuBudget, static_cast<size_t>(problem.getParams().smCountTarget()));
+                launch_overrides.sm_count_target
+                    = static_cast<size_t>(problem.getParams().smCountTarget());
             }
-            if(cuBudget < pAMDGPU->analyticalHardware->N_CU)
-            {
-                launch_overrides.max_cus = cuBudget;
-            }
+            launch_overrides.stream_k_tile_scheduling_mode
+                = problem.getParams().streamKTileSchedulingMode();
             if(pAMDGPU->skFixedGrid > 0)
             {
                 launch_overrides.fixed_num_wgs = static_cast<size_t>(pAMDGPU->skFixedGrid);
             }
             else if(pAMDGPU->skDynamicGrid > 0)
             {
+                // Default skDynamicGrid=6 (k_split_aware) matches Tensile when env is unset.
                 launch_overrides.grid_selection
                     = static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid);
+            }
+            if(pAMDGPU->skGridMultiplier > 1)
+            {
+                launch_overrides.grid_multiplier = static_cast<size_t>(pAMDGPU->skGridMultiplier);
             }
 
             auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());

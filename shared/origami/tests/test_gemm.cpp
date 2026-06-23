@@ -369,6 +369,25 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
           problem, hardware, config, origami::grid_selection_t::k_split_aware, 64, 200);
       REQUIRE(std::get<1>(result_capped_grid) == 200);
       REQUIRE(std::get<2>(result_capped_grid) == 64);
+      REQUIRE(std::get<3>(result_capped_grid) >= 1);
+      REQUIRE(std::get<4>(result_capped_grid) >= 1);
+
+      // skDynamicGrid=0 + skMaxCUs mirrors getSKGrid max_cus-only path
+      origami::streamk_launch_overrides_t max_cus_only;
+      max_cus_only.max_cus = 64;
+      auto result_max_cus_only = origami::gemm::compute_launch_parameters(
+          problem, hardware, config, max_cus_only);
+      REQUIRE(std::get<1>(result_max_cus_only) == 64);
+      REQUIRE(std::get<2>(result_max_cus_only) == 64);
+      REQUIRE(std::get<3>(result_max_cus_only) >= 1);
+      REQUIRE(std::get<4>(result_max_cus_only) == 1);
+
+      // grid_multiplier path
+      origami::streamk_launch_overrides_t multiplier;
+      multiplier.grid_multiplier = 2;
+      auto result_multiplier = origami::gemm::compute_launch_parameters(
+          problem, hardware, config, multiplier);
+      REQUIRE(std::get<1>(result_multiplier) == hardware.N_CU * 2);
     }
   }
 }
@@ -387,6 +406,11 @@ TEST_CASE("GEMM: compute_total_latency launch overrides", "[gemm]") {
       const double latency = origami::gemm::compute_total_latency(problem, hardware, config, overrides);
       REQUIRE(latency < std::numeric_limits<double>::max());
       REQUIRE(latency > 0.0);
+
+      origami::streamk_launch_overrides_t baseline;
+      const double baseline_latency
+          = origami::gemm::compute_total_latency(problem, hardware, config, baseline);
+      REQUIRE(latency != baseline_latency);
     }
   }
 }

@@ -148,7 +148,11 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("max_cus", &origami::streamk_launch_overrides_t::max_cus)
       .def_rw("fixed_num_wgs", &origami::streamk_launch_overrides_t::fixed_num_wgs)
-      .def_rw("grid_selection", &origami::streamk_launch_overrides_t::grid_selection);
+      .def_rw("grid_selection", &origami::streamk_launch_overrides_t::grid_selection)
+      .def_rw("grid_multiplier", &origami::streamk_launch_overrides_t::grid_multiplier)
+      .def_rw("sm_count_target", &origami::streamk_launch_overrides_t::sm_count_target)
+      .def_rw("stream_k_tile_scheduling_mode",
+              &origami::streamk_launch_overrides_t::stream_k_tile_scheduling_mode);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -164,6 +168,7 @@ NB_MODULE(origami, m) {
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection)
+      .def_rw("stream_k", &origami::config_t::stream_k)
       .def_rw("prediction_mode", &origami::config_t::prediction_mode)
       .def_rw("grvw_a", &origami::config_t::grvw_a)
       .def_rw("grvw_b", &origami::config_t::grvw_b)

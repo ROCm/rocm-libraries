@@ -62,11 +62,8 @@ context_t::context_t(const problem_t& problem,
   num_output_tiles = grid_m * grid_n * batch;
 
   // Launch parameters
-  const grid_selection_t grid_selection =
-      (launch_overrides.grid_selection != grid_selection_t::none) ? launch_overrides.grid_selection
-                                                                  : config.grid_selection;
-  auto [reduction, wgs, cus, timesteps, split] = compute_launch_parameters(
-      problem, hardware, config, grid_selection, launch_overrides.max_cus, launch_overrides.fixed_num_wgs);
+  auto [reduction, wgs, cus, timesteps, split] =
+      compute_launch_parameters(problem, hardware, config, launch_overrides);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -363,19 +360,19 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
-    grid_selection_t grid_selection,
-    size_t max_cus,
-    size_t fixed_num_wgs) {
+    const streamk_launch_overrides_t& launch_overrides) {
+  const grid_selection_t grid_selection =
+      (launch_overrides.grid_selection != grid_selection_t::none) ? launch_overrides.grid_selection
+                                                                  : config.grid_selection;
+
   const reduction_t reduction_strategy =
       streamk::select_reduction(problem, hardware, config, grid_selection);
   auto config_with_reduction               = config;
   config_with_reduction.reduction_strategy = reduction_strategy;
 
-  const size_t cu_budget = (max_cus > 0) ? std::min(max_cus, hardware.N_CU) : hardware.N_CU;
-  const size_t num_wgs   = (fixed_num_wgs > 0)
-                               ? fixed_num_wgs
-                               : streamk::select_grid_size(
-                                     problem, hardware, config_with_reduction, grid_selection, max_cus);
+  const size_t cu_budget = streamk_cu_budget(launch_overrides, hardware);
+  const size_t num_wgs   = streamk::select_sk_grid(
+      problem, hardware, config_with_reduction, launch_overrides, grid_selection);
 
   const size_t num_mts = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
@@ -392,6 +389,20 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
 
   return std::make_tuple(
       reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
+}
+
+std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
+    grid_selection_t grid_selection,
+    size_t max_cus,
+    size_t fixed_num_wgs) {
+  streamk_launch_overrides_t launch_overrides;
+  launch_overrides.max_cus        = max_cus;
+  launch_overrides.fixed_num_wgs  = fixed_num_wgs;
+  launch_overrides.grid_selection = grid_selection;
+  return compute_launch_parameters(problem, hardware, config, launch_overrides);
 }
 
 // Check if MT fits in LDS

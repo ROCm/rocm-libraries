@@ -180,8 +180,14 @@ struct streamk_launch_overrides_t {
   size_t max_cus = 0;
   /// Fixed workgroup count (0 = use grid_selection algorithm).
   size_t fixed_num_wgs = 0;
-  /// When not none, overrides config.grid_selection for grid sizing.
+  /// When not none, dynamic grid selection is enabled (mirrors skDynamicGrid > 0).
   grid_selection_t grid_selection = grid_selection_t::none;
+  /// Workgroups per CU when no fixed/dynamic/max_cus path applies (0/1 = disabled).
+  size_t grid_multiplier = 0;
+  /// HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET — drives SK5 hybrid mode, not CU grid cap.
+  size_t sm_count_target = 0;
+  /// HIPBLASLT stream-K tile scheduling mode (-1 = default/OFF, 0=OFF, 1=ON, 2=AUTO).
+  int stream_k_tile_scheduling_mode = -1;
 };
 
 /**
@@ -545,6 +551,9 @@ struct config_t {
   target_t target = target_t::tensilelite;
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
+
+  /// Tensile Stream-K version (3/4/5). 0 = unspecified (treated as SK3 for grid modeling).
+  int stream_k = 0;
 
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;

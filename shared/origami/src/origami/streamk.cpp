@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+
 #include "origami/streamk.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
@@ -503,6 +505,70 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
 
   return (tiles_per_cu < threshold) ? hybrid_mode_t::static_
                                     : hybrid_mode_t::dynamic;
+}
+
+bool sk5_effective_dynamic(const problem_t& problem,
+                           const hardware_t& hardware,
+                           const config_t& config,
+                           const streamk_launch_overrides_t& overrides) {
+  if (config.stream_k != 5) return false;
+
+  int mode = overrides.stream_k_tile_scheduling_mode;
+  if (mode < 0) mode = 0;
+
+  switch (mode) {
+    case 1:
+      return true;
+    case 0:
+      if (overrides.sm_count_target == 0) return false;
+      [[fallthrough]];
+    case 2:
+      return select_hybrid_mode(problem, hardware, config, overrides.sm_count_target) ==
+             hybrid_mode_t::dynamic;
+    default:
+      return false;
+  }
+}
+
+size_t select_sk_grid(const problem_t& problem,
+                      const hardware_t& hardware,
+                      const config_t& config,
+                      const streamk_launch_overrides_t& overrides,
+                      grid_selection_t grid_selection) {
+  const size_t tiles = compute_number_of_output_tiles(
+      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  const size_t cu_count = hardware.N_CU;
+
+  if (overrides.fixed_num_wgs > 0) return overrides.fixed_num_wgs;
+
+  const bool any_launch_override = overrides.fixed_num_wgs > 0 || overrides.max_cus > 0 ||
+                                   overrides.grid_selection != grid_selection_t::none ||
+                                   overrides.grid_multiplier > 1 || overrides.sm_count_target > 0 ||
+                                   overrides.stream_k_tile_scheduling_mode >= 0;
+  const bool dynamic_grid = (overrides.grid_selection != grid_selection_t::none) ||
+                            (!any_launch_override && grid_selection != grid_selection_t::none);
+
+  if (dynamic_grid) {
+    const int stream_k = (config.stream_k > 0) ? config.stream_k : 3;
+    const bool sk5_dynamic =
+        (stream_k == 5) && sk5_effective_dynamic(problem, hardware, config, overrides);
+
+    if (stream_k == 4 || sk5_dynamic) {
+      const size_t kernel_occupancy =
+          static_cast<size_t>(std::min(std::max(config.occupancy, 1), 3));
+      size_t max_grid = cu_count * kernel_occupancy;
+      if (overrides.max_cus > 0) max_grid = std::min(max_grid, overrides.max_cus);
+      return std::min(tiles, max_grid);
+    }
+
+    return select_grid_size(problem, hardware, config, grid_selection, overrides.max_cus);
+  }
+
+  if (overrides.max_cus > 0) return std::min(cu_count, overrides.max_cus);
+
+  if (overrides.grid_multiplier > 1) return cu_count * overrides.grid_multiplier;
+
+  return cu_count;
 }
 }  // namespace streamk
 }  // namespace origami

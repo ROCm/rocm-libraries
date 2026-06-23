@@ -170,6 +170,12 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
+    const streamk_launch_overrides_t& launch_overrides);
+
+ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const config_t& config,
     grid_selection_t grid_selection,
     size_t max_cus,
     size_t fixed_num_wgs = 0);
