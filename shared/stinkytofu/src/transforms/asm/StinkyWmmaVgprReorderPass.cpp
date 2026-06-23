@@ -288,7 +288,9 @@ IWmmaReorderAlgorithm::Result AMajorOuterAlgorithm::solve(
     if (!savingExists) return result;
 
     // Reorder every pool to A-major outer and collect each pool's sorted A groups.
-    result.desiredOrder.reserve(wmmaSeq.size());
+    size_t totalWmma = 0;
+    for (const auto& pool : pools) totalWmma += pool.size();
+    result.desiredOrder.reserve(totalWmma);
     std::vector<std::vector<RegGroup>> poolAGroups;
     poolAGroups.reserve(pools.size());
 
