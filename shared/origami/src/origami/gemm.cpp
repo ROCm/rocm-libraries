@@ -23,6 +23,7 @@
 #include "origami/streamk.hpp"
 
 namespace origami {
+namespace gemm {
 
 // Forward declaration for internal Formocast latency computation
 static double compute_formocast_latency(const problem_t& problem,
@@ -2015,4 +2016,5 @@ static double compute_formocast_latency(const problem_t& problem,
   return perf.microSeconds;
 }
 
+}  // namespace gemm
 }  // namespace origami
