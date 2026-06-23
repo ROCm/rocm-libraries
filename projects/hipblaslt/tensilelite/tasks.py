@@ -64,10 +64,9 @@ def get_gpu_arch(c):
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
-        "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
     }
 )
-def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def rocisa(c, rocisa_dir=None):
     """Install rocisa as an editable pip package.
 
     Run once after cloning, or after changes to rocisa's pyproject.toml or
@@ -76,93 +75,52 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     nothing changed), with the staleness check in rocisa/__init__.py as a
     backstop if you skip that.
 
-    Builds and installs stinkytofu locally first so rocisa uses
-    find_package(stinkytofu) — mirroring how TheRock wires the two together.
+    stinkytofu is built from the monorepo sibling via add_subdirectory by
+    rocisa's CMake, so no separate install step is needed.
     """
-    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
+    _pip_install_rocisa(c, rocisa_dir)
 
 
-def _load_stinkytofu_tasks():
-    """Import shared/stinkytofu/tasks.py without triggering its venv guard.
+def _nanobind_cmake_dir():
+    """Return nanobind's CMake config dir, or None if nanobind is unavailable.
 
-    The venv check was moved into build() so this import is side-effect-free.
+    Needed because the editable install runs with --no-build-isolation, so
+    scikit-build-core won't auto-inject nanobind's CMake path.
     """
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "stinkytofu_tasks",
-        _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu" / "tasks.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    try:
+        import nanobind
+    except ImportError:
+        return None
+    return nanobind.cmake_dir()
 
 
-def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
-    """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
-
-    Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
-    of truth — so a new required cmake option only needs to be added there.
-    Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
-    cmake is incremental, so repeat calls are a fast no-op when nothing changed.
-    """
-    stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
-    build_dir = install_prefix.parent / "stinkytofu-build"
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    rocm_s = rocm if isinstance(rocm, str) else str(rocm)
-    _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-    _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
-
-    st = _load_stinkytofu_tasks()
-    cmake_cmd = [
-        "cmake",
-        "-S", str(stinkytofu_src),
-        "-B", str(build_dir),
-        "-DCMAKE_BUILD_TYPE=Release",
-        f"-DROCM_PATH={rocm_s}",
-        f"-DCMAKE_CXX_COMPILER={_cxx}",
-        f"-DCMAKE_C_COMPILER={_cc}",
-        # tests/python OFF for the rocisa integration build; examples ON (default).
-        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
-    ]
-    if shutil.which("ninja"):
-        cmake_cmd.append("-G Ninja")
-    if shutil.which("ccache"):
-        cmake_cmd += [
-            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
-            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-        ]
-    c.run(shlex.join(cmake_cmd))
-    c.run(shlex.join(["cmake", "--build", str(build_dir), "--parallel"]))
-    c.run(shlex.join(["cmake", "--install", str(build_dir)]))
-
-
-def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def _pip_install_rocisa(c, rocisa_dir=None):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
     the editable install fresh.
 
-    Builds stinkytofu and installs it to stinkytofu_prefix (default:
-    build_tmp/stinkytofu-install next to this file) so rocisa's CMake finds it
-    via find_package(stinkytofu) — the same path TheRock uses. This exercises
-    the installed package layout (stinkytofuConfig.cmake, exported targets) so
-    breakage is caught early in the dev/CI workflow.
+    rocisa's CMake builds stinkytofu from the monorepo sibling via
+    add_subdirectory: this compiles the rocisa<->stinkytofu conversion sources
+    (which define init_stinkytofu) into _rocisa, which a find_package(stinkytofu)
+    against an install tree cannot do because those sources need stinkytofu's
+    generated/private headers.
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
 
-    prefix = (
-        pathlib.Path(stinkytofu_prefix).resolve()
-        if stinkytofu_prefix
-        else _TASKS_DIR / "build_tmp" / "stinkytofu-install"
-    )
-    _build_and_install_stinkytofu(c, prefix, rocm)
+    # With --no-build-isolation, scikit-build-core does not inject nanobind's
+    # CMake config path, so find_package(nanobind CONFIG) must locate it via
+    # CMAKE_PREFIX_PATH.
+    nanobind_cmake_dir = _nanobind_cmake_dir()
+    # CMAKE_PREFIX_PATH is a CMake list, which is semicolon-separated regardless
+    # of platform (not os.pathsep).
+    prefix_path = ";".join(str(p) for p in (nanobind_cmake_dir,) if p)
 
     cmake_args = (
         f"-DROCM_PATH={rocm}"
         f" -DROCISA_INCLUDE_BUILD_INFO=ON"
-        f" -DCMAKE_PREFIX_PATH={prefix}"
+        f" -DCMAKE_PREFIX_PATH={prefix_path}"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
