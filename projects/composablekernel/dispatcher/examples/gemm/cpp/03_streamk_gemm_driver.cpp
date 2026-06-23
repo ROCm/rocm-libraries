@@ -58,9 +58,32 @@ int main(int argc, char** argv)
     const ck_tile::index_t M = std::stoll(get_opt(argc, argv, "--m", "3840"));
     const ck_tile::index_t N = std::stoll(get_opt(argc, argv, "--n", "4096"));
     const ck_tile::index_t K = std::stoll(get_opt(argc, argv, "--k", "2048"));
-    const int warmup         = std::stoi(get_opt(argc, argv, "--warmup", "10"));
-    const int repeat         = std::stoi(get_opt(argc, argv, "--repeat", "50"));
+    int warmup               = std::stoi(get_opt(argc, argv, "--warmup", "50"));
+    int repeat               = std::stoi(get_opt(argc, argv, "--repeat", "100"));
     const bool validate      = get_opt(argc, argv, "--validate", "1") != "0";
+
+    // Apple-to-apple with tile_engine: time the kernel with the SAME methodology the
+    // tile_engine benchmark uses (gemm_streamk_profiler.hpp) -- gpu timer and a
+    // cold-cache measurement that flushes the cache and rotates input buffers each
+    // iteration. tile_engine defaults: timer=true, flush_cache=true, rotating_count=1000.
+    // Without these the driver measured a warm-cache best case and over-reported TFlops,
+    // which is the entire source of the dispatcher-vs-TE "performance gap".
+    const bool gpu_timer = get_opt(argc, argv, "--timer", "1") != "0";
+    bool flush_cache     = get_opt(argc, argv, "--flush_cache", "1") != "0";
+    int rotating_count   = std::stoi(get_opt(argc, argv, "--rotating_count", "1000"));
+
+    // Verification reads C back and compares against the reference for the known A/B.
+    // Rotating buffers and multi-repeat rotate/accumulate the output, so the C left on
+    // the device would not correspond to the reference inputs. tile_engine handles this
+    // with repeat_once_if_verify(); we mirror it -- a validating run times a single cold
+    // shot. Run a separate --validate 0 pass to collect apple-to-apple perf numbers.
+    if(validate)
+    {
+        warmup        = 0;
+        repeat        = 1;
+        flush_cache   = false;
+        rotating_count = 1;
+    }
 
     std::cout << "Kernel: " << KERNEL_NAME << "\n";
     std::cout << "M=" << M << " N=" << N << " K=" << K << "\n";
@@ -95,7 +118,8 @@ int main(int argc, char** argv)
                                   sB,
                                   sC};
 
-    const ck_tile::stream_config s{nullptr, true, /*log=*/0, warmup, repeat};
+    const ck_tile::stream_config s{
+        nullptr, true, /*log=*/0, warmup, repeat, gpu_timer, flush_cache, rotating_count};
     float ave_time = SelectedKernel::launch(args, s);
 
     const std::size_t flop  = std::size_t(2) * M * N * K;
