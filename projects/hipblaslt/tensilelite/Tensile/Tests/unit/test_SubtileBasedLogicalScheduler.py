@@ -2471,6 +2471,85 @@ class TestFreeListVgprAllocation:
                             f"{tensor} uid={ui}: two concurrent groups share "
                             f"one id in {tile_map}")
 
+    def test_alloc_vgpr_tiles_list_lengths_match_peaks(self):
+        """allocVgprTiles allocates one RegisterTileInfo per tile_peaks entry."""
+        import math
+
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, _dTileInfo = make_writer_and_tileinfos(
+            kernel, fp4=True)
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        def _expected_regs(tileInfo, lrGran):
+            return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
+
+        try:
+            sched.allocVgprTiles(writer, tiA, tiB,
+                                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+            assert len(sched.vgprTilesA) == sched.tile_peaks['A']
+            assert len(sched.vgprTilesB) == sched.tile_peaks['B']
+            assert len(sched.vgprTilesSA) == sched.tile_peaks['SA']
+            assert len(sched.vgprTilesSB) == sched.tile_peaks['SB']
+
+            for tile in sched.vgprTilesA:
+                assert len(tile.regList.indices) == _expected_regs(tiA, cfg.lrA)
+            for tile in sched.vgprTilesB:
+                assert len(tile.regList.indices) == _expected_regs(tiB, cfg.lrB)
+            for tile in sched.vgprTilesSA:
+                assert len(tile.regList.indices) == _expected_regs(scaleTiA, cfg.lrSA)
+            for tile in sched.vgprTilesSB:
+                assert len(tile.regList.indices) == _expected_regs(scaleTiB, cfg.lrSB)
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_free_list_multi_partition_peaks(self):
+        """Multi-DU free-list with N partitions: ids stay dense in [0, peak)."""
+        cfg = make_cfg_256x256_fp4(
+            partSizeN=4, grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        assert cfg.numPartitions > 1
+        sched = LogicalScheduler(cfg)
+        assert sched._use_free_list_vgpr_allocation()
+        sched.assign_vgpr_tiles()
+
+        ids = self._collect_ids(sched)
+        for tensor, peak in sched.tile_peaks.items():
+            assert peak > 0
+            assert ids[tensor] == set(range(peak)), (
+                f"{tensor}: ids {sorted(ids[tensor])} not densely packed "
+                f"into [0, {peak}) with {cfg.numPartitions} partitions")
+
+    def test_compact_b_overlay_reuses_ids_in_same_slot(self):
+        """Multi-DU free-list sets compact_b_overlay; B LR at subIterK k hands
+        the same vgprTileIds to B MFMA at k+1 within a partition (in-slot
+        MFMA-then-LR execution reuses that peak budget instead of doubling)."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+        assert sched.compact_b_overlay
+        assert sched._use_free_list_vgpr_allocation()
+        assert sched.tile_peaks['B'] == 16
+
+        cfg_det = make_cfg_256x256_fp4()
+        sched_det = LogicalScheduler(cfg_det)
+        sched_det.assign_vgpr_tiles()
+        assert not sched_det.compact_b_overlay
+
+        for slots in sched._partitions:
+            for k in range(len(slots) - 1):
+                lr_vids = None
+                for lr in slots[k].lrs:
+                    if lr.tensor == 'B' and lr.vgpr_tile_map:
+                        lr_vids = set(lr.vgpr_tile_map[0].values())
+                        break
+                assert lr_vids is not None
+                mfma_vids = set(slots[k + 1].mfma.vgpr_tile_maps['B'][0].values())
+                assert lr_vids == mfma_vids, (
+                    f"B overlay: LR k={k} ids {sorted(lr_vids)} must match "
+                    f"MFMA k={k + 1} ids {sorted(mfma_vids)}")
+
 
 # ══════════════════════════════════════════════════════════════
 # get_partition_candidates
