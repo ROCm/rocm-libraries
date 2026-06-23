@@ -1,0 +1,40 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): SMRD scalar loads (s_load_*) retire on
+# the kmcnt counter, not loadcnt/dscnt. The pass classifies them as CK_KM and
+# inserts an s_wait_kmcnt before each consumer whose immediate is the number of
+# scalar loads that should still be OUTSTANDING after the wait. The inserted
+# instruction carries an `mod.swaitcnt` modifier exposing the semantic fields
+# (vlcnt / vscnt / dlcnt / dscnt / kmcnt) that downstream emitters consume.
+#
+# Pattern (single-block):
+#   s_load_b64 s[8:9]   (scalar load 0)
+#   s_load_b64 s[10:11] (scalar load 1)
+#   s_add_u32  s8, s8     (uses scalar load 0)
+#   s_add_u32  s10, s10   (uses scalar load 1)
+#
+# Expected waits inserted by the pass:
+#   s_wait_kmcnt 1   before first  s_add_u32 (wait for load 0 ; leave load 1)
+#   s_wait_kmcnt 0   before second s_add_u32 (wait for the remaining load 1)
+#
+# CHECK-LABEL: @waitcnt_insertion_smem_load_kmcnt
+# CHECK: s_load_b64
+# CHECK-NEXT: s_load_b64
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 1
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_wait_kmcnt
+# CHECK-SAME: kmcnt = 0
+# CHECK-NEXT: s_add_u32
+# Scalar loads only touch kmcnt; no other counter wait should be emitted.
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_smem_load_kmcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1])
+  s[10:11] = "st.s_load_b64"(s[0:1])
+  s20 = "st.s_add_u32"(s8, s8)
+  s21 = "st.s_add_u32"(s10, s10)
+}

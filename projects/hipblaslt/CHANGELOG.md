@@ -7,6 +7,35 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Complex datatype support for gfx942 and gfx950.
+* `hipblasLtSetSmCountTarget()` / `hipblasLtGetSmCountTarget()` handle-level
+  helpers (the analogue of cuBLAS's `cublasSetSmCountTarget` /
+  `cublasGetSmCountTarget`). `int32_t`, default `0` meaning "use all
+  compute units"; negative values are rejected with
+  `HIPBLAS_STATUS_INVALID_VALUE`.
+* `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` matmul-descriptor attribute and
+  `HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET` preference attribute (same
+  semantics). When a per-matmul / per-preference value is non-zero it
+  takes precedence over the handle-level value. Lets callers convey an
+  estimate of how many CUs hipBLASLt should target for kernel selection
+  and persistent-grid sizing — useful when another kernel (e.g. RCCL)
+  is co-running on the device or when a persistent grid should be sized
+  for a known CU budget. (This is a hint, not a CU reservation.)
+* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` and matching ext API
+  (`setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`) accept
+  the tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
+  ON=1 dynamic SK4, AUTO=2 origami heuristic). Invalid values return
+  `HIPBLAS_STATUS_INVALID_VALUE`. `hipblaslt-bench` `--streamk_tile_scheduling`
+  and `--sm_count_target` forward into the matmul descriptor
+  (see `clients/bench/README.md`).
+
+### Changed
+
+* StreamK=5 tile scheduling default is now `OFF` (`0`, static SK3 sub-path)
+  instead of `AUTO` (`2`). Set `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` (or
+  `hipblasLtSetSmCountTarget`) to a positive value to engage the origami
+  hybrid-mode heuristic per launch even when the mode is `OFF`; use
+  `HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO` (`2`) to always delegate to the
+  heuristic regardless of `sm_count_target`.
 
 ## hipBLASLt 1.3.0
 

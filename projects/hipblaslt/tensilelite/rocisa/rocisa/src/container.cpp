@@ -140,9 +140,9 @@ namespace rocisa
         return createGPR("s", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro)
+    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro, bool isOff)
     {
-        return createGPR("s", name, regNum, isMacro);
+        return createGPR("s", name, regNum, isMacro, false, isOff);
     }
 
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum)
@@ -206,10 +206,11 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("sgpr",
-              nb::overload_cast<const std::string&, float, bool>(&rocisa::sgpr),
+              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::sgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
-              nb::arg("isMacro") = false);
+              nb::arg("isMacro") = false,
+              nb::arg("isOff")   = false);
 
     m_con.def("accvgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::accvgpr),
@@ -344,16 +345,15 @@ void init_containers(nb::module_ m)
              });
 
     nb::class_<rocisa::GLOBALModifiers, rocisa::Container>(m_con, "GLOBALModifiers")
-        .def(nb::init<int>(),
-             nb::arg("offset") = 0)
-        .def(nb::init<int, bool, bool, bool, rocisa::CacheScope, bool, bool>(),
-             nb::arg("offset"),
-             nb::arg("glc"),
-             nb::arg("slc"),
-             nb::arg("dlc"),
-             nb::arg("scope"),
-             nb::arg("lds"),
-             nb::arg("isStore"))
+        .def(nb::init<int, bool, bool, bool, rocisa::CacheScope, bool, bool, rocisa::TemporalHint>(),
+             nb::arg("offset")  = 0,
+             nb::arg("glc")     = false,
+             nb::arg("slc")     = false,
+             nb::arg("dlc")     = false,
+             nb::arg("scope")   = rocisa::CacheScope::SCOPE_NONE,
+             nb::arg("lds")     = false,
+             nb::arg("isStore") = false,
+             nb::arg("th")      = rocisa::TemporalHint::TH_NONE)
         .def_rw("isStore", &rocisa::GLOBALModifiers::isStore)
         .def("__str__", &rocisa::GLOBALModifiers::toString)
         .def("__deepcopy__",
@@ -368,18 +368,20 @@ void init_containers(nb::module_ m)
                                         self.dlc,
                                         self.scope,
                                         self.lds,
-                                        self.isStore);
+                                        self.isStore,
+                                        self.th);
              })
         .def("__setstate__",
              [](rocisa::GLOBALModifiers&                                            self,
-                std::tuple<int, bool, bool, bool, rocisa::CacheScope, bool, bool> t) {
+                std::tuple<int, bool, bool, bool, rocisa::CacheScope, bool, bool, rocisa::TemporalHint> t) {
                  new(&self) rocisa::GLOBALModifiers(std::get<0>(t),
                                                     std::get<1>(t),
                                                     std::get<2>(t),
                                                     std::get<3>(t),
                                                     std::get<4>(t),
                                                     std::get<5>(t),
-                                                    std::get<6>(t));
+                                                    std::get<6>(t),
+                                                    std::get<7>(t));
              });
 
     nb::class_<rocisa::MUBUFModifiers, rocisa::Container>(m_con, "MUBUFModifiers")
@@ -570,7 +572,7 @@ void init_containers(nb::module_ m)
         .def("__setstate__", [](rocisa::True16Modifiers& self, std::tuple<const rocisa::HighBitSel> t) {
             new(&self) rocisa::True16Modifiers(std::get<0>(t));
         });
-
+    
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
         .def("__str__", &rocisa::EXEC::toString)

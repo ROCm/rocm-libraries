@@ -196,6 +196,10 @@ namespace rocisa
         NonVolatile  nv;
     };
 
+    // Modifiers for global_* memory ops: the immediate offset (offset:N) plus the
+    // temporal hint / cache scope used by global_prefetch_b8 (gfx1250 gl2-prefetch).
+    // Offset-only ops leave th/scope at their defaults (TH_NONE / SCOPE_NONE), which
+    // are not printed.
     struct GLOBALModifiers : public Container
     {
         GLOBALModifiers(int        offset  = 0,
@@ -204,7 +208,8 @@ namespace rocisa
                         bool       dlc     = false,
                         CacheScope scope   = CacheScope::SCOPE_NONE,
                         bool       lds     = false,
-                        bool       isStore = false)
+                        bool       isStore = false,
+                        TemporalHint th     = TemporalHint::TH_NONE)
             : Container()
             , offset(offset)
             , glc(glc)
@@ -213,6 +218,7 @@ namespace rocisa
             , scope(scope)
             , lds(lds)
             , isStore(isStore)
+            , th(th)
         {
         }
 
@@ -225,6 +231,7 @@ namespace rocisa
             , scope(other.scope)
             , lds(other.lds)
             , isStore(other.isStore)
+            , th(other.th)
         {
         }
 
@@ -262,6 +269,10 @@ namespace rocisa
             {
                 kStr += " lds";
             }
+            if(hasTemporalHint(th))
+            {
+                kStr += " th:" + rocisa::toString(th, false);
+            }
             return kStr;
         }
 
@@ -272,6 +283,7 @@ namespace rocisa
         CacheScope scope;
         bool       lds;
         bool       isStore;
+        TemporalHint th;
     };
 
     struct MUBUFModifiers : public Container
@@ -1449,7 +1461,7 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>
-        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false);
+        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isOff = false);
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(const std::string& name, float regNum = 1.f);

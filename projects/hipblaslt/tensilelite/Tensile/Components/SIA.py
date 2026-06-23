@@ -537,7 +537,13 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
 
     if kernel["PrefetchGlobalRead"] == 2:
-        imod = writer.codes.perIterGlobalRead[0].add(Module())
+        # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads
+        # are emitted at iter 0, they clobber vgprG2L* before the later local-write
+        # iteration stores the previous prefetch to LDS. Place non-TDM reads in the
+        # local-write iteration; SIA0 sub-iteration order emits localWriteCode before
+        # globalReadCode, preserving the G2L value until it is consumed.
+        grIter = localWriteEndIter if kernel["_ScheduleIterAlg"] == 0 and not kernel["NoLdsWriteCode"] and not tdmDeferLoad else 0
+        imod = writer.codes.perIterGlobalRead[grIter].add(Module())
         imod.addComment1("Global Read IncA")
         imod.add(globalReadIncACode)
         imod.addComment1("Global Read IncB")
@@ -567,12 +573,20 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
                 # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
                 deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
                 deferMod.add(tdmLoadModB)
-            # TODO: Once metadata TDM issueLoad is embedded inside globalReadDo(), globalReadMetadata
-            # will be empty and this block can be removed. Until then, apply _splitTdmLoad so the
-            # metadata TensorLoadToLds is deferred to tdmLoadIter together with A and B.
+            # Metadata TDM also writes to a double-buffered LDS region that is XOR-swapped
+            # alongside A's (see s_xor on sgprtdmMetadataGroup0+1). Defer its tensor_load_to_lds
+            # to tdmLoadIter so the load lands in the post-swap buffer, matching the
+            # ds_load_tr8_b64 reads from the new side; otherwise the async TDM write races
+            # against the current iter's metadata local reads from the same LDS region.
             if kernel["ProblemType"]["Sparse"]:
+                nonTdmModM, tdmLoadModM = _splitTdmLoad(writer.codes.globalReadMetadata)
                 imod.addComment1("Global Read Metadata")
-                imod.add(writer.codes.globalReadMetadata)
+                imod.add(nonTdmModM)
+                if tdmLoadModM.itemsSize() > 0:
+                    deferMod.addComment1("Global Read Metadata (TDM deferred after LDS swap)")
+                    deferMod.add(tdmLoadModM)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
         else:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
@@ -589,6 +603,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             if kernel["ProblemType"]["Sparse"]:
                 imod.addComment1("Global Read Metadata")
                 imod.add(writer.codes.globalReadMetadata)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
@@ -602,6 +618,8 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2PrefetchIncrement)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2Prefetch)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0

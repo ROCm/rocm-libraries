@@ -16,9 +16,10 @@ Organized by pass:
 """
 import pytest
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
+    GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
     ReadGranularity,
@@ -31,19 +32,29 @@ from Tensile.Components.Subtile.LogicalScheduler import (
     fmt_mt,
 )
 from unittest.mock import MagicMock
+from rocisa.code import Module
 
 
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
     fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    wave32 = kernel.get("WavefrontSize", 64) == 32
+    ab_bf16 = AB_B16_W32 if wave32 else AB_B16
+    cd_f32 = CD_F32_W32 if wave32 else CD_F32
     _geo = {
-        'A': AB_B4 if fp4 else AB_B16,
-        'B': AB_B4 if fp4 else AB_B16,
+        'A': AB_B4 if fp4 else ab_bf16,
+        'B': AB_B4 if fp4 else ab_bf16,
         'MXSA': MXSA_B4,
         'MXSB': MXSB_B4,
-        'D': CD_F32,
+        'D': cd_f32,
     }
-    return TileInfo(_geo[tc], tc, None, kernel)
+    # TDM path queries writer.states.subtileLdsSwizzle in TileInfo.__init__.
+    # Provide a minimal stub so makeTileInfo can be called without a full writer.
+    writer_stub = None
+    if kernel.get("enableTDM%s" % tc, False):
+        from types import SimpleNamespace
+        writer_stub = SimpleNamespace(states=SimpleNamespace(subtileLdsSwizzle=False))
+    return TileInfo(_geo[tc], tc, writer_stub, kernel)
 
 
 # ── Shared fixtures ───────────────────────────────────────────
@@ -59,7 +70,7 @@ def _mock_dtype(num_bytes=2):
 
 
 def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
-                  miWaveGroup=None, sourceSwap=False):
+                  miWaveGroup=None, sourceSwap=False, arch="gfx950"):
     mxblock = 32 if fp4 else 0
     bpe = 0.5 if fp4 else 2
     matrixInstK = 128 if fp4 else 32
@@ -67,6 +78,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         depthU = 256 if fp4 else 64
     if miWaveGroup is None:
         miWaveGroup = [2, 2]
+    is_gfx1250 = (arch == "gfx1250")
+    waveSize = 32 if is_gfx1250 else 64
     dtype = _mock_dtype(bpe)
     problemType = {
         "DataTypeA": dtype,
@@ -91,9 +104,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MIInputPerThreadA": matrixInstK // 4,
         "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
-        "WavefrontSize": 64,
+        "WavefrontSize": waveSize,
         "SourceSwap": sourceSwap,
-        "MIArchVgpr": False,
+        "MIArchVgpr": is_gfx1250,
         "NonTemporalA": 0,
         "NonTemporalB": 0,
         "NonTemporalMXSA": 0,
@@ -101,6 +114,11 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "NoTailLoop": False,
         "ProblemType": problemType,
     }
+    if is_gfx1250:
+        kernel["ISA"] = (12, 5, 0)
+        kernel["UseSubtileImpl"] = True
+        kernel["enableTDMA"] = True
+        kernel["enableTDMB"] = True
     if fp4:
         kernel["_DepthUMXSA"] = depthU // mxblock
         kernel["_DepthUMXSB"] = depthU // mxblock
@@ -198,6 +216,57 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
     )
 
 
+def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
+    """Create a plain FP8 kernel config (bpe=1, matrixInstK=128, no MX scale)."""
+    dtype = _mock_dtype(1)
+    return {
+        "DepthU": depthU,
+        "_DepthUA": depthU,
+        "_DepthUB": depthU,
+        "MacroTileA": MT0,
+        "MacroTileB": MT1,
+        "MacroTile0": MT0,
+        "MacroTile1": MT1,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "MIWaveGroup": list(waveGroup),
+        "WavefrontSize": 64,
+        "SourceSwap": False,
+        "MIArchVgpr": False,
+        "NonTemporalA": 0,
+        "NonTemporalB": 0,
+        "NonTemporalMXSA": 0,
+        "NonTemporalMXSB": 0,
+        "ProblemType": {
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "ComputeDataType": _mock_dtype(4),
+        },
+    }
+
+
+def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
+    """Build plain FP8 config (AB_B8, matrixInstK=128, no scale tensors).
+
+    GR granularity matches production: mn=subtileShape[0]=1, k=subtileShape[1]=1.
+    With DU=128 and matrixInstK=128: numSubIterK=1, flat_len=numPartitions.
+    """
+    kernel = create_kernel_fp8(MT0, MT1, waveGroup, depthU)
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        pgr=pgr,
+    )
+
+
 def make_example_granularities_1():
     """Example Granularities 1 from the design doc: LR A,B=1x1, LR SA,SB=2x2."""
     return SchedulerConfig(
@@ -224,11 +293,15 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from Tensile.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
-    if not ri.isInit():
-        import shutil
-        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
-    ri.setKernel((9, 5, 0), 64)
+    import shutil
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    # Pick ISA + wavesize from the kernel — rocisa is a process-wide singleton,
+    # so re-init each call to override any prior state from other tests.
+    isa = tuple(kernel.get("ISA", (9, 5, 0)))
+    waveSize = kernel.get("WavefrontSize", 64)
+    ri.init(isa, asmpath)
+    ri.setKernel(isa, waveSize)
+    is_gfx1250 = (isa == (12, 5, 0))
 
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
@@ -239,11 +312,27 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr, False)
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
+    writer.sgprs = {}
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        archCaps={"LDSBankCount": 64, "LDSBankWidth": 4,
+                  "HasWmmaArbStallBit": is_gfx1250},
+        asmCaps={"HasMFMA": not is_gfx1250,
+                 "HasWMMA_AccImmZero": is_gfx1250},
         unrollIdx=0,
-        laneSGPRCount=2,
+        laneSGPRCount=1 if is_gfx1250 else 2,
+        subtileLdsSwizzle=not is_gfx1250,
     )
+    if is_gfx1250:
+        writer.sgprPool.checkOut(12)
+        writer.sgprs["StrideA0I"] = 10
+        writer.sgprs["StrideB1J"] = 11
+        for tc in ['A', 'B']:
+            writer.sgprs["tdm%sGroup0" % tc] = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+            writer.sgprs["tdm%sGroup1" % tc] = writer.sgprPool.checkOutAligned(8, 4, preventOverflow=False)
+            writer.sgprs["tdmLdsAddr%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+            writer.sgprs["tdmLdsSwapMask%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+            writer.sgprs["Address%s" % tc] = writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False)
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
     writer.loopCounterName = lambda kernel, loopIdx: "LoopCounterL"
@@ -1455,6 +1544,64 @@ class TestComputeInflightLoads:
         assert lr_a1.preOps[0].wait_gr_counts.SA == 1
         assert lr_a1.preOps[0].wait_gr_counts.SB == 1
 
+    def test_fp8_DU128_asymmetric_A_lt_B(self):
+        """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.
+
+        Regression for _compute_inflight_loads bug (commit 055ecc8):
+        With flat_len=1 (1 partition × 1 subIterK), wraps_needed=1
+        (cross-MT dep), consumer_flat==dep_flat==0, the old wrap-counting
+        code walked the single slot twice instead of once — overcounting all
+        GRs in the slot as extra inflight.
+
+        Correct behavior: walk exactly wraps_needed*flat_len=1 step; on the
+        final step stop immediately at the dep GR (A), yielding A=0.  The B
+        GRs that were emitted after A (higher sort key) are still counted.
+
+        Old (buggy) counts for LR A: A=4, B=12.
+        New (correct) counts for LR A: A=0, B=6.
+        """
+        cfg = make_cfg_fp8(128, 192, waveGroup=(2, 2))
+        assert cfg.numSubIterK == 1, "FP8 DU=128 / matrixInstK=128 → single subIterK"
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        # LR A: dep is GR A (emitted first → last in reverse order).
+        # All B GRs (emitted after A, encountered first in backward walk) are inflight.
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 6  # 6 B tiles in MT192 / wg2
+
+        # LR B: dep is GR B (emitted last → first in reverse order); nothing after it.
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
+    def test_fp8_DU128_asymmetric_A_gt_B(self):
+        """FP8 DU=128, MT=448x64, waveGroup=(4,1), PGR=2.
+
+        Same _compute_inflight_loads regression as test_fp8_DU128_asymmetric_A_lt_B
+        but with more A tiles than B tiles (7A vs 4B).
+
+        Old (buggy) counts for LR A: A=7, B=8.
+        New (correct) counts for LR A: A=0, B=4.
+        """
+        cfg = make_cfg_fp8(448, 64, waveGroup=(4, 1))
+        assert cfg.numSubIterK == 1
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 4  # 4 B tiles in MT64 / wg1
+
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 8: Group LR/GR
@@ -2080,6 +2227,58 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_emitMainAndExitLoops_pap_mx_inserts_preloop_skip_and_nll_hooks(self):
+        """Subtile PAP is scheduler-owned and applies to MX PRELOOP/NLL paths."""
+        kernel = create_kernel(256, 256, fp4=True)
+        kernel.update({
+            "UseSubtileImpl": True,
+            "PrefetchAcrossPersistent": 1,
+            "PrefetchGlobalRead": 2,
+            "StreamK": 3,
+        })
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        def _pap_hook(_kernel, _tPA, _tPB, _preloop_gr, skipBarrier=False):
+            module = Module("Subtile PAP test hook")
+            module.addComment0("Subtile PAP test hook")
+            return module
+
+        writer.prefetchAcrossPersistentSubtile = MagicMock(side_effect=_pap_hook)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            module = sched.emitMainAndExitLoops(writer, kernel)
+            asm = str(module)
+
+            assert "Subtile PAP: first PRELOOP GR already issued?" in asm
+            assert "SubtilePAPPreloopFirstGRMerge" in asm
+            assert "Subtile PAP test hook" in asm
+            assert writer.prefetchAcrossPersistentSubtile.call_count == sched.unroll_factor
+            assert all(call.kwargs["skipBarrier"] for call in writer.prefetchAcrossPersistentSubtile.call_args_list)
+
+            pap_idx = asm.index("Subtile PAP test hook")
+            nll_idx = asm.rfind("NLL_C", 0, pap_idx)
+            assert nll_idx != -1
+            wait_gr_idx = asm.rfind("Wait GR", nll_idx, pap_idx)
+            barrier_idx = asm.rfind("Barrier", nll_idx, pap_idx)
+            assert nll_idx < wait_gr_idx < barrier_idx < pap_idx
+            mfma_idx = asm.find("MFMA C[", pap_idx)
+            assert mfma_idx != -1
+            assert pap_idx < mfma_idx
+        finally:
+            sched.deallocVgprTiles(writer)
+
     def test_tailloop_k_mask_256x256_fp4(self):
         """Tail loop must emit per-lane K-mask (v_cmp_lt_i32 + v_cndmask_b32) after wait_lr."""
         kernel = create_kernel(256, 256, fp4=True)
@@ -2243,6 +2442,8 @@ if __name__ == "__main__":
                         help="MIWaveGroup as MxN (default: 2x2)")
     parser.add_argument("--pgr", type=int, choices=[0, 1, 2], default=1,
                         help="PrefetchGlobalRead level (default: 1)")
+    parser.add_argument("--arch", choices=["gfx950", "gfx1250"], default="gfx950",
+                        help="Target arch (default: gfx950). gfx1250 enables wave32 + TDM.")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Step through each phase interactively")
     args = parser.parse_args()
@@ -2262,17 +2463,29 @@ if __name__ == "__main__":
     partSizeM, partSizeN = int(ps_parts[0]), int(ps_parts[1])
 
     kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
-                           miWaveGroup=list(waveGroup))
+                           miWaveGroup=list(waveGroup), arch=args.arch)
     tiA = makeTileInfo('A', kernel)
     tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
     scaleTiB = makeTileInfo('MXSB', kernel) if fp4 else None
 
-    # Mirror Kernel.py:1139-1140 — gr granularity widens to (2,2) when the
-    # tile's GR load ratio exceeds 1.0.
-    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    # Mirror Kernel.py mainLoop GR granularity selection:
+    #   - gfx950 (buffer load): mn=subtileShape[0] (doubled when loadRatioGR>1),
+    #                            k=subtileShape[1]
+    #   - gfx1250 (TDM):        one tensor_load_to_lds covers the full local
+    #                            MMA grid -> mn=localMMATileGrid[0], k=[1]
+    if args.arch == "gfx1250":
+        grA = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+        grB = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+    else:
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
 
+    # gfx1250 enables TDM (tensor_load_to_lds); GR doesn't pressure SIMD issue
+    # slots, so bunch all GR atoms into partition 0 / subIterK 0. Mirrors
+    # Kernel.py's grPlacement selection.
+    grPlacement = (GRPlacementStrategy.BUNCHED if args.arch == "gfx1250"
+                   else GRPlacementStrategy.SPREAD)
     cfg_kwargs = dict(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -2284,6 +2497,7 @@ if __name__ == "__main__":
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=args.pgr,
+        grPlacement=grPlacement,
     )
     if fp4:
         cfg_kwargs.update(
@@ -2296,7 +2510,7 @@ if __name__ == "__main__":
         )
     cfg = SchedulerConfig(**cfg_kwargs)
 
-    print(f"Config: MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
+    print(f"Config: arch={args.arch}, MT={args.mt0}x{args.mt1}, DU={args.du}, dtype={args.dtype}, "
           f"WG={waveGroup[0]}x{waveGroup[1]}, "
           f"partitionSize={partSizeM}x{partSizeN}, pgr={args.pgr}")
     print(f"        numMFMATilesM={cfg.numMFMATilesM}, "

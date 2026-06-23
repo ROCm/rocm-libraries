@@ -381621,7 +381621,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    PreloadKernArgs: 1
+    PreloadKernArgs: true
     ProblemType:
       Activation: true
       ActivationComputeDataType: 0

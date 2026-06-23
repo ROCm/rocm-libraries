@@ -178,6 +178,8 @@ namespace rocRoller
                 Throw<FatalError>("Unexpected pointer!");
             else if constexpr(std::is_same_v<T, Buffer>)
                 Throw<FatalError>("Unexpected Buffer!");
+            else if constexpr(std::is_same_v<T, TDM>)
+                Throw<FatalError>("Unexpected TDM!");
             else
                 return static_cast<size_t>(val);
         };

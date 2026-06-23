@@ -15,8 +15,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeScaleAlphaVec: 2
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200
   # PrintStoreRegisterDb: 1
   PrintSolutionRejectionReason: True
@@ -33,11 +33,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       True
+      UseBias:       1
       UseE:          False
       Activation:    True
       GroupedGemm:   True
@@ -54,17 +54,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
@@ -86,11 +86,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       False
+      UseBias:       0
       UseE:          False
       Activation:    False
       GroupedGemm:   True
@@ -107,17 +107,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
@@ -139,11 +139,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       False
+      UseBias:       0
       UseE:          False
       Activation:    False
       GroupedGemm:   True
@@ -161,17 +161,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
