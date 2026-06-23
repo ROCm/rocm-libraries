@@ -16,9 +16,10 @@ behind WMMAs that issue in the gap instead of being exposed as a stall. See
 from __future__ import annotations
 
 from rocisa.code import Label, Module
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import (
-    MFMAInstruction, MXMFMAInstruction, SBarrier, SBarrierSignalIsFirst,
-    SCBranchSCC0,
+    MFMAInstruction, MXMFMAInstruction, SBarrier, SCBranchSCC0, SCmpEQU32,
+    VReadfirstlaneB32,
 )
 
 # Number of WMMAs to issue between the cluster_barrier signal and its wait so the
@@ -28,19 +29,34 @@ CLUSTER_BARRIER_WMMA_GAP = 8
 _isMMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
 
 
-def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
-    """Workgroup barrier + the first-arriving wave's cluster_barrier signal.
+_isWgBarrier = lambda x: isinstance(x, SBarrier) and "-3" not in str(x)
 
-    Ends at the ``skipPreSignal`` label so all waves fall through to whatever work
-    follows; the matching wait is emitted later by ``subtileClusterBarrierWait``.
+
+def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
+    """Wave-0-only cluster_barrier signal (no workgroup barrier).
+
+    Wave 0 alone issues the cluster_barrier signal; all other waves branch over
+    it. Ends at the ``skipPreSignal`` label so all waves fall through to whatever
+    work follows; the matching wait is emitted later by ``subtileClusterBarrierWait``.
+
+    This module carries no workgroup barrier of its own; ``spliceClusterBarrierSignal``
+    places it immediately after the mainloop's existing workgroup barrier so that
+    sync is reused rather than duplicated.
     """
     mod = Module("subtile_cluster_barrier_signal")
-    # Workgroup barrier via isfirst: the first wave to arrive gets SCC=1 and so
-    # is the single wave that signals the cluster barrier (one arrival per WG).
     skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "", 16)
-    mod.add(SBarrierSignalIsFirst(False, "workgroup barrier signal (isfirst)"))
-    mod.add(SBarrier(True, True, False, "workgroup barrier wait"))
-    mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only the first-arriving wave signals the cluster"))
+    # No workgroup barrier here: this signal is spliced in immediately after the
+    # mainloop's existing workgroup barrier (s_barrier_signal -1/s_barrier_wait -1)
+    # by spliceClusterBarrierSignal, so all waves are already synced before wave 0
+    # announces the workgroup's arrival to the cluster.
+    # Elect wave 0 to issue the single cluster_barrier signal. readfirstlane of
+    # Serial returns the wave's lowest lane id (= waveId * wavesize), which is 0
+    # only for wave 0.
+    with writer.allocTmpSgpr(1) as tmpSgpr:
+        s = tmpSgpr.idx
+        mod.add(VReadfirstlaneB32(sgpr(s), vgpr("Serial"), "first lane tId (= waveId * wavesize)"))
+        mod.add(SCmpEQU32(sgpr(s), 0, "wave 0?"))
+        mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
     mod.add(skipPreSignal)
     return mod
@@ -62,6 +78,40 @@ def subtileClusterBarrier(writer, kernel, label="") -> Module:
     mod.appendModule(subtileClusterBarrierSignal(writer, kernel, label))
     mod.appendModule(subtileClusterBarrierWait(writer, kernel, label))
     return mod
+
+
+def spliceClusterBarrierSignal(module, signalMod) -> Module:
+    """Insert the cluster_barrier signal after the first workgroup barrier.
+
+    Walks ``module`` in program order and inserts the signal instruction(s)
+    immediately after the first workgroup barrier (the mainloop's existing
+    ``s_barrier_signal -1``/``s_barrier_wait -1``, emitted as a combined
+    ``SBarrier()`` by ``emit_sync``), reusing that workgroup sync instead of
+    emitting a second barrier. At this point no cluster (``-3``) barriers are in
+    the module yet, so the first ``SBarrier`` is the workgroup one.
+
+    If no workgroup barrier is found in this section, the signal is prepended at
+    the start so the handshake is still opened (correctness over reuse).
+
+    Returns a rebuilt flat Module; the input is left untouched.
+    """
+    signalItems = signalMod.flatitems()
+    result = Module(module.name)
+    done = False
+    for inst in module.flatitems():
+        result.add(inst)
+        if not done and _isWgBarrier(inst):
+            for s in signalItems:
+                result.add(s)
+            done = True
+    if not done:  # no workgroup barrier in this section: open the handshake at the start
+        head = Module(module.name)
+        for s in signalItems:
+            head.add(s)
+        for inst in module.flatitems():
+            head.add(inst)
+        return head
+    return result
 
 
 def spliceClusterBarrierWait(module, waitMod, gap=CLUSTER_BARRIER_WMMA_GAP) -> Module:
