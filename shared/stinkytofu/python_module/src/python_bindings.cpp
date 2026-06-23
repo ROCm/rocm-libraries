@@ -97,11 +97,12 @@ NB_MODULE(_stinkytofu, m) {
                 return names;
             },
             "List every Function name in this module (entry first, then callees)")
-        .def("hasFunction",
-             [](StinkyAsmModule& self, const std::string& name) {
-                 return self.getFunction(name) != nullptr;
-             },
-             nb::arg("name"), "Return true when this module contains a Function with the name")
+        .def(
+            "hasFunction",
+            [](StinkyAsmModule& self, const std::string& name) {
+                return self.getFunction(name) != nullptr;
+            },
+            nb::arg("name"), "Return true when this module contains a Function with the name")
         .def(
             "registerPassAtExtensionPoint",
             [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
