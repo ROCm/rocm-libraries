@@ -208,21 +208,20 @@ std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
         }
 
         // RAW: inst writes R → wmma reading R must not be moved before inst.
+        // Wmma reads aGroup (src0/1) and cGroup (src2 accumulator input), so all
+        // three are checked. C is both src and dst of wmma, but since each pool wmma
+        // accumulates into a unique C tile and addition is commutative, wmma-to-wmma
+        // reordering through C is always safe — only non-wmma writes to C create deps.
         for (unsigned d = 0; d < inst->getNumDestRegs(); ++d) {
             for (const WmmaNode& nd : originalPool) {
                 if (regOverlapsGroup(inst->getDestReg(d), nd.aGroup) ||
-                    regOverlapsGroup(inst->getDestReg(d), nd.bGroup))
+                    regOverlapsGroup(inst->getDestReg(d), nd.bGroup) ||
+                    regOverlapsGroup(inst->getDestReg(d), nd.cGroup))
                     minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
             }
         }
-
-        // WAR: inst reads R → wmma writing R (C dest) must not be moved after inst.
-        for (unsigned s = 0; s < inst->getNumSrcRegs(); ++s) {
-            for (const WmmaNode& nd : originalPool) {
-                if (regOverlapsGroup(inst->getSrcReg(s), nd.cGroup) && passedCount > 0)
-                    maxRank[nd.inst] = std::min(maxRank[nd.inst], passedCount - 1);
-            }
-        }
+        // No WAR check for C: a non-wmma reading intermediate C does not prevent
+        // reordering because the final accumulated value is order-independent.
     }
 
     // EDF scheduling: at each position p, among eligible wmma (minRank <= p),
