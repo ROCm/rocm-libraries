@@ -30,10 +30,10 @@ target_compile_definitions(hipthreads PUBLIC __HIP__)
 
 # Optional override for the number of scheduler vcores launched per WGP/multiprocessor.
 # Default lives in src/hip/thread.cxx; only forward a -D when the user sets a value.
-set(HIPTHREADS_VCORES_PER_WGP "" CACHE STRING
+set(HIPTHREADS_DEFAULT_VCORES_PER_WGP "" CACHE STRING
   "Scheduler vcores launched per WGP/multiprocessor (default defined in src/hip/thread.cxx)")
-if(HIPTHREADS_VCORES_PER_WGP)
-  target_compile_definitions(hipthreads PRIVATE HIPTHREADS_VCORES_PER_WGP=${HIPTHREADS_VCORES_PER_WGP})
+if(HIPTHREADS_DEFAULT_VCORES_PER_WGP)
+  target_compile_definitions(hipthreads PRIVATE HIPTHREADS_DEFAULT_VCORES_PER_WGP=${HIPTHREADS_DEFAULT_VCORES_PER_WGP})
 endif()
 
 
