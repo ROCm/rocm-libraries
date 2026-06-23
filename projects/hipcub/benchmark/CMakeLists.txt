@@ -57,7 +57,9 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
 
   target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
 
-  if((HIP_COMPILER STREQUAL "nvcc"))
+  if(WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
+  elseif((HIP_COMPILER STREQUAL "nvcc"))
     set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
