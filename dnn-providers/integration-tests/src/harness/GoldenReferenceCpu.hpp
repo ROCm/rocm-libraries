@@ -24,9 +24,9 @@ namespace
 
 inline bool isTensorLoadFailure(const std::runtime_error& error)
 {
-    constexpr std::string_view prefix = "Error: could not load tensor ";
+    constexpr std::string_view PREFIX = "Error: could not load tensor ";
     const std::string_view message(error.what());
-    return message.size() >= prefix.size() && message.substr(0, prefix.size()) == prefix;
+    return message.size() >= PREFIX.size() && message.substr(0, PREFIX.size()) == PREFIX;
 }
 
 } // namespace
