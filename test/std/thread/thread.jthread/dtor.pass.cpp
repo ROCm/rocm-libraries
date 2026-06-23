@@ -15,6 +15,7 @@
 #include <cassert>
 #include <hip/atomic>
 #include <hip/std/chrono>
+#include <hip/std/inplace_vector>
 #include <hip/std/memory>
 #include <hip/thread>
 #include <type_traits>
@@ -47,15 +48,14 @@ int main(int, char**) {
     auto calledTimes_ptr = hip::std::make_unique<hip::std::atomic<int>>(0);
     auto& calledTimes    = *calledTimes_ptr;
 
-    {
-      hip::jthread jts[numberOfThreads];
-      for (auto i = 0u; i < numberOfThreads; ++i) {
-        jts[i] = support::make_test_jthread([&calledTimes] {
-          hip::this_thread::sleep_for(hip::std::chrono::milliseconds{2});
-          calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
-        });
-      }
-    }  // ~jthread() runs here for every element → auto-join
+    hip::std::inplace_vector<hip::jthread, numberOfThreads> jts;
+    for (auto i = 0u; i < numberOfThreads; ++i) {
+      jts.emplace_back(support::make_test_jthread([&calledTimes] {
+        hip::this_thread::sleep_for(hip::std::chrono::milliseconds{2});
+        calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
+      }));
+    }
+    jts.clear();  // ~jthread() runs here for every element → auto-join
 
     // If join was called as expected, calledTimes must equal numberOfThreads.
     // If join was not called, the assert below could race with the worker

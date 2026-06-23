@@ -17,6 +17,7 @@
 #include <functional>
 #include <hip/atomic>
 #include <hip/std/chrono>
+#include <hip/std/inplace_vector>
 #include <hip/std/memory>
 #include <hip/thread>
 #include <system_error>
@@ -33,12 +34,12 @@ int main(int, char**) {
     auto calledTimes_ptr = hip::std::make_unique<hip::std::atomic<int>>(0);
     auto& calledTimes    = *calledTimes_ptr;
     constexpr auto numberOfThreads = 10u;
-    hip::jthread jts[numberOfThreads];
+    hip::std::inplace_vector<hip::jthread, numberOfThreads> jts;
     for (auto i = 0u; i < numberOfThreads; ++i) {
-      jts[i] = support::make_test_jthread([&calledTimes] __device__ () {
+      jts.emplace_back(support::make_test_jthread([&calledTimes] __device__ () {
         hip::this_thread::sleep_for(hip::std::chrono::milliseconds(2));
         calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
-      });
+      }));
     }
 
     for (auto i = 0u; i < numberOfThreads; ++i) {
