@@ -389,11 +389,25 @@ class StalledRegionTimer:
             gap-free GPU event span.
         """
         self._gate.arm(self._stream)
-        self._start.record(self._stream)
-        t0 = time.perf_counter()
-        enqueue()
-        t1 = time.perf_counter()
-        self._stop.record(self._stream)
+        try:
+            self._start.record(self._stream)
+            t0 = time.perf_counter()
+            enqueue()
+            t1 = time.perf_counter()
+            self._stop.record(self._stream)
+        except BaseException:
+            # Anything after arm() raised (e.g. an ExecutionError from the
+            # work submission). Release the gate so the armed stream-wait is
+            # satisfied, then drain the device so no pending wait still
+            # references the signal memory when the gate is torn down, then
+            # propagate. The stop event was not recorded, so do not
+            # synchronize it.
+            self._gate.release()
+            try:
+                self._hipdnn.hip_device_synchronize()
+            except Exception:
+                pass
+            raise
         self._gate.release()
         self._stop.synchronize()
         return (t1 - t0) * 1000.0, float(self._start.elapsed_time(self._stop))

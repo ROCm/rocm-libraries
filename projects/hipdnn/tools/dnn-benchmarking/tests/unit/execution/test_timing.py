@@ -473,6 +473,34 @@ class TestStalledRegionTimer:
         ]
         assert ("device_sync",) not in calls
 
+    def test_measure_releases_gate_when_enqueue_raises(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+
+        def boom() -> None:
+            calls.append(("enqueue",))
+            raise RuntimeError("enqueue failed")
+
+        with pytest.raises(RuntimeError, match="enqueue failed"):
+            timer.measure(boom)
+
+        start, stop = events[0], events[1]
+        # The gate was armed then released even though enqueue raised, so the
+        # stalled work stream never stays blocked.
+        assert ("arm", 7) in calls
+        assert ("release",) in calls
+        assert calls.index(("release",)) > calls.index(("arm", 7))
+        # The device is drained on the failure path so no pending wait still
+        # references the signal memory at teardown.
+        assert ("device_sync",) in calls
+        # stop was never recorded, so it must not be synchronized or measured.
+        assert ("record", stop, 7) not in calls
+        assert ("synchronize", stop) not in calls
+        assert ("elapsed", start, stop) not in calls
+
 
 class TestTorchGpuTimer:
     """Tests for torch.cuda event timing."""

@@ -172,13 +172,26 @@ public:
             hipExtMallocWithFlags(
                 reinterpret_cast<void**>(&_signal), sizeof(uint64_t), hipMallocSignalMemory),
             "hipExtMallocWithFlags");
-        // Non-blocking so the release write runs concurrently with a stalled
-        // work stream; a blocking control stream would implicitly serialize
-        // with the legacy default stream and deadlock when the gate stalls it.
-        throwOnHipError(
-            hipStreamCreateWithFlags(&_control, hipStreamNonBlocking), "hipStreamCreateWithFlags");
-        throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
-        throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
+        // Any failure after the allocation above must free what was already
+        // acquired: a throwing constructor does not run the destructor, so
+        // _signal (and _control, once created) would otherwise leak.
+        try
+        {
+            // Non-blocking so the release write runs concurrently with a stalled
+            // work stream; a blocking control stream would implicitly serialize
+            // with the legacy default stream and deadlock when the gate stalls it.
+            throwOnHipError(
+                hipStreamCreateWithFlags(&_control, hipStreamNonBlocking),
+                "hipStreamCreateWithFlags");
+            throwOnHipError(
+                hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
+            throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
+        }
+        catch(...)
+        {
+            destroy();
+            throw;
+        }
     }
 
     ~HipStallGate()
