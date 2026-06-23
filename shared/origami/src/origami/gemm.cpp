@@ -31,7 +31,6 @@ static double compute_formocast_latency(const problem_t& problem,
                                         const config_t& config);
 
 // Forward declarations (defined later; used by the context_t constructor).
-size_t round_elements_to_NB(size_t elements, size_t element_size_bits, size_t transaction_bytes);
 operand_traffic_t compute_operand_traffic(
     const problem_t& problem,
     const config_t& config,
@@ -125,8 +124,14 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
     OLOG_DEBUG("======== Origami Debug Info ========");
-    OLOG_DEBUG("ProblemSize (MxNxBxK): " << int(M) << "x" << int(N) << "x" << int(batch) << "x"
-                                         << int(K));
+    OLOG_DEBUG("M: " << int(M));
+    OLOG_DEBUG("N: " << int(N));
+    OLOG_DEBUG("Batch: " << int(batch));
+    OLOG_DEBUG("K: " << int(K));
+    OLOG_DEBUG("InputDataTypeA: " << datatype_to_string(problem.a_dtype));
+    OLOG_DEBUG("InputDataTypeB: " << datatype_to_string(problem.b_dtype));
+    OLOG_DEBUG("OutputDataType: " << datatype_to_string(problem.d_dtype));
+    OLOG_DEBUG("ComputeType: " << datatype_to_string(problem.mi_dtype));
     OLOG_DEBUG("transpose: " << (problem.a_transpose == transpose_t::T ? "T" : "N") << (problem.b_transpose == transpose_t::T ? "T" : "N"));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
@@ -235,11 +240,6 @@ double calculate_output_utilization(const problem_t& problem,
   return useful / launched;
 }
 
-// Round the number of elements to the nearest multiple of 128 bytes.
-size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
-  return round_elements_to_NB(elements, element_size_bits, 128);
-}
-
 // Round the number of elements to the nearest multiple of `transaction_bytes`.
 // Used by the memory-latency model where the "natural" coalesced load width is
 // not always a full 128-byte L1 line (e.g. bf16 DepthU=32 is a 64-byte load).
@@ -252,61 +252,6 @@ size_t round_elements_to_NB(size_t elements,
   const size_t g                = std::gcd(element_size_bits, transaction_bits);
   const size_t E_block          = transaction_bits / g;
   return round_up_mul(elements, E_block);
-}
-
-operand_traffic_t compute_operand_traffic(const problem_t& problem,
-                                          const config_t& config,
-                                          const context_t& context,
-                                          size_t transaction_bytes) {
-  const double cl = static_cast<double>(transaction_bytes);
-  const bool a_trans = (problem.a_transpose == transpose_t::T);
-  const bool b_trans = (problem.b_transpose == transpose_t::T);
-
-  const double mt_m_active = static_cast<double>(
-      std::min(static_cast<size_t>(problem.size.m), config.mt.m));
-  const double mt_n_active = static_cast<double>(
-      std::min(static_cast<size_t>(problem.size.n), config.mt.n));
-  const double k_per_wg = static_cast<double>(std::max(context.k_per_split, size_t{1}));
-  const double mt_k     = static_cast<double>(std::max(config.mt.k, size_t{1}));
-
-  operand_traffic_t traffic{};
-  traffic.k_iters = std::max(k_per_wg / mt_k, 1.0);
-
-  const double a_row_count = a_trans ? mt_m_active : k_per_wg;
-  const double a_row_bytes = a_trans ? k_per_wg * context.a_bytes : mt_m_active * context.a_bytes;
-  traffic.a_tile_bytes     = a_row_count * std::ceil(a_row_bytes / cl) * cl;
-
-  const double b_row_count = b_trans ? k_per_wg : mt_n_active;
-  const double b_row_bytes = b_trans ? mt_n_active * context.b_bytes : k_per_wg * context.b_bytes;
-  traffic.b_tile_bytes     = b_row_count * std::ceil(b_row_bytes / cl) * cl;
-
-  traffic.a_iter_bytes = traffic.a_tile_bytes / traffic.k_iters;
-  traffic.b_iter_bytes = traffic.b_tile_bytes / traffic.k_iters;
-  traffic.a_cl_share   = std::min(1.0, problem.size.m * context.a_bytes / cl);
-  traffic.b_cl_share   = std::min(1.0, problem.size.n * context.b_bytes / cl);
-
-  return traffic;
-}
-
-static double compute_operand_window_bytes(const problem_t& problem,
-                                           const config_t& config,
-                                           const context_t& context,
-                                           size_t k_window,
-                                           size_t transaction_bytes) {
-  const int a_bits = datatype_to_bits(problem.a_dtype);
-  const int b_bits = datatype_to_bits(problem.b_dtype);
-  const bool a_trans = (problem.a_transpose == transpose_t::T);
-  const bool b_trans = (problem.b_transpose == transpose_t::T);
-
-  const size_t Ld_A = a_trans
-      ? config.mt.m * round_elements_to_NB(k_window, a_bits, transaction_bytes)
-      : round_elements_to_NB(config.mt.m, a_bits, transaction_bytes) * k_window;
-  const size_t Ld_B = b_trans
-      ? round_elements_to_NB(config.mt.n, b_bits, transaction_bytes) * k_window
-      : config.mt.n * round_elements_to_NB(k_window, b_bits, transaction_bytes);
-
-  return static_cast<double>(Ld_A) * context.a_bytes
-       + static_cast<double>(Ld_B) * context.b_bytes;
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -982,6 +927,63 @@ size_t compute_mt_compute_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* Memory-related functions                                                                 */
 /* ---------------------------------------------------------------------------------------- */
+// Per-operand DRAM bytes one WG pulls for A/B over its K range (transaction-aligned rows).
+operand_traffic_t compute_operand_traffic(const problem_t& problem,
+                                          const config_t& config,
+                                          const context_t& context,
+                                          size_t transaction_bytes) {
+  const double cl = static_cast<double>(transaction_bytes);
+  const bool a_trans = (problem.a_transpose == transpose_t::T);
+  const bool b_trans = (problem.b_transpose == transpose_t::T);
+
+  const double mt_m_active = static_cast<double>(
+      std::min(static_cast<size_t>(problem.size.m), config.mt.m));
+  const double mt_n_active = static_cast<double>(
+      std::min(static_cast<size_t>(problem.size.n), config.mt.n));
+  const double k_per_wg = static_cast<double>(std::max(context.k_per_split, size_t{1}));
+  const double mt_k     = static_cast<double>(std::max(config.mt.k, size_t{1}));
+
+  operand_traffic_t traffic{};
+  traffic.k_iters = std::max(k_per_wg / mt_k, 1.0);
+
+  const double a_row_count = a_trans ? mt_m_active : k_per_wg;
+  const double a_row_bytes = a_trans ? k_per_wg * context.a_bytes : mt_m_active * context.a_bytes;
+  traffic.a_tile_bytes     = a_row_count * std::ceil(a_row_bytes / cl) * cl;
+
+  const double b_row_count = b_trans ? k_per_wg : mt_n_active;
+  const double b_row_bytes = b_trans ? mt_n_active * context.b_bytes : k_per_wg * context.b_bytes;
+  traffic.b_tile_bytes     = b_row_count * std::ceil(b_row_bytes / cl) * cl;
+
+  traffic.a_iter_bytes = traffic.a_tile_bytes / traffic.k_iters;
+  traffic.b_iter_bytes = traffic.b_tile_bytes / traffic.k_iters;
+  traffic.a_cl_share   = std::min(1.0, problem.size.m * context.a_bytes / cl);
+  traffic.b_cl_share   = std::min(1.0, problem.size.n * context.b_bytes / cl);
+
+  return traffic;
+}
+
+// Total A+B bytes loaded for a single K-window of MT_M x MT_N tile (transaction-aligned).
+static double compute_operand_window_bytes(const problem_t& problem,
+                                           const config_t& config,
+                                           const context_t& context,
+                                           size_t k_window,
+                                           size_t transaction_bytes) {
+  const int a_bits = datatype_to_bits(problem.a_dtype);
+  const int b_bits = datatype_to_bits(problem.b_dtype);
+  const bool a_trans = (problem.a_transpose == transpose_t::T);
+  const bool b_trans = (problem.b_transpose == transpose_t::T);
+
+  const size_t Ld_A = a_trans
+      ? config.mt.m * round_elements_to_NB(k_window, a_bits, transaction_bytes)
+      : round_elements_to_NB(config.mt.m, a_bits, transaction_bytes) * k_window;
+  const size_t Ld_B = b_trans
+      ? round_elements_to_NB(config.mt.n, b_bits, transaction_bytes) * k_window
+      : config.mt.n * round_elements_to_NB(k_window, b_bits, transaction_bytes);
+
+  return static_cast<double>(Ld_A) * context.a_bytes
+       + static_cast<double>(Ld_B) * context.b_bytes;
+}
+
 // MALL tile dimensions: how many concurrent M/N tiles fit when all CUs share MALL.
 // The MALL sees all CUs' traffic, so the tile footprint spans the full active_cus range.
 std::pair<size_t, size_t> compute_mall_tiles(size_t grid_m,

@@ -770,28 +770,28 @@ TEST_CASE("GEMM: compute_l2_hit_rate_global unit test", "[gemm]") {
   }
 }
 
-TEST_CASE("GEMM: round_elements_to_128B unit test", "[gemm]") {
+TEST_CASE("GEMM: round_elements_to_NB unit test", "[gemm]") {
   for (int gpu_arch : test_architectures) {
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - round_elements_to_128B unit test") {
-      // Test 1: Test with various element sizes
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - round_elements_to_NB unit test") {
+      // Test 1: Test with various element sizes (128-byte transaction)
       auto result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(196, 32);  // element size in bits - 32
+          origami::gemm::round_elements_to_NB(196, 32, 128);  // element size in bits - 32
       REQUIRE(result_various_element_sizes == 224);
 
       result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(225, 16);  // element size in bits - 16
+          origami::gemm::round_elements_to_NB(225, 16, 128);  // element size in bits - 16
       REQUIRE(result_various_element_sizes == 256);
 
       result_various_element_sizes =
-          origami::gemm::round_elements_to_128B(90, 8);  // element size in bits - 8
+          origami::gemm::round_elements_to_NB(90, 8, 128);  // element size in bits - 8
       REQUIRE(result_various_element_sizes == 128);
 
       // Test 2: Test alignment to 128-byte boundary (TODO) (Was already covered in the above
       // example, could be skipped) Test 3: Test edge cases
-      auto result_edge_cases = origami::gemm::round_elements_to_128B(0, 32);
+      auto result_edge_cases = origami::gemm::round_elements_to_NB(0, 32, 128);
       REQUIRE(result_edge_cases == 0);
 
-      result_edge_cases = origami::gemm::round_elements_to_128B(256, 0);
+      result_edge_cases = origami::gemm::round_elements_to_NB(256, 0, 128);
       REQUIRE(result_edge_cases == 256);
     }
   }

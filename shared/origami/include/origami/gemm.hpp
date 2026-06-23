@@ -118,13 +118,17 @@ ORIGAMI_EXPORT double calculate_output_utilization(const problem_t& problem,
 
 /**
  * @brief This function rounds the number of elements up to the smallest value whose total size
- * (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
+ * (given the element bit-width) is an exact multiple of a `transaction_bytes` memory transaction.
  *
  * @param elements Macro tile dimension
  * @param element_size_bits size in bits
+ * @param transaction_bytes memory transaction granularity in bytes (e.g. 128 for an L1 line,
+ *                          64 for a DRAM sector)
  * @return size_t
  */
-ORIGAMI_EXPORT size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+ORIGAMI_EXPORT size_t round_elements_to_NB(size_t elements,
+                                           size_t element_size_bits,
+                                           size_t transaction_bytes);
 
 /**
  * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
