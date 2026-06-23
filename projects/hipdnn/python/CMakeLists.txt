@@ -10,6 +10,18 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Runtime __version__ is the frontend component version (frontend/version.json).
+# SKBUILD wheel builds are standalone (no umbrella CMake defines it), so fall back
+# to a literal kept in sync with frontend/version.json and pyproject.toml.
+if(NOT DEFINED HIPDNN_FRONTEND_VERSION)
+    set(HIPDNN_FRONTEND_VERSION "0.2.0")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
+    @ONLY
+)
+
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
@@ -79,7 +91,7 @@ set_target_properties(
 
 if(DEFINED SKBUILD)
     install(TARGETS hipdnn_frontend_python DESTINATION hipdnn_frontend)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION hipdnn_frontend)
 else()
     # The ext stays bare in LIBDIR/BINDIR as a libhipdnn_backend sibling so a
@@ -90,7 +102,7 @@ else()
     install(TARGETS hipdnn_frontend_python
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/hipdnn_frontend")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/tests"
