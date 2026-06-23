@@ -16,6 +16,32 @@ import pandas as pd
 
 from feature_engine import FeatureEngine, DTYPE_BYTES, PIPELINE_MAP
 
+# ---------------------------------------------------------------------------
+# Per-arch feature sets
+# ---------------------------------------------------------------------------
+# Each entry is an ordered subset of GroupedConvFeatureEngine().get_feature_names().
+# convert_dsl_csv_to_parquet.py uses this to write only the arch-relevant columns;
+# train.py then records exactly those names in feature_spec.json; C++ reads
+# feature_spec.json at model load time and projects the full superset accordingly.
+#
+# To add an arch-specific feature: add it to get_feature_names() and to the
+# relevant arch's list here. Other archs' models are untouched.
+
+def _build_feature_sets() -> dict:
+    all_features = GroupedConvFeatureEngine().get_feature_names()
+    _v35_extras = {"log_gemm_m_raw", "gemm_m_lt_num_cus",
+                   "log_gemm_m_over_num_cus", "is_mem_x_log_gemm_m_raw"}
+    # gfx942 / gfx90a: pre-v35 103-feature baseline (no sub-CU occupancy features)
+    base_103 = [f for f in all_features if f not in _v35_extras]
+    # gfx950: 106 features — include the 3 informative sub-CU features, drop the
+    # useless binary flag (gemm_m_lt_num_cus, importance ≈ 0)
+    gfx950_106 = [f for f in all_features if f != "gemm_m_lt_num_cus"]
+    return {
+        "gfx942": base_103,
+        "gfx90a": base_103,
+        "gfx950": gfx950_106,
+    }
+
 
 class GroupedConvFeatureEngine(FeatureEngine):
     """Feature engine for grouped_conv kernels.
@@ -150,6 +176,12 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "problem_smaller_than_tile_k",
             "log_gemm_m_n_ratio",  # log(N*Ho*Wo / K): GEMM aspect ratio; large → prefer wide-m tiles
             "log_total_output_tiles",  # log(total_output_tiles): log-linear with TFLOPS in low-parallelism regime
+            "log_num_tiles_m",  # log(ceil(M/tile_m)): spreads low-tile-count regime for tree splits
+            "is_mem_x_log_num_tiles_m",  # is_mem * log_num_tiles_m: interaction for mem-pipeline preference at small M
+            "log_gemm_m_raw",             # log(N*Ho*Wo): raw output-token count, tile-independent
+            "gemm_m_lt_num_cus",          # 1 if N*Ho*Wo < num_cus: sub-CU parallelism regime
+            "log_gemm_m_over_num_cus",    # log(N*Ho*Wo / num_cus): signed CU-fill ratio (tile-independent)
+            "is_mem_x_log_gemm_m_raw",    # is_mem * log_gemm_m_raw: mem-pipeline interaction at low token count
             # Hardware features (12)
             "hw_num_cus",
             "hw_simds_per_cu",
@@ -328,6 +360,13 @@ class GroupedConvFeatureEngine(FeatureEngine):
         problem_smaller_than_tile_k = float(gemm_k < gemm_k_per_block)
         log_gemm_m_n_ratio = math.log(max(gemm_m, 1) / max(gemm_n, 1))
         log_total_output_tiles = math.log(max(total_output_tiles, 1))
+        log_num_tiles_m = math.log(max(num_tiles_m, 1))
+        is_mem_x_log_num_tiles_m = is_mem * log_num_tiles_m
+
+        log_gemm_m_raw = math.log(max(gemm_m, 1))
+        gemm_m_lt_num_cus = float(gemm_m < self._hw["num_cus"])
+        log_gemm_m_over_num_cus = math.log(max(gemm_m, 1) / max(self._hw["num_cus"], 1))
+        is_mem_x_log_gemm_m_raw = is_mem * log_gemm_m_raw
 
         hw = self._hw
         return np.array(
@@ -427,6 +466,12 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 problem_smaller_than_tile_k,
                 log_gemm_m_n_ratio,
                 log_total_output_tiles,
+                log_num_tiles_m,
+                is_mem_x_log_num_tiles_m,
+                log_gemm_m_raw,
+                gemm_m_lt_num_cus,
+                log_gemm_m_over_num_cus,
+                is_mem_x_log_gemm_m_raw,
                 # Hardware features (12)
                 hw["num_cus"],
                 hw["simds_per_cu"],
@@ -645,6 +690,13 @@ class GroupedConvFeatureEngine(FeatureEngine):
         problem_smaller_than_tile_k = (gemm_k < gemm_k_per_block).astype(np.float64)
         log_gemm_m_n_ratio = np.log(np.maximum(gemm_m, 1) / np.maximum(gemm_n, 1))
         log_total_output_tiles = np.log(np.maximum(total_output_tiles, 1))
+        log_num_tiles_m = np.log(np.maximum(num_tiles_m, 1))
+        is_mem_x_log_num_tiles_m = is_mem_arr * log_num_tiles_m
+
+        log_gemm_m_raw = np.log(np.maximum(gemm_m, 1))
+        gemm_m_lt_num_cus = (gemm_m < self._hw["num_cus"]).astype(np.float64)
+        log_gemm_m_over_num_cus = np.log(np.maximum(gemm_m, 1) / max(self._hw["num_cus"], 1))
+        is_mem_x_log_gemm_m_raw = is_mem_arr * log_gemm_m_raw
 
         hw = self._hw
 
@@ -832,6 +884,18 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = log_total_output_tiles
         idx += 1
+        result[:, idx] = log_num_tiles_m
+        idx += 1
+        result[:, idx] = is_mem_x_log_num_tiles_m
+        idx += 1
+        result[:, idx] = log_gemm_m_raw
+        idx += 1
+        result[:, idx] = gemm_m_lt_num_cus
+        idx += 1
+        result[:, idx] = log_gemm_m_over_num_cus
+        idx += 1
+        result[:, idx] = is_mem_x_log_gemm_m_raw
+        idx += 1
         result[:, idx] = hw["num_cus"]
         idx += 1
         result[:, idx] = hw["simds_per_cu"]
@@ -856,5 +920,14 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = hw["num_xcd"]
         idx += 1
-
         return result
+
+    def extract_batch_named(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Return extract_batch() result as a DataFrame with feature names as columns."""
+        arr = self.extract_batch(df)
+        return pd.DataFrame(arr, columns=self.get_feature_names(), index=df.index)
+
+
+# Initialised after the class definition so _build_feature_sets() can call
+# GroupedConvFeatureEngine().get_feature_names() without a forward-reference issue.
+FEATURE_SETS: dict = _build_feature_sets()

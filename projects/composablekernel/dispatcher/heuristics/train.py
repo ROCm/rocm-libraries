@@ -701,16 +701,24 @@ def main():
             json.dump(importances, f, indent=2)
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
+    model_feature_names = fe.get_feature_names()
     spec = {
         "op_type": operation,
         "dtype": args.dtype,
         "arch": args.arch,
-        "feature_names": fe.get_feature_names(),
+        "feature_names": model_feature_names,
         "categorical_features": fe.get_categorical_features(),
         "targets": targets,
         "log_targets": log_targets_used,
         "params": params,
     }
+    # For grouped_conv, record the extraction indices so C++ can project the full
+    # superset vector down to this model's feature subset without a name lookup table.
+    if operation == "grouped_conv":
+        from feature_engine_grouped_conv import GroupedConvFeatureEngine as _GCFe
+        superset = _GCFe().get_feature_names()
+        superset_index = {name: i for i, name in enumerate(superset)}
+        spec["feature_indices"] = [superset_index[n] for n in model_feature_names]
     with open(out_dir / "feature_spec.json", "w") as f:
         json.dump(spec, f, indent=2)
 

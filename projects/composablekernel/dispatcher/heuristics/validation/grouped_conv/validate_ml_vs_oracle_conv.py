@@ -98,6 +98,7 @@ def _kernel_dict(row: pd.Series) -> dict:
         "block_size": int(row.get("block_size", 256)),
         "gemm_m_per_block": int(row.get("gemm_m_per_block", 64)),
         "gemm_n_per_block": int(row.get("gemm_n_per_block", 64)),
+        "gemm_k_per_block": int(row.get("gemm_k_per_block", row.get("block_size", 64))),
         "pipeline": str(row.get("pipeline", "mem")),
         "wave_mode": str(row.get("wave_mode", "intrawave")),
         "has_dsb": int(row.get("has_dsb", 0)),

@@ -17,6 +17,15 @@ import sys
 from pathlib import Path
 import pandas as pd
 
+# Feature engine lives in the CK dispatcher heuristics package.
+# Insert its directory so this script works regardless of PYTHONPATH.
+_FEATURE_ENGINE_DIR = Path(__file__).resolve().parents[4] / \
+    "projects" / "composablekernel" / "dispatcher" / "heuristics"
+if str(_FEATURE_ENGINE_DIR) not in sys.path:
+    sys.path.insert(0, str(_FEATURE_ENGINE_DIR))
+
+from feature_engine_grouped_conv import GroupedConvFeatureEngine, FEATURE_SETS  # noqa: E402
+
 HW_PROFILES = {
     "gfx942": {   # MI300X
         "hw_num_cus": 228, "hw_simds_per_cu": 4, "hw_shader_engines": 28,
@@ -118,8 +127,18 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int,
     print(f"TFLOPS range: {df['tflops'].min():.3f} – {df['tflops'].max():.3f}")
     print(f"Valid rows: {df['is_valid'].sum():,} / {len(df):,}")
 
+    # Compute named feature columns and select the arch-specific subset.
+    fe = GroupedConvFeatureEngine(**{k: v for k, v in hw.items()})
+    feat_df = fe.extract_batch_named(df)
+    arch_features = FEATURE_SETS.get(arch, fe.get_feature_names())
+    print(f"Feature columns: {len(arch_features)} ({arch})")
+
+    meta_cols = [c for c in df.columns if c not in fe.get_feature_names()]
+    out_df = pd.concat([df[meta_cols].reset_index(drop=True),
+                        feat_df[arch_features].reset_index(drop=True)], axis=1)
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(output_path, index=False)
+    out_df.to_parquet(output_path, index=False)
     print(f"Written: {output_path}")
 
 
