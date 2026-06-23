@@ -169,7 +169,7 @@ class PyTorchCudaExecutor:
         if not self._prepared:
             raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
 
-        e2e_timings: List[float] = []
+        host_timings: List[float] = []
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
@@ -212,7 +212,7 @@ class PyTorchCudaExecutor:
             if kernel_ms is not None:
                 assert kernel_timings is not None
                 kernel_timings.append(kernel_ms)
-            e2e_timings.append(t.elapsed_ms)
+            host_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(
@@ -226,7 +226,7 @@ class PyTorchCudaExecutor:
         )
 
         return BenchmarkResult(
-            e2e_timings=e2e_timings,
+            host_timings=host_timings,
             kernel_timings=kernel_timings,
             metadata=metadata,
         )

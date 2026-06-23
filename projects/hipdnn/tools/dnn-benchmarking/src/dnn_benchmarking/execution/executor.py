@@ -366,7 +366,7 @@ class Executor:
         if self._graph is None:
             raise ExecutionError("Graph not prepared. Call prepare() first.")
 
-        e2e_timings: List[float] = []
+        host_timings: List[float] = []
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name: str = ""
@@ -399,7 +399,7 @@ class Executor:
                         )
 
                 cpu_ms, kernel_ms = staged_timer.measure(enqueue)
-                e2e_timings.append(cpu_ms)
+                host_timings.append(cpu_ms)
                 kernel_timings.append(kernel_ms)
         else:
             # Create GPU timer when kernel timing is requested and available.
@@ -435,7 +435,7 @@ class Executor:
                 if kernel_ms is not None:
                     assert kernel_timings is not None
                     kernel_timings.append(kernel_ms)
-                e2e_timings.append(t.elapsed_ms)
+                host_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(
@@ -449,7 +449,7 @@ class Executor:
         )
 
         return BenchmarkResult(
-            e2e_timings=e2e_timings,
+            host_timings=host_timings,
             kernel_timings=kernel_timings,
             metadata=metadata,
         )
