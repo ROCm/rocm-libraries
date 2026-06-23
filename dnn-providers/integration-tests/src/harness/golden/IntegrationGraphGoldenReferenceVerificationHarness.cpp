@@ -23,6 +23,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/TomlGuards.hpp"
 #include "harness/golden/UnverifiableBundleReport.hpp"
 #include "harness/golden/input_init/SynthesizeInputs.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
@@ -505,6 +506,15 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
         float rtol = 0.0f;
         resolveTolerances(wrapper, dataType, atol, rtol);
 
+        const auto testName = currentTestName();
+        if(auto ovr = lookupToleranceOverride(testName))
+        {
+            atol = ovr->atol;
+            rtol = ovr->rtol;
+            HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for "
+                                   << testName << ": atol=" << atol << " rtol=" << rtol);
+        }
+
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
 }
@@ -547,12 +557,12 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputTensor(
     {
         std::ostringstream report;
         report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
-        appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
+        writeTensorDiffReport(report, uid, attrs, dataType, expected, actual, atol, rtol);
         EXPECT_TRUE(false) << report.str();
     }
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::appendTensorDiff(
+void IntegrationGraphGoldenReferenceVerificationHarness::writeTensorDiffReport(
     std::ostream& os,
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -569,16 +579,16 @@ void IntegrationGraphGoldenReferenceVerificationHarness::appendTensorDiff(
     switch(dataType)
     {
     case DT::FLOAT:
-        appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
+        writeFpDiffReport<float>(os, uid, attrs, expected, actual, atol, rtol);
         return;
     case DT::HALF:
-        appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
+        writeFpDiffReport<half>(os, uid, attrs, expected, actual, atol, rtol);
         return;
     case DT::BFLOAT16:
-        appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
+        writeFpDiffReport<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
         return;
     case DT::DOUBLE:
-        appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
+        writeFpDiffReport<double>(os, uid, attrs, expected, actual, atol, rtol);
         return;
     default:
         os << "  (no element-wise diff available for this data type)\n";
@@ -586,7 +596,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::appendTensorDiff(
 }
 
 template <typename T>
-void IntegrationGraphGoldenReferenceVerificationHarness::appendFpDiff(
+void IntegrationGraphGoldenReferenceVerificationHarness::writeFpDiffReport(
     std::ostream& os,
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -675,6 +685,9 @@ float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForNodeAttrib
         return tol::pointwise::getTolerance<T>();
     case NA::LayernormAttributes:
         return tol::layernorm::getTolerance<T>();
+    case NA::SdpaAttributes:
+    case NA::SdpaBackwardAttributes:
+        return tol::sdpa::getToleranceFwd<T>();
     default:
         return 1e-3f;
     }
@@ -733,6 +746,19 @@ void IntegrationGraphGoldenReferenceVerificationHarness::applyMetadataGuards() c
     {
         GTEST_SKIP() << *reason;
     }
+}
+
+std::optional<std::string> IntegrationGraphGoldenReferenceVerificationHarness::lookupSkip(
+    const std::string& testName) const
+{
+    return TestConfig::get().findSkipForTest(testName);
+}
+
+std::optional<ToleranceOverride>
+    IntegrationGraphGoldenReferenceVerificationHarness::lookupToleranceOverride(
+        const std::string& testName) const
+{
+    return TestConfig::get().findToleranceOverride(testName);
 }
 
 } // namespace hipdnn_integration_tests::golden

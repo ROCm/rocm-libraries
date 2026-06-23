@@ -17,6 +17,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
+#include "harness/TomlGuards.hpp"
+
 namespace hipdnn_integration_tests
 {
 
@@ -47,11 +49,15 @@ protected:
 
         _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
+
+        skipIfTomlMatched(currentTestName());
     }
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
         SKIP_IF_WINDOWS();
+
+        applyTomlToleranceOverride(currentTestName(), absoluteTolerance, relativeTolerance);
 
         auto tensorMap = _graphAndTensors.hostBufferMap();
 

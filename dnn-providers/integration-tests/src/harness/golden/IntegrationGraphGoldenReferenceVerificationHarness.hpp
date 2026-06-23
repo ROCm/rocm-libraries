@@ -21,6 +21,7 @@
 
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/TomlGuards.hpp"
 #include "harness/golden/IntegrationTestBundle.hpp"
 
 namespace hipdnn_integration_tests::golden
@@ -53,6 +54,16 @@ using OutputTensors
 //     are mark*Modified().
 //   * Virtual (inter-node) tensors are allocated internally by each executor; the
 //     variant packs we build carry only real (input + output) tensors.
+//
+// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
+//   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
+//             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
+//             pointwise) through the synthesis switch. Zero behavioral change.
+//   Stage 2 — Migrate structured recipes one op at a time: copy the exact
+//             ranges/seeds/derivation from each non-golden subclass override
+//             into the corresponding fill function, using fillComputed/tensorAt
+//             for derived inputs. Delete each override once its fill fn works.
+//   Stage 3 — Both harnesses share one init pipeline via SynthesisTracker.
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
@@ -79,6 +90,14 @@ protected:
         if(_bundle == nullptr)
         {
             GTEST_SKIP() << "No bundle set";
+        }
+
+        {
+            const auto testName = currentTestName();
+            if(auto reason = lookupSkip(testName))
+            {
+                GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
+            }
         }
 
         applyMetadataGuards();
@@ -112,6 +131,15 @@ protected:
     // exercise hardware guards can override it — production reads from the
     // TestConfig singleton, which is only initialized by the real test main.
     virtual void applyMetadataGuards() const;
+
+    // TOML-driven skip check. Default reads TestConfig::get().findSkipForTest().
+    // Override in tests to avoid the singleton.
+    virtual std::optional<std::string> lookupSkip(const std::string& testName) const;
+
+    // TOML-driven tolerance override. Default reads TestConfig::get().findToleranceOverride().
+    // Override in tests to inject controlled values.
+    virtual std::optional<ToleranceOverride>
+        lookupToleranceOverride(const std::string& testName) const;
 
 private:
     bool _requiresDevice;
@@ -187,6 +215,32 @@ private:
     void markOutputsModified(OutputTensors& outputs) const;
     static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
+    // ── tolerances ──────────────────────────────────────────────────────
+    // Two-level lookup: per-operation default from TestTolerances.hpp,
+    // then TOML per-engine override (if a [[tolerance_overrides]] filter
+    // matches the current gtest name).
+    //
+    //   resolveTolerances        entry point — sets atol/rtol for one output tensor
+    //     deriveDefaultTolerance  max tolerance across all graph nodes (priority 2)
+    //       toleranceForDataType    dispatches on DataType → typed template
+    //         toleranceForNodeAttributes<T>  maps NodeAttributes → TestTolerances.hpp
+    static void
+        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                          float& atol,
+                          float& rtol);
+
+    static float deriveDefaultTolerance(
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+
+    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+
+    template <typename T>
+    static float
+        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
+
     // ── comparison ──────────────────────────────────────────────────────
     void compareAgainstGolden(OutputTensors& engineOutputs);
     void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
@@ -202,31 +256,7 @@ private:
                              float atol,
                              float rtol) const;
 
-    static void
-        appendTensorDiff(std::ostream& os,
-                         int64_t uid,
-                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                         hipdnn_data_sdk::utilities::ITensor& expected,
-                         hipdnn_data_sdk::utilities::ITensor& actual,
-                         float atol,
-                         float rtol);
-
-    template <typename T>
-    static void appendFpDiff(std::ostream& os,
-                             int64_t uid,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
-                             hipdnn_data_sdk::utilities::ITensor& expected,
-                             hipdnn_data_sdk::utilities::ITensor& actual,
-                             float atol,
-                             float rtol);
-
     // ── reporting ───────────────────────────────────────────────────────
-    // Records the bundle path + reason in the process-wide
-    // UnverifiableBundleReport (printed as a summary after all tests),
-    // then GTEST_SKIP()s this test. The reason is a flat human-readable
-    // string — per-tensor details are concatenated into it by the caller
-    // (e.g., tracker.finish()), not stored as structured data.
     void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
@@ -243,23 +273,25 @@ private:
 
     static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
-    // ── tolerances ──────────────────────────────────────────────────────
     static void
-        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                          float& atol,
-                          float& rtol);
+        writeTensorDiffReport(std::ostream& os,
+                              int64_t uid,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                              hipdnn_data_sdk::utilities::ITensor& expected,
+                              hipdnn_data_sdk::utilities::ITensor& actual,
+                              float atol,
+                              float rtol);
 
     template <typename T>
-    static float
-        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
-
-    static float deriveDefaultTolerance(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+    static void
+        writeFpDiffReport(std::ostream& os,
+                          int64_t uid,
+                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                          hipdnn_data_sdk::utilities::ITensor& expected,
+                          hipdnn_data_sdk::utilities::ITensor& actual,
+                          float atol,
+                          float rtol);
 };
 
 } // namespace hipdnn_integration_tests::golden

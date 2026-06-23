@@ -22,6 +22,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSynthesisTracker.cpp
     TestSynthesizeInputs.cpp
     TestVerificationModePaths.cpp
+    TestGoldenToleranceAndSkips.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

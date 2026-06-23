@@ -114,8 +114,16 @@ struct SynthesisResult
 //                generation. In a fused fwd+bwd graph the forward output flows
 //                to the backward input as a virtual tensor (not owned, silently
 //                skipped). In a standalone backward, the same tensor is a leaf
-//                input — markDerived records it, and finish() refuses because
-//                no forward pass produced it.
+//                input. Two ways to handle it:
+//                  * markDerived — record it and let finish() refuse (SKIP),
+//                    used when no recipe exists to produce a consistent value.
+//                  * fillComputed — the fill function runs the recipe itself
+//                    (e.g. a CPU forward pass to produce `o`/`stats` consistent
+//                    with the q/k/v it already filled FREE) and hands the
+//                    result to the tracker. This accounts for the input with
+//                    NO refusal, so finish() succeeds and the bundle runs.
+//                A recipe reads the already-filled FREE inputs via tensorAt()
+//                and writes the computed tensor back via fillComputed().
 //
 // finish() succeeds only when every owned leaf input was declared as some role
 // AND none were STRUCTURED or DERIVED. Undeclared inputs and refused inputs both
@@ -155,6 +163,36 @@ public:
         const auto seed = static_cast<unsigned int>(rng());
         _inputs.at(uid)->fillTensorWithRandomValues(lo, hi, seed);
         _accounted.insert(uid);
+    }
+
+    // Declares `uid` as DERIVED-and-produced — the fill function computed a
+    // consistent value itself (the recipe) and supplies it here. Copies the
+    // bytes into the leaf input and accounts for it with NO refusal, so a
+    // graph that would otherwise SKIP (markDerived) instead runs. `source`
+    // must have the same dtype/shape as the leaf input at `uid`.
+    void fillComputed(int64_t uid, const hipdnn_data_sdk::utilities::ITensor& source)
+    {
+        if(!isOwned(uid))
+        {
+            return;
+        }
+        auto& dst = *_inputs.at(uid);
+        const auto* src = const_cast<hipdnn_data_sdk::utilities::ITensor&>(source).rawHostData();
+        dst.fillWithData(src, source.elementSpace() * source.elementSize());
+        _accounted.insert(uid);
+    }
+
+    // Read access to an already-filled leaf input, so a recipe can compute a
+    // derived input from inputs filled earlier in the same node (e.g. read
+    // q/k/v to produce o/stats). Returns nullptr if `uid` is not an owned leaf
+    // (virtual, output, or absent-optional uid=0).
+    hipdnn_data_sdk::utilities::ITensor* tensorAt(int64_t uid)
+    {
+        if(!isOwned(uid))
+        {
+            return nullptr;
+        }
+        return _inputs.at(uid).get();
     }
 
     // Declares `uid` as STRUCTURED — accounts for it but records a refusal.
