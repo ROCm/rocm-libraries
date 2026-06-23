@@ -127,10 +127,14 @@ def resolve_devices(spec):
         n = int(spec)
         if n <= 0:
             return detected
-        # Treat a bare integer as a device *count*: take the first n detected
-        # ids, falling back to a plain 0..n-1 range if detection under-reports.
-        # To target one specific device id, use the comma form (e.g. "5,").
-        return detected[:n] if len(detected) >= n else [str(i) for i in range(n)]
+        # Treat a bare integer as a device *count*: take the first n detected ids.
+        # If the environment explicitly restricts visibility (HIP/CUDA_VISIBLE_DEVICES),
+        # do not invent additional ids beyond what's visible.
+        if len(detected) >= n:
+            return detected[:n]
+        if os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get("CUDA_VISIBLE_DEVICES"):
+            return detected
+        return [str(i) for i in range(n)]
     return [spec]
 
 
