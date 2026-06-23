@@ -45,7 +45,9 @@ struct StinkyInstruction;
 struct RegGroup {
     uint32_t base;
     uint16_t size;
-    bool operator==(const RegGroup& o) const { return base == o.base && size == o.size; }
+    bool operator==(const RegGroup& o) const {
+        return base == o.base && size == o.size;
+    }
     bool operator<(const RegGroup& o) const {
         return base < o.base || (base == o.base && size < o.size);
     }
@@ -56,18 +58,20 @@ struct RegGroup {
 /// ordinals and only compare them for overlap.
 struct RegInterval {
     unsigned first = 0;
-    unsigned last  = 0;
-    bool overlaps(const RegInterval& o) const { return first <= o.last && o.first <= last; }
+    unsigned last = 0;
+    bool overlaps(const RegInterval& o) const {
+        return first <= o.last && o.first <= last;
+    }
 };
 
 /// A single per-operand rewrite entry. The downstream register-renaming pass
 /// applies this list mechanically — no further analysis is required.
 struct RegReplacement {
-    StinkyInstruction* inst;   ///< instruction whose operand must change
-    unsigned           operandIdx; ///< index into srcRegs (isSrc=true) or destRegs
-    bool               isSrc;
-    StinkyRegister     oldReg;
-    StinkyRegister     newReg;
+    StinkyInstruction* inst;  ///< instruction whose operand must change
+    unsigned operandIdx;      ///< index into srcRegs (isSrc=true) or destRegs
+    bool isSrc;
+    StinkyRegister oldReg;
+    StinkyRegister newReg;
 };
 
 /// Stable output contract between this pass and all downstream consumers.
@@ -95,9 +99,9 @@ struct WmmaReorderAnalysisResult {
 /// Internal wmma descriptor used by both ABIs.
 struct WmmaNode {
     StinkyInstruction* inst;
-    RegGroup           aGroup; ///< src0 (A matrix tile)
-    RegGroup           bGroup; ///< src1 (B matrix tile)
-    RegGroup           cGroup; ///< dest (C accumulator tile)
+    RegGroup aGroup;  ///< src0 (A matrix tile)
+    RegGroup bGroup;  ///< src1 (B matrix tile)
+    RegGroup cGroup;  ///< dest (C accumulator tile)
 };
 
 /// Compute live intervals for A/B register groups referenced by wmma.
@@ -111,8 +115,7 @@ class STINKYTOFU_EXPORT IRegLivenessAnalysis {
     /// source in @p wmmaSeq. The @p bb argument is provided so full-instruction
     /// backends can inspect all instruction types; wmma-only backends may ignore it.
     virtual std::map<RegGroup, RegInterval> computeLiveness(
-        const BasicBlock&          bb,
-        const std::vector<WmmaNode>& wmmaSeq) const = 0;
+        const BasicBlock& bb, const std::vector<WmmaNode>& wmmaSeq) const = 0;
 };
 
 /// Fast wmma-only liveness: interval = [first wmma index, last wmma index]
@@ -120,8 +123,7 @@ class STINKYTOFU_EXPORT IRegLivenessAnalysis {
 class STINKYTOFU_EXPORT WmmaIntervalLiveness : public IRegLivenessAnalysis {
    public:
     std::map<RegGroup, RegInterval> computeLiveness(
-        const BasicBlock&            bb,
-        const std::vector<WmmaNode>& wmmaSeq) const override;
+        const BasicBlock& bb, const std::vector<WmmaNode>& wmmaSeq) const override;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,9 +131,9 @@ class STINKYTOFU_EXPORT WmmaIntervalLiveness : public IRegLivenessAnalysis {
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct AliasCandidate {
-    RegGroup canonical;   ///< register group to keep (e.g. A_X0[i])
-    RegGroup aliasable;   ///< register group to remap onto canonical (e.g. A_X1[i])
-    unsigned vgprSaved;   ///< == canonical.size
+    RegGroup canonical;  ///< register group to keep (e.g. A_X0[i])
+    RegGroup aliasable;  ///< register group to remap onto canonical (e.g. A_X1[i])
+    unsigned vgprSaved;  ///< == canonical.size
 };
 
 /// Given the wmma sequence and precomputed live intervals, decide the optimal
@@ -142,13 +144,12 @@ class STINKYTOFU_EXPORT IWmmaReorderAlgorithm {
     virtual ~IWmmaReorderAlgorithm() = default;
 
     struct Result {
-        std::vector<WmmaNode>     desiredOrder; ///< permutation of wmmaSeq
+        std::vector<WmmaNode> desiredOrder;  ///< permutation of wmmaSeq
         std::vector<AliasCandidate> aliases;
     };
 
-    virtual Result solve(
-        const std::vector<std::vector<WmmaNode>>& pools,
-        const std::map<RegGroup, RegInterval>&    liveness) const = 0;
+    virtual Result solve(const std::vector<std::vector<WmmaNode>>& pools,
+                         const std::map<RegGroup, RegInterval>& liveness) const = 0;
 };
 
 /// Reorders each pool so its pool-varying operand (A after detectABIndices relabeling)
@@ -157,9 +158,8 @@ class STINKYTOFU_EXPORT IWmmaReorderAlgorithm {
 /// src (A or B) carries the pool-varying registers.
 class STINKYTOFU_EXPORT PoolVaryingReorderAlgorithm : public IWmmaReorderAlgorithm {
    public:
-    Result solve(
-        const std::vector<std::vector<WmmaNode>>& pools,
-        const std::map<RegGroup, RegInterval>&    liveness) const override;
+    Result solve(const std::vector<std::vector<WmmaNode>>& pools,
+                 const std::map<RegGroup, RegInterval>& liveness) const override;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ class STINKYTOFU_EXPORT PoolVaryingReorderAlgorithm : public IWmmaReorderAlgorit
 /// The liveness backend and reorder algorithm are injected at construction so
 /// either axis can be swapped independently without touching consumers.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createStinkyWmmaVgprReorderPass(
-    std::unique_ptr<IRegLivenessAnalysis>  liveness  = nullptr,
+    std::unique_ptr<IRegLivenessAnalysis> liveness = nullptr,
     std::unique_ptr<IWmmaReorderAlgorithm> algorithm = nullptr);
 
 /// Retrieve the analysis result produced for @p bb by the most recent pass run.
