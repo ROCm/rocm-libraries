@@ -11,7 +11,6 @@
 #include <memory>
 #include <vector>
 #include <hip/atomic>
-#include <hip/std/inplace_vector>
 #include <hip/std/memory>
 #include <hip/thread>
 #ifdef _WIN32

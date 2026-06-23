@@ -32,7 +32,7 @@ endif()
 
 list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
-find_package(hipthreads)
+find_package(hipthreads REQUIRED)
 find_package(rocprim REQUIRED CONFIG)
 find_package(rocthrust REQUIRED CONFIG)
 

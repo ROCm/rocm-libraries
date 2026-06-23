@@ -23,9 +23,11 @@ list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 
 find_package(Threads REQUIRED)
 find_package(rocthrust REQUIRED)
+find_package(libhipcxx REQUIRED)
 
 target_link_libraries(spmm PRIVATE Threads::Threads)
 target_link_libraries(spmm PRIVATE roc::rocthrust)
+target_link_libraries(spmm PRIVATE libhipcxx::libhipcxx)
 
 # If you haven't already, pull the matrices from git lfs:
 # sudo apt install git-lfs
