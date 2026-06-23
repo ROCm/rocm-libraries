@@ -8425,6 +8425,144 @@ TEST_F(TestGraph, AddEngineSweepRejectsInvalidAxisKnob)
         << "Error message should mention the invalid knob name: " << result.err_msg;
 }
 
+// An empty-values sweep axis is dropped (knob takes its engine default) rather
+// than eliminating the engine's entire sweep. The surviving axis still produces
+// its product; the valueless knob is absent from every produced spec.
+TEST_F(TestGraph, AddEngineSweepDropsEmptyValuesAxisAndKeepsOthers)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto tileKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    auto warpsKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA002);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {tileKnobDesc, warpsKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    tileKnobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{32}});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    warpsKnobDesc,
+                                    "warps",
+                                    "Warp count",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{4}});
+
+    KnobSweepAxis tileAxis;
+    tileAxis.knobId = "tile_size";
+    tileAxis.values = {KnobValueVariant{int64_t{32}}, KnobValueVariant{int64_t{64}}};
+
+    KnobSweepAxis warpsAxis;
+    warpsAxis.knobId = "warps";
+    warpsAxis.values = {}; // no values: dropped, warps takes engine default
+
+    EngineSweepSpec sweepSpec;
+    sweepSpec.engineId = 42;
+    sweepSpec.axes = {tileAxis, warpsAxis};
+
+    auto result = graph.add_engine_sweep({sweepSpec});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    // One spec per tile value; the engine's sweep is NOT eliminated.
+    auto settings = graph.getPlanSpecKnobSettings();
+    ASSERT_EQ(settings.size(), 2u);
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> expected
+        = {{{"tile_size", KnobValueVariant{int64_t{32}}}},
+           {{"tile_size", KnobValueVariant{int64_t{64}}}}};
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> produced(settings.begin(),
+                                                                                settings.end());
+    EXPECT_EQ(produced, expected)
+        << "Specs must sweep tile_size only; the empty-values warps axis is dropped";
+}
+
+// When the only axis has empty values, the engine sweep falls back to a single
+// fixedSettings-only spec instead of being eliminated.
+TEST_F(TestGraph, AddEngineSweepSoleEmptyValuesAxisYieldsFixedSettingsSpec)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto warpsKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    auto tileKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA002);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {warpsKnobDesc, tileKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    warpsKnobDesc,
+                                    "warps",
+                                    "Warp count",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{4}});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    tileKnobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{32}});
+
+    KnobSweepAxis warpsAxis;
+    warpsAxis.knobId = "warps";
+    warpsAxis.values = {}; // no values: dropped
+
+    EngineSweepSpec sweepSpec;
+    sweepSpec.engineId = 42;
+    sweepSpec.axes = {warpsAxis};
+    sweepSpec.fixedSettings = {{"tile_size", KnobValueVariant{int64_t{32}}}};
+
+    auto result = graph.add_engine_sweep({sweepSpec});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    auto settings = graph.getPlanSpecKnobSettings();
+    ASSERT_EQ(settings.size(), 1u);
+    const std::set<std::pair<std::string, KnobValueVariant>> expected
+        = {{"tile_size", KnobValueVariant{int64_t{32}}}};
+    EXPECT_EQ(settings[0], expected)
+        << "A sole empty-values axis must yield one fixedSettings-only spec";
+}
+
+// When a knob appears in both a (dropped) empty-values axis and fixedSettings,
+// the fixedSettings value wins because the dropped axis contributes nothing.
+TEST_F(TestGraph, AddEngineSweepEmptyValuesAxisFixedSettingsConflictResolvesToFixed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto warpsKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {warpsKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    warpsKnobDesc,
+                                    "warps",
+                                    "Warp count",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{4}});
+
+    KnobSweepAxis warpsAxis;
+    warpsAxis.knobId = "warps";
+    warpsAxis.values = {}; // no values: dropped
+
+    EngineSweepSpec sweepSpec;
+    sweepSpec.engineId = 42;
+    sweepSpec.axes = {warpsAxis};
+    sweepSpec.fixedSettings = {{"warps", KnobValueVariant{int64_t{8}}}};
+
+    auto result = graph.add_engine_sweep({sweepSpec});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    auto settings = graph.getPlanSpecKnobSettings();
+    ASSERT_EQ(settings.size(), 1u);
+    const std::set<std::pair<std::string, KnobValueVariant>> expected
+        = {{"warps", KnobValueVariant{int64_t{8}}}};
+    EXPECT_EQ(settings[0], expected)
+        << "fixedSettings value must win when its knob also has an empty-values axis";
+}
+
 // --------------------------------------------------------------------------
 // get_workspace_size_plan_at_index error-returning overload tests
 // --------------------------------------------------------------------------

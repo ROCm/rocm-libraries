@@ -89,8 +89,9 @@ Deep learning operations can be computed by many algorithms, each with different
 │  │ Runtime         │───▶│ (EngineOverrideConfig JSON format)      │  │
 │  │                 │    │                                         │  │
 │  │ • AUTO mode     │    │ • Write ranked winner                   │  │
-│  │ • EXHAUSTIVE    │    │ • Append to existing file               │  │
-│  │   mode          │    │ • Replace matching (op, tensors)        │  │
+│  │ • EXHAUSTIVE    │    │ • Append to existing v2 file            │  │
+│  │   mode          │    │ • Replace matching (op, criteria,       │  │
+│  │                 │    │   tensors-by-id)                        │  │
 │  │ • Strategies    │    │ • Autotune metadata                     │  │
 │  │                 │    └─────────────────────────────────────────┘  │
 │  └─────────────────┘                                                 │
@@ -332,7 +333,7 @@ This avoids compiling engines whose _estimated_ workspace exceeds the budget.
 
 #### 6.2.4 Plan Spec Collection Semantics
 
-**Additive with deduplication**: All `add_engine_*()` calls append to the same internal plan spec list, deduplicated by `(engineId, knobSettings)`. Identical entries are silently skipped; the same engine with *different* knob settings produces distinct entries (variant autotuning). This deduplication key does not carry through to the config file match key, which uses `(operation, tensors)` only (see § 6.5).
+**Additive with deduplication**: All `add_engine_*()` calls append to the same internal plan spec list, deduplicated by `(engineId, knobSettings)`. Identical entries are silently skipped; the same engine with *different* knob settings produces distinct entries (variant autotuning). This deduplication key does not carry through to the config file match key, which is `(operation, criteria, tensors-matched-by-named-id-ignoring-order)` (see § 6.5).
 
 **Zero specs added**: Empty input returns an error. Batch calls (`add_engine_variants()`, `add_engine_sweep()`) that skip all entries due to validation return success with a warning log per skipped entry.
 
@@ -372,7 +373,7 @@ All `add_engine_*()` functions validate then store (see § 6.2.4). No compilatio
 
 **`add_engine_variants(variants)`**: For each `EngineVariant`, validates and stores a plan spec using the specified `engineId` and `knobSettings`. Fails fast on the first invalid knob configuration (returns error), but variants already validated and added are retained (partial application, not atomic).
 
-**`add_engine_sweep(specs)`**: For each `EngineSweepSpec`, strips the `global.benchmarking` knob from sweep axes (it has no effect on plan compilation), computes the Cartesian product of the remaining axes, merges each combination with `fixedSettings`, then stores each as `add_engine_variants` does. If all axes are stripped, one plan spec with only `fixedSettings` is produced. Returns an error if any single `EngineSweepSpec` produces more than 10,000 plan specs; a warning is logged above 1,000 per spec.
+**`add_engine_sweep(specs)`**: For each `EngineSweepSpec`, strips the `global.benchmarking` knob from sweep axes (it has no effect on plan compilation), computes the Cartesian product of the remaining axes, merges each combination with `fixedSettings`, then stores each as `add_engine_variants` does. A sweep axis with an empty `values` list is also dropped with a warning (the knob takes its engine default); it does not eliminate the engine's other combinations. If all axes are stripped, one plan spec with only `fixedSettings` is produced. Returns an error if any single `EngineSweepSpec` produces more than 10,000 plan specs; a warning is logged above 1,000 per spec.
 
 **Cartesian product example:**
 
@@ -600,13 +601,15 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 
 ```json
 {
+  "version": 2,
   "engine_overrides": [
     {
       "op": "conv_fprop",
       "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+      "criteria": { "pointwise_mode": "relu" },
       "tensors": [
-        { "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
-        { "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
+        { "tensor_id": "X", "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
+        { "tensor_id": "W", "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,
@@ -630,8 +633,8 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
       "op": "matmul",
       "engine_name": "ROCBLAS_ENGINE_DEFAULT",
       "tensors": [
-        { "dim": [128, 512], "stride": [512, 1] },
-        { "dim": [512, 256], "stride": [256, 1] }
+        { "tensor_id": "A", "dim": [128, 512], "stride": [512, 1] },
+        { "tensor_id": "B", "dim": [512, 256], "stride": [256, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,
@@ -649,6 +652,12 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
   ]
 }
 ```
+
+**Top-level `version`**: The file carries a top-level `version` field. The current value is `2` (`NAMED_TENSOR_IDS`). Format evolution: v1 was the legacy positional-tensor format (no `version` key, tensors matched by position); v2 adds named tensor IDs and entry-level criteria. The reader tolerates a missing `version` (treated as v1, positional matching); the writer always emits v2.
+
+**Entry-level `criteria`**: Each entry may carry a `criteria` object discriminating graphs that share the same operation and tensors but differ in a behavioral attribute (e.g. `norm_fwd_phase`, `reduction_mode`, `pointwise_mode`). `criteria` is part of the match key (see **Write behavior** below).
+
+**Per-tensor `tensor_id`**: In v2 each tensor carries a `tensor_id`; tensors are matched by named ID ignoring order rather than by position. v2 writes **require** named tensor IDs: a write for a graph whose core operation produces no resolvable tensor IDs is rejected with `INVALID_VALUE`. (Every currently-supported core op produces named tensor IDs, so this rejection is unreachable for documented graphs.)
 
 **Metadata fields** (`autotune_metadata`; informational only, ignored by `matchOperation()`):
 - `rank`: 0-based ranking (0 = fastest)
@@ -668,9 +677,11 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 
 The config file is a lightweight engine *selection* hint; plan serialization is the mechanism for full *restoration* of the winning plan with all configuration (knobs, workspace, compilation state).
 
-**Write behavior**: `AutotuneFileWriter` writes the rank-0 winner (fastest successful result) for the graph's core operation. If the file already contains an entry for the same `(operation, tensor shape)`, it is **unconditionally replaced** — there is no comparison against the previous entry's timing. At most one entry exists per `(operation, tensor shape)` combination.
+**Write behavior**: `AutotuneFileWriter` writes the rank-0 winner (fastest successful result) for the graph's core operation. The match key is `(operation, criteria, tensors-matched-by-named-id-ignoring-order)`. If the file already contains an entry with the same match key, it is **unconditionally replaced** — there is no comparison against the previous entry's timing. At most one entry exists per match key. Two graphs that differ only by a criterion (e.g. pointwise mode) are distinct entries and coexist.
 
-`AutotuneStorageConfig::deleteAllExistingFileContent` (default `false`) controls whether unrelated entries are preserved. When `false`, only the matching entry is replaced; other entries for different operations or tensor shapes are kept. When `true`, all existing content is deleted before writing.
+`AutotuneStorageConfig::deleteAllExistingFileContent` (default `false`) controls whether unrelated entries are preserved. When `false` (append mode), only the entry with a matching `(operation, criteria, tensors-by-id)` key is replaced; entries differing in operation, criteria, or tensor IDs are kept. When `true`, all existing content is deleted before writing.
+
+**Append requires a v2 file**: Append mode (`deleteAllExistingFileContent=false`) requires the existing file to be an autotune v2 file (carrying `version: 2`). Appending to a legacy/v1 or non-autotune `HIPDNN_HEUR_CONFIG_PATH` file is unsupported: the writer returns `INVALID_VALUE` and writes nothing, to avoid mixing v1 positional entries with v2 named-id entries in one file. This is an intentional reader/writer asymmetry — the reader still tolerates legacy/missing-version files, but the writer only appends to v2 files.
 
 **Corrupt file recovery**: If the existing config file contains invalid JSON, behavior depends on `deleteAllExistingFileContent`. When `true`, the file is replaced. When `false` (append mode), the corrupt file is preserved by being moved aside to a `<filePath>.corrupt-<Unix epoch seconds>` sibling (so its accumulated entries remain recoverable, and repeated corrupt-recoveries do not overwrite each other), an error is logged, and a fresh file is
 written with the new result. If the corrupt file cannot be moved aside, a warning is
@@ -680,11 +691,9 @@ results take priority over preserving unreadable data).
 **Concurrent access**: Config file append is not safe for concurrent writers. For concurrent scenarios, use separate output files per process and merge afterward.
 
 
-**Core operation mapping**: For multi-operation graphs, the config file entry is keyed by the core operation:
+**Core operation mapping**: For multi-operation graphs, the config file entry is keyed by the core operation, selected by descending priority:
 
-1. Convolution, GEMM, SDPA (highest priority)
-2. Normalization
-3. Pointwise (lowest priority)
+`CONVOLUTION (70) > SDPA (60) > MATMUL/GEMM (50) > BATCHNORM (40) > NORM (30) > REDUCTION (20) = RESAMPLE (20) > POINTWISE (10)`
 
 ## 7. Porting Guide: cuDNN → hipDNN
 
@@ -769,8 +778,8 @@ int main() {
 | Risk | Mitigation |
 |------|------------|
 | **Cartesian product growth** | Error at 10,000 plan specs per `add_engine_sweep()` call, warning at 1,000. Validate-then-store rejects invalid knobs early. |
-| **Config file format changes** | Backward-compatible: `matchOperation()` ignores unknown fields. |
-| **Config file conflicts on append** | Same (op, tensors) entries are replaced, preventing stale entries. |
+| **Config file format changes** | Reader is backward-compatible: `matchOperation()` ignores unknown fields and tolerates a missing `version`. The writer appends only to v2 files (returns `INVALID_VALUE` for legacy/non-autotune files). |
+| **Config file conflicts on append** | Entries with the same `(operation, criteria, tensors-by-id)` key are replaced, preventing stale entries. |
 
 ---
 
@@ -809,7 +818,7 @@ Write unit tests alongside each stage of implementation. Key areas:
   - Recovery from corrupt JSON
 - **Config reader extensions**: `EngineOverrideConfig` knob parsing:
   - Each knob type, type aliases, wildcards with knobs nested under `autotune_metadata`
-  - Missing/empty `autotune_metadata.knobs` fields (backward compatibility with pre-autotune config files)
+  - Missing/empty `autotune_metadata.knobs` fields (the reader tolerates pre-autotune / legacy config files; the writer refuses to append to them, returning `INVALID_VALUE`)
 - **Graph API guards** (§ 6.2.3, § 6.3):
   - Mutual exclusion: `add_engine_*()` after `create_execution_plans()` (and vice versa) returns error
   - Precondition: `add_engine_*()` returns error before `build_operation_graph()`

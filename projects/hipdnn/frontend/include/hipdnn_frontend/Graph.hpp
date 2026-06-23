@@ -1099,16 +1099,19 @@ private:
         {
             return {ErrorCode::INVALID_VALUE, "warmupIterations must be >= 0"};
         }
-        if(config.timedIterations < 1)
+        if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
         {
-            return {ErrorCode::INVALID_VALUE, "timedIterations must be >= 1"};
-        }
-        if(config.maxIterations < 1)
-        {
-            return {ErrorCode::INVALID_VALUE, "maxIterations must be >= 1"};
+            if(config.timedIterations < 1)
+            {
+                return {ErrorCode::INVALID_VALUE, "timedIterations must be >= 1"};
+            }
         }
         if(config.strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
         {
+            if(config.maxIterations < 1)
+            {
+                return {ErrorCode::INVALID_VALUE, "maxIterations must be >= 1"};
+            }
             if(config.windowSize < 2)
             {
                 return {ErrorCode::INVALID_VALUE, "windowSize must be >= 2"};
@@ -1353,18 +1356,18 @@ private:
                     }
 
                     // Ensure compiled plan's workspace size fits the provided workspace size.
-                    int64_t comopiledPlanWsSize = 0;
+                    int64_t compiledPlanWsSize = 0;
                     detail::hipdnnBackend()->backendGetAttribute(
                         primingPlan.executionPlanDesc->get(),
                         HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
                         HIPDNN_TYPE_INT64,
                         1,
                         nullptr,
-                        &comopiledPlanWsSize);
+                        &compiledPlanWsSize);
                     const bool primingWsNullMismatch
-                        = (workspace == nullptr && comopiledPlanWsSize > 0);
+                        = (workspace == nullptr && compiledPlanWsSize > 0);
                     const bool primingWsOverBudget
-                        = (maxWorkspaceSize >= 0 && comopiledPlanWsSize > maxWorkspaceSize);
+                        = (maxWorkspaceSize >= 0 && compiledPlanWsSize > maxWorkspaceSize);
                     if(primingWsNullMismatch || primingWsOverBudget)
                     {
                         // Log a warning and add a priming failure reason if the estimated workspace
@@ -1378,7 +1381,7 @@ private:
                         {
                             const std::string reason
                                 = "Priming skipped: compiled plan workspace size "
-                                  + std::to_string(comopiledPlanWsSize)
+                                  + std::to_string(compiledPlanWsSize)
                                   + (workspace == nullptr
                                          ? " exceeds provided workspace (null pointer)"
                                          : " exceeds provided workspace size "
@@ -3701,6 +3704,11 @@ public:
                 if(axis.knobId == autotune::detail::BENCHMARKING_KNOB_NAME)
                 {
                     continue; // Already logged during validation above
+                }
+                if(axis.values.empty())
+                {
+                    // empty-values axis: knob takes engine default (warned in validateSweepSpec)
+                    continue;
                 }
                 filteredAxes.push_back(axis);
             }

@@ -61,7 +61,7 @@ enum class AutotuneStrategy
  * During EXHAUSTIVE priming, an engine's temporary priming plan may fail to
  * build, finalize, or execute. This policy selects whether that failure aborts
  * the whole autotune() call or whether the engine is benchmarked unprimed. When
- * priming fails and the policy is BENCHMARK_UNPRIMED, the autotuneRsult will set
+ * priming fails and the policy is BENCHMARK_UNPRIMED, the autotuneResult will set
  * ranExhaustive=false and errorMessage describes the reason.
  */
 enum class PrimingFailurePolicy

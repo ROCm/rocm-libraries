@@ -30,6 +30,14 @@ inline Error validateSweepSpec(const EngineSweepSpec& sweepSpec,
                                << "This knob is managed by autotune() in EXHAUSTIVE mode.");
             continue;
         }
+        if(axis.values.empty())
+        {
+            HIPDNN_FE_LOG_WARN("Dropping sweep axis for knob '"
+                               << axis.knobId << "' on engine " << sweepSpec.engineId
+                               << ": no values provided; knob will take its engine default "
+                               << "(axis not swept).");
+            continue;
+        }
         auto knobIt = knobLookup.find(axis.knobId);
         if(knobIt == knobLookup.end())
         {
