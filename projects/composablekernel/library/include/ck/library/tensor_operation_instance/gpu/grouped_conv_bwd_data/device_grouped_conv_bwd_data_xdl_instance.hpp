@@ -502,7 +502,10 @@ using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_gfx950
     // clang-format on
     >;
 
-// Public alias: base instances + GFX950 extras (when targeting GFX950)
+// Public alias: base instances (when NOT targeting GFX950) + GFX950 instances (when targeting
+// GFX950) Base 16x16 instances with KPerBlock=16, AK1=4 are incompatible with GFX950's
+// mfma_f32_16x16x32xf32 (KPack=8 > KPerThread=4 triggers static_for assertion). GFX950 instances
+// use KPerBlock=32 instead.
 template <index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -510,12 +513,15 @@ template <index_t NDimSpatial,
           typename ELayout,
           ConvolutionBackwardDataSpecialization ConvSpec>
 using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances = ck::tuple_cat_t<
-    device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_base<NDimSpatial,
-                                                                             ALayout,
-                                                                             BLayout,
-                                                                             DsLayout,
-                                                                             ELayout,
-                                                                             ConvSpec>,
+    std::conditional_t<
+        !ck::cmakeTargetsContain(0x0950),
+        device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_base<NDimSpatial,
+                                                                                 ALayout,
+                                                                                 BLayout,
+                                                                                 DsLayout,
+                                                                                 ELayout,
+                                                                                 ConvSpec>,
+        std::tuple<>>,
     std::conditional_t<
         ck::cmakeTargetsContain(0x0950),
         device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_gfx950<NDimSpatial,
