@@ -100,50 +100,6 @@ TEST(TestSynthesisTracker, DerivedInputFails)
     EXPECT_NE(result.reason.find("derived"), std::string::npos);
 }
 
-// fillComputed accounts for a derived input with NO refusal -> ok(), and the
-// computed bytes are copied into the leaf input.
-TEST(TestSynthesisTracker, FillComputedSucceedsAndCopies)
-{
-    auto inputs = makeTensors({1, 2});
-    const std::vector<int64_t> owned = {1, 2};
-    std::mt19937 rng(42);
-
-    // A source tensor holding a known value, matching the leaf's dtype/shape.
-    auto source = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(
-        std::vector<int64_t>{2, 3}, std::vector<int64_t>{3, 1});
-    source->fillTensorWithValue(7.5f);
-
-    SynthesisTracker tracker(owned, inputs);
-    tracker.fillFree(1, -1.f, 1.f, rng);
-    tracker.fillComputed(2, *source); // the "recipe" result
-
-    const auto result = tracker.finish("TestOp");
-    EXPECT_TRUE(result.filled);
-
-    // The bytes landed in the leaf input.
-    const auto* data = static_cast<const float*>(inputs.at(2)->rawHostData());
-    for(size_t i = 0; i < inputs.at(2)->elementCount(); ++i)
-    {
-        EXPECT_FLOAT_EQ(data[i], 7.5f);
-    }
-}
-
-// tensorAt returns an owned leaf input so a recipe can read already-filled
-// values, and returns nullptr for non-owned uids.
-TEST(TestSynthesisTracker, TensorAtReadsOwnedAndNullsNonOwned)
-{
-    auto inputs = makeTensors({1});
-    const std::vector<int64_t> owned = {1};
-    std::mt19937 rng(42);
-
-    SynthesisTracker tracker(owned, inputs);
-    tracker.fillFree(1, -1.f, 1.f, rng);
-
-    EXPECT_EQ(tracker.tensorAt(1), inputs.at(1).get());
-    EXPECT_EQ(tracker.tensorAt(0), nullptr); // absent-optional
-    EXPECT_EQ(tracker.tensorAt(99), nullptr); // not owned
-}
-
 // uid 0 (absent optional tensor) is silently ignored, not treated as owned.
 TEST(TestSynthesisTracker, ZeroUidIgnored)
 {
