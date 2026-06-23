@@ -2691,7 +2691,9 @@ class TestWaitCntInstructions(unittest.TestCase):
         m.add(_SWaitCnt(lgkmcnt=0, vmcnt=0))
         m.add(SWaitTensorcnt(cnt=0))
         m.add(SWaitXCnt(cnt=0))
-        self.assertEqual(len(m._collect_logical_insts()), 3)
+        # _SWaitCnt(lgkmcnt=0, vmcnt=0) decomposes into 2 typed waits
+        # (dscnt from lgkmcnt + loadcnt from vmcnt) + tensorcnt + xcnt = 4
+        self.assertEqual(len(m._collect_logical_insts()), 4)
 
 
 class TestSWaitAlu(unittest.TestCase):

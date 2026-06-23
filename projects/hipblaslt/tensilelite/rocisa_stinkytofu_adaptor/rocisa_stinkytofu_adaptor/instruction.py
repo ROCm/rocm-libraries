@@ -2207,6 +2207,15 @@ SSetVgprMsb = _make_imm_no_dest_class("SSetVgprMsb", "s_set_vgpr_msb")
 # logicalIR: SWaitCnt, SWaitTensorcnt, SWaitXCnt
 # ==========================================================================
 
+# Markers embedded in the comment field of SWaitCnt logical instructions to
+# encode which gfx12+ wait opcode the instruction should lower to.  The
+# post-processing step in Module.to_stinky_asm() (code.py) uses these to
+# replace generic ``s_waitcnt N`` assembly text with the correct instruction.
+_WAIT_MARKER_LOADCNT = "\x00@WL@"
+_WAIT_MARKER_STORECNT = "\x00@WS@"
+_WAIT_MARKER_DSCNT = "\x00@WD@"
+_WAIT_MARKER_KMCNT = "\x00@WK@"
+
 
 class _SWaitCnt(Instruction):
     """``s_waitcnt`` primitive (lgkmcnt/vmcnt combined)."""
@@ -2241,9 +2250,28 @@ class _SWaitCnt(Instruction):
         return self.formatWithComment("s_waitcnt " + wait_str)
 
     def to_stinky_logical(self) -> Any:
+        """Map legacy _SWaitCnt to gfx12+ typed waits.
+
+        On gfx12+, lgkmcnt maps to dscnt (DS/LDS counter) and vmcnt maps
+        to loadcnt (VMEM load counter), mirroring the native C++
+        AllHwMappings.cpp logic that sets dlcnt=lgkmcnt, vlcnt=vmcnt.
+        """
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+        insts: List[Any] = []
+        if self.lgkmcnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.lgkmcnt),
+                _WAIT_MARKER_DSCNT + self.comment,
+            ))
+        if self.vmcnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.vmcnt),
+                _WAIT_MARKER_LOADCNT + self.comment,
+            ))
+        if not insts:
+            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+        return insts
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2278,7 +2306,10 @@ class _SWaitCntVscnt(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+        return _st.SWaitCnt(
+            _to_stinky_register(self.cnt),
+            _WAIT_MARKER_STORECNT + self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2313,7 +2344,10 @@ class _SWaitStorecnt(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+        return _st.SWaitCnt(
+            _to_stinky_register(self.cnt),
+            _WAIT_MARKER_STORECNT + self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2348,7 +2382,10 @@ class _SWaitLoadcnt(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+        return _st.SWaitCnt(
+            _to_stinky_register(self.cnt),
+            _WAIT_MARKER_LOADCNT + self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2383,7 +2420,10 @@ class _SWaitKMcnt(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+        return _st.SWaitCnt(
+            _to_stinky_register(self.cnt),
+            _WAIT_MARKER_KMCNT + self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2418,7 +2458,10 @@ class _SWaitDscnt(Instruction):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(self.cnt), self.comment)
+        return _st.SWaitCnt(
+            _to_stinky_register(self.cnt),
+            _WAIT_MARKER_DSCNT + self.comment,
+        )
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -2433,7 +2476,7 @@ class SWaitCnt(Instruction):
 
     Mirrors rocisa::SWaitCnt which is a CompositeInstruction that
     decomposes into _SWaitCnt/_SWaitCntVscnt. For the logical IR path,
-    we emit a single SWaitCnt logical instruction.
+    we decompose into individual gfx12+ typed wait instructions.
     """
 
     __slots__ = ("vlcnt", "vscnt", "dscnt", "kmcnt", "waitAll")
@@ -2462,9 +2505,37 @@ class SWaitCnt(Instruction):
         return self.formatWithComment(self.instStr)
 
     def to_stinky_logical(self) -> Any:
+        """Decompose into individual gfx12+ wait logical instructions.
+
+        Returns a list of SWaitCnt logical instructions with type markers
+        so the post-processing step can emit the correct opcodes.
+        """
         import stinkytofu as _st  # noqa: WPS433
 
-        return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+        insts: List[Any] = []
+        if self.dscnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.dscnt),
+                _WAIT_MARKER_DSCNT + self.comment,
+            ))
+        if self.kmcnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.kmcnt),
+                _WAIT_MARKER_KMCNT + self.comment,
+            ))
+        if self.vlcnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.vlcnt),
+                _WAIT_MARKER_LOADCNT + self.comment,
+            ))
+        if self.vscnt != -1:
+            insts.append(_st.SWaitCnt(
+                _to_stinky_register(self.vscnt),
+                _WAIT_MARKER_STORECNT + self.comment,
+            ))
+        if not insts:
+            return _st.SWaitCnt(_to_stinky_register(0), self.comment)
+        return insts
 
     def __deepcopy__(self, memo):
         if id(self) in memo:

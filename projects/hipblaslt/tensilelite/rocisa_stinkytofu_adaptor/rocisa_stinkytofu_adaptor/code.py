@@ -117,6 +117,7 @@ logicalIR correspondence:
 from __future__ import annotations
 
 import copy as _copy
+import re as _re
 from typing import Any, Iterable, List, Optional, Sequence
 
 from ._dummy import make_dummy_class
@@ -134,6 +135,96 @@ from .instruction import (
 )
 
 _P = "rocisa.code"
+
+
+# ---------------------------------------------------------------------------
+# Wait-instruction post-processing
+# ---------------------------------------------------------------------------
+# stinkytofu's Python LogicalModule path does not support SWaitCntData
+# modifiers, so the gfx12+ legalization pass cannot split s_waitcnt into
+# individual s_wait_loadcnt / s_wait_dscnt etc.  As a workaround, we encode
+# the target wait type in the comment of SWaitCnt logical instructions via
+# NUL-prefixed markers and post-process the emitted assembly text here.
+
+from .instruction import (
+    _WAIT_MARKER_LOADCNT,
+    _WAIT_MARKER_STORECNT,
+    _WAIT_MARKER_DSCNT,
+    _WAIT_MARKER_KMCNT,
+)
+
+_WAIT_MARKER_MAP = {
+    _WAIT_MARKER_LOADCNT: "s_wait_loadcnt",
+    _WAIT_MARKER_STORECNT: "s_wait_storecnt",
+    _WAIT_MARKER_DSCNT: "s_wait_dscnt",
+    _WAIT_MARKER_KMCNT: "s_wait_kmcnt",
+}
+
+_WAIT_MARKER_RE = _re.compile(
+    r"^(\s*)s_waitcnt\s+(\d+)\s*//\s*\x00@W([LSDK])@(.*)$"
+)
+
+_MARKER_CODE_TO_OPCODE = {
+    "L": "s_wait_loadcnt",
+    "S": "s_wait_storecnt",
+    "D": "s_wait_dscnt",
+    "K": "s_wait_kmcnt",
+}
+
+
+def _postprocess_wait_markers(asm: str) -> str:
+    """Replace marker-annotated ``s_waitcnt N`` lines with gfx12+ waits."""
+    lines = asm.split("\n")
+    out: List[str] = []
+    for line in lines:
+        m = _WAIT_MARKER_RE.match(line)
+        if m:
+            indent = m.group(1)
+            count = m.group(2)
+            code = m.group(3)
+            comment = m.group(4).strip()
+            opcode = _MARKER_CODE_TO_OPCODE[code]
+            new_line = f"{indent}{opcode} {count}"
+            if comment:
+                pad = max(1, 45 - len(new_line))
+                new_line += " " * pad + "// " + comment
+            out.append(new_line)
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+class _WaitCntPostProcessModule:
+    """Wraps a StinkyAsmModule and post-processes wait markers in emitAssembly()."""
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def runOptimizationPipeline(self) -> None:
+        self._inner.runOptimizationPipeline()
+
+    def emitAssembly(self) -> str:
+        return _postprocess_wait_markers(self._inner.emitAssembly())
+
+    def getName(self) -> str:
+        return self._inner.getName()
+
+    def setOutputName(self, name: str) -> None:
+        self._inner.setOutputName(name)
+
+    def getOutputName(self) -> str:
+        return self._inner.getOutputName()
+
+    def setOutputDir(self, directory: str) -> None:
+        self._inner.setOutputDir(directory)
+
+    def getOutputDir(self) -> str:
+        return self._inner.getOutputDir()
+
+    def getMetaDataU64(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.getMetaDataU64(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -1247,7 +1338,7 @@ class Module(Item):
             with open(_lm_path, "w") as _f:
                 _f.write(_lm_dump)
 
-        return _st.lower_logical_module(lm, list(arch))
+        return _WaitCntPostProcessModule(_st.lower_logical_module(lm, list(arch)))
 
     def _collect_logical_insts(self) -> List[Any]:
         """In-order walk of leaf instructions exposing ``to_stinky_logical``.
@@ -1260,6 +1351,10 @@ class Module(Item):
         ``_noop`` returns None, which lets us cheaply filter both kinds
         of "no logical mapping" cases (dummy class + Step-3 shim that
         deliberately opts out) at the same gate.
+
+        ``to_stinky_logical()`` may return a single logical instruction or
+        a list (e.g. ``SWaitCnt`` composite decomposes into multiple typed
+        wait instructions).
         """
         out: List[Any] = []
         for it in self.itemList:
@@ -1272,7 +1367,10 @@ class Module(Item):
             logical = handle()
             if logical is None:
                 continue  # dummy shim or explicit opt-out
-            out.append(logical)
+            if isinstance(logical, list):
+                out.extend(logical)
+            else:
+                out.append(logical)
         return out
 
     # ---------------------------------------------------------- internal
