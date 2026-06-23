@@ -5,6 +5,9 @@
 
 #include <tuple>
 
+/// @file
+/// @brief Type-level concatenation helper for std::tuple type lists.
+
 namespace ck {
 
 namespace detail {
@@ -17,6 +20,7 @@ struct tuple_cat_types<std::tuple<T1s...>, std::tuple<T2s...>>
 };
 } // namespace detail
 
+/// @brief Concatenate two std::tuple type lists into one std::tuple type.
 template <typename T1, typename T2>
 using tuple_cat_t = typename detail::tuple_cat_types<T1, T2>::type;
 

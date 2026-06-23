@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdio>
+
 #include "gemm_utils.hpp"
 #include "ck_tile/host/device_prop.hpp"
 
@@ -23,7 +25,9 @@ template <typename T,
 int run_gemm_abquant_quantgrouped(const ck_tile::ArgParser& arg_parser)
 {
     using namespace ck_tile::core::arch;
-    if constexpr(getCMakeTargetsContain<amdgcn_target_id::GFX950>())
+    if constexpr(getCMakeTargetsContain<amdgcn_target_id::GFX950>() &&
+                 (ck_tile::core::amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE ||
+                  get_compiler_target().TARGET_ID == amdgcn_target_id::GFX950))
     {
         if(ck_tile::is_gfx95_supported())
         {
@@ -34,7 +38,9 @@ int run_gemm_abquant_quantgrouped(const ck_tile::ArgParser& arg_parser)
                                               QT>(arg_parser);
         }
     }
-    if constexpr(getCMakeTargetsContainOtherThan<amdgcn_target_id::GFX950>())
+    if constexpr(getCMakeTargetsContainOtherThan<amdgcn_target_id::GFX950>() &&
+                 (ck_tile::core::amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE ||
+                  get_compiler_target().TARGET_ID != amdgcn_target_id::GFX950))
     {
         return run_gemm_example_prec_type<GemmConfigABQuantPrefill<T, TransposeC>,
                                           TypeConfig,
@@ -42,7 +48,8 @@ int run_gemm_abquant_quantgrouped(const ck_tile::ArgParser& arg_parser)
                                           BQuantGroupSize,
                                           QT>(arg_parser);
     }
-    __builtin_unreachable();
+    std::fprintf(stderr, "No AB-quant grouped GEMM kernel was compiled for the current device.\n");
+    return -1;
 }
 
 template <typename T,
@@ -54,7 +61,9 @@ template <typename T,
 int run_gemm_abquant_quantgrouped_preshuffleb(const ck_tile::ArgParser& arg_parser)
 {
     using namespace ck_tile::core::arch;
-    if constexpr(getCMakeTargetsContain<amdgcn_target_id::GFX950>())
+    if constexpr(getCMakeTargetsContain<amdgcn_target_id::GFX950>() &&
+                 (ck_tile::core::amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE ||
+                  get_compiler_target().TARGET_ID == amdgcn_target_id::GFX950))
     {
         if(ck_tile::is_gfx95_supported())
         {
@@ -65,7 +74,9 @@ int run_gemm_abquant_quantgrouped_preshuffleb(const ck_tile::ArgParser& arg_pars
                                               QT>(arg_parser);
         }
     }
-    if constexpr(getCMakeTargetsContainOtherThan<amdgcn_target_id::GFX950>())
+    if constexpr(getCMakeTargetsContainOtherThan<amdgcn_target_id::GFX950>() &&
+                 (ck_tile::core::amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE ||
+                  get_compiler_target().TARGET_ID != amdgcn_target_id::GFX950))
     {
         return run_gemm_example_prec_type<GemmConfigPreshuffleB_ABQuant_Prefill<T, TransposeC>,
                                           TypeConfig,
@@ -73,5 +84,8 @@ int run_gemm_abquant_quantgrouped_preshuffleb(const ck_tile::ArgParser& arg_pars
                                           BQuantGroupSize,
                                           QT>(arg_parser);
     }
-    __builtin_unreachable();
+    std::fprintf(stderr,
+                 "No preshuffle-B AB-quant grouped GEMM kernel was compiled for the current "
+                 "device.\n");
+    return -1;
 }

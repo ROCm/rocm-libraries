@@ -205,7 +205,7 @@ enum struct amdgcn_target_wave_size_id
 {
     WAVE32 = 32u,
     WAVE64 = 64u,
-    HOST   = 64u, // TODO: Is this correct? Should the host default to 64 or 1?
+    HOST   = 64u, // Host-side default; it does not describe a device wavefront.
 };
 
 #if 1 //__cplusplus <= 201703L
@@ -220,6 +220,12 @@ struct amdgcn_target
     static constexpr amdgcn_target_family_id FAMILY_ID       = FamilyId;
     static constexpr amdgcn_target_arch_id ARCH_ID           = ArchId;
     static constexpr amdgcn_target_wave_size_id WAVE_SIZE_ID = WaveSizeId;
+};
+
+template <typename... CompilerTargets>
+struct amdgcn_targets
+{
+    static constexpr index_t SIZE = sizeof...(CompilerTargets);
 };
 
 template <amdgcn_target_id TargetId,
@@ -272,64 +278,164 @@ static constexpr auto make_amdgcn_gfx12_target()
                          amdgcn_target_wave_size_id::WAVE32>{};
 }
 
+namespace target_detail {
+template <typename CompilerTarget, amdgcn_target_id... TargetIds>
+struct is_target_id_any_of_impl
+{
+    static constexpr bool value = is_any_value_of(CompilerTarget::TARGET_ID, TargetIds...);
+};
+
+// For target packs, every configured target must match one of the queried values. For example,
+// a pack containing gfx908 and gfx90a matches a gfx9-family query, while a pack containing gfx908
+// and gfx1200 does not. This keeps mixed-family CMake configurations from enabling a specialization
+// for only part of the pack.
+template <typename... CompilerTargets, amdgcn_target_id... TargetIds>
+struct is_target_id_any_of_impl<amdgcn_targets<CompilerTargets...>, TargetIds...>
+{
+    static constexpr bool value = sizeof...(CompilerTargets) > 0 &&
+                                  (is_any_value_of(CompilerTargets::TARGET_ID, TargetIds...) &&
+                                   ...);
+};
+
+template <typename CompilerTarget, amdgcn_target_family_id... FamilyIds>
+struct is_target_family_any_of_impl
+{
+    static constexpr bool value = is_any_value_of(CompilerTarget::FAMILY_ID, FamilyIds...);
+};
+
+template <typename... CompilerTargets, amdgcn_target_family_id... FamilyIds>
+struct is_target_family_any_of_impl<amdgcn_targets<CompilerTargets...>, FamilyIds...>
+{
+    static constexpr bool value = sizeof...(CompilerTargets) > 0 &&
+                                  (is_any_value_of(CompilerTargets::FAMILY_ID, FamilyIds...) &&
+                                   ...);
+};
+
+template <typename CompilerTarget, amdgcn_target_arch_id... ArchIds>
+struct is_target_arch_any_of_impl
+{
+    static constexpr bool value = is_any_value_of(CompilerTarget::ARCH_ID, ArchIds...);
+};
+
+template <typename... CompilerTargets, amdgcn_target_arch_id... ArchIds>
+struct is_target_arch_any_of_impl<amdgcn_targets<CompilerTargets...>, ArchIds...>
+{
+    static constexpr bool value = sizeof...(CompilerTargets) > 0 &&
+                                  (is_any_value_of(CompilerTargets::ARCH_ID, ArchIds...) && ...);
+};
+
+template <typename CompilerTarget, amdgcn_target_wave_size_id... WaveSizeIds>
+struct is_target_wave_size_any_of_impl
+{
+    static constexpr bool value = is_any_value_of(CompilerTarget::WAVE_SIZE_ID, WaveSizeIds...);
+};
+
+template <typename... CompilerTargets, amdgcn_target_wave_size_id... WaveSizeIds>
+struct is_target_wave_size_any_of_impl<amdgcn_targets<CompilerTargets...>, WaveSizeIds...>
+{
+    static constexpr bool value = sizeof...(CompilerTargets) > 0 &&
+                                  (is_any_value_of(CompilerTargets::WAVE_SIZE_ID, WaveSizeIds...) &&
+                                   ...);
+};
+
+template <typename CompilerTargetPack>
+struct is_target_pack_homogeneous_impl
+{
+    static constexpr bool value = false;
+};
+
+template <typename FirstCompilerTarget, typename... RestCompilerTargets>
+struct is_target_pack_homogeneous_impl<amdgcn_targets<FirstCompilerTarget, RestCompilerTargets...>>
+{
+    static constexpr bool value =
+        ((RestCompilerTargets::FAMILY_ID == FirstCompilerTarget::FAMILY_ID) && ...) &&
+        ((RestCompilerTargets::ARCH_ID == FirstCompilerTarget::ARCH_ID) && ...) &&
+        ((RestCompilerTargets::WAVE_SIZE_ID == FirstCompilerTarget::WAVE_SIZE_ID) && ...);
+};
+
+template <>
+struct is_target_pack_homogeneous_impl<amdgcn_targets<>>
+{
+    static constexpr bool value = false;
+};
+} // namespace target_detail
+
 template <typename CompilerTarget, amdgcn_target_id... TargetIds>
 static constexpr auto is_target_id_any_of()
 {
-    return is_any_value_of(CompilerTarget::TARGET_ID, TargetIds...);
+    return target_detail::is_target_id_any_of_impl<CompilerTarget, TargetIds...>::value;
 }
 
 template <typename CompilerTarget, amdgcn_target_family_id... FamilyIds>
 static constexpr auto is_target_family_any_of()
 {
-    return is_any_value_of(CompilerTarget::FAMILY_ID, FamilyIds...);
+    return target_detail::is_target_family_any_of_impl<CompilerTarget, FamilyIds...>::value;
+}
+
+template <typename CompilerTarget, amdgcn_target_arch_id... ArchIds>
+static constexpr auto is_target_arch_any_of()
+{
+    return target_detail::is_target_arch_any_of_impl<CompilerTarget, ArchIds...>::value;
+}
+
+template <typename CompilerTarget, amdgcn_target_wave_size_id... WaveSizeIds>
+static constexpr auto is_target_wave_size_any_of()
+{
+    return target_detail::is_target_wave_size_any_of_impl<CompilerTarget, WaveSizeIds...>::value;
+}
+
+template <typename CompilerTargetPack>
+static constexpr auto is_target_pack_homogeneous()
+{
+    return target_detail::is_target_pack_homogeneous_impl<CompilerTargetPack>::value;
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx9()
 {
-    return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX9;
+    return is_target_family_any_of<CompilerTarget, amdgcn_target_family_id::GFX9>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx10_3()
 {
-    return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX10_3;
+    return is_target_family_any_of<CompilerTarget, amdgcn_target_family_id::GFX10_3>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx11()
 {
-    return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX11;
+    return is_target_family_any_of<CompilerTarget, amdgcn_target_family_id::GFX11>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx12()
 {
-    return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX12;
+    return is_target_family_any_of<CompilerTarget, amdgcn_target_family_id::GFX12>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_arch_cdna()
 {
-    return CompilerTarget::ARCH_ID == amdgcn_target_arch_id::CDNA;
+    return is_target_arch_any_of<CompilerTarget, amdgcn_target_arch_id::CDNA>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_arch_rdna()
 {
-    return CompilerTarget::ARCH_ID == amdgcn_target_arch_id::RDNA;
+    return is_target_arch_any_of<CompilerTarget, amdgcn_target_arch_id::RDNA>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_wave_size_32()
 {
-    return CompilerTarget::WAVE_SIZE_ID == amdgcn_target_wave_size_id::WAVE32;
+    return is_target_wave_size_any_of<CompilerTarget, amdgcn_target_wave_size_id::WAVE32>();
 }
 
 template <typename CompilerTarget>
 static constexpr bool is_target_wave_size_64()
 {
-    return CompilerTarget::WAVE_SIZE_ID == amdgcn_target_wave_size_id::WAVE64;
+    return is_target_wave_size_any_of<CompilerTarget, amdgcn_target_wave_size_id::WAVE64>();
 }
 
 // Helper to map compiler state to target arch id
@@ -361,6 +467,57 @@ static constexpr bool is_target_wave_size_64()
         return make_amdgcn_gfx12_target<amdgcn_target_id::TARGET_ID>(); \
     }                                                                   \
     else
+
+template <uint32_t RawTargetId>
+static constexpr auto make_amdgcn_target_from_id()
+{
+    constexpr auto id = static_cast<amdgcn_target_id>(RawTargetId);
+
+    if constexpr(id == amdgcn_target_id::GFX908 || id == amdgcn_target_id::GFX90A ||
+                 id == amdgcn_target_id::GFX942 || id == amdgcn_target_id::GFX950)
+    {
+        return make_amdgcn_gfx9_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1030 || id == amdgcn_target_id::GFX1031 ||
+                      id == amdgcn_target_id::GFX1032 || id == amdgcn_target_id::GFX1033 ||
+                      id == amdgcn_target_id::GFX1034 || id == amdgcn_target_id::GFX1035 ||
+                      id == amdgcn_target_id::GFX1036 || id == amdgcn_target_id::GFX103_GENERIC)
+    {
+        return make_amdgcn_gfx10_3_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1100 || id == amdgcn_target_id::GFX1101 ||
+                      id == amdgcn_target_id::GFX1102 || id == amdgcn_target_id::GFX1103 ||
+                      id == amdgcn_target_id::GFX1150 || id == amdgcn_target_id::GFX1151 ||
+                      id == amdgcn_target_id::GFX1152 || id == amdgcn_target_id::GFX1153 ||
+                      id == amdgcn_target_id::GFX11_GENERIC)
+    {
+        return make_amdgcn_gfx11_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1200 || id == amdgcn_target_id::GFX1201 ||
+                      id == amdgcn_target_id::GFX12_GENERIC)
+    {
+        return make_amdgcn_gfx12_target<id>();
+    }
+    else if constexpr(id == amdgcn_target_id::GFX1250)
+    {
+        return make_amdgcn_gfx12_target<id>();
+    }
+    else
+    {
+        static_assert(
+            always_false_v<std::integral_constant<uint32_t, RawTargetId>>,
+            "CK_CMAKE_GPU_TARGET_IDS contains HOST, UNKNOWN, or an unsupported target!\n");
+        return amdgcn_target<>{}; // By default, return HOST target.
+    }
+}
+
+template <uint32_t... RawTargetIds>
+static constexpr auto make_amdgcn_targets_from_ids()
+{
+    using Targets = amdgcn_targets<decltype(make_amdgcn_target_from_id<RawTargetIds>())...>;
+    static_assert(Targets::SIZE > 0, "CK_CMAKE_GPU_TARGET_IDS must contain at least one target!\n");
+    return Targets{};
+}
 
 /**
  * @brief Returns the amdgcn_target of the current compiler pass.
@@ -416,54 +573,31 @@ constexpr auto get_compiler_target()
 template <typename = void>
 static constexpr auto getCMakeCompilerTarget()
 {
-    using ck_tile::core::arch::amdgcn_target_id;
 #ifdef CK_CMAKE_GPU_TARGET_IDS
     constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
-    constexpr amdgcn_target_id id =
-        static_cast<amdgcn_target_id>(ids[0]); // We pick the *first* target arch. TODO.
-
-    if constexpr(id == amdgcn_target_id::GFX908 || id == amdgcn_target_id::GFX90A ||
-                 id == amdgcn_target_id::GFX942 || id == amdgcn_target_id::GFX950)
-    {
-        return make_amdgcn_gfx9_target<id>();
-    }
-    else if constexpr(id == amdgcn_target_id::GFX1030 || id == amdgcn_target_id::GFX1031 ||
-                      id == amdgcn_target_id::GFX1032 || id == amdgcn_target_id::GFX1033 ||
-                      id == amdgcn_target_id::GFX1034 || id == amdgcn_target_id::GFX1035 ||
-                      id == amdgcn_target_id::GFX1036 || id == amdgcn_target_id::GFX103_GENERIC)
-    {
-        return make_amdgcn_gfx10_3_target<id>();
-    }
-    else if constexpr(id == amdgcn_target_id::GFX1100 || id == amdgcn_target_id::GFX1101 ||
-                      id == amdgcn_target_id::GFX1102 || id == amdgcn_target_id::GFX1103 ||
-                      id == amdgcn_target_id::GFX1150 || id == amdgcn_target_id::GFX1151 ||
-                      id == amdgcn_target_id::GFX1152 || id == amdgcn_target_id::GFX1153 ||
-                      id == amdgcn_target_id::GFX11_GENERIC)
-    {
-        return make_amdgcn_gfx11_target<id>();
-    }
-    else if constexpr(id == amdgcn_target_id::GFX1200 || id == amdgcn_target_id::GFX1201 ||
-                      id == amdgcn_target_id::GFX12_GENERIC)
-    {
-        return make_amdgcn_gfx12_target<id>();
-    }
-    else if constexpr(id == amdgcn_target_id::GFX1250)
-    {
-        return make_amdgcn_gfx12_target<id>(); // TODO: This should not be a GFX12 target.
-    }
-    else
-    {
-#if USE_NEW_UNIFIED_FRAMEWORK // Avoid hard errors for third parties including arch.hpp
-        static_assert(always_false_v<decltype(id)>,
-                      "CK_CMAKE_GPU_TARGET_IDS[0] is HOST or UNKNOWN!\n");
-#endif
-        return amdgcn_target<>{}; // By default, return HOST target.
-    }
+    return make_amdgcn_target_from_id<ids[0]>();
 #else
 #if USE_NEW_UNIFIED_FRAMEWORK
     static_assert(false, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
 #endif
     return amdgcn_target<>{}; // By default, return HOST target.
+#endif
+}
+
+/**
+ * @brief Returns all amdgcn_targets configured by CMake.
+ * @note Unlike get_compiler_target(), this does not inspect the active host/device compiler pass.
+ */
+template <typename = void>
+static constexpr auto getCMakeCompilerTargets()
+{
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    return make_amdgcn_targets_from_ids<CK_CMAKE_GPU_TARGET_IDS>();
+#else
+#if USE_NEW_UNIFIED_FRAMEWORK
+    static_assert(false, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
+#endif
+    return amdgcn_targets<amdgcn_target<>>{};
 #endif
 }
 
@@ -631,7 +765,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target_id(char const* 
  */
 template <typename CompilerTarget, amdgcn_target_id... SupportedTargetIds>
 using enable_if_target_id_t =
-    std::enable_if_t<is_any_value_of(CompilerTarget::TARGET_ID, SupportedTargetIds...)>;
+    std::enable_if_t<is_target_id_any_of<CompilerTarget, SupportedTargetIds...>()>;
 
 /**
  * @brief SFINAE enabler for a compiler target if the family id is in the list of supported family
@@ -642,7 +776,7 @@ using enable_if_target_id_t =
  */
 template <typename CompilerTarget, amdgcn_target_family_id... SupportedTargetFamilyIds>
 using enable_if_target_family_id_t =
-    std::enable_if_t<is_any_value_of(CompilerTarget::FAMILY_ID, SupportedTargetFamilyIds...)>;
+    std::enable_if_t<is_target_family_any_of<CompilerTarget, SupportedTargetFamilyIds...>()>;
 
 /**
  * @brief SFINAE enabler for a compiler target if the arch id is in the list of supported arch ids
@@ -651,7 +785,7 @@ using enable_if_target_family_id_t =
  */
 template <typename CompilerTarget, amdgcn_target_arch_id... SupportedTargetArchIds>
 using enable_if_target_arch_id_t =
-    std::enable_if_t<is_any_value_of(CompilerTarget::ARCH_ID, SupportedTargetArchIds...)>;
+    std::enable_if_t<is_target_arch_any_of<CompilerTarget, SupportedTargetArchIds...>()>;
 
 /**
  * @brief SFINAE enabler for a compiler target if the wave size id is in the list of supported wave
@@ -662,7 +796,7 @@ using enable_if_target_arch_id_t =
  */
 template <typename CompilerTarget, amdgcn_target_wave_size_id... SupportedTargetWaveSizeIds>
 using enable_if_target_wave_size_id_t =
-    std::enable_if_t<is_any_value_of(CompilerTarget::WAVE_SIZE_ID, SupportedTargetWaveSizeIds...)>;
+    std::enable_if_t<is_target_wave_size_any_of<CompilerTarget, SupportedTargetWaveSizeIds...>()>;
 
 /// Specialized enablers for common families, architectures, and wave sizes ///
 

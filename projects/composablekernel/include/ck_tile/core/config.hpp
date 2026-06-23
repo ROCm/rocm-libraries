@@ -50,6 +50,11 @@
 #define __gfx12__
 #endif
 
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx950__) && defined(CK_TILE_USE_WMMA)
+#undef CK_TILE_USE_WMMA
+#define CK_TILE_USE_WMMA 0
+#endif
+
 #ifdef __HIPCC__
 #define CK_TILE_HOST inline __host__
 #define CK_TILE_DEVICE inline __device__

@@ -2,20 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "run_gemm_quant_example.inc"
+#include "gemm_bquant_quantgrouped_preshuffleb.h"
 
-#if CK_TILE_USE_WMMA
 template <typename T>
-using GemmConfig = GemmConfigPreshuffleB_PreshuffleBQuant_Prefill_Wmma<T>;
-#else
-template <typename T>
-using GemmConfig = GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<T>;
-#endif
+using WmmaGemmConfig = GemmConfigPreshuffleB_PreshuffleBQuant_Prefill_Wmma<T>;
 
-#define RUN_GEMM_EXAMPLE_PREC_TYPE                         \
-    run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>, \
-                               TypeConfig,                 \
-                               QuantGroupSize,             \
-                               ck_tile::QuantType::BQuantGrouped>(arg_parser);
+template <typename T>
+using GenericGemmConfig = GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<T>;
+
+#define RUN_GEMM_EXAMPLE_PREC_TYPE                                              \
+    run_gemm_bquant_quantgrouped_preshuffleb<WmmaGemmConfig<ck_tile::fp8_t>,    \
+                                             GenericGemmConfig<ck_tile::fp8_t>, \
+                                             TypeConfig,                        \
+                                             QuantGroupSize>(arg_parser);
 
 static auto _ = []() {
     auto& lut = get_kernel_lut();

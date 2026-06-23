@@ -5,6 +5,9 @@
 
 #include <cstdint>
 
+/// @file
+/// @brief Compile-time query helpers for GPU targets configured through CMake.
+
 namespace ck {
 
 // Constexpr query functions for CMake-configured GPU targets.
@@ -29,6 +32,29 @@ inline static constexpr bool cmakeTargetsContain([[maybe_unused]] uint32_t targe
     for(auto id : ids)
     {
         if(id == target)
+        {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+/**
+ * @brief Check if any CMake-configured GPU target belongs to the specified family.
+ * @details Target IDs use a 16-bit layout: family ID in the high byte and chip variant
+ *          in the low byte. For example, gfx908 is 0x0908 and gfx90a is 0x090A,
+ *          so both belong to the 0x09 family.
+ * @param family The target family hex value to search for (e.g. 0x09 for gfx9).
+ * @return true if any target in CK_CMAKE_GPU_TARGET_IDS belongs to family, false otherwise.
+ */
+inline static constexpr bool cmakeTargetsContainFamily([[maybe_unused]] uint32_t family)
+{
+#ifdef CK_CMAKE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+    for(auto id : ids)
+    {
+        if((id >> 8) == family)
         {
             return true;
         }

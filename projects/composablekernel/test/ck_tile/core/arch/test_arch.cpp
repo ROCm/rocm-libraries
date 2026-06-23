@@ -188,6 +188,82 @@ TEST(ArchTest, TestSFINAEEnablersGfx9CdnaWave32)
     EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<Target>::value);
 }
 
+TEST(ArchTest, MakeTargetFromIdFields)
+{
+    constexpr auto gfx908 = make_amdgcn_target_from_id<0x0908>();
+    EXPECT_EQ(gfx908.TARGET_ID, amdgcn_target_id::GFX908);
+    EXPECT_EQ(gfx908.FAMILY_ID, amdgcn_target_family_id::GFX9);
+    EXPECT_EQ(gfx908.ARCH_ID, amdgcn_target_arch_id::CDNA);
+    EXPECT_EQ(gfx908.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE64);
+
+    constexpr auto gfx1100 = make_amdgcn_target_from_id<0x1100>();
+    EXPECT_EQ(gfx1100.TARGET_ID, amdgcn_target_id::GFX1100);
+    EXPECT_EQ(gfx1100.FAMILY_ID, amdgcn_target_family_id::GFX11);
+    EXPECT_EQ(gfx1100.ARCH_ID, amdgcn_target_arch_id::RDNA);
+    EXPECT_EQ(gfx1100.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
+
+    constexpr auto gfx1200 = make_amdgcn_target_from_id<0x1200>();
+    EXPECT_EQ(gfx1200.TARGET_ID, amdgcn_target_id::GFX1200);
+    EXPECT_EQ(gfx1200.FAMILY_ID, amdgcn_target_family_id::GFX12);
+    EXPECT_EQ(gfx1200.ARCH_ID, amdgcn_target_arch_id::RDNA);
+    EXPECT_EQ(gfx1200.WAVE_SIZE_ID, amdgcn_target_wave_size_id::WAVE32);
+}
+
+TEST(ArchTest, MakeTargetsFromIdsBuildsHomogeneousPack)
+{
+    using Targets = decltype(make_amdgcn_targets_from_ids<0x0908, 0x090A, 0x0942>());
+    constexpr bool target_ids_match = is_target_id_any_of<Targets,
+                                                          amdgcn_target_id::GFX908,
+                                                          amdgcn_target_id::GFX90A,
+                                                          amdgcn_target_id::GFX942>();
+    constexpr bool family_matches =
+        is_target_family_any_of<Targets, amdgcn_target_family_id::GFX9>();
+    constexpr bool arch_matches = is_target_arch_any_of<Targets, amdgcn_target_arch_id::CDNA>();
+    constexpr bool wave_size_matches =
+        is_target_wave_size_any_of<Targets, amdgcn_target_wave_size_id::WAVE64>();
+    constexpr bool pack_is_homogeneous = is_target_pack_homogeneous<Targets>();
+
+    EXPECT_EQ(3, Targets::SIZE);
+    EXPECT_EQ(true, target_ids_match);
+    EXPECT_EQ(true, family_matches);
+    EXPECT_EQ(true, arch_matches);
+    EXPECT_EQ(true, wave_size_matches);
+    EXPECT_EQ(true, pack_is_homogeneous);
+}
+
+TEST(ArchTest, TargetPackQueriesUseAllTargets)
+{
+    using Gfx908             = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+    using Gfx90a             = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+    using Gfx1200            = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1200>());
+    using HomogeneousTargets = amdgcn_targets<Gfx908, Gfx90a>;
+    using MixedTargets       = amdgcn_targets<Gfx908, Gfx1200>;
+    using EmptyTargets       = amdgcn_targets<>;
+    constexpr bool homogeneous_ids_match = is_target_id_any_of<HomogeneousTargets,
+                                                               amdgcn_target_id::GFX908,
+                                                               amdgcn_target_id::GFX90A>();
+    constexpr bool single_homogeneous_id_matches =
+        is_target_id_any_of<HomogeneousTargets, amdgcn_target_id::GFX908>();
+    constexpr bool mixed_family_matches =
+        is_target_family_any_of<MixedTargets, amdgcn_target_family_id::GFX9>();
+    constexpr bool mixed_arch_matches =
+        is_target_arch_any_of<MixedTargets, amdgcn_target_arch_id::CDNA>();
+    constexpr bool mixed_wave_size_matches =
+        is_target_wave_size_any_of<MixedTargets, amdgcn_target_wave_size_id::WAVE64>();
+    constexpr bool empty_id_matches = is_target_id_any_of<EmptyTargets, amdgcn_target_id::GFX908>();
+    constexpr bool mixed_pack_is_homogeneous = is_target_pack_homogeneous<MixedTargets>();
+    constexpr bool empty_pack_is_homogeneous = is_target_pack_homogeneous<EmptyTargets>();
+
+    EXPECT_EQ(true, homogeneous_ids_match);
+    EXPECT_EQ(false, single_homogeneous_id_matches);
+    EXPECT_EQ(false, mixed_family_matches);
+    EXPECT_EQ(false, mixed_arch_matches);
+    EXPECT_EQ(false, mixed_wave_size_matches);
+    EXPECT_EQ(false, empty_id_matches);
+    EXPECT_EQ(false, mixed_pack_is_homogeneous);
+    EXPECT_EQ(false, empty_pack_is_homogeneous);
+}
+
 TEST(ArchTest, TestSFINAEEnablersMix)
 {
     static constexpr auto target = amdgcn_target<amdgcn_target_id::GFX90A,
@@ -199,6 +275,30 @@ TEST(ArchTest, TestSFINAEEnablersMix)
     EXPECT_EQ(false, SFINAETestFamilyIdGfx9<Target>::value);
     EXPECT_EQ(true, SFINAETestArchIdCdna<Target>::value);
     EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<Target>::value);
+}
+
+TEST(ArchTest, TestSFINAEEnablersTargetPackGfx9)
+{
+    using Target0 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+    using Target1 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX90A>());
+    using Targets = amdgcn_targets<Target0, Target1>;
+
+    EXPECT_EQ(true, SFINAETestTargetIdGfx908OrGfx90a<Targets>::value);
+    EXPECT_EQ(true, SFINAETestFamilyIdGfx9<Targets>::value);
+    EXPECT_EQ(true, SFINAETestArchIdCdna<Targets>::value);
+    EXPECT_EQ(true, SFINAETestWaveSizeIdWave64<Targets>::value);
+}
+
+TEST(ArchTest, TestSFINAEEnablersTargetPackMixedFamilies)
+{
+    using Target0 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX908>());
+    using Target1 = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1200>());
+    using Targets = amdgcn_targets<Target0, Target1>;
+
+    EXPECT_EQ(false, SFINAETestTargetIdGfx908OrGfx90a<Targets>::value);
+    EXPECT_EQ(false, SFINAETestFamilyIdGfx9<Targets>::value);
+    EXPECT_EQ(false, SFINAETestArchIdCdna<Targets>::value);
+    EXPECT_EQ(false, SFINAETestWaveSizeIdWave64<Targets>::value);
 }
 
 #elif 0 // TODO: c++20 tests

@@ -514,7 +514,7 @@ template <index_t NDimSpatial,
           ConvolutionBackwardDataSpecialization ConvSpec>
 using device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances = ck::tuple_cat_t<
     std::conditional_t<
-        !ck::cmakeTargetsContain(0x0950),
+        !ck::cmakeTargetsContainOnly(0x0950),
         device_grouped_conv_bwd_data_xdl_f32_tf32_optimized_loads_instances_base<NDimSpatial,
                                                                                  ALayout,
                                                                                  BLayout,

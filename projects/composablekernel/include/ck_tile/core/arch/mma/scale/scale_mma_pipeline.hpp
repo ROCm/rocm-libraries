@@ -55,9 +55,7 @@ template <typename ADataType_,
           index_t SwizzleFactor      = 1,
           index_t AttrNumAccessAV    = 1,
           index_t AttrNumAccessBV    = AttrNumAccessAV,
-          typename CompilerTarget =
-              decltype(getCMakeCompilerTarget()), // TODO: c++20 amdgcn_target_arch_id GfxTargetId =
-                                                  // get_compiler_target(),
+          typename CompilerTarget    = decltype(getCMakeCompilerTarget()),
           typename MmaOp_ =
               typename MmaDefaultSelector<ADataType_, // TODO: c++20 MmaOpI MmaOp_ = typename
                                                       // MmaDefaultSelector<ADataType,
