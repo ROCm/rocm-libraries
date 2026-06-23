@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <set>
 #include <vector>
@@ -166,7 +167,14 @@ namespace TensileLite
 
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
+            // Rank against the capped CU count when TENSILE_STREAMK_MAX_CUS limits the grid.
+            origami::hardware_t analytical_hardware = *(pAMDGPU->analyticalHardware);
+            if(pAMDGPU->skMaxCUs > 0)
+            {
+                analytical_hardware.N_CU = std::min(
+                    analytical_hardware.N_CU, static_cast<size_t>(pAMDGPU->skMaxCUs));
+            }
+
             auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
@@ -186,7 +194,7 @@ namespace TensileLite
             };
 
             auto prediction_result = origami::rank_configs(
-                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                origami_problem, analytical_hardware, origami_config_list);
 
             for(const auto& r : prediction_result)
             {
