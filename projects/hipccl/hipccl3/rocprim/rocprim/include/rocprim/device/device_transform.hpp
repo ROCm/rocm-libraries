@@ -43,8 +43,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
-
 namespace detail
 {
 
@@ -132,8 +130,6 @@ inline hipError_t transform_impl(InputIterator     input,
 }
 
 } // namespace detail
-
-#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 /// \brief Parallel transform primitive for device level.
 ///
