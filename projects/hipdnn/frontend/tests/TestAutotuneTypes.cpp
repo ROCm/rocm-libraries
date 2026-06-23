@@ -371,28 +371,20 @@ TEST(TestAutotuneTypes, StddevSingleValue)
 // AutotuneConfig Default Values Tests
 // ============================================================================
 
-TEST(TestAutotuneTypes, AutotuneConfigCustomValues)
+TEST(TestAutotuneTypes, AutotuneConfigDefaultValues)
 {
-    AutotuneConfig config;
-    config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
-    config.warmupIterations = 5;
-    config.timedIterations = 20;
-    config.maxIterations = 200;
-    config.windowSize = 10;
-    config.stabilityThreshold = 0.02f;
-    config.engineIdFilter = {1, 2, 3};
-    config.continueOnPrimingFailure = true;
+    const AutotuneConfig config;
 
-    EXPECT_EQ(config.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(config.mode, TuneMode::AUTO);
     EXPECT_EQ(config.strategy, AutotuneStrategy::RUN_UNTIL_STABLE);
-    EXPECT_EQ(config.warmupIterations, 5);
-    EXPECT_EQ(config.timedIterations, 20);
-    EXPECT_EQ(config.maxIterations, 200);
-    EXPECT_EQ(config.windowSize, 10);
-    EXPECT_FLOAT_EQ(config.stabilityThreshold, 0.02f);
-    EXPECT_EQ(config.engineIdFilter.size(), 3u);
-    EXPECT_TRUE(config.continueOnPrimingFailure);
+    EXPECT_EQ(config.warmupIterations, 1);
+    EXPECT_EQ(config.timedIterations, 10);
+    EXPECT_EQ(config.maxIterations, 100);
+    EXPECT_EQ(config.windowSize, 3);
+    EXPECT_FLOAT_EQ(config.stabilityThreshold, 0.05f);
+    EXPECT_TRUE(config.engineIdFilter.empty());
+    EXPECT_EQ(config.rankingFn, nullptr);
+    EXPECT_EQ(config.primingFailurePolicy, PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE);
 }
 
 // ============================================================================
@@ -419,52 +411,16 @@ TEST(TestAutotuneTypes, AutotuneResultDefaults)
     EXPECT_EQ(result.strategyUsed, AutotuneStrategy::RUN_UNTIL_STABLE);
 }
 
-TEST(TestAutotuneTypes, AutotuneResultPopulated)
-{
-    AutotuneResult result;
-    result.engineId = 42;
-    result.engineName = "MIOpen_ConvFwd";
-    result.knobSettings.emplace_back("SPLIT_K", int64_t{2});
-    result.rank = 0;
-    result.minTimeMs = 1.5f;
-    result.avgTimeMs = 1.8f;
-    result.stddevMs = 0.3f;
-    result.iterationsRun = 10;
-    result.succeeded = true;
-    result.modeUsed = TuneMode::EXHAUSTIVE;
-    result.converged = true;
-    result.workspaceSize = 4096;
-    result.ranExhaustive = true;
-    result.strategyUsed = AutotuneStrategy::SINGLE_SHOT;
-
-    EXPECT_EQ(result.engineId, 42);
-    EXPECT_EQ(result.engineName, "MIOpen_ConvFwd");
-    EXPECT_EQ(result.knobSettings.size(), 1u);
-    EXPECT_EQ(result.rank, 0);
-    EXPECT_FLOAT_EQ(result.minTimeMs, 1.5f);
-    EXPECT_FLOAT_EQ(result.avgTimeMs, 1.8f);
-    EXPECT_FLOAT_EQ(result.stddevMs, 0.3f);
-    EXPECT_EQ(result.iterationsRun, 10);
-    EXPECT_TRUE(result.succeeded);
-    EXPECT_EQ(result.modeUsed, TuneMode::EXHAUSTIVE);
-    EXPECT_TRUE(result.converged);
-    EXPECT_EQ(result.workspaceSize, 4096);
-    EXPECT_TRUE(result.ranExhaustive);
-    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::SINGLE_SHOT);
-}
-
 // ============================================================================
 // AutotuneStorageConfig Tests
 // ============================================================================
 
-TEST(TestAutotuneTypes, AutotuneStorageConfigCustomValues)
+TEST(TestAutotuneTypes, AutotuneStorageConfigDefaults)
 {
-    AutotuneStorageConfig config;
-    config.filePath = "/tmp/autotune_results.json";
-    config.deleteAllExistingFileContent = true;
+    const AutotuneStorageConfig config;
 
-    EXPECT_EQ(config.filePath.string(), "/tmp/autotune_results.json");
-    EXPECT_TRUE(config.deleteAllExistingFileContent);
+    EXPECT_TRUE(config.filePath.empty());
+    EXPECT_FALSE(config.deleteAllExistingFileContent);
 }
 
 // ============================================================================
@@ -483,9 +439,33 @@ TEST(TestAutotuneTypes, AutotuneStrategyValues)
     EXPECT_NE(AutotuneStrategy::SINGLE_SHOT, AutotuneStrategy::RUN_UNTIL_STABLE);
 }
 
+TEST(TestAutotuneTypes, TuneModeToStringMapsEachValue)
+{
+    EXPECT_EQ(tuneModeToString(TuneMode::AUTO), "AUTO");
+    EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), "EXHAUSTIVE");
+}
+
 TEST(TestAutotuneTypes, TuneModeToStringUnknownReturnsUnknown)
 {
     EXPECT_EQ(tuneModeToString(static_cast<TuneMode>(999)), "UNKNOWN");
+}
+
+TEST(TestAutotuneTypes, TuneModeToLowerStringMapsEachValue)
+{
+    EXPECT_EQ(tuneModeToLowerString(TuneMode::AUTO), "auto");
+    EXPECT_EQ(tuneModeToLowerString(TuneMode::EXHAUSTIVE), "exhaustive");
+}
+
+TEST(TestAutotuneTypes, TuneModeToLowerStringUnknownReturnsUnknown)
+{
+    EXPECT_EQ(tuneModeToLowerString(static_cast<TuneMode>(999)), "unknown");
+}
+
+TEST(TestAutotuneTypes, AutotuneStrategyToStringMapsEachValue)
+{
+    EXPECT_EQ(strategyToString(AutotuneStrategy::SINGLE_SHOT), "SINGLE_SHOT");
+    EXPECT_EQ(strategyToString(AutotuneStrategy::FIXED_AVERAGE), "FIXED_AVERAGE");
+    EXPECT_EQ(strategyToString(AutotuneStrategy::RUN_UNTIL_STABLE), "RUN_UNTIL_STABLE");
 }
 
 TEST(TestAutotuneTypes, AutotuneStrategyToStringUnknownReturnsUnknown)
@@ -493,48 +473,27 @@ TEST(TestAutotuneTypes, AutotuneStrategyToStringUnknownReturnsUnknown)
     EXPECT_EQ(strategyToString(static_cast<AutotuneStrategy>(999)), "UNKNOWN");
 }
 
-// ============================================================================
-// EngineVariant Tests
-// ============================================================================
-
-TEST(TestAutotuneTypes, EngineVariantConstruction)
+TEST(TestAutotuneTypes, AutotuneStrategyToLowerStringMapsEachValue)
 {
-    EngineVariant variant;
-    variant.engineId = 42;
-    variant.knobSettings["SPLIT_K"] = int64_t{2};
-    variant.knobSettings["TILE_SIZE"] = int64_t{128};
-
-    EXPECT_EQ(variant.engineId, 42);
-    EXPECT_EQ(variant.knobSettings.size(), 2u);
-    EXPECT_EQ(std::get<int64_t>(variant.knobSettings.at("SPLIT_K")), 2);
+    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::SINGLE_SHOT), "single_shot");
+    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::FIXED_AVERAGE), "fixed_average");
+    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::RUN_UNTIL_STABLE), "run_until_stable");
 }
 
-// ============================================================================
-// KnobSweepAxis Tests
-// ============================================================================
-
-TEST(TestAutotuneTypes, KnobSweepAxisConstruction)
+TEST(TestAutotuneTypes, AutotuneStrategyToLowerStringUnknownReturnsUnknown)
 {
-    KnobSweepAxis axis;
-    axis.knobId = "SPLIT_K";
-    axis.values = {int64_t{1}, int64_t{2}, int64_t{4}};
-
-    EXPECT_EQ(axis.knobId, "SPLIT_K");
-    EXPECT_EQ(axis.values.size(), 3u);
+    EXPECT_EQ(strategyToLowerString(static_cast<AutotuneStrategy>(999)), "unknown");
 }
 
-// ============================================================================
-// EngineSweepSpec Tests
-// ============================================================================
-
-TEST(TestAutotuneTypes, EngineSweepSpecConstruction)
+TEST(TestAutotuneTypes, PrimingFailurePolicyToStringMapsEachValue)
 {
-    EngineSweepSpec spec;
-    spec.engineId = 42;
-    spec.axes = {{"SPLIT_K", {int64_t{1}, int64_t{2}}}};
-    spec.fixedSettings["REDUCTION_MODE"] = int64_t{1};
+    EXPECT_EQ(primingFailurePolicyToString(PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE),
+              "ABORT_ON_PRIMING_FAILURE");
+    EXPECT_EQ(primingFailurePolicyToString(PrimingFailurePolicy::BENCHMARK_UNPRIMED),
+              "BENCHMARK_UNPRIMED");
+}
 
-    EXPECT_EQ(spec.engineId, 42);
-    EXPECT_EQ(spec.axes.size(), 1u);
-    EXPECT_EQ(spec.fixedSettings.size(), 1u);
+TEST(TestAutotuneTypes, PrimingFailurePolicyToStringUnknownReturnsUnknown)
+{
+    EXPECT_EQ(primingFailurePolicyToString(static_cast<PrimingFailurePolicy>(999)), "UNKNOWN");
 }

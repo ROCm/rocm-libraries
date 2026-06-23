@@ -31,23 +31,6 @@ TEST(TestAutotune, BenchmarkingKnobNameIsGlobalBenchmarking)
 // AutotuneConfig Validation Tests
 // ============================================================================
 
-TEST(TestAutotune, ConfigDefaultsAreValid)
-{
-    const AutotuneConfig config;
-
-    // Verify defaults
-    EXPECT_EQ(config.mode, TuneMode::AUTO);
-    EXPECT_EQ(config.strategy, AutotuneStrategy::RUN_UNTIL_STABLE);
-    EXPECT_EQ(config.warmupIterations, 1);
-    EXPECT_EQ(config.timedIterations, 10);
-    EXPECT_EQ(config.maxIterations, 100);
-    EXPECT_EQ(config.windowSize, 3);
-    EXPECT_FLOAT_EQ(config.stabilityThreshold, 0.05f);
-    EXPECT_TRUE(config.engineIdFilter.empty());
-    EXPECT_EQ(config.rankingFn, nullptr);
-    EXPECT_FALSE(config.continueOnPrimingFailure);
-}
-
 TEST(TestAutotune, ConfigValidationNegativeWarmup)
 {
     hipdnn_frontend::graph::Graph g;
@@ -113,43 +96,6 @@ TEST(TestAutotune, ConfigValidationStabilityThresholdOutOfBounds)
         EXPECT_TRUE(err.is_bad());
         EXPECT_NE(err.get_message().find("stabilityThreshold"), std::string::npos);
     }
-}
-
-// ============================================================================
-// AutotuneResult Default State Tests
-// ============================================================================
-
-TEST(TestAutotune, AutotuneResultDefaultState)
-{
-    const AutotuneResult result;
-
-    EXPECT_EQ(result.engineId, -1);
-    EXPECT_TRUE(result.engineName.empty());
-    EXPECT_TRUE(result.knobSettings.empty());
-    EXPECT_EQ(result.rank, -1);
-    EXPECT_FLOAT_EQ(result.minTimeMs, 0.0f);
-    EXPECT_FLOAT_EQ(result.avgTimeMs, 0.0f);
-    EXPECT_FLOAT_EQ(result.stddevMs, 0.0f);
-    EXPECT_EQ(result.iterationsRun, 0);
-    EXPECT_FALSE(result.succeeded);
-    EXPECT_EQ(result.modeUsed, TuneMode::AUTO);
-    EXPECT_FALSE(result.converged);
-    EXPECT_EQ(result.workspaceSize, 0);
-    EXPECT_FALSE(result.ranExhaustive);
-    EXPECT_TRUE(result.errorMessage.empty());
-    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::RUN_UNTIL_STABLE);
-}
-
-// ============================================================================
-// AutotuneStorageConfig Tests
-// ============================================================================
-
-TEST(TestAutotune, StorageConfigDefaults)
-{
-    const AutotuneStorageConfig config;
-
-    EXPECT_TRUE(config.filePath.empty());
-    EXPECT_FALSE(config.deleteAllExistingFileContent);
 }
 
 // ============================================================================
@@ -360,15 +306,4 @@ TEST(TestAutotune, MaxIterationsCheckOnlyForRunUntilStable)
     // reason (null handle), but the error must NOT be the maxIterations check.
     EXPECT_EQ(err.get_message().find("maxIterations"), std::string::npos)
         << "FIXED_AVERAGE must not trigger the maxIterations validation: " << err.get_message();
-}
-
-// ============================================================================
-// AutotuneResult New Fields Tests
-// ============================================================================
-
-TEST(TestAutotune, AutotuneResultDefaultStrategy)
-{
-    const AutotuneResult result;
-
-    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::RUN_UNTIL_STABLE);
 }

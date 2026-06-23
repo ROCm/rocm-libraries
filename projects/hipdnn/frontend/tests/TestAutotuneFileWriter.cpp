@@ -824,40 +824,6 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
     EXPECT_FALSE(entry["autotune_metadata"].contains("knobs"));
 }
 
-// ── Strategy/Mode String Tests ──────────────────────────────────────────────
-
-TEST(TestAutotuneFileWriter, StrategyToString)
-{
-    EXPECT_EQ(strategyToString(AutotuneStrategy::SINGLE_SHOT), "SINGLE_SHOT");
-    EXPECT_EQ(strategyToString(AutotuneStrategy::FIXED_AVERAGE), "FIXED_AVERAGE");
-    EXPECT_EQ(strategyToString(AutotuneStrategy::RUN_UNTIL_STABLE), "RUN_UNTIL_STABLE");
-}
-
-TEST(TestAutotuneFileWriter, StrategyToLowerString)
-{
-    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::SINGLE_SHOT), "single_shot");
-    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::FIXED_AVERAGE), "fixed_average");
-    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::RUN_UNTIL_STABLE), "run_until_stable");
-}
-
-TEST(TestAutotuneFileWriter, TuneModeToString)
-{
-    EXPECT_EQ(tuneModeToString(TuneMode::AUTO), "AUTO");
-    EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), "EXHAUSTIVE");
-}
-
-TEST(TestAutotuneFileWriter, TuneModeToLowerString)
-{
-    EXPECT_EQ(tuneModeToLowerString(TuneMode::AUTO), "auto");
-    EXPECT_EQ(tuneModeToLowerString(TuneMode::EXHAUSTIVE), "exhaustive");
-}
-
-TEST(TestAutotuneFileWriter, UnknownEnumsUseUnknownLowercaseStrings)
-{
-    EXPECT_EQ(strategyToLowerString(static_cast<AutotuneStrategy>(999)), "unknown");
-    EXPECT_EQ(tuneModeToLowerString(static_cast<TuneMode>(999)), "unknown");
-}
-
 // ── Error handling Tests ────────────────────────────────────────────────────
 
 TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)

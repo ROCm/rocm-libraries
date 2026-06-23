@@ -54,6 +54,22 @@ enum class AutotuneStrategy
     RUN_UNTIL_STABLE ///< Run until timing variance stabilizes, up to a cap (default)
 };
 
+/**
+ * @enum PrimingFailurePolicy
+ * @brief Controls how autotune() reacts when an engine's exhaustive priming fails
+ *
+ * During EXHAUSTIVE priming, an engine's temporary priming plan may fail to
+ * build, finalize, or execute. This policy selects whether that failure aborts
+ * the whole autotune() call or whether the engine is benchmarked unprimed. When
+ * priming fails and the policy is BENCHMARK_UNPRIMED, the autotuneRsult will set
+ * ranExhaustive=false and errorMessage describes the reason.
+ */
+enum class PrimingFailurePolicy
+{
+    ABORT_ON_PRIMING_FAILURE, ///< Abort autotune() and return an error
+    BENCHMARK_UNPRIMED ///< Continue and benchmark the engine unprimed
+};
+
 /// Get the string representation of a TuneMode
 inline const char* tuneModeToString(TuneMode mode)
 {
@@ -68,6 +84,20 @@ inline const char* tuneModeToString(TuneMode mode)
     }
 }
 
+/// Get the lowercase string representation of a TuneMode (for config file output)
+inline std::string tuneModeToLowerString(TuneMode mode)
+{
+    switch(mode)
+    {
+    case TuneMode::AUTO:
+        return "auto";
+    case TuneMode::EXHAUSTIVE:
+        return "exhaustive";
+    default:
+        return "unknown";
+    }
+}
+
 /// Get the string representation of an AutotuneStrategy
 inline const char* strategyToString(AutotuneStrategy strategy)
 {
@@ -79,6 +109,36 @@ inline const char* strategyToString(AutotuneStrategy strategy)
         return "FIXED_AVERAGE";
     case AutotuneStrategy::RUN_UNTIL_STABLE:
         return "RUN_UNTIL_STABLE";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/// Get the lowercase string representation of an AutotuneStrategy (for config file output)
+inline std::string strategyToLowerString(AutotuneStrategy strategy)
+{
+    switch(strategy)
+    {
+    case AutotuneStrategy::SINGLE_SHOT:
+        return "single_shot";
+    case AutotuneStrategy::FIXED_AVERAGE:
+        return "fixed_average";
+    case AutotuneStrategy::RUN_UNTIL_STABLE:
+        return "run_until_stable";
+    default:
+        return "unknown";
+    }
+}
+
+/// Get the string representation of a PrimingFailurePolicy
+inline const char* primingFailurePolicyToString(PrimingFailurePolicy policy)
+{
+    switch(policy)
+    {
+    case PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE:
+        return "ABORT_ON_PRIMING_FAILURE";
+    case PrimingFailurePolicy::BENCHMARK_UNPRIMED:
+        return "BENCHMARK_UNPRIMED";
     default:
         return "UNKNOWN";
     }
@@ -182,12 +242,12 @@ struct AutotuneConfig
     /// Custom ranking function (nullptr = rank by minTimeMs ascending)
     AutotuneRankingFn rankingFn = nullptr;
 
-    /// EXHAUSTIVE mode: abort on priming failure (false, default) or continue
-    /// without priming (true). When false, autotune() returns an error if any
-    /// engine's priming plan fails. When true, the engine is benchmarked
-    /// unprimed with AutotuneResult::ranExhaustive set to false.
-    /// Has no effect in AUTO mode.
-    bool continueOnPrimingFailure = false;
+    /// Policy for engine priming failures during EXHAUSTIVE priming. With
+    /// ABORT_ON_PRIMING_FAILURE (default), autotune() returns an error if any
+    /// engine's priming plan fails. With BENCHMARK_UNPRIMED, that engine is
+    /// benchmarked unprimed (AutotuneResult::ranExhaustive set to false) and
+    /// tuning continues. Has no effect in AUTO mode.
+    PrimingFailurePolicy primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 };
 
 /**

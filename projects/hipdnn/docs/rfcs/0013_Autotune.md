@@ -156,10 +156,12 @@ struct AutotuneConfig {
     // Custom ranking (nullptr = rank by minTimeMs)
     AutotuneRankingFn rankingFn = nullptr;
 
-    // EXHAUSTIVE mode: when false (default), abort on priming failure.
-    // When true: continue to benchmark without priming; ranExhaustive=false, errorMessage notes reason.
+    // EXHAUSTIVE mode priming-failure policy.
+    //   ABORT_ON_PRIMING_FAILURE (default): abort autotune() and return an error on priming failure.
+    //   BENCHMARK_UNPRIMED: continue to benchmark the engine without priming; ranExhaustive=false,
+    //                       errorMessage notes reason.
     // No effect in AUTO mode.
-    bool continueOnPrimingFailure = false;
+    PrimingFailurePolicy primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
 };
 
@@ -505,7 +507,7 @@ If both or neither path's artifacts are present, `autotune()` returns an error. 
 *Runtime errors (discovered during benchmarking):*
 - All plans fail compilation or benchmarking (every result `succeeded = false`)
 - HIP memory operations fail
-- EXHAUSTIVE mode: priming failure when `continueOnPrimingFailure` is `false` (default)
+- EXHAUSTIVE mode: priming failure when `primingFailurePolicy` is `ABORT_ON_PRIMING_FAILURE` (default)
 
 Failed entries (`succeeded = false`) are always placed after successful entries, with `rank = -1`.
 
@@ -543,13 +545,13 @@ sort by minTimeMs ascending (or user rankingFn)
      * build and finalize a temporary priming plan using the plan spec's knob settings
        plus global.benchmarking = 1
      * filter by the compiled plan's workspace size (but still benchmark filtered plans);
-       this is a skip, not a priming failure, so continueOnPrimingFailure does not apply
+       this is a skip, not a priming failure, so primingFailurePolicy does not apply
        but a log is generated if a filter'sd plan's estimated size would have fit.
      * otherwise, execute the priming plan once
      * discard the priming plan
      * On priming failure (build/finalize/execute error, distinct from a workspace skip):
-       - If continueOnPrimingFailure is false (default): abort, return error
-       - If continueOnPrimingFailure is true: mark engine as unprimed, continue
+       - If primingFailurePolicy is ABORT_ON_PRIMING_FAILURE (default): abort, return error
+       - If primingFailurePolicy is BENCHMARK_UNPRIMED: mark engine as unprimed, continue
 2. Compile all plan specs into execution plans (engines are now primed)
 3. For each compiled plan:
      a. warmup iterations (discard timing)
@@ -567,9 +569,9 @@ sort by minTimeMs ascending (or user rankingFn)
 
 Engines where `supportsExhaustive` is false skip priming and are compiled and benchmarked normally.
 
-When `continueOnPrimingFailure` is `true` and priming fails, the engine is still benchmarked (unprimed). Its `AutotuneResult::ranExhaustive` is `false`, and `errorMessage` notes the priming failure even though `succeeded` may be `true`.
+When `primingFailurePolicy` is `BENCHMARK_UNPRIMED` and priming fails, the engine is still benchmarked (unprimed). Its `AutotuneResult::ranExhaustive` is `false`, and `errorMessage` notes the priming failure even though `succeeded` may be `true`.
 
-When priming is skipped because the priming plan's compiled workspace does not fit the provided workspace, the engine is always benchmarked unprimed regardless of `continueOnPrimingFailure` (a workspace skip is not a priming failure). Its `AutotuneResult::ranExhaustive` is `false`. An `errorMessage` is attached only when the pre-compile plan-spec estimate indicated the plan would fit but the larger compiled workspace did not; when the estimate also did not fit, the skip is expected and no message is recorded. This mirrors the post-compile workspace skip behavior in the main benchmarking flow. The plan is then subject to the normal post-compile workspace check, which may skip it from benchmarking entirely if its compiled workspace still exceeds the provided size.
+When priming is skipped because the priming plan's compiled workspace does not fit the provided workspace, the engine is always benchmarked unprimed regardless of `primingFailurePolicy` (a workspace skip is not a priming failure). Its `AutotuneResult::ranExhaustive` is `false`. An `errorMessage` is attached only when the pre-compile plan-spec estimate indicated the plan would fit but the larger compiled workspace did not; when the estimate also did not fit, the skip is expected and no message is recorded. This mirrors the post-compile workspace skip behavior in the main benchmarking flow. The plan is then subject to the normal post-compile workspace check, which may skip it from benchmarking entirely if its compiled workspace still exceeds the provided size.
 
 **Strategy implementations**:
 

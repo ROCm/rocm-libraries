@@ -159,41 +159,6 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
            && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
-} // namespace detail
-
-/// Get the lowercase string representation of an AutotuneStrategy (for config file output)
-inline std::string strategyToLowerString(AutotuneStrategy strategy)
-{
-    switch(strategy)
-    {
-    case AutotuneStrategy::SINGLE_SHOT:
-        return "single_shot";
-    case AutotuneStrategy::FIXED_AVERAGE:
-        return "fixed_average";
-    case AutotuneStrategy::RUN_UNTIL_STABLE:
-        return "run_until_stable";
-    default:
-        return "unknown";
-    }
-}
-
-/// Get the lowercase string representation of a TuneMode (for config file output)
-inline std::string tuneModeToLowerString(TuneMode mode)
-{
-    switch(mode)
-    {
-    case TuneMode::AUTO:
-        return "auto";
-    case TuneMode::EXHAUSTIVE:
-        return "exhaustive";
-    default:
-        return "unknown";
-    }
-}
-
-namespace detail
-{
-
 /// Build a single JSON engine_overrides entry from an AutotuneResult.
 ///
 /// @param result The autotune result to serialize

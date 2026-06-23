@@ -26,7 +26,7 @@ namespace
 
 using IntegrationAutotuneExhaustive = hipdnn_tests::AutotuneIntegrationFixture;
 
-// Test: EXHAUSTIVE mode with continueOnPrimingFailure=true verifies per-engine behavior.
+// Test: EXHAUSTIVE mode with the BENCHMARK_UNPRIMED policy verifies per-engine behavior.
 //
 // This consolidated test verifies autotune behavior for all engine types:
 // - Engine A (main): has benchmarking knob, priming succeeds, benchmark succeeds
@@ -40,10 +40,10 @@ using IntegrationAutotuneExhaustive = hipdnn_tests::AutotuneIntegrationFixture;
 // - EnginePrimingOnlyFails: has benchmarking knob, priming fails, benchmark succeeds
 //   → ranExhaustive=false, succeeded=true, errorMessage contains priming failure
 //
-// When continueOnPrimingFailure is true and priming fails, the engine is still
+// With the BENCHMARK_UNPRIMED policy and priming fails, the engine is still
 // benchmarked (unprimed): AutotuneResult::ranExhaustive is false, and errorMessage
 // notes the priming failure even though succeeded may be true.
-TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithContinueOnPrimingFailure)
+TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
 {
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
@@ -61,7 +61,7 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithContinueOnPrimingFailure
     config.mode = TuneMode::EXHAUSTIVE;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
-    config.continueOnPrimingFailure = true;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
 
     std::vector<AutotuneResult> results;
     result = bundle.graph->autotune(
@@ -193,7 +193,7 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
 //   - non-exhaustive compiled (1024) <= 4096 -> benchmarked normally -> succeeded
 //
 // A workspace skip during priming always continues, allowing the plan to run through
-// the benchmarking loop un-primed, regardless of continueOnPrimingFailure. The skipped
+// the benchmarking loop un-primed, regardless of primingFailurePolicy. The skipped
 // plan's result has ranExhaustive = false, and an errorMessage is also attached but
 // only when the pre-compile estimate fit but the larger compiled workspace did not.
 TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUnprimed)
@@ -224,9 +224,9 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
     config.mode = TuneMode::EXHAUSTIVE;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
-    // A workspace skip is not a priming failure: even with this false, the run
-    // must continue and benchmark the plan unprimed rather than aborting.
-    config.continueOnPrimingFailure = false;
+    // A workspace skip is not a priming failure: even with the ABORT_ON_PRIMING_FAILURE
+    // policy, the run must continue and benchmark the plan unprimed rather than aborting.
+    config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
     std::vector<AutotuneResult> results;
     result = bundle.graph->autotune(
@@ -254,12 +254,12 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
     EXPECT_TRUE(foundWorkspaceGrows) << "WorkspaceGrows engine not found in results";
 }
 
-// Test: continueOnPrimingFailure=false hard-fails when an engine fails priming.
+// Test: the ABORT_ON_PRIMING_FAILURE policy hard-fails when an engine fails priming.
 //
 // The test plugin's AutotunePluginEngineFails (-21) fails executeGraph()
 // UNCONDITIONALLY so both priming AND benchmark fail and succeeded==false holds.
-// With continueOnPrimingFailure=false, the entire autotune() call fails.
-TEST_F(IntegrationAutotuneExhaustive, ContinueOnPrimingFailureFalseHardFails)
+// With the ABORT_ON_PRIMING_FAILURE policy, the entire autotune() call fails.
+TEST_F(IntegrationAutotuneExhaustive, AbortPolicyHardFailsOnPrimingFailure)
 {
     ConvGraphBundle bundle;
     createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
@@ -277,7 +277,7 @@ TEST_F(IntegrationAutotuneExhaustive, ContinueOnPrimingFailureFalseHardFails)
     config.mode = TuneMode::EXHAUSTIVE;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
-    config.continueOnPrimingFailure = false;
+    config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
     std::vector<AutotuneResult> results;
     result = bundle.graph->autotune(
@@ -285,6 +285,43 @@ TEST_F(IntegrationAutotuneExhaustive, ContinueOnPrimingFailureFalseHardFails)
 
     // The unconditionally-failing engine's priming execution genuinely fails,
     // so EXHAUSTIVE priming returns HIPDNN_BACKEND_ERROR with no winner selected.
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.err_msg;
+}
+
+// Test: a default-constructed config aborts on a recoverable priming failure.
+//
+// AutotuneConfig's default primingFailurePolicy is ABORT_ON_PRIMING_FAILURE.
+// AutotunePluginEnginePrimingOnlyFails (-22) fails execution ONLY during priming
+// (benchmarking knob enabled) and would succeed when benchmarked unprimed, so the
+// BENCHMARK_UNPRIMED policy tolerates it and returns OK. Isolating this engine makes
+// the outcome a true discriminator: under the default policy the priming failure must
+// abort the whole autotune() call with HIPDNN_BACKEND_ERROR, proving the default aborts
+// on a failure that the alternative policy would have recovered from.
+TEST_F(IntegrationAutotuneExhaustive, DefaultPolicyAbortsOnPrimingFailure)
+{
+    ConvGraphBundle bundle;
+    createBuiltConvGraph("autotune_exhaustive_test_conv", bundle);
+
+    constexpr int64_t ENGINE_PRIMING_ONLY_FAILS_ID
+        = hipdnn_tests::plugin_constants::engineId<AutotunePluginEnginePrimingOnlyFails>();
+    auto result = bundle.graph->add_engine(ENGINE_PRIMING_ONLY_FAILS_ID);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    int64_t maxWs = 0;
+    result = bundle.graph->get_estimated_max_workspace_size(maxWs);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    const Workspace workspace(static_cast<size_t>(maxWs));
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.warmupIterations = 1;
+
+    std::vector<AutotuneResult> results;
+    result = bundle.graph->autotune(
+        _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
+
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.err_msg;
 }
 

@@ -206,7 +206,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
     config.strategy = largeMode ? AutotuneStrategy::FIXED_AVERAGE : AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = largeMode ? 3 : 1;
     config.timedIterations = largeMode ? 10 : 1;
-    config.continueOnPrimingFailure = true;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
 
     // Use the overload that populates results
     std::vector<AutotuneResult> results;

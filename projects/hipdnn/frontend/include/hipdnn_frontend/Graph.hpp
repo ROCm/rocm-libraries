@@ -1299,7 +1299,8 @@ private:
                     auto compileErr = compilePlanFromSpec(spec.engineId, primingKnobs, primingPlan);
                     if(compileErr.is_bad())
                     {
-                        if(!config.continueOnPrimingFailure)
+                        if(config.primingFailurePolicy
+                           == PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "EXHAUSTIVE priming failed for engine "
@@ -1323,7 +1324,8 @@ private:
                         static_cast<const void*>(&primingPlan.engineConfigDesc->get()));
                     if(finStatus != HIPDNN_STATUS_SUCCESS)
                     {
-                        if(!config.continueOnPrimingFailure)
+                        if(config.primingFailurePolicy
+                           == PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "Failed to set engine config on priming plan for engine "
@@ -1338,7 +1340,8 @@ private:
                         primingPlan.executionPlanDesc->get());
                     if(finStatus != HIPDNN_STATUS_SUCCESS)
                     {
-                        if(!config.continueOnPrimingFailure)
+                        if(config.primingFailurePolicy
+                           == PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "Failed to finalize priming plan for engine "
@@ -1393,7 +1396,8 @@ private:
                         handle, *primingPlan.executionPlanDesc, variantPack, workspace);
                     if(execErr.is_bad())
                     {
-                        if(!config.continueOnPrimingFailure)
+                        if(config.primingFailurePolicy
+                           == PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
                         {
                             return {ErrorCode::HIPDNN_BACKEND_ERROR,
                                     "EXHAUSTIVE priming execution failed for engine "
