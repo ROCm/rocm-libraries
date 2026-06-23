@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
+
 #include "common/PlatformUtils.hpp"
 
 // HIP's host_defines.h redefines __noinline__ as either
@@ -146,13 +148,19 @@ public:
 
         for(const auto& entry : _skips)
         {
-            const bool archMatches
+            // Loose match: a skip entry's arch may be a family prefix (e.g.
+            // "gfx10" covers all gfx10xx), matched as a substring of the
+            // device's raw gcnArchName.
+            const bool archMatched
                 = entry.archs.empty()
                   || std::any_of(
                       entry.archs.begin(), entry.archs.end(), [&](const std::string& candidate) {
-                          return deviceArchStr.find(candidate) != std::string::npos;
+                          return hipdnn_test_sdk::utilities::archMatches(
+                              deviceArchStr,
+                              candidate,
+                              hipdnn_test_sdk::utilities::ArchMatchMode::SUBSTRING);
                       });
-            if(!archMatches)
+            if(!archMatched)
             {
                 continue;
             }

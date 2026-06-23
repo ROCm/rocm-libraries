@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,16 @@ T warp_move_dpp(const T& input)
             //       __builtin_amdgcn_update_dpp, hence fail to parse the template altogether. (Except MSVC
             //       because even using /permissive- they somehow still do delayed parsing of the body of
             //       function templates, even though they pinky-swear they don't.)
-            return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+            {
+                return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+            }
+            else
+            {
+                // Calling DPP on an architecture that does not support it is UB. warp_move_dpp should not be called on these machines.
+                __builtin_trap();
+                return v;
+            }
         });
 }
 

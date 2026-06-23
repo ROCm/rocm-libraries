@@ -6,6 +6,7 @@
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/WorkgroupClusters_detail.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -67,23 +68,31 @@ namespace GEMMTests
             if constexpr(isF8<TA> || isF8<TB>)
             {
                 REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8,
-                                        GPUCapability::HasWMMA_f32_16x16x16_f8);
+                                        GPUCapability::HasWMMA_f32_16x16x16_f8,
+                                        GPUCapability::HasWMMA_f32_16x16x64_f8,
+                                        GPUCapability::HasWMMA_f32_16x16x128_f8);
             }
 
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
+                                        GPUCapability::HasWMMA_f8f6f4);
             }
 
             if((isF8<TA> || isF8<TB>)&&(gemm.waveK >= 64))
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4,
+                                        GPUCapability::HasWMMA_f8f6f4,
+                                        GPUCapability::HasWMMA_32x16x128_f4);
             }
 
             if(gemm.scaleAMode != Operations::ScaleMode::None
                || gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4,
+                                        GPUCapability::HasWMMA_scale_f8f6f4,
+                                        GPUCapability::HasWMMA_scale_32x16x128_f4,
+                                        GPUCapability::HasWMMA_scale16_32x16x128_f4);
                 const auto  scaleType = gemm.scaleAMode != Operations::ScaleMode::None
                                             ? gemm.scaleTypeA
                                             : gemm.scaleTypeB;
@@ -134,6 +143,19 @@ namespace GEMMTests
                         "MacroTile size mismatch (N)",
                         ShowValue(N),
                         ShowValue(gemm.macN));
+            AssertFatal(K >= gemm.macK, "K must be >= macK", ShowValue(K), ShowValue(gemm.macK));
+            AssertFatal(K % gemm.macK == 0 || gemm.tailLoops,
+                        "K must be a multiple of macK (or enable tailLoops)",
+                        ShowValue(K),
+                        ShowValue(gemm.macK));
+            AssertFatal(gemm.macK >= gemm.waveK,
+                        "macK must be >= waveK",
+                        ShowValue(gemm.macK),
+                        ShowValue(gemm.waveK));
+            AssertFatal(gemm.macK % gemm.waveK == 0,
+                        "macK must be a multiple of waveK",
+                        ShowValue(gemm.macK),
+                        ShowValue(gemm.waveK));
 
             if(gemm.scaleAMode == Operations::ScaleMode::Separate
                || gemm.scaleBMode == Operations::ScaleMode::Separate)
@@ -242,8 +264,8 @@ namespace GEMMTests
                           descC,
                           hostScaleA,
                           hostScaleB,
-                          gemm.scaleAMode == Operations::ScaleMode::Separate,
-                          gemm.scaleBMode == Operations::ScaleMode::Separate,
+                          gemm.scaleTypeA,
+                          gemm.scaleTypeB,
                           -1.f,
                           1.f,
                           static_cast<uint>(scaleBlockSize));
@@ -653,6 +675,34 @@ namespace GEMMTests
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
 
+            if(gemm.workgroupClusterSizeX > 0 || gemm.workgroupClusterSizeY > 0
+               || gemm.workgroupClusterSizeZ > 0)
+            {
+#ifndef ROCROLLER_HAS_HIP_WORKGROUP_CLUSTERS
+                GTEST_SKIP() << "Workgroup cluster feature is disabled: the installed ROCm/HIP "
+                                "version does not support hipLaunchAttributeClusterDimension.";
+#endif
+                REQUIRE_ARCH_CAP(GPUCapability::HasWorkgroupClusters);
+
+                auto const workgroupClusterSizeX
+                    = gemm.workgroupClusterSizeX > 0 ? gemm.workgroupClusterSizeX : 1;
+                auto const workgroupClusterSizeY
+                    = gemm.workgroupClusterSizeY > 0 ? gemm.workgroupClusterSizeY : 1;
+                auto const workgroupClusterSizeZ
+                    = gemm.workgroupClusterSizeZ > 0 ? gemm.workgroupClusterSizeZ : 1;
+
+                AssertFatal(workgroupClusterSizeX * workgroupClusterSizeY * workgroupClusterSizeZ
+                                <= WorkgroupClustersDetail::MaxWorkgroupsPerCluster,
+                            fmt::format("Requested ClusterSize {}x{}x{} exceeds maximum allowed "
+                                        "number of workgroups per cluster ({})",
+                                        ShowValue(workgroupClusterSizeX),
+                                        ShowValue(workgroupClusterSizeY),
+                                        ShowValue(workgroupClusterSizeZ),
+                                        WorkgroupClustersDetail::MaxWorkgroupsPerCluster));
+
+                params->setManualWorkgroupClusterSize(
+                    {workgroupClusterSizeX, workgroupClusterSizeY, workgroupClusterSizeZ});
+            }
             // TODO: Calculate these values internally based on workgroup sizes.
             params->setManualWavefrontCount(
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
