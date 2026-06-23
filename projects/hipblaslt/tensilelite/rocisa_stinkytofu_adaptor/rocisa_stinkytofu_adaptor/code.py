@@ -186,7 +186,7 @@ def _postprocess_wait_markers(asm: str) -> str:
             opcode = _MARKER_CODE_TO_OPCODE[code]
             new_line = f"{indent}{opcode} {count}"
             if comment:
-                pad = max(1, 45 - len(new_line))
+                pad = max(1, 51 - len(new_line))
                 new_line += " " * pad + "// " + comment
             out.append(new_line)
         else:
