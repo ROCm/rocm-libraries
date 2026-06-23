@@ -352,7 +352,8 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 
-    with open(file, "r") as f:
+    from Tensile.CustomYamlLoader import open_yaml
+    with open_yaml(file) as f:
         l0(f.readline())
         name = l1(f.readline())
         gfx, cu = l2(f.readline())

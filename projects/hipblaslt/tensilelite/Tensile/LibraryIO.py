@@ -344,6 +344,11 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
 ###############################
 def read(filename, customizedLoader=False):
     name, extension = os.path.splitext(filename)
+    if extension == ".zst":
+        inner_name, inner_ext = os.path.splitext(name)
+        if inner_ext == ".yaml":
+            return load_yaml_stream(filename, StrictTypeLoader) if customizedLoader else readYAML(filename)
+        printExit("Unrecognized compressed format {}".format(filename))
     if extension == ".yaml":
         return load_yaml_stream(filename, StrictTypeLoader) if customizedLoader else readYAML(filename)
     if extension == ".json":
@@ -354,7 +359,8 @@ def read(filename, customizedLoader=False):
 
 def readYAML(filename):
     """Reads and returns YAML data from file."""
-    with open(filename, "r") as f:
+    from Tensile.CustomYamlLoader import open_yaml
+    with open_yaml(filename) as f:
         data = yaml.load(f, StrictTypeLoader)
     return data
 

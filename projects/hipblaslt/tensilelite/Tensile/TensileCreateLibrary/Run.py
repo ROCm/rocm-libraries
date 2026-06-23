@@ -986,16 +986,25 @@ def run():
         return (arch in archs) or any(a.startswith(arch) for a in archs)
 
     def validLogicFile(p: Path):
-        return p.suffix == logicExtFormat and (
+        suffix = p.suffix
+        if suffix == '.zst':
+            suffix = p.with_suffix('').suffix
+        return suffix == logicExtFormat and (
             "all" in archs or archMatch(load_logic_gfx_arch(p), archs)
         )
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
+    globPatternZst = os.path.join(
+        arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}.zst"
+    )
     print1(f"# LogicFilter:       {globPattern}")
     logicFiles = [
         file for file in glob.iglob(globPattern, recursive=True)
+    ]
+    logicFiles += [
+        file for file in glob.iglob(globPatternZst, recursive=True)
     ]
 
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]

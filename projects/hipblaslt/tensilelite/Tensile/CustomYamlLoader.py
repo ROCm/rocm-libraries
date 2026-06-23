@@ -1,7 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import io
 import yaml
+from contextlib import contextmanager
 from pathlib import Path
 
 try:
@@ -74,8 +76,30 @@ def parse_scalar(loader: yaml.Loader):
 
     return value
 
+
+@contextmanager
+def open_yaml(yaml_path: Path):
+    """Open a YAML file for text-mode reading, transparently decompressing .zst."""
+    yaml_path = Path(yaml_path)
+    if yaml_path.suffix == '.zst':
+        try:
+            import zstandard
+        except ImportError:
+            raise ImportError(
+                f"Cannot read {yaml_path}: the 'zstandard' package is required "
+                "for .zst files.  Install with:  pip install zstandard"
+            )
+        with open(yaml_path, 'rb') as fb:
+            dctx = zstandard.ZstdDecompressor()
+            raw = dctx.decompress(fb.read(), max_output_size=2 * 1024 * 1024 * 1024)
+        yield io.StringIO(raw.decode('utf-8'))
+    else:
+        with open(yaml_path, 'r') as f:
+            yield f
+
+
 def load_yaml_stream(yaml_path: Path, loader_type: yaml.Loader):
-    with open(yaml_path, 'r') as f:
+    with open_yaml(yaml_path) as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
         loader.get_event()
@@ -88,7 +112,7 @@ def load_yaml_stream(yaml_path: Path, loader_type: yaml.Loader):
         return logic
 
 def load_yaml_sequence_item(yaml_path: Path, loader_type: yaml.Loader, idx: int):
-    with open(yaml_path, 'r') as f:
+    with open_yaml(yaml_path) as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
         loader.get_event()
@@ -115,7 +139,7 @@ def load_yaml_sequence_item(yaml_path: Path, loader_type: yaml.Loader, idx: int)
         return ret
 
 def load_yaml_dict_item(yaml_path: Path, loader_type: yaml.Loader, key: str):
-    with open(yaml_path, 'r') as f:
+    with open_yaml(yaml_path) as f:
         loader = loader_type(f)
         assert loader.check_event(yaml.StreamStartEvent)
         loader.get_event()
