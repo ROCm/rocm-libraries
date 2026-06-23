@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   CpuThreads: 32
   KernelTime: False
   DataInitTypeAlpha: 1
@@ -42,7 +42,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [-1]
         - DepthU: [ 32 ]
@@ -51,7 +51,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1,1, 1, 2]
           - [16, 16, 32, 1, 1, 1,1, 2, 1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -83,7 +83,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 32, 64 ]
@@ -94,7 +94,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 8,8, 1,2]
           - [16, 16, 32, 1, 1, 4,4, 1,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]

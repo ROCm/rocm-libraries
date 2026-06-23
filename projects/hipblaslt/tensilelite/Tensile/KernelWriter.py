@@ -46,6 +46,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
+from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
@@ -133,6 +134,19 @@ class ABMatrixInfo(MatrixInfo):
   startVgprGL2PrefetchAddr: int = -1
 
 # States
+@dataclass(frozen=True)
+class StreamKSettings:
+  """Snapshot of variant feature flags for the kernel being emitted.
+  Populated once at _initKernel time from the StreamK* variant class.
+  Frozen so consumers cannot mutate it mid-codegen."""
+  emitsParallelReductionSgprAliases: bool = False
+  borrowsSrdWsInEpilogue: bool = False
+  emitsWorkspaceReductionBpe: bool = False
+  requiresWorkspaceReductionStorePath: bool = False
+  keepsConstantsInSgpr: bool = False
+  supportsSubtileImpl: bool = False
+
+
 @dataclass
 class StateValues:
   version: Tuple[int, int, int]
@@ -307,6 +321,7 @@ class StateValues:
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
   numSgprStreamK: int                    = 0
+  streamK: StreamKSettings               = field(default_factory=StreamKSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
@@ -2526,6 +2541,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               localWrites += skipPreIterLW
         dscnt += localWrites
       else:
+        sawLocalRead = False
         for item in list(iterCode.items()):
           localReads  = countWeightedLocalRead(item)
           localWrites = countWeightedLocalWrite(item)
@@ -2544,7 +2560,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # we need to wait for all preceding reads before the macs
             # so only opportunity for optimization is if the writes are at the end
             if localReads:
+              sawLocalRead = True
               dscnt = 0 # reset to wait for all reads
+            elif sawLocalRead:
+              # SIA0 + PGR>=2 emits localReadCode and localWriteCode as separate
+              # modules. Once local reads require a full drain, a following
+              # write-only module must not downgrade dscnt to localWrites-only.
+              pass
             else:
               dscnt = localWrites  # this only survives if writes are at the end
 
@@ -2786,7 +2808,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
         tdmM: bool = kernel["enableTDMMetadata"]
-        if tdmA and tdmB and kernel["NumWaves"] > 1:
+        if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
           module.add(self.undefineSgpr("MulticastMask"))
         else:
           module.add(self.undefineSgpr("MulticastMaskA"))
@@ -5197,9 +5219,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # StreamK Constants In VGPRs
   ##############################################################################
   def isStreamKConstantsToVgprEnabled(self, kernel):
-    # SK4 uses a different runtime-argument set and still references those
-    # constants directly in the dynamic queue path.
-    return kernel["ISA"] == IsaVersion(12,5,0) and kernel["StreamK"] != 4
+    # Variants that mark keepsConstantsInSgpr=True (the dynamic
+    # per-XCD path references SK kernarg constants directly) cannot
+    # cache them in VGPRs on gfx1250.
+    return kernel["ISA"] == IsaVersion(12,5,0) and not self.states.streamK.keepsConstantsInSgpr
 
   def acquireStreamKConstSgpr(self, kernel, name):
     if self.isStreamKConstantsToVgprEnabled(kernel):
@@ -6057,9 +6080,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersA["MX"]))
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParametersB["MX"]))
 
-      # reset memToken for tail loop
-      self.states.ldsWriteTokenIdx = self.states.memTokenLdsBuffer0
-      self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
+      # LDS mem tokens: baseline buffer 0 for tail-loop codegen
+      self.resetLdsTokensForTailLoop()
       module.addComment1("Update M0 for DTLDS")
       moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters1st)
       module.add(replaceHolder(moduleTmp, 0))
@@ -6207,9 +6229,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        # StreamK tail workgroups may start from a partial tile slice, so SIA0
-        # also needs the LRO reset before tail MACs.
-        if kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"]:
+        # Main-loop pointer swaps can leave LROs in the Blk half. SIA0 non-TDM
+        # also needs this reset before tail MACs, but SIA0 TDM tail descriptors
+        # already select the correct LDS bank and clearing the LRO Blk bit here
+        # regresses those kernels.
+        if (kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"] or
+            not (kernel["enableTDMA"] and kernel["enableTDMB"])):
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
@@ -6522,10 +6547,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
-    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
-    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
-    # may have reduced the instruction-level VGPR count below the pool estimate.
-    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+    # Post-rocIsaPass: use the O(1) max-VGPR count from the register graph the
+    # pass already built (passResult.maxVgpr) to update the kernel descriptor
+    # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
+    self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
@@ -6672,6 +6697,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
+    # Snapshot the StreamK variant's feature flags onto self.states
+    # so downstream emitters can query them by name instead of
+    # branching on the integer kernel["StreamK"] value.
+    _skVariantCls = streamKVariantClass(kernel.get("StreamK", 0))
+    self.states.streamK = StreamKSettings(
+      emitsParallelReductionSgprAliases=_skVariantCls.emitsParallelReductionSgprAliases,
+      borrowsSrdWsInEpilogue=_skVariantCls.borrowsSrdWsInEpilogue,
+      emitsWorkspaceReductionBpe=_skVariantCls.emitsWorkspaceReductionBpe,
+      requiresWorkspaceReductionStorePath=_skVariantCls.requiresWorkspaceReductionStorePath,
+      keepsConstantsInSgpr=_skVariantCls.keepsConstantsInSgpr,
+      supportsSubtileImpl=_skVariantCls.supportsSubtileImpl,
+    )
     # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
     # gfx1250 TDM uses a different LDS layout without swizzling).
     self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
@@ -9009,7 +9046,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tdmA: bool = kernel["enableTDMA"]
       tdmB: bool = kernel["enableTDMB"]
       tdmM: bool = kernel["enableTDMMetadata"]
-      if tdmA and tdmB and kernel["NumWaves"] > 1:
+      # Subtile issues both A and B loads on every wave (no wave-parity load
+      # split), so the single parity MulticastMask is wrong there -- it would
+      # OR one tensor's mask into both descriptors. Use the split A/B masks.
+      if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
         self.defineSgpr("MulticastMask", 1)
       else:
         self.defineSgpr("MulticastMaskA", 1)
@@ -9163,6 +9203,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWI", 1)
       self.defineSgpr("skGrid", 1)
       self.states.numSgprStreamK += 6
+    elif kernel["StreamK"] == 5:
+      # Hybrid SK3+SK4: define exactly the 6 SK3-named SGPRs that hold the
+      # kernarg slots; the SK4 reader names (TotalItems, SKTiles, SKSplit,
+      # SKItersPerWI, SKGrid) are emitted as RegSet aliases in
+      # KernelWriterAssembly.py (SK5 block guarded by emitsParallelReductionSgprAliases).
+      # This collapse matches the host's per-mode 6-arg pack
+      # (ContractionSolution.cpp SK5 branch). The runtime mode bit
+      # (bit 30 of MagicShiftItersPerTile) is extracted into StreamKHybridMode
+      # at preLoop, after which _emitModeExtraction also clears that bit so
+      # the SK4 path's read via the SKTiles alias sees a clean value.
+      self.defineSgpr("ItersPerTile", 1)
+      self.defineSgpr("MagicNumberItersPerTile", 1)
+      self.defineSgpr("MagicShiftItersPerTile", 1)
+      self.defineSgpr("SKItersPerWG", 1)
+      self.defineSgpr("skGrid", 1)
+      self.defineSgpr("skTiles", 1)
+      self.states.numSgprStreamK += 6
     elif kernel["StreamK"]:
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
@@ -9228,6 +9285,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if kernel["StreamKAtomic"] == 0:
+        requiredAligned4SgprVar.append("SrdWS")
+    elif kernel["StreamK"] == 5:
+      # Hybrid SK3+SK4: the SK3 and SK4 code paths are mutually exclusive at
+      # runtime (selected by StreamKHybridMode), so their path-specific
+      # persistent SGPRs overlap. Only allocate the shared SGPRs, the
+      # SK4-only pair (StreamKTileIdx/StreamKPartialIdx) and the dedicated
+      # StreamKHybridMode bit (extracted from bit 30 of MagicShiftItersPerTile
+      # at preLoop entry). The SK3-only pair (StreamKIter/StreamKIterEnd) is
+      # NOT defined here: it is RegSet-aliased onto the SK4-only
+      # StreamKTileIdx/StreamKPartialIdx slots in KernelWriterAssembly.py
+      # (SK5 block), mirroring the kernarg-slot aliasing, so SK5 allocates
+      # the same persistent SGPR count as SK4 plus the single mode bit.
+      requiredUnalignedSgprVar += [
+        "StreamKIdx",
+        "StreamKTileIdx",
+        "StreamKPartialIdx",
+        "StreamKLocalStart",
+        "StreamKLocalEnd",
+        "StreamKHybridMode",
+      ]
+      if len(kernel["SpaceFillingAlgo"]):
+        requiredUnalignedSgprVar.append("StreamKTileID")
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"]:
@@ -9697,10 +9777,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
 
-  def updateOccupancyFromScan(self, kernel, mkb) -> None:
-    """Override in KernelWriterAssembly to rescan actual register usage after
-    rocIsaPass optimizations and correct kernel["CUOccupancy"] + the kernel
-    descriptor's next_free_vgpr for ArchAccUnifiedRegs ISAs."""
+  def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
+    """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
+    using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
 
   ##############################################################################
@@ -10689,7 +10768,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
+  def resetLdsTokensForTailLoop(self) -> None:
+    """Point all LDS-related memory tokens at buffer 0 before tail-loop codegen.
+
+    Keep assignments in sync with the baseline next to ``memTokenLdsBuffer*`` setup
+    (``ldsReadTokenIdx`` / ``ldsTensorTokenIdx`` / ``ldsDirectToLDSTokenIdx`` /
+    ``ldsWriteTokenIdx``).
+    """
+    t0 = self.states.memTokenLdsBuffer0
+    self.states.ldsWriteTokenIdx = t0
+    self.states.ldsReadTokenIdx = t0
+    self.states.ldsTensorTokenIdx = t0
+    self.states.ldsDirectToLDSTokenIdx = t0
 
   def resetTDMDescriptorForTail(self, kernel, tP) -> Module:
     assert False, "Should be overrided"

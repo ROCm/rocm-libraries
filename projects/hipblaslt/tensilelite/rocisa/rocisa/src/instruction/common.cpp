@@ -737,6 +737,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SEndpgm& self, nb::dict&) { return new rocisa::SEndpgm(self); });
 
+    nb::class_<rocisa::STtraceData, rocisa::Instruction>(m_common, "STtraceData")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::STtraceData::getParams)
+        .def("__str__", &rocisa::STtraceData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::STtraceData& self, nb::dict&) { return new rocisa::STtraceData(self); });
+
     nb::class_<rocisa::SSleep, rocisa::Instruction>(m_common, "SSleep")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSleep::getParams)
@@ -2042,6 +2049,17 @@ void common_inst(nb::module_ m_common)
              nb::arg("dpp")     = std::nullopt)
         .def("__deepcopy__",
              [](const rocisa::VMovB32& self, nb::dict&) { return new rocisa::VMovB32(self); });
+
+    nb::class_<rocisa::VMovRelsD2B32, rocisa::CommonInstruction>(m_common, "VMovRelsD2B32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMovRelsD2B32& self, nb::dict&) {
+            return new rocisa::VMovRelsD2B32(self);
+        });
 
     nb::class_<rocisa::_VMovB64, rocisa::CommonInstruction>(m_common, "_VMovB64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

@@ -35,12 +35,7 @@
 #include <iostream>
 #include <iterator>
 
-/// \addtogroup devicemodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
-
-#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
 
 namespace detail
 {
@@ -280,7 +275,8 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
 } // namespace detail
 
-#endif // DOXYGEN_DOCUMENTATION_BUILD
+/// \addtogroup devicemodule
+/// @{
 
 /// \brief Searches the range [input, input + size) for any of the elements in the range
 ///   [keys, keys + keys_size).
@@ -391,9 +387,9 @@ hipError_t find_first_of(void*          temporary_storage,
                                               debug_synchronous);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group devicemodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_FIND_FIRST_OF_HPP_

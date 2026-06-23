@@ -1,0 +1,34 @@
+# serializer version: 1
+# name: test_check_only_custom_kernels_with_options
+  dict({
+    'CheckAll': False,
+    'CheckOnlyCustomKernels': True,
+    'CxxCompiler': 'amdclang++',
+    'Jobs': '8',
+    'KnownBugs': 'kb.yaml',
+    'LogicPath': 'logic/dir',
+    'Verbose': 2,
+  })
+# ---
+# name: test_defaults_only_logicpath
+  dict({
+    'CheckAll': False,
+    'CheckOnlyCustomKernels': False,
+    'CxxCompiler': 'amdclang++',
+    'Jobs': 48,
+    'KnownBugs': None,
+    'LogicPath': 'logic/dir',
+    'Verbose': 1,
+  })
+# ---
+# name: test_minimal_check_all
+  dict({
+    'CheckAll': True,
+    'CheckOnlyCustomKernels': False,
+    'CxxCompiler': 'amdclang++',
+    'Jobs': 48,
+    'KnownBugs': None,
+    'LogicPath': 'logic/dir',
+    'Verbose': 1,
+  })
+# ---

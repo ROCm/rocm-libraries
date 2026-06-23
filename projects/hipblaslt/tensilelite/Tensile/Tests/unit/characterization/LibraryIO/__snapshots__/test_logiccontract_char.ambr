@@ -1,0 +1,719 @@
+# serializer version: 1
+# name: test_create_library_logic_dict_arch
+  list([
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'aquavanjaram',
+    dict({
+      'Architecture': 'gfx942',
+      'CUCount': 228,
+    }),
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+      1,
+    ]),
+    list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    None,
+    None,
+    'perf-metric',
+    'Matching',
+  ])
+# ---
+# name: test_create_library_logic_no_exact
+  list([
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'aquavanjaram',
+    'gfx90a',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+      1,
+    ]),
+    None,
+    None,
+    None,
+    'perf-metric',
+    'Matching',
+  ])
+# ---
+# name: test_create_library_logic_roundtrip
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': None,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': 'Matching',
+      'indexOrder': list([
+        0,
+        1,
+      ]),
+      'table': list([
+        list([
+          list([
+            1,
+            1,
+            1,
+          ]),
+          list([
+            0,
+            1.0,
+          ]),
+        ]),
+      ]),
+    }),
+    'LibraryType': 'Matching',
+    'MinimumRequiredVersion': '<VERSION>',
+    'PerfMetric': 'perf-metric',
+    'ProblemType': dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+    ]),
+  })
+# ---
+# name: test_create_library_logic_str_arch
+  list([
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'aquavanjaram',
+    'gfx942',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+      1,
+    ]),
+    list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    None,
+    None,
+    'perf-metric',
+    'Matching',
+  ])
+# ---
+# name: test_create_library_logic_tile_selection
+  list([
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'aquavanjaram',
+    'gfx90a',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'ISA': tuple(
+          9,
+          4,
+          2,
+          'truncated',
+        ),
+        'SolutionIndex': 1,
+      }),
+    ]),
+    list([
+      0,
+      1,
+    ]),
+    list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    None,
+    dict({
+      'TileSelectionIndices': list([
+        3,
+        4,
+      ]),
+    }),
+    'perf-metric',
+    'Matching',
+  ])
+# ---
+# name: test_create_library_logic_with_metadata
+  list([
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'aquavanjaram',
+    'gfx950',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'ActivationComputeDataType': 0,
+      'ActivationType': 'none',
+      'BiasDataTypeList': list([
+        0,
+      ]),
+      'ComputeDataType': 0,
+      'DataType': 4,
+      'DataTypeA': 4,
+      'DataTypeAmaxD': 0,
+      'DataTypeB': 4,
+      'DataTypeE': 0,
+      'DataTypeMXSA': 8,
+      'DataTypeMXSB': 9,
+      'DataTypeMetadata': 7,
+      'DestDataType': 0,
+      'F32XdlMathOp': 0,
+      'MacDataTypeA': 4,
+      'MacDataTypeB': 4,
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'ISA': list([
+          9,
+          4,
+          2,
+        ]),
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+      1,
+    ]),
+    list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    None,
+    None,
+    'perf-metric',
+    'Matching',
+  ])
+# ---
+# name: test_parse_logic_list_arch_dict
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': 228,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': 'Matching',
+      'indexOrder': list([
+        0,
+        1,
+      ]),
+      'table': list([
+        list([
+          list([
+            1,
+            1,
+            1,
+          ]),
+          list([
+            0,
+            1.0,
+          ]),
+        ]),
+      ]),
+    }),
+    'LibraryType': 'Matching',
+    'MinimumRequiredVersion': '<VERSION>',
+    'PerfMetric': 'perf-metric',
+    'ProblemType': dict({
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'SolutionIndex': 1,
+      }),
+    ]),
+  })
+# ---
+# name: test_parse_logic_list_freesize
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': None,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': None,
+      'indexOrder': None,
+      'table': list([
+        0,
+        2,
+      ]),
+    }),
+    'LibraryType': 'FreeSize',
+    'MinimumRequiredVersion': '<VERSION>',
+    'PerfMetric': 'perf-metric',
+    'ProblemType': dict({
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'SolutionIndex': 1,
+      }),
+    ]),
+  })
+# ---
+# name: test_parse_logic_list_matching
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': None,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': '0.5',
+      'indexOrder': list([
+        0,
+        1,
+      ]),
+      'table': list([
+        list([
+          list([
+            1,
+            1,
+            1,
+          ]),
+          list([
+            0,
+            1.0,
+          ]),
+        ]),
+      ]),
+    }),
+    'LibraryType': 'Matching',
+    'MinimumRequiredVersion': '<VERSION>',
+    'PerfMetric': 'perf-metric',
+    'ProblemType': dict({
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'SolutionIndex': 1,
+      }),
+    ]),
+  })
+# ---
+# name: test_parse_logic_list_no_perfmetric
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': None,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': 'Matching',
+      'indexOrder': list([
+        0,
+        1,
+      ]),
+      'table': list([
+        list([
+          list([
+            1,
+            1,
+            1,
+          ]),
+          list([
+            0,
+            1.0,
+          ]),
+        ]),
+      ]),
+    }),
+    'LibraryType': 'Matching',
+    'MinimumRequiredVersion': '<VERSION>',
+    'ProblemType': dict({
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'SolutionIndex': 1,
+      }),
+    ]),
+  })
+# ---
+# name: test_parse_logic_list_prediction
+  dict({
+    'ArchitectureName': 'gfx942',
+    'CUCount': None,
+    'DeviceNames': list([
+      'Device 0049',
+    ]),
+    'ExactLogic': list([
+      list([
+        list([
+          1,
+          1,
+          1,
+        ]),
+        list([
+          0,
+          1.0,
+        ]),
+      ]),
+    ]),
+    'Library': dict({
+      'distance': None,
+      'indexOrder': None,
+      'table': list([
+        0,
+        2,
+      ]),
+    }),
+    'LibraryType': 'Prediction',
+    'MinimumRequiredVersion': '<VERSION>',
+    'PerfMetric': 'perf-metric',
+    'ProblemType': dict({
+      'OperationType': 'GEMM',
+    }),
+    'RangeLogic': None,
+    'ScheduleName': 'aquavanjaram',
+    'Solutions': list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+      dict({
+        'SolutionIndex': 1,
+      }),
+    ]),
+  })
+# ---
+# name: test_raw_library_logic_minimal
+  tuple(
+    '<VERSION>',
+    'sched',
+    'gfx942',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+    ]),
+    list([
+      list([
+        'k',
+        'v',
+      ]),
+    ]),
+    None,
+    list([
+    ]),
+  )
+# ---
+# name: test_raw_library_logic_with_other_fields
+  tuple(
+    '<VERSION>',
+    'sched',
+    'gfx942',
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+    ]),
+    list([
+      list([
+        'k',
+        'v',
+      ]),
+    ]),
+    None,
+    list([
+      'perf',
+      'Matching',
+      dict({
+        'extra': 1,
+      }),
+    ]),
+  )
+# ---
