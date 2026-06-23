@@ -194,8 +194,56 @@ def _postprocess_wait_markers(asm: str) -> str:
     return "\n".join(out)
 
 
-class _WaitCntPostProcessModule:
-    """Wraps a StinkyAsmModule and post-processes wait markers in emitAssembly()."""
+_VCMPX_RE = _re.compile(
+    r"^(\s*)(v_cmpx_\w+)\s+(.+?)(\s*//\s*(.*))?$"
+)
+
+
+def _postprocess_vcmpx(asm: str) -> str:
+    """Expand ``v_cmpx_*`` into ``v_cmp_* + s_mov_b32 exec_lo`` for gfx1250."""
+    lines = asm.split("\n")
+    out: List[str] = []
+    for line in lines:
+        m = _VCMPX_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        indent = m.group(1)
+        mnemonic = m.group(2)
+        operands_str = m.group(3)
+        comment = (m.group(5) or "").strip()
+
+        cmp_mnemonic = mnemonic.replace("_cmpx_", "_cmp_", 1)
+        operands = [op.strip() for op in operands_str.split(",")]
+
+        if len(operands) >= 3:
+            dst = operands[0]
+            srcs = ", ".join(operands[1:])
+            if dst in ("exec_lo", "exec_hi", "exec"):
+                dst = "vcc_lo"
+        else:
+            dst = "vcc_lo"
+            srcs = ", ".join(operands)
+
+        cmp_line = f"{indent}{cmp_mnemonic} {dst}, {srcs}"
+        mov_line = f"{indent}s_mov_b32 exec_lo, {dst}"
+        if comment:
+            cmp_pad = max(1, 51 - len(cmp_line))
+            cmp_line += " " * cmp_pad + "// " + comment
+            mov_pad = max(1, 51 - len(mov_line))
+            mov_line += " " * mov_pad + "// " + comment
+        out.append(cmp_line)
+        out.append(mov_line)
+    return "\n".join(out)
+
+
+class _PostProcessModule:
+    """Wraps a StinkyAsmModule and post-processes emitAssembly() output.
+
+    Applies two transforms:
+    1. Wait-marker expansion (s_waitcnt → s_wait_loadcnt/etc)
+    2. VCmpX expansion (v_cmpx_* → v_cmp_* + s_mov_b32 exec_lo)
+    """
 
     __slots__ = ("_inner",)
 
@@ -206,7 +254,10 @@ class _WaitCntPostProcessModule:
         self._inner.runOptimizationPipeline()
 
     def emitAssembly(self) -> str:
-        return _postprocess_wait_markers(self._inner.emitAssembly())
+        asm = self._inner.emitAssembly()
+        asm = _postprocess_wait_markers(asm)
+        asm = _postprocess_vcmpx(asm)
+        return asm
 
     def getName(self) -> str:
         return self._inner.getName()
@@ -1338,7 +1389,7 @@ class Module(Item):
             with open(_lm_path, "w") as _f:
                 _f.write(_lm_dump)
 
-        return _WaitCntPostProcessModule(_st.lower_logical_module(lm, list(arch)))
+        return _PostProcessModule(_st.lower_logical_module(lm, list(arch)))
 
     def _collect_logical_insts(self) -> List[Any]:
         """In-order walk of leaf instructions exposing ``to_stinky_logical``.
