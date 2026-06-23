@@ -161,6 +161,115 @@ TEST(TestResampleFwdNode, InvalidYDim)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
+TEST(TestResampleFwdNode, InferYDim3D)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{1});
+    attr.set_post_padding(std::vector<int64_t>{1});
+    attr.set_stride(std::vector<int64_t>{2});
+    attr.set_window(std::vector<int64_t>{3});
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 16}));
+}
+
+TEST(TestResampleFwdNode, InferYDim4D)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{1, 1});
+    attr.set_post_padding(std::vector<int64_t>{1, 1});
+    attr.set_stride(std::vector<int64_t>{2, 2});
+    attr.set_window(std::vector<int64_t>{3, 3});
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 16, 16}));
+}
+
+TEST(TestResampleFwdNode, InferYDim5D)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 16, 16, 16});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{2, 2, 2});
+    attr.set_post_padding(std::vector<int64_t>{2, 2, 2});
+    attr.set_stride(std::vector<int64_t>{3, 3, 3});
+    attr.set_window(std::vector<int64_t>{1, 1, 1});
+
+    const GraphAttributes graphAttributes;
+
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 7, 7, 7}));
+}
+
+TEST(TestResampleFwdNode, InferYStride)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 3, 16, 16});
+    attr.set_y(yTensor);
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{768, 256, 16, 1}));
+}
+
+TEST(TestResampleFwdNode, InferYStrideFromX)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    // channel last
+    xTensor->set_dim({2, 3, 7, 5}).set_stride({105, 1, 15, 3});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({2, 3, 3, 2});
+    attr.set_y(yTensor);
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{18, 1, 6, 3}));
+}
+
 TEST(TestResampleFwdNode, GetNodeTypeReturnsResampleFwd)
 {
     const GraphAttributes graphAttrs;
