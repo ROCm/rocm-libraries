@@ -4,9 +4,10 @@
 """Convert TensileLite Logic YAML files to use a defaults+overrides pattern.
 
 Modes:
-  apply   – replace element [5] (Solutions list) with {SolutionDefaults, Solutions}
-  stats   – dry-run showing per-file and aggregate savings
-  revert  – expand defaults+overrides back to flat solution dicts
+  apply     – replace element [5] (Solutions list) with {SolutionDefaults, Solutions}
+  stats     – dry-run showing per-file and aggregate savings
+  revert    – expand defaults+overrides back to flat solution dicts
+  fullstats – compute flat YAML / d+o YAML / d+o JSON sizes for every file
 """
 
 from __future__ import annotations
@@ -14,10 +15,12 @@ from __future__ import annotations
 import argparse
 import copy
 import glob
+import json
 import multiprocessing
 import os
 import sys
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -225,6 +228,55 @@ def stats_file(path: str) -> dict:
     return apply_file(path, dry_run=True)
 
 
+def fullstats_file(path: str) -> dict:
+    """Compute flat-YAML, d+o-YAML, and d+o-JSON sizes for a single file."""
+    try:
+        data = load_yaml(path)
+    except Exception as e:
+        return {"path": path, "skipped": True, "reason": f"load error: {e}"}
+
+    if not isinstance(data, list) or len(data) < SOLUTIONS_INDEX + 1:
+        return {"path": path, "skipped": True, "reason": "too few elements or not a list"}
+
+    element5 = data[SOLUTIONS_INDEX]
+
+    if _is_converted(element5):
+        defaults = element5["SolutionDefaults"]
+        flat_solutions = [expand_solution(o, defaults) for o in element5["Solutions"]]
+    elif isinstance(element5, list):
+        flat_solutions = element5
+    else:
+        return {"path": path, "skipped": True, "reason": "element[5] is not a list or dict"}
+
+    if len(flat_solutions) == 0:
+        return {"path": path, "skipped": True, "reason": "no solutions"}
+
+    num_solutions = len(flat_solutions)
+
+    data_flat = list(data)
+    data_flat[SOLUTIONS_INDEX] = flat_solutions
+    flat_yaml_size = len(yaml.dump(data_flat, default_flow_style=None, Dumper=yaml.SafeDumper).encode("utf-8"))
+
+    new_defaults = compute_defaults(flat_solutions)
+    override_list = [compute_overrides(s, new_defaults) for s in flat_solutions]
+    data_do = list(data)
+    data_do[SOLUTIONS_INDEX] = {"SolutionDefaults": new_defaults, "Solutions": override_list}
+
+    do_yaml_size = len(yaml.dump(data_do, default_flow_style=None, Dumper=yaml.SafeDumper).encode("utf-8"))
+
+    do_json_size = len(json.dumps(data_do, separators=(",", ":")).encode("utf-8"))
+
+    return {
+        "path": path,
+        "skipped": False,
+        "category": classify_category(path),
+        "num_solutions": num_solutions,
+        "flat_yaml_size": flat_yaml_size,
+        "do_yaml_size": do_yaml_size,
+        "do_json_size": do_json_size,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------------
@@ -275,6 +327,14 @@ def _pct(old: int, new: int) -> str:
         return "N/A"
     reduction = (1 - new / old) * 100
     return f"{reduction:.1f}%"
+
+
+def classify_category(path: str) -> str:
+    parts = Path(path).parts
+    for cat in CATEGORIES:
+        if cat in parts:
+            return cat
+    return "Other"
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +476,80 @@ def cmd_revert(args: argparse.Namespace) -> None:
         print("\nNo files were reverted.")
 
 
+def cmd_fullstats(args: argparse.Namespace) -> None:
+    paths = resolve_paths(args.path)
+    if not paths:
+        print("No files found.")
+        return
+
+    workers = args.jobs or min(multiprocessing.cpu_count(), len(paths))
+    print(f"Analyzing {len(paths)} file(s) with {workers} workers...", file=sys.stderr)
+
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(fullstats_file, paths))
+
+    by_cat: dict[str, list[dict]] = {}
+    skipped = 0
+    for r in results:
+        if r.get("skipped"):
+            skipped += 1
+            continue
+        by_cat.setdefault(r["category"], []).append(r)
+
+    if skipped:
+        print(f"  ({skipped} file(s) skipped)", file=sys.stderr)
+
+    rows = []
+    for cat in sorted(by_cat.keys()):
+        items = by_cat[cat]
+        row = {
+            "category": cat,
+            "files": len(items),
+            "solutions": sum(r["num_solutions"] for r in items),
+            "flat_yaml_mb": sum(r["flat_yaml_size"] for r in items) / (1024 * 1024),
+            "do_yaml_mb": sum(r["do_yaml_size"] for r in items) / (1024 * 1024),
+            "do_json_mb": sum(r["do_json_size"] for r in items) / (1024 * 1024),
+        }
+        flat = row["flat_yaml_mb"]
+        row["do_pct"] = (1 - row["do_yaml_mb"] / flat) * 100 if flat else 0
+        row["json_on_do_pct"] = (1 - row["do_json_mb"] / row["do_yaml_mb"]) * 100 if row["do_yaml_mb"] else 0
+        row["cumul_pct"] = (1 - row["do_json_mb"] / flat) * 100 if flat else 0
+        rows.append(row)
+
+    total = {
+        "category": "TOTAL",
+        "files": sum(r["files"] for r in rows),
+        "solutions": sum(r["solutions"] for r in rows),
+        "flat_yaml_mb": sum(r["flat_yaml_mb"] for r in rows),
+        "do_yaml_mb": sum(r["do_yaml_mb"] for r in rows),
+        "do_json_mb": sum(r["do_json_mb"] for r in rows),
+    }
+    flat = total["flat_yaml_mb"]
+    total["do_pct"] = (1 - total["do_yaml_mb"] / flat) * 100 if flat else 0
+    total["json_on_do_pct"] = (1 - total["do_json_mb"] / total["do_yaml_mb"]) * 100 if total["do_yaml_mb"] else 0
+    total["cumul_pct"] = (1 - total["do_json_mb"] / flat) * 100 if flat else 0
+
+    if args.json_output:
+        print(json.dumps({"categories": rows, "total": total}, indent=2))
+        return
+
+    hdr = f"{'Category':<15} {'Files':>6} {'#Sol':>7}  {'Orig(MB)':>10} {'D+O(MB)':>10} {'D+O %':>7}  {'JSON(MB)':>10} {'J/DO %':>7} {'Cumul %':>8}"
+    print(hdr)
+    print("-" * len(hdr))
+    for row in rows:
+        print(
+            f"  {row['category']:<13} {row['files']:>6} {row['solutions']:>7}  "
+            f"{row['flat_yaml_mb']:>10.1f} {row['do_yaml_mb']:>10.1f} {row['do_pct']:>6.1f}%  "
+            f"{row['do_json_mb']:>10.1f} {row['json_on_do_pct']:>6.1f}% {row['cumul_pct']:>7.1f}%"
+        )
+    print("-" * len(hdr))
+    print(
+        f"  {total['category']:<13} {total['files']:>6} {total['solutions']:>7}  "
+        f"{total['flat_yaml_mb']:>10.1f} {total['do_yaml_mb']:>10.1f} {total['do_pct']:>6.1f}%  "
+        f"{total['do_json_mb']:>10.1f} {total['json_on_do_pct']:>6.1f}% {total['cumul_pct']:>7.1f}%"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert TensileLite Logic YAML to defaults+overrides format.",
@@ -445,6 +579,15 @@ def main() -> None:
     p_revert.add_argument("--category", choices=["StreamK", "Equality", "GridBased", "all"],
                           default=None, help="Filter by category subdirectory")
 
+    # fullstats
+    p_fullstats = subparsers.add_parser("fullstats",
+        help="Compute flat/d+o/JSON sizes for all files (read-only)")
+    p_fullstats.add_argument("path", help="File, directory, or glob pattern")
+    p_fullstats.add_argument("-j", "--jobs", type=int, default=None,
+                             help="Number of parallel workers (default: CPU count)")
+    p_fullstats.add_argument("--json", dest="json_output", action="store_true",
+                             help="Emit machine-readable JSON output")
+
     args = parser.parse_args()
 
     if args.command == "apply":
@@ -453,6 +596,8 @@ def main() -> None:
         cmd_stats(args)
     elif args.command == "revert":
         cmd_revert(args)
+    elif args.command == "fullstats":
+        cmd_fullstats(args)
 
 
 if __name__ == "__main__":
