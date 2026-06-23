@@ -427,7 +427,7 @@ _defaultProblemType = {
     "UseE": False,  # =True use output E to output gemm results before activation
     "Gradient": False,  # =True set globalWriteElements to gradient mode
     "UseBias": 0,  # =1 support bias vector on M direction, =2 support bias vector on N direction, =3 support bias vector on both M,N direction
-    "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
+    "UseGateResidual": True,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     "UseScaleCD": False,  # =True use scaleC, scaleD
@@ -901,7 +901,7 @@ class ProblemType(Mapping):
       self["BiasDataTypeList"] = []
 
     # Gate Residual
-    if "UseGateResidual" in config and config["UseGateResidual"]:
+    if self["UseGateResidual"]:
       if "GateResidualDataTypeList" in config:
         self["GateResidualDataTypeList"] = [DataType(gtype) for gtype in config["GateResidualDataTypeList"]]
         self["GateResidualDataTypeList"].sort() # Make name unique
@@ -1355,12 +1355,7 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
 ################################################################################
 
 def getGateResidualDataTypeListDefault(problem: ProblemType) -> List[DataType]:
-  gList = []
-  for d in ["DataType", "ComputeDataType"]:
-    dtype = DataType(problem[d])
-    if dtype.numBytes() > 1:
-      gList.append(dtype)
-
-  gateResidualDataTypeList = list(set(gList))
-  gateResidualDataTypeList.sort() # Make name unique
-  return gateResidualDataTypeList
+  # Experiment: force single gate dtype = A (input) type; sub-byte A (fp8/i8)
+  # falls back to compute type (source kernels can't cast fp8 on device).
+  dt = DataType(problem["DataType"])
+  return [dt] if dt.numBytes() > 1 else [DataType(problem["ComputeDataType"])]
