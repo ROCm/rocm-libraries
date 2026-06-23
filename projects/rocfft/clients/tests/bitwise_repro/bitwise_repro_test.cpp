@@ -195,7 +195,6 @@ INSTANTIATE_TEST_SUITE_P(pow2_1D,
                                                              true)),
                          bitwise_repro_test::TestName);
 
-
 INSTANTIATE_TEST_SUITE_P(pow2_1D_half,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
@@ -285,7 +284,7 @@ INSTANTIATE_TEST_SUITE_P(mix_1D,
 INSTANTIATE_TEST_SUITE_P(small_1D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator_base(
-                                                 repro_db == nullptr ? 0 : test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              {fft_transform_type_complex_forward},
                              generate_lengths({small_1D_sizes()}),
                              {fft_precision_single},
