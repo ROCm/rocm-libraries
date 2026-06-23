@@ -189,6 +189,10 @@ class GlobalWriteBatchWriter:
     4. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
     5. Not complex (real/imag are interleaved in acc VGPRs, so the relative
        offset elementSumIdx[i]-elementSumIdx[0] does not locate the imag half)
+    6. Single output tile (MIWaveTile == [1,1] and VectorWidth == 1). The
+       i*gwvw offset only matches the arch-VGPR layout for one contiguous block;
+       with multiple wave-tiles the acc registers are grouped per tile (e.g. TN +
+       2x2 read the wrong registers).
     """
     if self.parentWriter.states.useBias == DataDirection.READ or \
        self.kernel.get("ActivationFuncCall", False) or \
@@ -197,6 +201,11 @@ class GlobalWriteBatchWriter:
        self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
        self.kernel["ProblemType"].get("UseScaleCD", False) or \
        self.kernel["ProblemType"]["DataType"].isComplex():
+      return False
+
+    miWaveTile = self.kernel.get("MIWaveTile", [1, 1])
+    if miWaveTile[0] != 1 or miWaveTile[1] != 1 or \
+       self.kernel.get("VectorWidthA", 1) != 1 or self.kernel.get("VectorWidthB", 1) != 1:
       return False
 
     return self.kernel["MIArchVgpr"] and \

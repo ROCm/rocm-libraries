@@ -2541,6 +2541,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               localWrites += skipPreIterLW
         dscnt += localWrites
       else:
+        sawLocalRead = False
         for item in list(iterCode.items()):
           localReads  = countWeightedLocalRead(item)
           localWrites = countWeightedLocalWrite(item)
@@ -2559,7 +2560,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # we need to wait for all preceding reads before the macs
             # so only opportunity for optimization is if the writes are at the end
             if localReads:
+              sawLocalRead = True
               dscnt = 0 # reset to wait for all reads
+            elif sawLocalRead:
+              # SIA0 + PGR>=2 emits localReadCode and localWriteCode as separate
+              # modules. Once local reads require a full drain, a following
+              # write-only module must not downgrade dscnt to localWrites-only.
+              pass
             else:
               dscnt = localWrites  # this only survives if writes are at the end
 
@@ -2801,7 +2808,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
         tdmM: bool = kernel["enableTDMMetadata"]
-        if tdmA and tdmB and kernel["NumWaves"] > 1:
+        if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
           module.add(self.undefineSgpr("MulticastMask"))
         else:
           module.add(self.undefineSgpr("MulticastMaskA"))
@@ -6222,9 +6229,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # tail: re-init local read addresses
       if kernel["PrefetchGlobalRead"]:
-        # StreamK tail workgroups may start from a partial tile slice, so SIA0
-        # also needs the LRO reset before tail MACs.
-        if kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"]:
+        # Main-loop pointer swaps can leave LROs in the Blk half. SIA0 non-TDM
+        # also needs this reset before tail MACs, but SIA0 TDM tail descriptors
+        # already select the correct LDS bank and clearing the LRO Blk bit here
+        # regresses those kernels.
+        if (kernel["_ScheduleIterAlg"] != 0 or kernel["StreamK"] or
+            not (kernel["enableTDMA"] and kernel["enableTDMB"])):
           module.addComment1("Tail: local read reset offsets a")
           module.add(self.localReadResetOffsets(kernel, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
@@ -6537,10 +6547,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
-    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
-    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
-    # may have reduced the instruction-level VGPR count below the pool estimate.
-    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+    # Post-rocIsaPass: use the O(1) max-VGPR count from the register graph the
+    # pass already built (passResult.maxVgpr) to update the kernel descriptor
+    # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
+    self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
@@ -9036,7 +9046,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tdmA: bool = kernel["enableTDMA"]
       tdmB: bool = kernel["enableTDMB"]
       tdmM: bool = kernel["enableTDMMetadata"]
-      if tdmA and tdmB and kernel["NumWaves"] > 1:
+      # Subtile issues both A and B loads on every wave (no wave-parity load
+      # split), so the single parity MulticastMask is wrong there -- it would
+      # OR one tensor's mask into both descriptors. Use the split A/B masks.
+      if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
         self.defineSgpr("MulticastMask", 1)
       else:
         self.defineSgpr("MulticastMaskA", 1)
@@ -9764,10 +9777,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
 
-  def updateOccupancyFromScan(self, kernel, mkb) -> None:
-    """Override in KernelWriterAssembly to rescan actual register usage after
-    rocIsaPass optimizations and correct kernel["CUOccupancy"] + the kernel
-    descriptor's next_free_vgpr for ArchAccUnifiedRegs ISAs."""
+  def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
+    """Override in KernelWriterAssembly to update CUOccupancy after rocIsaPass
+    using the pre-computed maxVgpr from rocIsaPassResult."""
     pass
 
   ##############################################################################

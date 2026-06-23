@@ -13,8 +13,8 @@ GlobalParameters:
   DataInitTypeA: 3
   DataInitTypeB: 3
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   RotatingBufferSize: 512
   DeviceLDS: 163840

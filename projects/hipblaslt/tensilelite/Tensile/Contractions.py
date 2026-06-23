@@ -829,7 +829,8 @@ class Solution:
                    printIndexAssignmentInfo,
                    assembler,
                    isaInfoMap,
-                   solution.srcName
+                   solution.srcName,
+                   raiseProblemTypeOnTypeMismatch=False,
                )
 
     @classmethod
@@ -843,7 +844,9 @@ class Solution:
             assembler,
             isaInfoMap,
             srcName = "",
-            deviceInfo=None
+            deviceInfo=None,
+            *,
+            raiseProblemTypeOnTypeMismatch: bool = True,
         ):
         rv = cls()
 
@@ -906,7 +909,8 @@ class Solution:
                                   printIndexAssignmentInfo,
                                   assembler,
                                   isaInfoMap,
-                                  srcName
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
                               )
         rv.srcName = srcName
 

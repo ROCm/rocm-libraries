@@ -216,7 +216,7 @@ class SpinnyThing:
         self.index = 0
 
     def increment(self, value=1):
-        sys.stdout.write("\b" + self.chars[self.index])
+        sys.stdout.write("\b" + self.chars[self.index])  # pragma: no mutate
         sys.stdout.flush()
         self.index = (self.index + 1) % len(self.chars)
 
@@ -341,7 +341,7 @@ def isRhel8() -> bool:
         content = f.read()
     match = re.search(pattern, content, re.DOTALL)
     if match:
-        printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
+        printWarning("Rhel8 environments may not support all tools for system queries such as amd-smi.")
         return True
     return False
 
@@ -359,12 +359,12 @@ def ceilDivide(numerator, denominator):
         if numerator < 0 or denominator < 0:
             raise ValueError
     except ValueError:
-        print("ERROR: Can't have a negative register value")
+        print("ERROR: Can't have a negative register value")  # pragma: no mutate
         return 0
     try:
         div = int((numerator+denominator-1) // denominator)
     except ZeroDivisionError:
-        print("ERROR: Divide by 0")
+        print("ERROR: Divide by 0")  # pragma: no mutate
         return 0
     return div
 

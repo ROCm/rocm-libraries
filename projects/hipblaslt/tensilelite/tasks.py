@@ -64,9 +64,10 @@ def get_gpu_arch(c):
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
+        "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
     }
 )
-def rocisa(c, rocisa_dir=None):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     """Install rocisa as an editable pip package.
 
     Run once after cloning, or after changes to rocisa's pyproject.toml or
@@ -74,22 +75,95 @@ def rocisa(c, rocisa_dir=None):
     build-client` re-runs this editable install (an incremental no-op when
     nothing changed), with the staleness check in rocisa/__init__.py as a
     backstop if you skip that.
+
+    Builds and installs stinkytofu locally first so rocisa uses
+    find_package(stinkytofu) — mirroring how TheRock wires the two together.
     """
-    _pip_install_rocisa(c, rocisa_dir)
+    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
 
 
-def _pip_install_rocisa(c, rocisa_dir=None):
+def _load_stinkytofu_tasks():
+    """Import shared/stinkytofu/tasks.py without triggering its venv guard.
+
+    The venv check was moved into build() so this import is side-effect-free.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "stinkytofu_tasks",
+        _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu" / "tasks.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
+    """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
+
+    Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
+    of truth — so a new required cmake option only needs to be added there.
+    Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
+    cmake is incremental, so repeat calls are a fast no-op when nothing changed.
+    """
+    stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
+    build_dir = install_prefix.parent / "stinkytofu-build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    rocm_s = rocm if isinstance(rocm, str) else str(rocm)
+    _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+    _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+
+    st = _load_stinkytofu_tasks()
+    cmake_cmd = [
+        "cmake",
+        "-S", str(stinkytofu_src),
+        "-B", str(build_dir),
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DROCM_PATH={rocm_s}",
+        f"-DCMAKE_CXX_COMPILER={_cxx}",
+        f"-DCMAKE_C_COMPILER={_cc}",
+        # tests/python OFF for the rocisa integration build; examples ON (default).
+        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
+    ]
+    if shutil.which("ninja"):
+        cmake_cmd.append("-G Ninja")
+    if shutil.which("ccache"):
+        cmake_cmd += [
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ]
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", str(build_dir), "--parallel"]))
+    c.run(shlex.join(["cmake", "--install", str(build_dir)]))
+
+
+def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
     the editable install fresh.
+
+    Builds stinkytofu and installs it to stinkytofu_prefix (default:
+    build_tmp/stinkytofu-install next to this file) so rocisa's CMake finds it
+    via find_package(stinkytofu) — the same path TheRock uses. This exercises
+    the installed package layout (stinkytofuConfig.cmake, exported targets) so
+    breakage is caught early in the dev/CI workflow.
     """
-    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
+    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
-    # Standalone wheel build: build the stinkytofu example plugin so it is bundled in
-    # the rocisa package (next to libstinkytofu) and exercised by the rocisa plugin
-    # tests. Default OFF in CMake so integrated/ROCm builds never ship it.
-    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON -DSTINKYTOFU_BUILD_EXAMPLES=ON"
+
+    prefix = (
+        pathlib.Path(stinkytofu_prefix).resolve()
+        if stinkytofu_prefix
+        else _TASKS_DIR / "build_tmp" / "stinkytofu-install"
+    )
+    _build_and_install_stinkytofu(c, prefix, rocm)
+
+    cmake_args = (
+        f"-DROCM_PATH={rocm}"
+        f" -DROCISA_INCLUDE_BUILD_INFO=ON"
+        f" -DCMAKE_PREFIX_PATH={prefix}"
+    )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
@@ -130,6 +204,11 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
     running only build-client, those bindings are stale — silently for installs
     without `_build_info.py`, or an ImportError otherwise. Re-running the
     editable install here fixes that.
+
+    This also re-runs the stinkytofu cmake configure+build+install step. cmake is
+    incremental, so when stinkytofu sources are unchanged this is a fast no-op and
+    does not affect the staleness-check semantics — the stale rocisa detection via
+    _build_info.py / direct_url.json is unaffected.
 
     No-op unless rocisa is installed editable. Degrades to a warning — never a
     hard failure — when the build backend (scikit-build-core / nanobind) is
