@@ -67,7 +67,7 @@ try
     size_t size_tmpcopy;
     // size of arrays of pointers (for batched cases)
     size_t size_workArr;
-    rocsolver_getri_getMemorySize<false, true, T>(n, batch_count, &size_work1, &size_work2,
+    rocsolver_getri_getMemorySize<false, true, T>(handle, n, batch_count, &size_work1, &size_work2,
                                                   &size_work3, &size_work4, &size_tmpcopy,
                                                   &size_workArr, &optim_mem);
 

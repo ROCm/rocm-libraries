@@ -36,18 +36,23 @@ usage() {
     echo ""
     echo "  Requires Python 3.12 or newer."
     echo ""
-    echo "  --torch-mode <rocm|cpu|existing|none>"
+    echo "  --torch-mode <rocm|cuda|cpu|existing|none>"
     echo "                       Select how torch is provided. Default: $TORCH_MODE"
     echo "                         rocm: install ROCm torch nightly, use ROCm"
     echo "                               libraries/toolchain from the torch wheel's"
     echo "                               bundled ROCm SDK packages, and build local"
     echo "                               hipDNN/provider artifacts when absent."
+    echo "                         cuda: install CUDA torch from PyPI (or"
+    echo "                               --torch-index-url) for the PyTorch"
+    echo "                               execution backend only. hipDNN bindings,"
+    echo "                               engine plugins, and ROCm setup are skipped."
     echo "                         cpu:  install CPU-only torch and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "                         existing:"
     echo "                               reuse torch already present in $VENV_DIR."
     echo "                               ROCm torch uses its bundled SDK libraries;"
-    echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
+    echo "                               CUDA torch skips hipDNN/ROCm setup;"
+    echo "                               CPU torch uses installed ROCm/hipDNN."
     echo "                         none: leave torch uninstalled and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
@@ -154,12 +159,18 @@ done
 
 
 case "$TORCH_MODE" in
-    rocm|cpu|existing|none) ;;
+    rocm|cuda|cpu|existing|none) ;;
     *)
-        echo "ERROR: --torch-mode must be one of: rocm, cpu, existing, none" >&2
+        echo "ERROR: --torch-mode must be one of: rocm, cuda, cpu, existing, none" >&2
         exit 1
         ;;
 esac
+
+if [ "$TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with --torch-mode cuda;" >&2
+    echo "hipDNN and provider plugins require a ROCm toolchain." >&2
+    exit 1
+fi
 
 if [ "$TORCH_MODE" = "existing" ]; then
     REUSE_VENV=1
@@ -436,13 +447,23 @@ detect_gpu_arch() {
 }
 
 get_torch_mode() {
-    python - <<'PY'
+    # `import torch` from a ROCm wheel with no visible GPU can print SDK probe
+    # warnings to stdout, and this value is captured via command substitution.
+    # Emit the mode on its own final line (the leading newline guards against a
+    # warning that lacks a trailing newline) and read only that last line.
+    python - <<'PY' | tail -n1
 try:
     import torch
 except Exception:
-    print("missing")
+    mode = "missing"
 else:
-    print("rocm" if getattr(torch.version, "hip", None) else "cpu")
+    if getattr(torch.version, "hip", None):
+        mode = "rocm"
+    elif getattr(torch.version, "cuda", None):
+        mode = "cuda"
+    else:
+        mode = "cpu"
+print("\n" + mode)
 PY
 }
 
@@ -497,15 +518,36 @@ install_torch() {
             INSTALLED_TORCH_MODE=$(get_torch_mode)
             require_torch_mode cpu
             ;;
+        cuda)
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
+                require_torch_mode cuda
+                echo "Using existing CUDA PyTorch in $VENV_DIR."
+                return
+            fi
+            if [ -n "$TORCH_INDEX_URL" ]; then
+                echo "Installing CUDA PyTorch from $TORCH_INDEX_URL"
+                pip install torch --index-url "$TORCH_INDEX_URL"
+            else
+                echo "Installing CUDA PyTorch from PyPI"
+                pip install torch
+            fi
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
+            require_torch_mode cuda
+            ;;
         rocm)
             local index_url="$TORCH_INDEX_URL"
             if [ -z "$index_url" ]; then
-                local gpu_arch index_arch
+                local gpu_arch index_bucket
                 gpu_arch=$(detect_gpu_arch)
+                # ROCm nightly bucket per GPU arch. gfx90a's current torch +
+                # ROCm SDK builds live in the bare "gfx90a" bucket; the older
+                # "gfx90X-dcgpu" family bucket is frozen at a release that
+                # predates several SDK libraries (e.g. hipdnn). gfx942/gfx950
+                # are still served by their "-dcgpu" family buckets.
                 case "$gpu_arch" in
-                    gfx90a) index_arch="gfx90X" ;;
-                    gfx942) index_arch="gfx94X" ;;
-                    gfx950) index_arch="gfx950" ;;
+                    gfx90a) index_bucket="gfx90a" ;;
+                    gfx942) index_bucket="gfx94X-dcgpu" ;;
+                    gfx950) index_bucket="gfx950-dcgpu" ;;
                     *)
                         echo "ERROR: Unsupported GPU architecture '${gpu_arch:-none}'." >&2
                         echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950 (MI350)" >&2
@@ -513,7 +555,7 @@ install_torch() {
                         exit 1
                         ;;
                 esac
-                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_arch}-dcgpu/"
+                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_bucket}/"
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
@@ -592,6 +634,7 @@ build_hipdnn() {
     rm -rf "$BUILD_DIR"
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -629,6 +672,7 @@ build_provider() {
     rm -rf "$build_dir"
     cmake -S "$provider_dir" -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -746,6 +790,14 @@ ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
     printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
 } > "$ACTIVATE_LOCAL"
 INSTALLED_TORCH_MODE=$(get_torch_mode)
+# An existing venv with CUDA torch reaches the CUDA skip path below even when
+# --torch-mode existing was passed; building hipDNN there would silently be
+# skipped, so reject the build request as early as possible.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with an existing CUDA torch venv;" >&2
+    echo "building hipDNN requires a ROCm toolchain. Remove $VENV_DIR or use a ROCm torch mode." >&2
+    exit 1
+fi
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -759,6 +811,37 @@ echo "Torch mode: $TORCH_MODE"
 # intentionally omits torch so pip never replaces the selected torch wheel.
 install_torch
 pip install -e "$SCRIPT_DIR"
+
+# CUDA torch supports only the PyTorch execution backend: no hipDNN Python
+# bindings, engine plugins, amdsmi, or ROCm prefix are installed or required.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] || [ "$TORCH_MODE" = "cuda" ]; then
+    echo ""
+    echo "CUDA torch selected: skipping hipDNN/provider builds, hipDNN Python"
+    echo "bindings, and ROCm environment setup."
+    echo ""
+    echo "Setup complete. Activate the virtual environment with:"
+    echo "  source $VENV_DIR/bin/activate"
+    echo ""
+    echo "Run PyTorch-backend benchmarks with:"
+    echo "  python -m dnn_benchmarking --graph <graph.json> --backend pytorch"
+    exit 0
+fi
+
+# Resolve the GPU arch once and hand it to the HIP device-code builds. The
+# wheel-bundled ROCm SDK ships no rocm_agent_enumerator/offload-arch on PATH and
+# the build may run with no GPU, so HIP cannot autodetect the offload arch; pass
+# it explicitly via hipDNN's documented GPU_TARGETS instead of letting HIP fall
+# back to a default target list. --gpu-arch (or detection on a configured host)
+# is the single source of truth -- no external GPU_TARGETS or
+# ROCM_SDK_TARGET_FAMILY is required.
+RESOLVED_GPU_ARCH=$(detect_gpu_arch)
+HIPDNN_HIP_ARCH_ARGS=()
+if [ -n "$RESOLVED_GPU_ARCH" ]; then
+    HIPDNN_HIP_ARCH_ARGS=(-DGPU_TARGETS="$RESOLVED_GPU_ARCH" -DAMDGPU_TARGETS="$RESOLVED_GPU_ARCH")
+    # Belt-and-suspenders for any torch C++/HIP extension compile (none today:
+    # the Python bindings are nanobind host code linking hip::host).
+    export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$RESOLVED_GPU_ARCH}"
+fi
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
 BINDING_PREFIX=$(select_binding_prefix)

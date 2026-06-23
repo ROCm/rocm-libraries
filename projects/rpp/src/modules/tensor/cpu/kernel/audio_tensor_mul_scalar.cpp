@@ -24,40 +24,33 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus audio_tensor_mul_scalar_host(Rpp32f *srcPtr,
-                                       Rpp32f scalarValue,
-                                       RpptDescPtr srcDescPtr,
-                                       Rpp32f *dstPtr,
-                                       RpptDescPtr dstDescPtr,
-                                       Rpp32s *srcLengthTensor,
-                                       rpp::Handle& handle)
-{
+RppStatus audio_tensor_mul_scalar_host(Rpp32f* srcPtr, Rpp32f scalarValue, RpptDescPtr srcDescPtr,
+                                       Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
+                                       Rpp32s* srcLengthTensor, rpp::Handle& handle) {
     // Broadcast the scalar value for SIMD operations
     __m256 pScalar = _mm256_set1_ps(scalarValue);
 
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for (Rpp32u batchCount = 0; batchCount < srcDescPtr->n; batchCount++)
-    {
-        Rpp32f *srcPtrTemp = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        Rpp32f *dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
+    for (Rpp32u batchCount = 0; batchCount < srcDescPtr->n; batchCount++) {
+        Rpp32f* srcPtrTemp = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrTemp = dstPtr + batchCount * dstDescPtr->strides.nStride;
         Rpp32s bufferLength = srcLengthTensor[batchCount];
-        
+
         Rpp32s vectorLoopCount = 0;
         Rpp32s vectorIncrement = 8;
         Rpp32s alignedLength = (bufferLength / 8) * 8;
-#if __AVX2__       
+#if __AVX2__
         // Vectorized multiplication using AVX2 (8 floats at a time)
-        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement)
-        {
+        for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
             __m256 pSrc = _mm256_loadu_ps(srcPtrTemp);
             __m256 pDst = _mm256_mul_ps(pSrc, pScalar);
             _mm256_storeu_ps(dstPtrTemp, pDst);
             srcPtrTemp += vectorIncrement;
             dstPtrTemp += vectorIncrement;
         }
-#endif        
+#endif
         // Handle remaining elements
         for (; vectorLoopCount < bufferLength; vectorLoopCount++)
             *dstPtrTemp++ = *srcPtrTemp++ * scalarValue;

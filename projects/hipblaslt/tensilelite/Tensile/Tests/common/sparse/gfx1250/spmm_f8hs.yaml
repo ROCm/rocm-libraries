@@ -5,7 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -69,14 +69,14 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [0, 1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -139,14 +139,14 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [0, 1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -209,14 +209,14 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [0, 1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -279,14 +279,14 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [0, 1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]

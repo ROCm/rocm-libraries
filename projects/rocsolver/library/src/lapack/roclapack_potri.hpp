@@ -39,7 +39,8 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_potri_getMemorySize(const rocblas_int n,
+void rocsolver_potri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
                                    size_t* size_work2,
@@ -63,9 +64,9 @@ void rocsolver_potri_getMemorySize(const rocblas_int n,
     }
 
     // requirements for calling TRTRI
-    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(rocblas_diagonal_non_unit, n, batch_count,
-                                                       size_work1, size_work2, size_work3, size_work4,
-                                                       size_tmpcopy, size_workArr, optim_mem);
+    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(
+        handle, rocblas_diagonal_non_unit, n, batch_count, size_work1, size_work2, size_work3,
+        size_work4, size_tmpcopy, size_workArr, optim_mem);
 
     // required space to copy A
     *size_tmpcopy = std::max(*size_tmpcopy, sizeof(T) * n * n * batch_count);

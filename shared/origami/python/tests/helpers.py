@@ -9,19 +9,19 @@ import origami
 # Hardware objects for supported architectures
 HARDWARE = {
     "gfx90a": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx90a, 110, 64 * 1024, 8 * 1024 * 1024, 1700000
+        origami.architecture_t.gfx90a, 110, 64 * 1024, 512 * 1024, 8 * 1024 * 1024, 1700000
     ),
     "gfx942": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx942, 228, 64 * 1024, 24 * 1024 * 1024, 1700000
+        origami.architecture_t.gfx942, 228, 64 * 1024, 512 * 1024, 24 * 1024 * 1024, 1700000
     ),
     "gfx950": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx950, 304, 64 * 1024, 32 * 1024 * 1024, 2100000
+        origami.architecture_t.gfx950, 304, 64 * 1024, 512 * 1024, 32 * 1024 * 1024, 2100000
     ),
     "gfx1100": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx1100, 96, 64 * 1024, 6 * 1024 * 1024, 2500000
+        origami.architecture_t.gfx1100, 96, 64 * 1024, 512 * 1024, 6 * 1024 * 1024, 2500000
     ),
     "gfx1201": origami.get_hardware_for_arch(
-        origami.architecture_t.gfx1201, 60, 128 * 1024, 6 * 1024 * 1024, 2500000
+        origami.architecture_t.gfx1201, 60, 128 * 1024, 512 * 1024, 6 * 1024 * 1024, 2500000
     ),
 }
 

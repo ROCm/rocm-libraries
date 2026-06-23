@@ -25,9 +25,10 @@ SOFTWARE.
 #include "hip_tensor_executors.hpp"
 #include "rpp_hip_interpolation.hpp"
 
-__device__ void water_roi_and_srclocs_hip_compute(int id_x, int id_y, float4 *amplX_f4, float4 *amplY_f4,
-                                                  float freqX, float freqY, float phaseX, float phaseY, d_float16 *locSrc_f16)
-{
+__device__ void water_roi_and_srclocs_hip_compute(int id_x, int id_y, float4* amplX_f4,
+                                                  float4* amplY_f4, float freqX, float freqY,
+                                                  float phaseX, float phaseY,
+                                                  d_float16* locSrc_f16) {
     d_float8 increment_f8, locDst_f8x, locDst_f8y;
     increment_f8.f4[0] = make_float4(0.0f, 1.0f, 2.0f, 3.0f);
     increment_f8.f4[1] = make_float4(4.0f, 5.0f, 6.0f, 7.0f);
@@ -48,31 +49,35 @@ __device__ void water_roi_and_srclocs_hip_compute(int id_x, int id_y, float4 *am
     cosFactor_f8.f1[6] = cosf(fmaf(freqY, locDst_f8x.f1[6], phaseY));
     cosFactor_f8.f1[7] = cosf(fmaf(freqY, locDst_f8x.f1[7], phaseY));
 
-    locSrc_f16->f4[0] =  locDst_f8x.f4[0] + (*amplX_f4 * sinFactor_f8.f4[0]);  // Compute src x locations in float for dst x locations [0-3]
-    locSrc_f16->f4[1] =  locDst_f8x.f4[1] + (*amplX_f4 * sinFactor_f8.f4[1]);  // Compute src x locations in float for dst x locations [4-7]
-    locSrc_f16->f4[2] =  locDst_f8y.f4[0] + (*amplY_f4 * cosFactor_f8.f4[0]);  // Compute src y locations in float for dst y locations [0-3]
-    locSrc_f16->f4[3] =  locDst_f8y.f4[1] + (*amplY_f4 * cosFactor_f8.f4[1]);  // Compute src y locations in float for dst y locations [4-7]
+    locSrc_f16->f4[0] =
+        locDst_f8x.f4[0] +
+        (*amplX_f4 *
+         sinFactor_f8.f4[0]);  // Compute src x locations in float for dst x locations [0-3]
+    locSrc_f16->f4[1] =
+        locDst_f8x.f4[1] +
+        (*amplX_f4 *
+         sinFactor_f8.f4[1]);  // Compute src x locations in float for dst x locations [4-7]
+    locSrc_f16->f4[2] =
+        locDst_f8y.f4[0] +
+        (*amplY_f4 *
+         cosFactor_f8.f4[0]);  // Compute src y locations in float for dst y locations [0-3]
+    locSrc_f16->f4[3] =
+        locDst_f8y.f4[1] +
+        (*amplY_f4 *
+         cosFactor_f8.f4[1]);  // Compute src y locations in float for dst y locations [4-7]
 }
 
 template <typename T>
-__global__ void water_pkd_tensor(T *srcPtr,
-                                 uint2 srcStridesNH,
-                                 T *dstPtr,
-                                 uint2 dstStridesNH,
-                                 float *amplXTensor,
-                                 float *amplYTensor,
-                                 float *freqXTensor,
-                                 float *freqYTensor,
-                                 float *phaseXTensor,
-                                 float *phaseYTensor,
-                                 RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void water_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, uint2 dstStridesNH,
+                                 float* amplXTensor, float* amplYTensor, float* freqXTensor,
+                                 float* freqYTensor, float* phaseXTensor, float* phaseYTensor,
+                                 RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) || (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x))
-    {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
         return;
     }
 
@@ -86,35 +91,28 @@ __global__ void water_pkd_tensor(T *srcPtr,
     float phaseX = phaseXTensor[id_z];
     float phaseY = phaseYTensor[id_z];
 
-    int4 srcRoi_i4 = *(reinterpret_cast<int4 *>(&roiTensorPtrSrc[id_z]));
+    int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
-    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX, phaseY, &locSrc_f16);
+    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
+                                      phaseY, &locSrc_f16);
 
     d_float24 dst_f24;
-    rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16, &srcRoi_i4, &dst_f24);
+    rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16,
+                                                &srcRoi_i4, &dst_f24);
     rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
-__global__ void water_pln_tensor(T *srcPtr,
-                                 uint3 srcStridesNCH,
-                                 T *dstPtr,
-                                 uint3 dstStridesNCH,
-                                 int channelsDst,
-                                 float *amplXTensor,
-                                 float *amplYTensor,
-                                 float *freqXTensor,
-                                 float *freqYTensor,
-                                 float *phaseXTensor,
-                                 float *phaseYTensor,
-                                 RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void water_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, uint3 dstStridesNCH,
+                                 int channelsDst, float* amplXTensor, float* amplYTensor,
+                                 float* freqXTensor, float* freqYTensor, float* phaseXTensor,
+                                 float* phaseYTensor, RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) || (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x))
-    {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
         return;
     }
 
@@ -128,49 +126,44 @@ __global__ void water_pln_tensor(T *srcPtr,
     float phaseX = phaseXTensor[id_z];
     float phaseY = phaseYTensor[id_z];
 
-    int4 srcRoi_i4 = *(reinterpret_cast<int4 *>(&roiTensorPtrSrc[id_z]));
+    int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
-    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX, phaseY, &locSrc_f16);
+    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
+                                      phaseY, &locSrc_f16);
 
     d_float8 dst_f8;
-    rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16, &srcRoi_i4, &dst_f8);
+    rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16,
+                                               &srcRoi_i4, &dst_f8);
     rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
-    if (channelsDst == 3)
-    {
+    if (channelsDst == 3) {
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
 
-        rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16, &srcRoi_i4, &dst_f8);
+        rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16,
+                                                   &srcRoi_i4, &dst_f8);
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
 
-        rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16, &srcRoi_i4, &dst_f8);
+        rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16,
+                                                   &srcRoi_i4, &dst_f8);
         rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
     }
 }
 
 template <typename T>
-__global__ void water_pkd3_pln3_tensor(T *srcPtr,
-                                       uint2 srcStridesNH,
-                                       T *dstPtr,
-                                       uint3 dstStridesNCH,
-                                       float *amplXTensor,
-                                       float *amplYTensor,
-                                       float *freqXTensor,
-                                       float *freqYTensor,
-                                       float *phaseXTensor,
-                                       float *phaseYTensor,
-                                       RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void water_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                       uint3 dstStridesNCH, float* amplXTensor, float* amplYTensor,
+                                       float* freqXTensor, float* freqYTensor, float* phaseXTensor,
+                                       float* phaseYTensor, RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) || (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x))
-    {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
         return;
     }
 
@@ -184,34 +177,28 @@ __global__ void water_pkd3_pln3_tensor(T *srcPtr,
     float phaseX = phaseXTensor[id_z];
     float phaseY = phaseYTensor[id_z];
 
-    int4 srcRoi_i4 = *(reinterpret_cast<int4 *>(&roiTensorPtrSrc[id_z]));
+    int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
-    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX, phaseY, &locSrc_f16);
+    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
+                                      phaseY, &locSrc_f16);
 
     d_float24 dst_f24;
-    rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16, &srcRoi_i4, &dst_f24);
+    rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16,
+                                                &srcRoi_i4, &dst_f24);
     rpp_hip_pack_float24_pkd3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
 
 template <typename T>
-__global__ void water_pln3_pkd3_tensor(T *srcPtr,
-                                       uint3 srcStridesNCH,
-                                       T *dstPtr,
-                                       uint2 dstStridesNH,
-                                       float *amplXTensor,
-                                       float *amplYTensor,
-                                       float *freqXTensor,
-                                       float *freqYTensor,
-                                       float *phaseXTensor,
-                                       float *phaseYTensor,
-                                       RpptROIPtr roiTensorPtrSrc)
-{
+__global__ void water_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                       uint2 dstStridesNH, float* amplXTensor, float* amplYTensor,
+                                       float* freqXTensor, float* freqYTensor, float* phaseXTensor,
+                                       float* phaseYTensor, RpptROIPtr roiTensorPtrSrc) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) || (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x))
-    {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
         return;
     }
 
@@ -225,119 +212,88 @@ __global__ void water_pln3_pkd3_tensor(T *srcPtr,
     float phaseX = phaseXTensor[id_z];
     float phaseY = phaseYTensor[id_z];
 
-    int4 srcRoi_i4 = *(reinterpret_cast<int4 *>(&roiTensorPtrSrc[id_z]));
+    int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
-    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX, phaseY, &locSrc_f16);
+    water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
+                                      phaseY, &locSrc_f16);
 
     d_float24 dst_f24;
-    rpp_hip_interpolate24_nearest_neighbor_pln3(srcPtr + srcIdx, &srcStridesNCH, &locSrc_f16, &srcRoi_i4, &dst_f24);
+    rpp_hip_interpolate24_nearest_neighbor_pln3(srcPtr + srcIdx, &srcStridesNCH, &locSrc_f16,
+                                                &srcRoi_i4, &dst_f24);
     rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
-RppStatus hip_exec_water_tensor(T *srcPtr,
-                                RpptDescPtr srcDescPtr,
-                                T *dstPtr,
-                                RpptDescPtr dstDescPtr,
-                                Rpp32f *amplitudeXTensor,
-                                Rpp32f *amplitudeYTensor,
-                                Rpp32f *frequencyXTensor,
-                                Rpp32f *frequencyYTensor,
-                                Rpp32f *phaseXTensor,
-                                Rpp32f *phaseYTensor,
-                                RpptROIPtr roiTensorPtrSrc,
-                                RpptRoiType roiType,
-                                rpp::Handle& handle)
-{
-    if (roiType == RpptRoiType::XYWH)
-        hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+RppStatus hip_exec_water_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                RpptDescPtr dstDescPtr, Rpp32f* amplitudeXTensor,
+                                Rpp32f* amplitudeYTensor, Rpp32f* frequencyXTensor,
+                                Rpp32f* frequencyYTensor, Rpp32f* phaseXTensor,
+                                Rpp32f* phaseYTensor, RpptROIPtr roiTensorPtrSrc,
+                                RpptRoiType roiType, rpp::Handle& handle) {
+    if (roiType == RpptRoiType::XYWH) hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
     int globalThreads_z = handle.GetBatchSize();
 
-    if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC))
-    {
-        hipLaunchKernelGGL(water_pkd_tensor,
-                           dim3(ceil(static_cast<float>(globalThreads_x)/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                           0,
-                           handle.GetStream(),
-                           srcPtr,
-                           make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
-                           dstPtr,
-                           make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                           amplitudeXTensor,
-                           amplitudeYTensor,
-                           frequencyXTensor,
-                           frequencyYTensor,
-                           phaseXTensor,
-                           phaseYTensor,
-                           roiTensorPtrSrc);
+    if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
+        hipLaunchKernelGGL(
+            water_pkd_tensor,
+            dim3(ceil(static_cast<float>(globalThreads_x) / LOCAL_THREADS_X),
+                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(), srcPtr,
+            make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride), dstPtr,
+            make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride), amplitudeXTensor,
+            amplitudeYTensor, frequencyXTensor, frequencyYTensor, phaseXTensor, phaseYTensor,
+            roiTensorPtrSrc);
         HIP_CHECK_LAUNCH_RETURN();
-    }
-    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW))
-    {
+    } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+               (dstDescPtr->layout == RpptLayout::NCHW)) {
         hipLaunchKernelGGL(water_pln_tensor,
-                           dim3(ceil(static_cast<float>(globalThreads_x)/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                           0,
-                           handle.GetStream(),
-                           srcPtr,
-                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                           dim3(ceil(static_cast<float>(globalThreads_x) / LOCAL_THREADS_X),
+                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                           handle.GetStream(), srcPtr,
+                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                      srcDescPtr->strides.hStride),
                            dstPtr,
-                           make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                           dstDescPtr->c,
-                           amplitudeXTensor,
-                           amplitudeYTensor,
-                           frequencyXTensor,
-                           frequencyYTensor,
-                           phaseXTensor,
-                           phaseYTensor,
-                           roiTensorPtrSrc);
+                           make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                      dstDescPtr->strides.hStride),
+                           dstDescPtr->c, amplitudeXTensor, amplitudeYTensor, frequencyXTensor,
+                           frequencyYTensor, phaseXTensor, phaseYTensor, roiTensorPtrSrc);
         HIP_CHECK_LAUNCH_RETURN();
-    }
-    else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3))
-    {
-        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+    } else if ((srcDescPtr->c == 3) && (dstDescPtr->c == 3)) {
+        if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             hipLaunchKernelGGL(water_pkd3_pln3_tensor,
-                               dim3(ceil(static_cast<float>(globalThreads_x)/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
+                               dim3(ceil(static_cast<float>(globalThreads_x) / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
                                make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
                                dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride, dstDescPtr->strides.hStride),
-                               amplitudeXTensor,
-                               amplitudeYTensor,
-                               frequencyXTensor,
-                               frequencyYTensor,
-                               phaseXTensor,
-                               phaseYTensor,
-                               roiTensorPtrSrc);
+                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                          dstDescPtr->strides.hStride),
+                               amplitudeXTensor, amplitudeYTensor, frequencyXTensor,
+                               frequencyYTensor, phaseXTensor, phaseYTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
-        }
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
+                   (dstDescPtr->layout == RpptLayout::NHWC)) {
             globalThreads_x = (srcDescPtr->strides.hStride + 7) >> 3;
             hipLaunchKernelGGL(water_pln3_pkd3_tensor,
-                               dim3(ceil(static_cast<float>(globalThreads_x)/LOCAL_THREADS_X), ceil((float)globalThreads_y/LOCAL_THREADS_Y), ceil((float)globalThreads_z/LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z),
-                               0,
-                               handle.GetStream(),
-                               srcPtr,
-                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride, srcDescPtr->strides.hStride),
+                               dim3(ceil(static_cast<float>(globalThreads_x) / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), srcPtr,
+                               make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                          srcDescPtr->strides.hStride),
                                dstPtr,
                                make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
-                               amplitudeXTensor,
-                               amplitudeYTensor,
-                               frequencyXTensor,
-                               frequencyYTensor,
-                               phaseXTensor,
-                               phaseYTensor,
-                               roiTensorPtrSrc);
+                               amplitudeXTensor, amplitudeYTensor, frequencyXTensor,
+                               frequencyYTensor, phaseXTensor, phaseYTensor, roiTensorPtrSrc);
             HIP_CHECK_LAUNCH_RETURN();
         }
     }
@@ -345,58 +301,18 @@ RppStatus hip_exec_water_tensor(T *srcPtr,
     return RPP_SUCCESS;
 }
 
-template RppStatus hip_exec_water_tensor<Rpp8u>(Rpp8u*,
-                                                RpptDescPtr,
-                                                Rpp8u*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_water_tensor<Rpp8u>(Rpp8u*, RpptDescPtr, Rpp8u*, RpptDescPtr, Rpp32f*,
+                                                Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_water_tensor<half>(half*,
-                                                RpptDescPtr,
-                                                half*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_water_tensor<half>(half*, RpptDescPtr, half*, RpptDescPtr, Rpp32f*,
+                                               Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                               RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_water_tensor<Rpp32f>(Rpp32f*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_water_tensor<Rpp32f>(Rpp32f*, RpptDescPtr, Rpp32f*, RpptDescPtr,
+                                                 Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                 Rpp32f*, RpptROIPtr, RpptRoiType, rpp::Handle&);
 
-template RppStatus hip_exec_water_tensor<Rpp8s>(Rpp8s*,
-                                                RpptDescPtr,
-                                                Rpp8s*,
-                                                RpptDescPtr,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                Rpp32f*,
-                                                RpptROIPtr,
-                                                RpptRoiType,
-                                                rpp::Handle&);
+template RppStatus hip_exec_water_tensor<Rpp8s>(Rpp8s*, RpptDescPtr, Rpp8s*, RpptDescPtr, Rpp32f*,
+                                                Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*, Rpp32f*,
+                                                RpptROIPtr, RpptRoiType, rpp::Handle&);

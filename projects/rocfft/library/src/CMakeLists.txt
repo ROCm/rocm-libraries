@@ -172,6 +172,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
@@ -550,6 +551,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   set( GPU_TARGETS_AOT ${GPU_TARGETS} )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx90c )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, FrozenSet, List, Optional
 
 from ..config.benchmark_config import (
+    EXECUTION_BACKEND_CHOICES,
+    ExecutionBackendName,
     REFERENCE_PROVIDER_CHOICES,
     ReferenceProviderName,
 )
@@ -99,7 +101,7 @@ def _parse_plugin_path_list(s: str) -> List[Path]:
     return [Path(p) for p in parts]
 
 
-_BACKEND_CHOICES = frozenset({"hipdnn", "pytorch"})
+_BACKEND_CHOICES = EXECUTION_BACKEND_CHOICES
 _REFERENCE_PROVIDER_HELP = ", ".join(sorted(REFERENCE_PROVIDER_CHOICES))
 _METRICS_TIER_CHOICES = frozenset({"basic", "off"})
 _EMIT_TRACE_CHOICES = frozenset({"pftrace", "kineto"})
@@ -171,7 +173,7 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         dest="backend",
         parser_type=str,
         choices=_BACKEND_CHOICES,
-        default="hipdnn",
+        default=ExecutionBackendName.HIPDNN.value,
         metavar="BACKEND",
         help="Execution backend (default: hipdnn). "
         "Options: hipdnn (AMD GPU via hipDNN), pytorch (GPU via PyTorch)",
