@@ -37,7 +37,7 @@ def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
     mod = Module("subtile_cluster_barrier_signal")
     # Workgroup barrier via isfirst: the first wave to arrive gets SCC=1 and so
     # is the single wave that signals the cluster barrier (one arrival per WG).
-    skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "")
+    skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "", 16)
     mod.add(SBarrierSignalIsFirst(False, "workgroup barrier signal (isfirst)"))
     mod.add(SBarrier(True, True, False, "workgroup barrier wait"))
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only the first-arriving wave signals the cluster"))
