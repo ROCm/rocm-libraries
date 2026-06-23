@@ -1,0 +1,29 @@
+# Pre-commit config scoped to hipblaslt / TensileLite.
+#
+# hipblaslt is opted out of the monorepo root .pre-commit-config.yaml, so this
+# config is installed explicitly:
+#
+#   pre-commit install --config projects/hipblaslt/.pre-commit-config.yaml
+#
+# The test hook is `always_run` with `pass_filenames: false`: it computes the
+# staged file set itself (via git) and runs only the unit + characterization
+# tests affected by the staged TensileLite changes, falling back to the full
+# unit + char suite when it cannot narrow confidently.
+#
+# Tests run via `uv run pytest` from projects/hipblaslt/tensilelite: uv
+# provisions the env (deps + the rocisa native extension) from uv.lock. rocisa
+# is a HIP native ext, so this needs a ROCm environment (e.g. a ROCm dev
+# container with HIP + a headered Python). To bypass for one commit:
+# `git commit --no-verify`.
+
+repos:
+  - repo: local
+    hooks:
+      - id: tensilelite-affected-tests
+        name: TensileLite affected unit + characterization tests
+        entry: projects/hipblaslt/tensilelite/scripts/precommit_affected_tests.py
+        language: script
+        always_run: true
+        pass_filenames: false
+        verbose: true
+        stages: [pre-commit]
