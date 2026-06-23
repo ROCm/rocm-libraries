@@ -373,11 +373,16 @@ endfunction() # add_tiered_test_target
 # of the main CMakeLists.txt after all tests are registered.
 #
 # Usage:
-#   install_provider_ctest_files(<install_subdir>)
+#   install_provider_ctest_files(<install_subdir> [TEST_CATEGORIES_YAML <yaml>])
 #
 # Parameters:
 #   INSTALL_SUBDIR - Subdirectory under CMAKE_INSTALL_BINDIR for the CTestTestfile.cmake
+#   TEST_CATEGORIES_YAML - Optional path to a test_categories.yaml. When given
+#       (and apply_ctest_category_labels is available), tiered category labels
+#       are applied to the generated install file so `ctest -L <tier>` works
+#       from the installed tree.
 function(install_provider_ctest_files INSTALL_SUBDIR)
+    cmake_parse_arguments(ARG "" "TEST_CATEGORIES_YAML" "" ${ARGN})
     set(CTEST_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/${INSTALL_SUBDIR}")
 
     set(INSTALLED_CTEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
@@ -410,6 +415,14 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
     if(_external_staging)
         file(APPEND "${INSTALLED_CTEST_FILE}" "\n# External integration test entries (cross-provider suite)\n")
         file(APPEND "${INSTALLED_CTEST_FILE}" "${_external_staging}")
+    endif()
+
+    # Apply YAML-driven category labels to the generated install file (scans
+    # its add_test() names). Must run before install() so the labeled file is
+    # the one staged. No-op when no YAML is passed or the shared helper isn't
+    # available (standalone / sparse checkout).
+    if(ARG_TEST_CATEGORIES_YAML AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${ARG_TEST_CATEGORIES_YAML}" "${INSTALLED_CTEST_FILE}")
     endif()
 
     install(FILES "${INSTALLED_CTEST_FILE}"

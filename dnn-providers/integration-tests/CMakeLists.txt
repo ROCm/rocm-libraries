@@ -161,9 +161,20 @@ add_subdirectory(tests)
 # using add_*_test_target()
 finalize_test_targets("${PROJECT_NAME}")
 
+# Optional YAML-driven CTest categorization. Guarded so standalone / sparse
+# checkouts without shared/ctest still build (falls back to unlabeled install).
+set(_HIPDNN_IT_TEST_CATEGORIES_YAML "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    set(_HIPDNN_IT_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+endif()
+
 # For standalone builds we need to install the ctest files
 if(NOT ROCM_LIBS_SUPERBUILD)
-    install_provider_ctest_files("hipdnn_integration_tests_ctest")
+    install_provider_ctest_files("hipdnn_integration_tests_ctest"
+        TEST_CATEGORIES_YAML "${_HIPDNN_IT_TEST_CATEGORIES_YAML}"
+    )
 endif()
 
 include(CMakePackageConfigHelpers)
