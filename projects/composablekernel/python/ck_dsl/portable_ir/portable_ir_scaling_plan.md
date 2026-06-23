@@ -31,9 +31,35 @@ So **record is universal and near-free; roll is the incremental value-add.** A
 sound rollout records everything first (concrete = portable-IR parity, already
 byte-identical), then rolls family-by-family for the storage benefit.
 
+## Status — productization landed this iteration
+
+The plumbing for the CPython-free path is now in place and gated (see `README.md`
+for the directory map and how to run each piece):
+
+- **Reorg.** `portable_ir/` is split into `src/` (engine + runtime binding),
+  `utils/` (device-free oracle), `examples/` (demo kernels), `drivers/`
+  (harnesses), `tests/`.
+- **CBOR codec + bundle** (`src/recipe_bundle.py`, C `cbor_dom.c`): recipes/bundles
+  (`ck.dsl.bundle/v1`) ship as compact CBOR the C VM decodes into the same DOM as
+  JSON. ~3× smaller than JSON; the bundle packs many recipes keyed by `(key,arch)`.
+- **Online in-process path** (`src/online.py` ctypes ↔ C `online.c`): the Python
+  builder hands a serialized recipe/IR to the C backend and gets `.ll` back, no
+  subprocess, no pybind build step.
+- **Recipe `.ll` is now byte-identical, not just HSACO-equivalent.** Concrete
+  recipes (empty `spec`) carry unique Python SSA names; the VM names each value
+  verbatim from its bind (mirroring the IR importer), so the recipe-VM `.ll`
+  matches the Python lowerer byte-for-byte.
+- **Multi-result `outs`** expand path in the C VM is **done** (exercised on a real
+  `inline_asm_multi` kernel, HSACO byte-identical).
+- **Cross-arch parity gate** (`drivers/parity_matrix.py`,
+  `run_parity_matrix.sh`): both backend paths (engine-import and recipe-VM) vs the
+  Python lowerer — **45/45 buildable kernels byte-identical on gfx942 and gfx950**
+  (flavor pinned). A `tile.buffer_load_vN`/`store_vN` → `*_f16` opcode **alias** in
+  the portable-IR layer (engine core untouched) made the conv kernels round-trip.
+
 ## Step 1 — universal capture: build-time interception recorder  ✅ DONE
 
-`RecordingIRBuilder` (`ck_dsl/portable_ir/recording_builder.py`, subclass of
+`RecordingIRBuilder` (`ck_dsl/portable_ir/src/recording_builder.py`, subclass of
 `core.ir.IRBuilder`) records each emitted op live by intercepting `_emit`,
 `param`, and `push_region`/`pop_region` into a recipe as it is built. Because it
 rides `_emit` (the single op choke point) rather than the public op-builder
@@ -45,10 +71,10 @@ dataclass/descriptor logic executes normally; only emitted ops are captured.
 - Output: a concrete (per-shape) recipe == portable IR. Byte-identical (it equals
   the byte-identity-proven `kerneldef_to_recipe` walk; also multi-result aware via
   `outs`).
-- **Coverage proven:** `record_coverage.py` drives the recorder off the parity
-  spec set — **60/63 emitters record faithfully, 0 recorder failures**, spanning
-  T1 small ops, T2 GEMM/conv, T3 MoE, and T4 attention (scalar unified 2D, tiled
-  gfx942/gfx950 2D/3D, WMMA gfx1151/gfx1201). The 3 skips are bespoke
+- **Coverage proven:** `drivers/record_coverage.py` drives the recorder off the
+  parity spec set — **55/65 emitters record faithfully, 0 recorder failures**,
+  spanning T1 small ops, T2 GEMM/conv, T3 MoE, and T4 attention (scalar unified
+  2D, tiled gfx942/gfx950 2D/3D, WMMA gfx1151/gfx1201). The 10 skips are bespoke
   multi-kernel / multi-arg *emitter* signatures in the reuse harness, not recorder
   gaps.
 - **Drift guard:** `tests/test_recording_builder.py` asserts the live recording
@@ -58,23 +84,23 @@ dataclass/descriptor logic executes normally; only emitted ops are captured.
 
 ## Step 2 — generalize the roller  🚧 IN PROGRESS
 
-The bespoke roller (`roll_recipe.py`) handled exactly ONE index-progression
+The bespoke roller (`drivers/roll_recipe.py`) handled exactly ONE index-progression
 unroll + ONE loop-carried accumulator + linearly-spec-scaled int constants,
 hard-coded to attention head_size (D=64/128, VEC=8).
 
 **Delivered — a general, safe-by-construction roller:**
-- `roller.py` — multi-trace structural roller: aligns traces, finds repeated
+- `src/roller.py` — multi-trace structural roller: aligns traces, finds repeated
   runs via insertion-point detection + periodic expansion (robust to tandem
   repeats), and rolls each run into a `static_for` with **multiple** index-ladder
   constants (`v0 + i*delta`), **multiple** loop-carried values (cross-block
   def→use, threaded via the carry-alias trick), spec-scaled in-run constants, and
   **nested** rolling (runs inside `scf.for`/`scf.if` bodies recurse naturally).
-- `recipe_expand.py` — a pure-Python recipe VM (mirrors `recipe_vm.c`) +
+- `utils/recipe_expand.py` — a pure-Python recipe VM (mirrors `recipe_vm.c`) +
   `recipes_equiv` (structural equality modulo SSA renaming). This is the
   **device-free oracle**: `expand(parametric, spec) ≡ recorded_concrete(spec)`
   proves byte-identity without comgr (concrete→HSACO byte-identity is already
   established, and α-equivalent op streams lower identically).
-- `roll.py` — the `roll(build_at, axis, sample_points, holdout_points)` driver:
+- `src/roll.py` — the `roll(build_at, axis, sample_points, holdout_points)` driver:
   records traces from an **unmodified** builder (Step-1 recorder), infers one
   parametric recipe, then **verifies it against every sample AND held-out point**.
   On any failure it returns `(None, reason)` — the caller keeps concrete per-shape
@@ -112,8 +138,8 @@ and rollable:
   (`linear(axis)`), and rolls iter-args + per-lane body run + yield, re-pointing
   the parent's result references. Rolls a clean synthetic fan (verified at
   held-out lane counts).
-- The recipe-VM C mirror of parametric iter-args is still pending (the Python
-  oracle proves correctness device-free meanwhile).
+- The recipe-VM C mirror of parametric iter-args is **delivered** (see "C recipe
+  VM — parametric surface complete" below); the Python oracle cross-checks it.
 
 **`deep_fused_conv_pool` diagnosed — the fan is NOT the real blocker.** A
 data-dependence analysis of its scf.for body (per-lane backward cones) refuted
@@ -281,18 +307,32 @@ A matrix regression that, for each (kernel family, shape set, arch):
 3. asserts **byte-identical** HSACO.
 
 This makes rolling safe-by-construction: any mis-roll fails the comparison.
-Extend `ck_dsl_c/tests/portable_ir/run_*` into a parameterized matrix runner over
-`instances/SUPPORT_MATRIX.md`.
+
+**Delivered (device-free tier):** `drivers/parity_matrix.py` +
+`ck_dsl_c/tests/portable_ir/run_parity_matrix.sh` is the parameterized matrix
+runner over every parity-emitter kernel × arch, checking BOTH backend paths
+(engine import + recipe VM) against the Python lowerer at the `.ll` level
+(byte-identical) with one flavor pinned — **45/45 buildable kernels byte-identical
+on gfx942 and gfx950**. The byte-identical-HSACO tier (adds comgr) is the per-shape
+`run_*_demo.sh` set; extend both over `instances/SUPPORT_MATRIX.md` for the full
+shape grid.
 
 ## Step 6 — productization
 
-- `ck_dsl.portable_ir.record(build_fn, spec) -> recipe` (interception recorder).
-- `ck_dsl.portable_ir.roll(build_fn, spec_axes, arch) -> parametric recipe`
-  (multi-trace driver + roller).
-- A bundle writer emitting CBOR + zstd recipes keyed by `(family, arch, cache_key)`.
-- The provider's `ArtifactStore` gains a recipe path (VM expand) alongside
-  `.hsaco`/`.ll` (gated by `CK_DSL_C_JIT`).
-- CI runs the byte-identical matrix on every kernel change.
+- `record_kernel(build_fn) -> (kernel, recipe)` (interception recorder) — **done**
+  (`src/recording_builder.py`).
+- `roll(build_at, axis, ...) -> parametric recipe` (multi-trace driver + roller) —
+  **done** (`src/roll.py`).
+- A bundle writer emitting CBOR recipes keyed by `(key, arch)` — **done**
+  (`src/recipe_bundle.py`, schema `ck.dsl.bundle/v1`; the C VM serves a recipe by
+  key via `ckc_recipe_run_from_bundle_cbor`). zstd compression is the remaining
+  wrapper.
+- In-process online lowering binding — **done** (`src/online.py` ctypes ↔ C
+  `online.c`).
+- The provider's `ArtifactStore` recipe path (VM expand alongside `.hsaco`/`.ll`,
+  gated by `CK_DSL_C_JIT`) — **pending integration**.
+- CI runs the parity matrix (`run_parity_matrix.sh`) + byte-identical-HSACO demos
+  on every kernel change.
 
 ## Onboarding a new instance — what code (if any) is required?
 
@@ -312,7 +352,7 @@ point), `param`, and `push_region`/`pop_region` — not the public op-builder
 methods — so it captures *any* emitted op stream (helpers/closures/descriptor math
 just execute). `record_kernel(build_fn)` auto-rebinds the `IRBuilder` name across
 all imported `ck_dsl` modules, so it works no matter where the builder constructs
-its `IRBuilder`. Proven: 60/63 parity emitters record faithfully, 0 recorder
+its `IRBuilder`. Proven: 55/65 parity emitters record faithfully, 0 recorder
 failures, across all tiers (see Step 1).
 
 ### Caveats & corner cases
@@ -329,8 +369,8 @@ failures, across all tiers (see Step 1).
   compact. A new instance is never *broken* by missing roller support; it only
   loses some compression. (See "Helper-expansion bloat" below.)
 - **Multi-result ops.** The recorder is multi-result aware (emits `outs` for N>1
-  result ops, e.g. `inline_asm_multi`); the C VM's N-result expand path is still a
-  known gap to close before such ops lower (tracked under recipe-VM gaps).
+  result ops, e.g. `inline_asm_multi`); the C VM's N-result expand path is **done**
+  (validated HSACO byte-identical on a real `inline_asm_multi` kernel).
 - **Multi-kernel / multi-arg builders.** A few builders emit several kernels per
   call or take non-standard build signatures (e.g. `(spec, arch, ...)` tuples).
   `record_kernel` matches the returned `KernelDef` by identity, so single-kernel
