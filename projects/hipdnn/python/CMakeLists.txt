@@ -10,6 +10,18 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Runtime __version__ is the frontend component version (frontend/version.json).
+# SKBUILD wheel builds are standalone (no umbrella CMake defines it), so fall back
+# to a literal kept in sync with frontend/version.json and pyproject.toml.
+if(NOT DEFINED HIPDNN_FRONTEND_VERSION)
+    set(HIPDNN_FRONTEND_VERSION "0.2.0")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
+    @ONLY
+)
+
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
@@ -66,22 +78,33 @@ target_link_libraries(
         hip::host
 )
 
+# Co-locate the extension with libhipdnn_backend so a bare dlopen of the module
+# (e.g. rocm-sdk's testSharedLibrariesLoad) resolves the backend as a sibling:
+# $ORIGIN on Linux, the module's own directory on Windows. The backend installs
+# to lib/ (Linux) / bin/ (Windows); CMake routes the MODULE artifact to the same
+# place (LIBRARY on Linux, RUNTIME on Windows).
 set_target_properties(
     hipdnn_frontend_python
     PROPERTIES
-        INSTALL_RPATH_USE_LINK_PATH TRUE
+        INSTALL_RPATH "$ORIGIN"
 )
 
 if(DEFINED SKBUILD)
     install(TARGETS hipdnn_frontend_python DESTINATION hipdnn_frontend)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION hipdnn_frontend)
 else()
-    set(_staging "share/hipdnn/python/hipdnn_frontend")
-    install(TARGETS hipdnn_frontend_python DESTINATION "${_staging}")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
-            DESTINATION "${_staging}")
+    # The ext stays bare in LIBDIR/BINDIR as a libhipdnn_backend sibling so a
+    # standalone dlopen resolves the backend via $ORIGIN. The importable package
+    # (__init__.py) and its tests live under LIBDIR/python; `import
+    # hipdnn_frontend` then loads the ext via its top-level name with LIBDIR on
+    # PYTHONPATH.
+    install(TARGETS hipdnn_frontend_python
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/hipdnn_frontend")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
-            DESTINATION "share/hipdnn/tests/python"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/tests"
             FILES_MATCHING PATTERN "*.py")
 endif()
