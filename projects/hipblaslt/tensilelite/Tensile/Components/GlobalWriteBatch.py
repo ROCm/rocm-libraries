@@ -1917,9 +1917,12 @@ class GlobalWriteBatchWriter:
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
-            # Note: Current stochastic rounding FP8 converter does not support pack version
-            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+            # StochasticRounding selects PackData_FLOAT8_SR (see PackData.py), which
+            # takes the extra vgprTmp seed register and alphaScale; resolve the
+            # source through the VGPR-first source map like the non-SR path below.
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, \
+                                       inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset, alphaScale=1.0)
           else:
             packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
