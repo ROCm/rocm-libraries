@@ -209,9 +209,7 @@ std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
 
         // RAW: inst writes R → wmma reading R must not be moved before inst.
         // Wmma reads aGroup (src0/1) and cGroup (src2 accumulator input), so all
-        // three are checked. C is both src and dst of wmma, but since each pool wmma
-        // accumulates into a unique C tile and addition is commutative, wmma-to-wmma
-        // reordering through C is always safe — only non-wmma writes to C create deps.
+        // three are checked.
         for (unsigned d = 0; d < inst->getNumDestRegs(); ++d) {
             for (const WmmaNode& nd : originalPool) {
                 if (regOverlapsGroup(inst->getDestReg(d), nd.aGroup) ||
@@ -220,8 +218,26 @@ std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
                     minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
             }
         }
-        // No WAR check for C: a non-wmma reading intermediate C does not prevent
-        // reordering because the final accumulated value is order-independent.
+
+        // C-read barrier: a non-wmma reading any pool C tile observes an
+        // intermediate accumulation state. Treat it like a hard barrier —
+        // nothing crosses it in either direction.
+        bool readsPoolC = false;
+        for (unsigned s = 0; s < inst->getNumSrcRegs() && !readsPoolC; ++s)
+            for (const WmmaNode& nd : originalPool)
+                if (regOverlapsGroup(inst->getSrcReg(s), nd.cGroup)) {
+                    readsPoolC = true;
+                    break;
+                }
+        if (readsPoolC) {
+            for (const WmmaNode& nd : originalPool) {
+                if (origRank.at(nd.inst) < passedCount)
+                    maxRank[nd.inst] =
+                        std::min(maxRank[nd.inst], passedCount > 0 ? passedCount - 1 : 0u);
+                else
+                    minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
+            }
+        }
     }
 
     // EDF scheduling: at each position p, among eligible wmma (minRank <= p),
