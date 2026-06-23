@@ -160,78 +160,102 @@ std::vector<WmmaNode> reorderContiguously(const std::vector<WmmaNode>& pool, boo
     return (result.size() == pool.size()) ? result : std::vector<WmmaNode>{};
 }
 
-/// Verify that reordering @p originalPool's wmma instructions as @p reorderedPool
-/// does not violate data dependencies created by non-wmma instructions in @p bb.
+/// Reorder @p pool's wmma instructions to be as close to @p idealOrder as possible
+/// while respecting data dependencies from non-wmma instructions in @p bb.
 ///
-/// Two hazards checked:
-///  - RAW: a non-wmma instruction writes a register that a pool wmma reads as src.
-///    The wmma must not be moved before that writer.
-///  - WAR: a non-wmma instruction reads the C-tile that a pool wmma writes as dest.
-///    The wmma must not be moved after that reader.
-///  - Hard barriers (s_barrier, s_waitcnt): no wmma may cross them; the original
-///    relative ordering of wmma instructions around each barrier is preserved.
+/// For each non-wmma instruction a min/max rank window is computed per wmma:
+///  - RAW (inst writes wmma src): wmma minRank >= passedCount
+///  - WAR (inst reads wmma C dest): wmma maxRank < passedCount
+///  - Hard barrier (s_barrier/s_waitcnt): wmma cannot cross — sets both bounds
 ///
-/// Wmma-to-wmma C-tile hazards are not checked here — the caller guarantees that
-/// each wmma in a pool has a unique C tile (standard GEMM layout).
-bool isPoolReorderSafe(const BasicBlock& bb, const std::vector<WmmaNode>& originalPool,
-                       const std::vector<WmmaNode>& reorderedPool) {
-    // Build reordered rank map and original rank map.
-    std::map<const StinkyInstruction*, unsigned> reorderedRank, originalRank;
-    for (unsigned i = 0; i < reorderedPool.size(); ++i) reorderedRank[reorderedPool[i].inst] = i;
-    for (unsigned i = 0; i < originalPool.size(); ++i) originalRank[originalPool[i].inst] = i;
+/// EDF (Earliest Deadline First) scheduling with ideal-order tiebreaking then
+/// produces the permutation closest to @p idealOrder that fits within all windows.
+/// Falls back to @p originalPool if the constraints are infeasible.
+std::vector<WmmaNode> constrainedReorder(const BasicBlock& bb,
+                                         const std::vector<WmmaNode>& originalPool,
+                                         const std::vector<WmmaNode>& idealOrder) {
+    const unsigned n = static_cast<unsigned>(originalPool.size());
+
+    std::map<const StinkyInstruction*, unsigned> minRank, maxRank, origRank;
+    for (unsigned i = 0; i < n; ++i) {
+        origRank[originalPool[i].inst] = i;
+        minRank[originalPool[i].inst] = 0;
+        maxRank[originalPool[i].inst] = n - 1;
+    }
 
     std::set<const StinkyInstruction*> poolInsts;
-    for (const WmmaNode& n : originalPool) poolInsts.insert(n.inst);
+    for (const WmmaNode& nd : originalPool) poolInsts.insert(nd.inst);
 
-    // passedCount = number of pool wmma seen so far in BB order.
-    // Non-wmma instructions at passedCount=k sit between original wmma[k-1] and wmma[k].
-    // In any safe reordering, wmma that appear after such an instruction in original
-    // order must still appear after it — i.e., at reordered rank >= k.
     unsigned passedCount = 0;
-
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!inst) continue;
-
         if (poolInsts.count(inst)) {
             ++passedCount;
             continue;
         }
-        if (isXDLWMMA(*inst)) continue;  // different pool — handled by its own check
+        if (isXDLWMMA(*inst)) continue;
 
-        // Hard barrier: s_barrier or s_waitcnt. No pool wmma may cross it.
-        // Every wmma whose original rank is < passedCount must also have reordered
-        // rank < passedCount, and vice versa.
         if (isBarrier(*inst) || inst->is(InstFlag::IF_WaitCnt)) {
-            for (const WmmaNode& n : originalPool) {
-                bool origBefore = originalRank.at(n.inst) < passedCount;
-                bool reordBefore = reorderedRank.at(n.inst) < passedCount;
-                if (origBefore != reordBefore) return false;
+            for (const WmmaNode& nd : originalPool) {
+                if (origRank.at(nd.inst) < passedCount)
+                    maxRank[nd.inst] =
+                        std::min(maxRank[nd.inst], passedCount > 0 ? passedCount - 1 : 0u);
+                else
+                    minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
             }
             continue;
         }
 
-        // RAW: inst writes R → any pool wmma reading R must stay at reordered rank >= passedCount.
+        // RAW: inst writes R → wmma reading R must not be moved before inst.
         for (unsigned d = 0; d < inst->getNumDestRegs(); ++d) {
-            const StinkyRegister& destReg = inst->getDestReg(d);
-            for (const WmmaNode& n : originalPool) {
-                if (regOverlapsGroup(destReg, n.aGroup) || regOverlapsGroup(destReg, n.bGroup)) {
-                    if (reorderedRank.at(n.inst) < passedCount) return false;
-                }
+            for (const WmmaNode& nd : originalPool) {
+                if (regOverlapsGroup(inst->getDestReg(d), nd.aGroup) ||
+                    regOverlapsGroup(inst->getDestReg(d), nd.bGroup))
+                    minRank[nd.inst] = std::max(minRank[nd.inst], passedCount);
             }
         }
 
-        // WAR: inst reads R → any pool wmma writing R (as C dest) must stay at rank < passedCount.
+        // WAR: inst reads R → wmma writing R (C dest) must not be moved after inst.
         for (unsigned s = 0; s < inst->getNumSrcRegs(); ++s) {
-            const StinkyRegister& srcReg = inst->getSrcReg(s);
-            for (const WmmaNode& n : originalPool) {
-                if (regOverlapsGroup(srcReg, n.cGroup)) {
-                    if (reorderedRank.at(n.inst) >= passedCount) return false;
-                }
+            for (const WmmaNode& nd : originalPool) {
+                if (regOverlapsGroup(inst->getSrcReg(s), nd.cGroup) && passedCount > 0)
+                    maxRank[nd.inst] = std::min(maxRank[nd.inst], passedCount - 1);
             }
         }
     }
-    return true;
+
+    // EDF scheduling: at each position p, among eligible wmma (minRank <= p),
+    // pick the one with the tightest deadline (smallest maxRank), breaking ties
+    // by ideal order position to stay as close to ideal as possible.
+    std::vector<bool> used(n, false);
+    std::vector<WmmaNode> result;
+    result.reserve(n);
+
+    for (unsigned p = 0; p < n; ++p) {
+        int bestIdx = -1;
+        unsigned bestDeadline = UINT_MAX;
+        unsigned bestIdealPos = UINT_MAX;
+
+        for (unsigned i = 0; i < n; ++i) {
+            if (used[i]) continue;
+            auto* w = idealOrder[i].inst;
+            unsigned mn = minRank.at(w);
+            unsigned mx = maxRank.at(w);
+            if (mn > p) continue;             // not yet releasable
+            if (mx < p) return originalPool;  // missed deadline — fall back
+            if (mx < bestDeadline || (mx == bestDeadline && i < bestIdealPos)) {
+                bestDeadline = mx;
+                bestIdealPos = i;
+                bestIdx = static_cast<int>(i);
+            }
+        }
+
+        if (bestIdx < 0) return originalPool;  // no eligible wmma
+        result.push_back(idealOrder[bestIdx]);
+        used[bestIdx] = true;
+    }
+    return result;
 }
 
 /// Build the flat per-operand replacement list: walk every instruction in @p bb
@@ -317,29 +341,39 @@ class StinkyWmmaVgprReorderPassImpl : public StinkyInstPass {
             for (const auto& n : pool) wmmaSeq.push_back(n);
 
         const auto intervals = liveness_->computeLiveness(bb, wmmaSeq);
-        auto [desiredOrder, aliases] = algorithm_->solve(pools, intervals);
-        if (aliases.empty()) return {};
+        auto [idealOrder, idealAliases] = algorithm_->solve(pools, intervals);
+        if (idealAliases.empty()) return {};
 
-        // Validate that the proposed reordering is safe for each pool given
-        // non-wmma instructions (ds_loads, barriers, waitcnts) in the block.
+        // Apply dependency constraints per pool: reorder as much as possible without
+        // violating RAW/WAR/barrier constraints from non-wmma instructions.
+        std::vector<WmmaNode> constrainedSeq;
         size_t offset = 0;
         for (const auto& pool : pools) {
-            std::vector<WmmaNode> reorderedPool(desiredOrder.begin() + offset,
-                                                desiredOrder.begin() + offset + pool.size());
-            if (!isPoolReorderSafe(bb, pool, reorderedPool)) {
-                PASS_DEBUG(std::cerr << "[WmmaVgprReorderPass] reorder unsafe due to"
-                                        " non-wmma dependency; skipping block\n");
-                return {};
-            }
+            std::vector<WmmaNode> idealPool(idealOrder.begin() + offset,
+                                            idealOrder.begin() + offset + pool.size());
+            auto constrained = constrainedReorder(bb, pool, idealPool);
+            for (const WmmaNode& n : constrained) constrainedSeq.push_back(n);
             offset += pool.size();
         }
+
+        // Re-compute liveness on the constrained ordering and keep only alias pairs
+        // whose intervals no longer overlap — partial reordering may still save some.
+        const auto constrainedIntervals = liveness_->computeLiveness(bb, constrainedSeq);
+        std::vector<AliasCandidate> aliases;
+        for (const AliasCandidate& a : idealAliases) {
+            auto itC = constrainedIntervals.find(a.canonical);
+            auto itA = constrainedIntervals.find(a.aliasable);
+            if (itC == constrainedIntervals.end() || itA == constrainedIntervals.end()) continue;
+            if (!itC->second.overlaps(itA->second)) aliases.push_back(a);
+        }
+        if (aliases.empty()) return {};
 
         WmmaReorderAnalysisResult out;
         out.applicable = true;
         out.replacements = buildReplacements(bb, aliases);
         for (const AliasCandidate& a : aliases) out.totalVgprSaved += a.vgprSaved;
-        out.desiredWmmaOrder.reserve(desiredOrder.size());
-        for (const WmmaNode& n : desiredOrder) out.desiredWmmaOrder.push_back(n.inst);
+        out.desiredWmmaOrder.reserve(constrainedSeq.size());
+        for (const WmmaNode& n : constrainedSeq) out.desiredWmmaOrder.push_back(n.inst);
         return out;
     }
 };
