@@ -347,11 +347,19 @@ inline SynthesisResult fillBlockScaleQuantizeInputs(
 
 // ── SDPA ──────────────────────────────────────────────────────────────────────
 
-// Q/K/V/mask/scale accept random values. The remaining inputs are STRUCTURED:
-// seq lengths encode actual sequence boundaries, page tables map to allocated
-// GPU memory chunks, block masks define sparse attention patterns, and dropout
-// seed/offset must match between forward and backward passes.
-// Most of these are optional — absent ones (uid 0) are silently ignored.
+// Q/K/V/mask accept random values, as does scale (the softmax multiplier, e.g.
+// 1/sqrt(head_dim) — any positive value is mathematically valid). The FP8/MX
+// descale/scale factors are STRUCTURED, NOT free: each must equal the actual
+// quantization factor used to produce its tensor's data. A random descale does
+// not break the engine-vs-reference comparison (both read the same shared value)
+// but it lets values drift out of FP8 range and saturate identically on both
+// sides — a vacuous pass that verifies nothing. We therefore refuse to fabricate
+// them, mirroring fillBlockScaleDequantizeInputs. Real FP8 coverage comes from
+// authored bundles that ship the matching scales as data. The remaining inputs
+// are STRUCTURED for their own reasons: seq lengths encode actual sequence
+// boundaries, page tables map to allocated GPU memory chunks, block masks define
+// sparse attention patterns, and dropout seed/offset must match between fwd and
+// bwd. Most of these are optional — absent ones (uid 0) are silently ignored.
 inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                                          SynthesisTracker& tracker,
                                          std::mt19937& rng)
@@ -367,6 +375,15 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
     tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
     tracker.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+
+    // FP8/MX quantization scale factors must match the data's true scale — see
+    // the header comment. Refuse rather than fabricate a meaningless value.
+    tracker.markStructured(a->descale_q_tensor_uid().value_or(0), "descale_q");
+    tracker.markStructured(a->descale_k_tensor_uid().value_or(0), "descale_k");
+    tracker.markStructured(a->descale_v_tensor_uid().value_or(0), "descale_v");
+    tracker.markStructured(a->descale_s_tensor_uid().value_or(0), "descale_s");
+    tracker.markStructured(a->scale_s_tensor_uid().value_or(0), "scale_s");
+    tracker.markStructured(a->scale_o_tensor_uid().value_or(0), "scale_o");
 
     tracker.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
     tracker.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
@@ -398,9 +415,18 @@ inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data
     tracker.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->do_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->dropout_scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->dropout_scale_inv_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
 
     tracker.markDerived(a->o_tensor_uid(), "o (forward output)");
     tracker.markDerived(a->stats_tensor_uid(), "stats (forward softmax stats)");
+
+    tracker.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
+    tracker.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
+    tracker.markStructured(a->seed_tensor_uid().value_or(0), "dropout_seed");
+    tracker.markStructured(a->offset_tensor_uid().value_or(0), "dropout_offset");
 
     return SynthesisResult::ok();
 }

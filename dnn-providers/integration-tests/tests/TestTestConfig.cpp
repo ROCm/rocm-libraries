@@ -69,7 +69,7 @@ TEST(TestConfigUninitialized, GetReferenceExecutorTypeThrowsWhenUninitialized)
 
 // parseVerificationMode is a free function (no singleton state), so it can be
 // exercised regardless of initialization.
-TEST(ParseVerificationMode, AcceptsAllValidValuesCaseInsensitive)
+TEST(TestParseVerificationMode, AcceptsAllValidValuesCaseInsensitive)
 {
     using hipdnn_integration_tests::parseVerificationMode;
     using hipdnn_integration_tests::VerificationMode;
@@ -84,7 +84,7 @@ TEST(ParseVerificationMode, AcceptsAllValidValuesCaseInsensitive)
     EXPECT_EQ(parseVerificationMode("GPU"), VerificationMode::GPU);
 }
 
-TEST(ParseVerificationMode, ThrowsOnInvalidValue)
+TEST(TestParseVerificationMode, ThrowsOnInvalidValue)
 {
     EXPECT_THROW(hipdnn_integration_tests::parseVerificationMode("bogus"), std::runtime_error);
     EXPECT_THROW(hipdnn_integration_tests::parseVerificationMode(""), std::runtime_error);
@@ -94,7 +94,7 @@ TEST(ParseVerificationMode, ThrowsOnInvalidValue)
 // implement the "CLI wins, then env, then nullopt" precedence chain.
 // They don't touch the singleton so they can be tested freely.
 
-TEST(ResolveVerificationMode, CliValueWinsOverEnv)
+TEST(TestResolveVerificationMode, CliValueWinsOverEnv)
 {
     using hipdnn_integration_tests::resolveVerificationMode;
     using hipdnn_integration_tests::VerificationMode;
@@ -105,7 +105,7 @@ TEST(ResolveVerificationMode, CliValueWinsOverEnv)
     EXPECT_EQ(*result, VerificationMode::GPU);
 }
 
-TEST(ResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
+TEST(TestResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
 {
     using hipdnn_integration_tests::resolveVerificationMode;
 
@@ -114,7 +114,7 @@ TEST(ResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(ResolveGoldenDataDir, CliValueWinsOverEnv)
+TEST(TestResolveGoldenDataDir, CliValueWinsOverEnv)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;
 
@@ -124,7 +124,7 @@ TEST(ResolveGoldenDataDir, CliValueWinsOverEnv)
     EXPECT_EQ(*result, cliPath);
 }
 
-TEST(ResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
+TEST(TestResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;
 

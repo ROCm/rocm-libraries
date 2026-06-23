@@ -76,6 +76,11 @@ protected:
         return nullptr;
     }
 
+    // These tests exercise verification-mode dispatch, not the VRAM/arch
+    // hardware guards. Override to a no-op so they don't reach into the
+    // (uninitialized-in-this-binary) TestConfig singleton.
+    void applyMetadataGuards() const override {}
+
 private:
     VerificationMode _mode;
     EngineStub _engineStub;
@@ -277,7 +282,7 @@ TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
     EXPECT_TRUE(anyFailed(results));
 }
 
-TEST_F(TestVerificationModePathsFixture, AutoNoGoldenGpuRefSucceedsPasses)
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 {
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_gpu", /*includeGoldenOutput=*/false),
@@ -290,7 +295,7 @@ TEST_F(TestVerificationModePathsFixture, AutoNoGoldenGpuRefSucceedsPasses)
     EXPECT_FALSE(anySkipped(results));
 }
 
-TEST_F(TestVerificationModePathsFixture, AutoNoGoldenGpuMissFallsThroughToCpu)
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
 {
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_fallthrough", /*includeGoldenOutput=*/false),
@@ -345,8 +350,11 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataSkips)
 }
 
 // ── Explicit GPU mode ───────────────────────────────────────────────────────
+// "Device" in these case names denotes VerificationMode::GPU (the device-side
+// reference executor). The literal "Gpu" keyword is reserved by the test-name
+// linter for the suite name and so cannot appear in the case name.
 
-TEST_F(TestVerificationModePathsFixture, GpuModeRefSucceedsPasses)
+TEST_F(TestVerificationModePathsFixture, DeviceModeRefSucceedsPasses)
 {
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("gpu_ok", /*includeGoldenOutput=*/true),
@@ -359,7 +367,7 @@ TEST_F(TestVerificationModePathsFixture, GpuModeRefSucceedsPasses)
     EXPECT_FALSE(anySkipped(results));
 }
 
-TEST_F(TestVerificationModePathsFixture, GpuModeCapabilityMissSkips)
+TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissSkips)
 {
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("gpu_miss", /*includeGoldenOutput=*/true),

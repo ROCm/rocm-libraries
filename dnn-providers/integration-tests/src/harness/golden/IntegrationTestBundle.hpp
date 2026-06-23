@@ -37,9 +37,13 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //                      and the harness walks it (GraphWrapper) for dtypes and
 //                      tolerances. A bundle that cannot even produce a graph is a
 //                      LoadError, not a bundle.
-//   metadata         — .meta.json contents (VRAM / arch guards). MANDATORY: a
-//                      bundle without a valid .meta.json is a LoadError, so a
-//                      loaded bundle always carries real metadata.
+//   metadata         — .meta.json contents (VRAM / arch guards). Mandatory ONLY
+//                      for golden bundles (those shipping output .bin blobs);
+//                      metadata validates golden data, so a bundle without it is
+//                      a LoadError. For a no-golden bundle (graph-only, or
+//                      inputs-only verified against a reference) absent metadata
+//                      is valid and this is default-constructed (all fields
+//                      empty); the optional-aware consumers fall back to defaults.
 //   outputTensorUids — UIDs of the graph's output tensors, derived from the
 //                      graph. Always available (even for a graph-only bundle),
 //                      so the harness knows which tensors to compare / allocate.
@@ -78,7 +82,7 @@ enum class LoadError
 {
     MALFORMED_JSON, // the graph .json is not syntactically valid JSON
     INVALID_GRAPH_SCHEMA, // valid JSON, but not a valid graph (cannot build flatbuffer)
-    MISSING_METADATA, // required .meta.json companion is absent or invalid
+    MISSING_METADATA, // golden bundle's .meta.json companion is absent or invalid
     TENSOR_LOAD_FAILED // a tensor .bin is present but failed to load (wrong size,
     // unreadable, unsupported dtype, ...)
 };
@@ -163,7 +167,8 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
 //
 //   * graph .json not parseable           -> LoadError::MALFORMED_JSON      (FAIL)
 //   * parseable but not a valid graph     -> LoadError::INVALID_GRAPH_SCHEMA(FAIL)
-//   * valid graph, no .meta.json companion-> LoadError::MISSING_METADATA    (FAIL)
+//   * golden bundle, no/invalid .meta.json-> LoadError::MISSING_METADATA    (FAIL)
+//   * no-golden bundle, no .meta.json      -> bundle, metadata default-constructed
 //   * valid graph, input .bin data absent -> bundle, tensors == nullopt     (tier-3:
 //                                            harness may synthesize, else SKIP)
 //   * valid graph, .bin present but broken-> LoadError::TENSOR_LOAD_FAILED  (FAIL)
@@ -209,22 +214,35 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         return LoadError::INVALID_GRAPH_SCHEMA;
     }
 
-    // 3. Metadata is MANDATORY: every valid-graph bundle must ship a valid
-    //    .meta.json companion. loadBundleMetadata returns nullopt both when the
-    //    file is absent and when it is present but invalid (bad JSON / bad
-    //    format_version) — either way it is an authoring error -> FAIL.
+    // 3. Capture the graph and derive the output UIDs (always available, even
+    //    for a graph-only bundle).
+    IntegrationTestBundle bundle;
+    bundle.graphBuffer = builder.Release();
+    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(graphJson);
+
+    // 4. Metadata is mandatory ONLY for golden bundles — those shipping output
+    //    .bin blobs. Metadata (arch lock, provenance, seed) exists to validate
+    //    golden data; a bundle with no golden outputs (pure graph-only, or
+    //    inputs-only verified against a reference) has nothing for it to
+    //    validate, so absent metadata is fine and we default-construct it.
+    //
+    //    loadBundleMetadata returns nullopt both when the .meta.json is absent
+    //    and when it is present but invalid (bad JSON / bad format_version). For
+    //    a golden bundle either case is an authoring error -> FAIL.
+    const bool goldenOutputsPresent
+        = !bundle.outputTensorUids.empty()
+          && detail::blobsPresentFor(bundle.outputTensorUids, jsonPath);
+
     auto metadata = hipdnn_test_sdk::utilities::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())
     {
-        return LoadError::MISSING_METADATA;
+        if(goldenOutputsPresent)
+        {
+            return LoadError::MISSING_METADATA;
+        }
+        metadata.emplace(); // graph-only / no-golden: empty metadata is valid.
     }
-
-    // 4. Graph + metadata verified: capture them and the output UIDs (always
-    //    available, even for a graph-only bundle).
-    IntegrationTestBundle bundle;
-    bundle.graphBuffer = builder.Release();
     bundle.metadata = std::move(*metadata);
-    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(graphJson);
 
     // 5. Load tensor .bin data, inputs and outputs INDEPENDENTLY.
     //
@@ -258,8 +276,7 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         // A graph with no declared inputs cannot be fed; treat as graph-only.
         const bool inputsPresent
             = !inputUids.empty() && detail::blobsPresentFor(inputUids, jsonPath);
-        const bool outputsPresent = !bundle.outputTensorUids.empty()
-                                    && detail::blobsPresentFor(bundle.outputTensorUids, jsonPath);
+        const bool outputsPresent = goldenOutputsPresent; // computed in step 4
 
         if(inputsPresent)
         {

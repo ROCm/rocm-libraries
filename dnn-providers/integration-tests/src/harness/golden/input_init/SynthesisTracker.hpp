@@ -22,9 +22,9 @@ namespace hipdnn_integration_tests::golden
 using InputTensorMap
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
-// Result of synthesizeNodeInputs() for one node. filled==true means every
-// input the node owns got valid data. filled==false means at least one could
-// not be synthesized — reason says which and why.
+// Result of a synthesis step — returned by per-node fill functions and by
+// tracker.finish(). filled==true means synthesis can proceed; filled==false
+// means at least one input could not be synthesized — reason says which and why.
 struct SynthesisResult
 {
     bool filled = false;
@@ -40,12 +40,50 @@ struct SynthesisResult
     }
 };
 
-// Tracks which inputs a node's fill function has accounted for. Each input must be
-// declared as one of three roles:
+// Tracks which leaf inputs of a bundle's graph have been accounted for by the
+// per-node fill functions. A bundle contains a graph of one or more nodes — a
+// single conv, or a fused chain like conv → bias_add → relu. One tracker is
+// created for the entire graph's leaf inputs (non-virtual, non-output tensors),
+// shared across all fill functions, and finish() is called once at the end.
+//
+// Graph structure (conv + bias + relu fused graph):
+//
+//   Data flows top-down. Roots are the leaf input tensors that the tracker
+//   owns; the sink is the graph output tensor.
+//
+//        x (root/leaf)  w (root/leaf)  bias (root/leaf)
+//         uid=1          uid=2           uid=4
+//           \             /                |
+//            \           /                 |
+//         ┌──────────────┐                 |
+//         │   ConvFwd    │  (internal)     |
+//         └──────┬───────┘                 |
+//                |                         |
+//          conv_y (virtual, uid=10)        |
+//                |                         |
+//                \                        /
+//              ┌──────────────────────┐
+//              │   Pointwise ADD      │  (internal)
+//              └──────────┬───────────┘
+//                         |
+//                   bias_out (virtual, uid=11)
+//                         |
+//              ┌──────────┴───────────┐
+//              │   Pointwise RELU     │  (internal)
+//              └──────────┬───────────┘
+//                         |
+//                    out (sink/leaf, uid=6)
+//
+//   Roots  = leaf input tensors, owned by tracker: {1, 2, 4}
+//   Virtual = inter-node edges, not owned → fillFree/markDerived skip them
+//   Sink   = graph output tensor, not owned
+//
+// Each leaf input must be declared as one of three mutually exclusive roles:
 //
 //   FREE       — random values in a range work. The range can be tight (e.g.
 //                variance in [0.5, 1.5] to stay positive) or wide (e.g. x in
 //                [-1, 1]). What matters is that any value in the range is valid.
+//
 //   STRUCTURED — random values in any range won't work. The data needs to be
 //                consistent with other state or follow a specific format.
 //
@@ -71,14 +109,33 @@ struct SynthesisResult
 //                partial results. The peer_stats tensor holds references to
 //                other GPUs' memory regions. Randomly generated values would
 //                point to invalid cross-device memory.
-// 
-//   DERIVED    — the value must come from another op's output, not from random
-//                generation (e.g. a backward pass needs the forward pass's output
-//                tensor and intermediate statistics to compute correct gradients).
 //
-// finish() succeeds only when every owned input was declared as some role AND
-// none were STRUCTURED or DERIVED. Undeclared inputs and refused inputs both
+//   DERIVED    — the value must come from another op's output, not from random
+//                generation. In a fused fwd+bwd graph the forward output flows
+//                to the backward input as a virtual tensor (not owned, silently
+//                skipped). In a standalone backward, the same tensor is a leaf
+//                input — markDerived records it, and finish() refuses because
+//                no forward pass produced it.
+//
+// finish() succeeds only when every owned leaf input was declared as some role
+// AND none were STRUCTURED or DERIVED. Undeclared inputs and refused inputs both
 // produce a diagnostic message so the caller knows what went wrong.
+//
+// PRECONDITION — a validated, well-formed graph. The tracker trusts the leaf
+// set it is handed and the virtual_ flag on every tensor:
+//
+//   * A required input referenced by a node is assumed to be a real leaf tensor
+//     (not mislabeled virtual or aliased to an output). If it were, fillFree
+//     would silently no-op on a non-owned uid and finish() would never see it.
+//   * A virtual tensor is assumed to genuinely have a producer node. A standalone
+//     backward whose `o`/`stats` were erroneously flagged virtual would skip the
+//     markDerived refusal and "succeed" with garbage.
+//
+// Both of those malformed-graph states are rejected upstream — at bundle load
+// (the flatbuffer build in loadIntegrationTestBundle) and again by the engine's
+// own graph validation (from_binary / check_support / build_plans), which
+// requires every virtual tensor to have a producer. By the time synthesis runs,
+// the graph is well-formed, so the tracker does not re-validate topology.
 class SynthesisTracker
 {
 public:
@@ -122,13 +179,13 @@ public:
         _refusals.push_back(std::string(role) + " (derived from another computation)");
     }
 
-    // Returns ok() when all owned inputs were filled with random data.
+    // Returns ok() when all owned leaf inputs were filled with random data.
     // Returns unsupported() when synthesis cannot produce valid data for
-    // this node — either because an owned input is STRUCTURED/DERIVED
-    // (we know about it but can't fill it), or because an owned input was
-    // never declared (the fill function forgot about it).
-    // Note: absent optional tensors (uid 0) and virtual tensors are not
-    // owned, so STRUCTURED/DERIVED calls on them are silently ignored.
+    // this graph — either because a leaf input is STRUCTURED/DERIVED
+    // (we know about it but can't fill it), or because a leaf input was
+    // never declared by any node's fill function.
+    // Note: absent optional tensors (uid 0) and virtual inter-node tensors
+    // are not owned, so STRUCTURED/DERIVED calls on them are silently ignored.
     SynthesisResult finish(const char* opName) const
     {
         std::vector<std::string> reasons = _refusals;

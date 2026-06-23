@@ -150,6 +150,35 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runComparison()
     }
 }
 
+namespace
+{
+// GTEST_SKIP() expands to `return;`, so it can only be used from a void-returning
+// function. This wrapper records the skip (and its message) and returns from
+// itself; the skip state persists for the caller, which then returns nullopt.
+void skipEngineCouldNotRun(const std::filesystem::path& bundlePath, const std::string& error)
+{
+    std::ostringstream msg;
+    msg << "Engine could not execute bundle " << bundlePath;
+    if(!error.empty())
+    {
+        msg << ": " << error;
+    }
+    GTEST_SKIP() << msg.str();
+}
+} // namespace
+
+std::optional<OutputTensors>
+    IntegrationGraphGoldenReferenceVerificationHarness::runEngineOrSkip()
+{
+    std::string error;
+    auto engineOutputs = runEngineCapturingOutputs(error);
+    if(!engineOutputs && !::testing::Test::HasFatalFailure())
+    {
+        skipEngineCouldNotRun(_bundlePath, error);
+    }
+    return engineOutputs;
+}
+
 void IntegrationGraphGoldenReferenceVerificationHarness::runGoldenMode()
 {
     if(!_bundle->hasGoldenOutputs)
@@ -157,13 +186,9 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runGoldenMode()
         skipUnverifiable("no golden data (verification-mode=golden)");
         return;
     }
-    auto engineOutputs = runEngineCapturingOutputs();
+    auto engineOutputs = runEngineOrSkip();
     if(!engineOutputs)
     {
-        if(!::testing::Test::HasFatalFailure())
-        {
-            GTEST_SKIP() << "Engine could not execute bundle " << _bundlePath;
-        }
         return;
     }
     compareAgainstGolden(*engineOutputs);
@@ -172,13 +197,9 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runGoldenMode()
 void IntegrationGraphGoldenReferenceVerificationHarness::runExplicitRefMode(
     ReferenceExecutorType type)
 {
-    auto engineOutputs = runEngineCapturingOutputs();
+    auto engineOutputs = runEngineOrSkip();
     if(!engineOutputs)
     {
-        if(!::testing::Test::HasFatalFailure())
-        {
-            GTEST_SKIP() << "Engine could not execute bundle " << _bundlePath;
-        }
         return;
     }
 
@@ -205,13 +226,9 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runExplicitRefMode(
 
 void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
 {
-    auto engineOutputs = runEngineCapturingOutputs();
+    auto engineOutputs = runEngineOrSkip();
     if(!engineOutputs)
     {
-        if(!::testing::Test::HasFatalFailure())
-        {
-            GTEST_SKIP() << "Engine could not execute bundle " << _bundlePath;
-        }
         return;
     }
 
@@ -330,7 +347,15 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
 
 // ---- engine + reference runs -----------------------------------------------
 
-OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateZeroedOutputs() const
+// Output buffers are filled with a sentinel (NaN for float types, type max for
+// integer types) rather than zero. This is the standard hipdnn practice — see
+// CpuReferenceGraphExecutor and GraphTensorBundle::sentinelFillOutputTensors —
+// and it arms allClose's NaN/sentinel guard: any output element the executor
+// fails to write stays NaN and is caught as a hard failure. Zero-filling would
+// make an unwritten output indistinguishable from a legitimately-computed zero,
+// so engine and reference could silently agree on garbage (both untouched zeros)
+// and the comparison would vacuously pass.
+OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -340,7 +365,7 @@ OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateZeroed
     {
         outputs[uid]
             = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttrMap.at(uid));
-        outputs[uid]->fillTensorWithValue(0.f);
+        outputs[uid]->fillWithSentinelValue();
     }
     return outputs;
 }
@@ -369,13 +394,12 @@ std::unordered_map<int64_t, void*>
 }
 
 std::optional<OutputTensors>
-    IntegrationGraphGoldenReferenceVerificationHarness::runEngineCapturingOutputs()
+    IntegrationGraphGoldenReferenceVerificationHarness::runEngineCapturingOutputs(std::string& error)
 {
-    OutputTensors engineOutputs = allocateZeroedOutputs();
+    OutputTensors engineOutputs = allocateSentinelOutputs();
     auto variantPack = buildVariantPack(engineOutputs, /*useDevice=*/_requiresDevice);
 
     bool threw = false;
-    std::string error;
     try
     {
         executeGraphThroughEngine(variantPack);
@@ -403,7 +427,7 @@ IntegrationGraphGoldenReferenceVerificationHarness::RefRunResult
     IntegrationGraphGoldenReferenceVerificationHarness::runReferenceCapturingOutputs(
         ReferenceExecutorType type, OutputTensors& refOutputs)
 {
-    refOutputs = allocateZeroedOutputs();
+    refOutputs = allocateSentinelOutputs();
     const bool useDevice = (type == ReferenceExecutorType::GPU);
     auto variantPack = buildVariantPack(refOutputs, useDevice);
 

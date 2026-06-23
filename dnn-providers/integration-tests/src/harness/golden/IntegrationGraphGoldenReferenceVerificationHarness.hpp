@@ -107,6 +107,12 @@ protected:
     // without touching the TestConfig singleton.
     virtual VerificationMode getVerificationMode() const;
 
+    // Skips the test when the bundle's metadata is incompatible with the
+    // current device (VRAM/arch). Virtual so isolated unit tests that don't
+    // exercise hardware guards can override it — production reads from the
+    // TestConfig singleton, which is only initialized by the real test main.
+    virtual void applyMetadataGuards() const;
+
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
@@ -134,15 +140,48 @@ private:
 
     // ── inputs ──────────────────────────────────────────────────────────
     bool ensureInputsAvailable();
+
+    // Synthesizes leaf input tensors for the graph when no golden data exists.
+    //
+    // Phase 1 — allocate: walks the graph's tensor list, skips virtual
+    //   (inter-node) and output tensors, allocates a CPU-side buffer for
+    //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
+    //
+    // Phase 2 — fill: iterates each node (internal op) and calls its
+    //   registered fill function via synthesizeNodeInputs(). Each fill
+    //   function reads its tensor UIDs from the node's attributes and
+    //   declares each one as FREE (random values), STRUCTURED (needs
+    //   specific format), or DERIVED (needs another op's output) through
+    //   a shared SynthesisTracker.
+    //
+    // Phase 3 — verify: calls tracker.finish() which checks that every
+    //   leaf input was accounted for by some fill function and none were
+    //   refused (STRUCTURED/DERIVED). Returns false and SKIPs the test
+    //   if any leaf was missed or refused.
+    //
+    // On success, moves the filled tensors into the bundle so downstream
+    // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
     bool synthesizeInputs();
 
     // ── buffer allocation + execution ───────────────────────────────────
-    // allocateZeroedOutputs / buildVariantPack prepare the buffers;
+    // allocateSentinelOutputs / buildVariantPack prepare the buffers;
     // runEngine* / runReference* call the executors and capture results.
-    OutputTensors allocateZeroedOutputs() const;
+    // Outputs are sentinel-filled (NaN) so an unwritten output element is
+    // caught by allClose rather than masquerading as a computed zero.
+    OutputTensors allocateSentinelOutputs() const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
                                                         bool useDevice) const;
-    std::optional<OutputTensors> runEngineCapturingOutputs();
+    // Runs the engine into fresh output buffers. Returns nullopt if the
+    // engine threw (its message is written to `error`) or raised a fatal
+    // GTest failure (in which case `error` is left empty).
+    std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
+
+    // Runs the engine and returns its outputs, or nullopt if it could not
+    // run. On nullopt the caller must simply return: this has already
+    // issued the appropriate verdict (a fatal failure propagates as-is,
+    // otherwise the test is SKIPped). Shared preamble for all three modes.
+    std::optional<OutputTensors> runEngineOrSkip();
+
     RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
                                               OutputTensors& refOutputs);
     void markOutputsModified(OutputTensors& outputs) const;
@@ -183,6 +222,11 @@ private:
                              float rtol);
 
     // ── reporting ───────────────────────────────────────────────────────
+    // Records the bundle path + reason in the process-wide
+    // UnverifiableBundleReport (printed as a summary after all tests),
+    // then GTEST_SKIP()s this test. The reason is a flat human-readable
+    // string — per-tensor details are concatenated into it by the caller
+    // (e.g., tracker.finish()), not stored as structured data.
     void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
@@ -218,9 +262,6 @@ private:
     static float
         toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    // ── guards ──────────────────────────────────────────────────────────
-    void applyMetadataGuards() const;
 };
 
 } // namespace hipdnn_integration_tests::golden
