@@ -94,6 +94,18 @@ constexpr bool kRule3Enabled = true;
 /// it for the loop-back branch.
 [[maybe_unused]] constexpr bool kRule4ForceUngatedSignalMode = true;
 
+/// EXPERIMENT: when true, Rule 6 (the loop-end wait) plants a `waveID <= 1`-
+/// gated `s_sleep` stall immediately before the loop-end `s_barrier_wait -3`,
+/// so waves 0 and 1 reach the cluster wait much later than their siblings.
+/// Used to verify the cluster wait does not release until the straggler waves
+/// arrive. `kClusterWaitDelaySleepImm` is the `s_sleep` immediate (~64*imm
+/// cycles; only the low 7 bits are used, so 127 ~= 8000 cycles), and
+/// `kClusterWaitDelaySleepCount` `s_sleep` instructions are chained to extend
+/// the stall (total ~= count * 64 * imm cycles).
+constexpr bool kExperimentDelayFirstClusterWait = true;
+constexpr int kClusterWaitDelaySleepImm = 127;
+constexpr int kClusterWaitDelaySleepCount = 4;
+
 /// Returns a fresh 16-character alphanumeric identifier. The first call seeds
 /// from std::random_device; subsequent calls reuse the engine for low overhead
 /// while still producing collision-resistant IDs across all insertions.
@@ -809,6 +821,46 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
     waitInst->addModifier<CommentData>(CommentData{comment});
 }
 
+/// EXPERIMENT: emit a `waveID <= 1`-gated `s_sleep` stall before `anchor`, so
+/// waves 0 and 1 arrive late at the cluster wait that follows. Emitted shape
+/// (all before `anchor`):
+///     s_cmp_le_u32 s[sgprWaveIdx], 1
+///     s_cbranch_scc0 label_skipCBWaitDelay_<H>     // skip for late waves (>1)
+///     s_sleep <kClusterWaitDelaySleepImm>          // x kClusterWaitDelaySleepCount
+///     ...
+///   label_skipCBWaitDelay_<H>:
+void insertClusterWaitArrivalDelayBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                                         GfxArchID archId) {
+    const std::string labelName = std::string("label_skipCBWaitDelay_") + makeRandomHash();
+
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_le_u32, archId);
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+    const HwInstDesc* sleepDesc = getMCIDByUOp(GFX::s_sleep, archId);
+    assert(cmpDesc && brDesc && sleepDesc &&
+           "Cluster-wait delay opcodes are not supported on this architecture");
+
+    StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
+    cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
+    cmpInst->addSrcReg(StinkyRegister(1));
+    cmpInst->addModifier<CommentData>(CommentData{"EXPERIMENT: stall waveID <= 1"});
+
+    StinkyInstruction* brInst = irBuilder.create(brDesc, anchor);
+    brInst->addSrcReg(StinkyRegister(labelName));
+    brInst->addModifier<LabelData>(LabelData{labelName});
+    brInst->addModifier<CommentData>(CommentData{"skip stall for late waves"});
+
+    for (int i = 0; i < kClusterWaitDelaySleepCount; ++i) {
+        StinkyInstruction* sleepInst = irBuilder.create(sleepDesc, anchor);
+        sleepInst->addSrcReg(StinkyRegister(kClusterWaitDelaySleepImm));
+        sleepInst->addModifier<CommentData>(CommentData{"EXPERIMENT: arrive late at cluster wait"});
+    }
+
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+    StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
+    lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
+}
+
 /// True if `inst` is the loop-counter "numIterL == 0" guard compare:
 /// `s_cmp_eq_{u32,i32} s[sgprLoopCounterL], 0`. This is the test Tensile emits
 /// just before the kernel's first prefetch `tensor_load_to_lds` to decide
@@ -1269,6 +1321,12 @@ class InsertClusterBarrierPassImpl : public Pass {
             // This is the paired wait for the hoisted per-iteration signals,
             // placed at the convergence point of every loop-drain path.
             for (IRBase* anchor : loopEndLAnchors) {
+                // EXPERIMENT: stall waves 0/1 so they reach the loop-end
+                // cluster wait late (inserted before the wait so the final
+                // order is delay-gate -> wait).
+                if (kExperimentDelayFirstClusterWait) {
+                    insertClusterWaitArrivalDelayBefore(anchor, irBuilder, archId);
+                }
                 insertClusterBarrierWaitBefore(anchor, "cluster barrier wait (loop end)", irBuilder,
                                                archId);
             }
