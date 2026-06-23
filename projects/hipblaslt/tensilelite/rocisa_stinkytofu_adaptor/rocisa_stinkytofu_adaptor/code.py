@@ -202,6 +202,10 @@ _SBARRIER_RE = _re.compile(
     r"^(\s*)s_barrier\s*(//.+)?$"
 )
 
+_CARRY_RE = _re.compile(
+    r"^(\s*)(v_(?:add|sub)_co(?:_ci)?_u32)\s+(.+?)(\s*//\s*(.*))?$"
+)
+
 
 def _postprocess_vcmpx(asm: str) -> str:
     """Expand ``v_cmpx_*`` into ``v_cmp_* + s_mov_b32 exec_lo`` for gfx1250."""
@@ -263,6 +267,41 @@ def _postprocess_sbarrier(asm: str) -> str:
     return "\n".join(out)
 
 
+def _postprocess_carry(asm: str) -> str:
+    """Insert ``vcc_lo`` carry operand into ``v_add_co_u32``/``v_sub_co_u32``/``v_add_co_ci_u32``."""
+    lines = asm.split("\n")
+    out: List[str] = []
+    for line in lines:
+        m = _CARRY_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        indent = m.group(1)
+        mnemonic = m.group(2)
+        operands_str = m.group(3)
+        comment = (m.group(5) or "").strip()
+
+        operands = [op.strip() for op in operands_str.split(",")]
+
+        is_ci = "_ci_" in mnemonic
+        if is_ci and len(operands) == 3:
+            # v_add_co_ci_u32 dst, src0, src1 → dst, vcc_lo, src0, src1, vcc_lo
+            new_ops = f"{operands[0]}, vcc_lo, {operands[1]}, {operands[2]}, vcc_lo"
+        elif not is_ci and len(operands) == 3:
+            # v_add_co_u32 / v_sub_co_u32 dst, src0, src1 → dst, vcc_lo, src0, src1
+            new_ops = f"{operands[0]}, vcc_lo, {operands[1]}, {operands[2]}"
+        else:
+            out.append(line)
+            continue
+
+        new_line = f"{indent}{mnemonic} {new_ops}"
+        if comment:
+            pad = max(1, 51 - len(new_line))
+            new_line += " " * pad + "// " + comment
+        out.append(new_line)
+    return "\n".join(out)
+
+
 class _PostProcessModule:
     """Wraps a StinkyAsmModule and post-processes emitAssembly() output.
 
@@ -284,6 +323,7 @@ class _PostProcessModule:
         asm = _postprocess_wait_markers(asm)
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
+        asm = _postprocess_carry(asm)
         return asm
 
     def getName(self) -> str:
