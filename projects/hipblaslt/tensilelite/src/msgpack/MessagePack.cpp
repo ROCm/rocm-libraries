@@ -70,19 +70,25 @@ namespace TensileLite
         }
     }
 
-    static bool readCompressedMsgObject(std::string const&     gz_filename,
-                                         msgpack::object_handle& result)
+    namespace
+    {
+    bool readCompressedMsgObject(std::string const&     gz_filename,
+                                 msgpack::object_handle& result)
     {
         std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
         if(!in.is_open())
+        {
             return false;
+        }
 
         auto compressed_size = static_cast<size_t>(in.tellg());
         in.seekg(0);
         std::vector<uint8_t> compressed(compressed_size);
         in.read(reinterpret_cast<char*>(compressed.data()), compressed_size);
         if(!in)
+        {
             return false;
+        }
 
         z_stream strm{};
         if(inflateInit(&strm) != Z_OK)
@@ -120,6 +126,7 @@ namespace TensileLite
 
         return finished_parsing;
     }
+    } // anonymous namespace
 
     bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
     {
