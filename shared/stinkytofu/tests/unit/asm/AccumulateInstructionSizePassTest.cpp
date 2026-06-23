@@ -451,20 +451,30 @@ TEST_F(InstructionSizeCostingTest, BufferOOB_String_Plus4) {
     EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, LabelString_AddrFromMap) {
+TEST_F(InstructionSizeCostingTest, LabelString_AlwaysPlus4) {
+    // A label operand is always a FK_PCRel_4 relocation: the assembler uses the
+    // 0xff inline-literal slot and reserves a 32-bit literal word, regardless of
+    // the label's resolved address or its position. Verified with
+    // `llvm-mc -mcpu=gfx1250 -show-encoding` (s_add_i32 s66, label, 0 -> 8 bytes).
+    // So +4 in every case, independent of labelByteOffset / current offset.
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("s", 0, 1));
     inst->addSrcReg(litStr("label_foo"));
 
+    // Far label address.
     std::unordered_map<std::string, int64_t> m;
     m["label_foo"] = 100;
     EXPECT_EQ(getLiteralExtraBytes(*inst, &m, 0, nullptr), 4);
 
+    // Near label address (<= 64): still +4 (the old > 64 heuristic was wrong).
     std::unordered_map<std::string, int64_t> m2;
     m2["label_foo"] = 8;
-    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 4);
+
+    // Label not in the map (forward reference) and near current offset: still +4.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
 }
 
 // VALU *_f32: hex `0x........` is float32 bits — same literal-extra as decimal

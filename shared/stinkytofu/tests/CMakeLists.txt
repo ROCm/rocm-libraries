@@ -56,6 +56,8 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
     unit/asm/SwInstructionPrefetchRelDynamicPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp

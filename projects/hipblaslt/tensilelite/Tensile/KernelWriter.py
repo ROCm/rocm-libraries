@@ -305,6 +305,10 @@ class StateValues:
   numSgprAddressDbg: int                 = 0
 
   firstInitSgpr: int                     = -1
+  # Abs SW instruction prefetch base: low index of 3 contiguous SGPRs (even-aligned pair
+  # s[N:N+1] + scratch s[N+2]) auto-allocated in _initKernel and freed immediately so the
+  # body reuses them. -1 when abs prefetch is off.
+  swPrefetchAbsBaseSgpr: int             = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -6643,6 +6647,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # a workgroup sync inside the LCL-gated signal block.
                                # Defaults to 1 (fallback off) when unset.
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+                               # Abs SW prefetch: mutually exclusive with PC-rel.
+                               # Abs takes priority when both are True (backend enforces via else-if).
+                               "EnableSwInstructionPrefetchAbs": bool(
+                                   kernel.get("SwInstructionPrefetchAbs", False)),
+                               # Auto-allocated even-aligned SGPR pair (reserved + freed in
+                               # _initKernel); -1 when abs prefetch is off.
+                               "SwInstructionPrefetchAbsBaseSgpr": int(
+                                   self.states.swPrefetchAbsBaseSgpr),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -9493,6 +9505,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
     while SgprSlot:
       tempSgpr = SgprSlot.pop(0)
       self.sgprPool.checkIn(tempSgpr)
+
+    # Abs SW instruction prefetch base SGPRs.
+    # Reserve 3 contiguous SGPRs with an even-aligned base for the StinkyTofu abs static pass,
+    # which inserts the prefetch burst
+    #   (s_getpc_b64 -> s_add_i32 -> s_add_u32 -> s_addc_u32 -> s_prefetch_inst)
+    # at kernel entry-begin:
+    #   s[base:base+1] = even-aligned 64-bit address pair (s_getpc_b64 / s_prefetch_inst base)
+    #   s[base+2]      = scratch (PC-rel offset, then klength=31 for the slength operand)
+    # The burst runs BEFORE the kernarg preload shuffle has moved preloaded arguments out of their
+    # launch SGPRs, so with PreloadKernArgs the base pair MUST NOT alias the live-in preload region
+    # s[0:MaxSgprPreload). checkOutAligned() returns the lowest free aligned block, which can fall
+    # inside that region (e.g. s20 == SrdC, holding a preloaded stride at entry), so temporarily
+    # reserve s[0:MaxSgprPreload) to force the base above it (mirrors the preloadGuard above). The
+    # base is checked back in immediately, so the kernel body reuses it ("free after entry", net 0).
+    self.states.swPrefetchAbsBaseSgpr = -1
+    if kernel.get("SwInstructionPrefetchAbs", False):
+      # Force the base past the live-in kernarg preload region when preloading is enabled.
+      prefetchPreloadGuard = []
+      if kernel["PreloadKernArgs"]:
+        while True:
+          guardSgpr = self.sgprPool.checkOut(1, "SwPrefetchAbsPreloadGuard", preventOverflow=False)
+          if guardSgpr >= self.states.archCaps["MaxSgprPreload"]:
+            self.sgprPool.checkIn(guardSgpr)
+            break
+          prefetchPreloadGuard.append(guardSgpr)
+      absBaseIdx = self.sgprPool.checkOutAligned(3, 2, tag="SwPrefetchAbsBase", preventOverflow=False)
+      assert absBaseIdx % 2 == 0, "abs prefetch base SGPR pair must be even-aligned"
+      assert (not kernel["PreloadKernArgs"]) or absBaseIdx >= self.states.archCaps["MaxSgprPreload"], \
+        "abs prefetch base SGPR must not alias the kernarg preload region"
+      self.states.swPrefetchAbsBaseSgpr = absBaseIdx
+      self.sgprPool.checkIn(absBaseIdx)
+      for guardSgpr in prefetchPreloadGuard:
+        self.sgprPool.checkIn(guardSgpr)
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of first half of defined SGPRS (%d) overflowed max SGPRS (%d)." \

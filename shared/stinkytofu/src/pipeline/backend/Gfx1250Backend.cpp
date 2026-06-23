@@ -56,6 +56,8 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
@@ -188,7 +190,20 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
     pm.addPass(createSetMatrixReusePass());
-    if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
+    // SW instruction prefetch — abs and PC-rel are mutually exclusive (§2 design doc).
+    // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel
+    // (EnableSwInstructionPrefetchRelStatic).
+    if (moduleOptions.EnableSwInstructionPrefetchAbs) {
+        // §16.6 pipeline: one knob enables both abs passes; each no-ops unless
+        // its size regime matches. Static handles 32640 < total ≤ 65536;
+        // dynamic handles total > 65536 (P2 stub: logs + no-ops for now).
+        // Use the module overload so the pass reads SwInstructionPrefetchAbsBaseSgpr
+        // AND writes its debug dump to <outputDir>/<kernel>/sw_prefetch_abs_static_pass.txt
+        // (same as the PC-rel pass); the int overload has no debug path → no dump.
+        pm.addPass(createSwInstructionPrefetchAbsStaticPass(module));
+        // pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
+    } else if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
+        // PC-rel dynamic pass (CFG-gated; replaces static PC-rel when enabled).
         // pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
         pm.addPass(createSwInstructionPrefetchRelDynamicPass(module));
     }

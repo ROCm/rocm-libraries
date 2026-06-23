@@ -7,6 +7,8 @@ target_sources(stinkytofu_objs PRIVATE
     SwPrefetchRelCommon.cpp
     SwInstructionPrefetchRelStaticPass.cpp
     SwInstructionPrefetchRelDynamicPass.cpp
+    SwInstructionPrefetchAbsStaticPass.cpp
+    SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp

@@ -607,6 +607,12 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
+    # SwInstructionPrefetchAbs — True: enable absolute SW instruction prefetch
+    # (s_prefetch_inst with a label-fixed base built from s_getpc_b64 + s_add_u32).
+    # Mutually exclusive with SwInstructionPrefetch (abs takes priority when both True).
+    # The 2-SGPR even-aligned base pair is auto-allocated in KernelWriter (reserved past the
+    # kernel-argument region, then freed for body reuse). Default False: abs pass disabled.
+    {"SwInstructionPrefetchAbs": [True]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.

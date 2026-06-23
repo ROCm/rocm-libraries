@@ -356,6 +356,14 @@ validParameters = { # we need to make sure this matches develop
     # prefetch instructions bring hot code back under software control so execution stays ahead of
     # the fetch pointer and avoids those misses.
     "SwInstructionPrefetch": [False, True],
+    # StinkyTofu: absolute SW instruction prefetch (s_prefetch_inst) using a label-fixed base
+    # address built from s_getpc_b64 + s_add_u32.
+    # Mutually exclusive with SwInstructionPrefetch (abs takes priority when both True).
+    # Static regime (32640 < totalBytes <= 65536): single-label + koffset burst at entry BB.
+    # Dynamic regime (totalBytes > 65536): not yet implemented (pass no-ops above 65536).
+    # The 2-SGPR even-aligned base pair is auto-allocated in KernelWriter (reserved past the
+    # kernel-argument region, then freed for body reuse) — no manual SGPR index needed.
+    "SwInstructionPrefetchAbs": [False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap

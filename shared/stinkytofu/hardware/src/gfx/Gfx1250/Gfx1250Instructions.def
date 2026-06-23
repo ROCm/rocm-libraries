@@ -517,6 +517,36 @@ DEF_BATCH(.format = SMRD_LOAD,
         .operand_fields = { {D0, .size=512} },
 )
 
+// SMRD / SMEM — S_PREFETCH_INST  §5.7
+// Prefetch instructions into the shader instruction cache, relative to a base address.
+// No-op when MODE.SCALAR_PREFETCH_EN == 0. No completion / error status returned.
+//
+// Hardware semantics (from ISA spec):
+//   mem_addr = (S0 + sign_extend24(koffset)) & ~0x7F  // 128 B aligned base
+//   length   = (S2 + klength) & 31                    // S2=slength SGPR/M0 + klength simm5
+//   PrefetchScalarInst(mem_addr, (length + 1) * 128)  // 128-4096 bytes (1-32 cache lines)
+//
+// Pass usage: null for S2 (slength=0) + klength=31 → (0+31)&31+1=32 lines = 4096 bytes/insn.
+//
+// Field map (ISA column: POS (INSTFIELD) = operand_name : type):
+//   S0 (sbase)   = sbase   : sreg           B64 — 64-bit aligned SGPR pair
+//   S1 (ioffset) = koffset : simm24         B32 — byte offset added to sbase
+//   S2 (soffset) = slength : smem_offset_nok B32 — SGPR/M0/null length addend
+//   S3 (sdata)   = klength : simm5          B32 — simm5 immediate length addend
+//
+// Note: ISA names the S2 encoding field "soffset" (hardware) and its semantic role "slength".
+// Note: ISA names the S0 encoding field "sbase". StinkyTofu uses ssrc0 (same 64-bit sreg
+//       constraint); the assembly emitter prints the SGPR pair correctly regardless.
+DEF_T(SPrefetchInstInst, "s_prefetch_inst",
+    .format = SMRD,
+    .flags = {ScalarInstPrefetch},
+    .operand_fields = {
+        {S0, ssrc0, sreg, 64},
+        {S1, ioffset, simm24, 32},
+        {S2, soffset, smem_offset_nok, 32},
+        {S3, sdata, simm5, 32},
+    })
+
 // SMRD / SMEM — S_PREFETCH_INST_PC_REL (PC-relative; koffset simm24, slength, klength simm5)
 DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
     .format = SMRD,
