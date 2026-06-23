@@ -229,9 +229,8 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     //    loadBundleMetadata returns nullopt both when the .meta.json is absent
     //    and when it is present but invalid (bad JSON / bad format_version). For
     //    a golden bundle either case is an authoring error -> FAIL.
-    const bool goldenOutputsPresent
-        = !bundle.outputTensorUids.empty()
-          && detail::blobsPresentFor(bundle.outputTensorUids, jsonPath);
+    const bool goldenOutputsPresent = !bundle.outputTensorUids.empty()
+                                      && detail::blobsPresentFor(bundle.outputTensorUids, jsonPath);
 
     auto metadata = hipdnn_test_sdk::utilities::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())

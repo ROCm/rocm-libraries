@@ -167,8 +167,7 @@ void skipEngineCouldNotRun(const std::filesystem::path& bundlePath, const std::s
 }
 } // namespace
 
-std::optional<OutputTensors>
-    IntegrationGraphGoldenReferenceVerificationHarness::runEngineOrSkip()
+std::optional<OutputTensors> IntegrationGraphGoldenReferenceVerificationHarness::runEngineOrSkip()
 {
     std::string error;
     auto engineOutputs = runEngineCapturingOutputs(error);
@@ -265,14 +264,13 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
         switch(cpu.status)
         {
         case RefStatus::CAPABILITY_MISS:
-            skipUnverifiable(
-                gpuRefErrored
-                    ? "no usable reference (golden absent; GPU ref errored, CPU ref "
-                      "cannot run this op; see reference-error report): "
-                          + cpu.message
-                    : "no reference available (golden absent; GPU and CPU ref "
-                      "cannot run this op): "
-                          + cpu.message);
+            skipUnverifiable(gpuRefErrored
+                                 ? "no usable reference (golden absent; GPU ref errored, CPU ref "
+                                   "cannot run this op; see reference-error report): "
+                                       + cpu.message
+                                 : "no reference available (golden absent; GPU and CPU ref "
+                                   "cannot run this op): "
+                                       + cpu.message);
             return;
         case RefStatus::RUNTIME_ERROR:
             recordRefError("CPU reference errored (auto mode, last resort): " + cpu.message);
@@ -319,8 +317,8 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
         allLeafInputUids.push_back(uid);
     }
 
-    std::mt19937 rng(static_cast<std::mt19937::result_type>(
-        _bundle->metadata.seed.value_or(K_DEFAULT_SEED)));
+    std::mt19937 rng(
+        static_cast<std::mt19937::result_type>(_bundle->metadata.seed.value_or(K_DEFAULT_SEED)));
 
     SynthesisTracker tracker(allLeafInputUids, inputs);
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
@@ -363,8 +361,7 @@ OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateSentin
     OutputTensors outputs;
     for(const int64_t uid : _bundle->outputTensorUids)
     {
-        outputs[uid]
-            = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttrMap.at(uid));
+        outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttrMap.at(uid));
         outputs[uid]->fillWithSentinelValue();
     }
     return outputs;
@@ -394,7 +391,8 @@ std::unordered_map<int64_t, void*>
 }
 
 std::optional<OutputTensors>
-    IntegrationGraphGoldenReferenceVerificationHarness::runEngineCapturingOutputs(std::string& error)
+    IntegrationGraphGoldenReferenceVerificationHarness::runEngineCapturingOutputs(
+        std::string& error)
 {
     OutputTensors engineOutputs = allocateSentinelOutputs();
     auto variantPack = buildVariantPack(engineOutputs, /*useDevice=*/_requiresDevice);
@@ -489,8 +487,8 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputs(
 }
 
 template <typename ExpectedLookup>
-void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(
-    OutputTensors& engineOutputs, ExpectedLookup expectedFor)
+void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTensors& engineOutputs,
+                                                                     ExpectedLookup expectedFor)
 {
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -526,8 +524,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::recordRefError(const st
         _bundlePath.string(), reason, UnverifiableSeverity::REF_ERROR);
 }
 
-std::string IntegrationGraphGoldenReferenceVerificationHarness::refLabel(
-    ReferenceExecutorType type)
+std::string IntegrationGraphGoldenReferenceVerificationHarness::refLabel(ReferenceExecutorType type)
 {
     return type == ReferenceExecutorType::GPU ? "GPU reference" : "CPU reference";
 }

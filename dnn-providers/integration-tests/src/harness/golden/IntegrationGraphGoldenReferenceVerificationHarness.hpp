@@ -232,8 +232,7 @@ private:
     static std::string refLabel(ReferenceExecutorType type);
 
     static std::string
-        labelFor(int64_t uid,
-                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
+        labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
 
     std::string reportHeader(int64_t uid,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -259,9 +258,8 @@ private:
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
         hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
-    static float
-        toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                             hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 };
 
 } // namespace hipdnn_integration_tests::golden

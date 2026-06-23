@@ -34,8 +34,8 @@ namespace hipdnn_integration_tests::golden
 // ── Convolution ───────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillConvFwdInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                     SynthesisTracker& tracker,
-                                     std::mt19937& rng)
+                                         SynthesisTracker& tracker,
+                                         std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionFwdAttributes();
     if(a == nullptr)
@@ -48,8 +48,8 @@ inline SynthesisResult fillConvFwdInputs(const hipdnn_flatbuffers_sdk::data_obje
 }
 
 inline SynthesisResult fillConvBwdDataInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         SynthesisTracker& tracker,
-                                         std::mt19937& rng)
+                                             SynthesisTracker& tracker,
+                                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionBwdAttributes();
     if(a == nullptr)
@@ -61,9 +61,10 @@ inline SynthesisResult fillConvBwdDataInputs(const hipdnn_flatbuffers_sdk::data_
     return SynthesisResult::ok();
 }
 
-inline SynthesisResult fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                            SynthesisTracker& tracker,
-                                            std::mt19937& rng)
+inline SynthesisResult
+    fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                             SynthesisTracker& tracker,
+                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ConvolutionWrwAttributes();
     if(a == nullptr)
@@ -77,10 +78,10 @@ inline SynthesisResult fillConvBwdWeightsInputs(const hipdnn_flatbuffers_sdk::da
 
 // ── Batchnorm ─────────────────────────────────────────────────────────────────
 
-inline SynthesisResult fillBatchnormInferenceInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBatchnormInferenceInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                 SynthesisTracker& tracker,
+                                 std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributes();
     if(a == nullptr)
@@ -95,10 +96,10 @@ inline SynthesisResult fillBatchnormInferenceInputs(
     return SynthesisResult::ok();
 }
 
-inline SynthesisResult fillBatchnormInferenceVarianceInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBatchnormInferenceVarianceInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                         SynthesisTracker& tracker,
+                                         std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
     if(a == nullptr)
@@ -116,10 +117,10 @@ inline SynthesisResult fillBatchnormInferenceVarianceInputs(
 
 // peer_stats holds references to other GPUs' memory for multi-GPU batchnorm —
 // randomly generated values would point to invalid cross-device memory.
-inline SynthesisResult fillBatchnormTrainingInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBatchnormTrainingInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                SynthesisTracker& tracker,
+                                std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormAttributes();
     if(a == nullptr)
@@ -146,10 +147,10 @@ inline SynthesisResult fillBatchnormTrainingInputs(
 }
 
 // mean/inv_variance are optional (may come from forward). peer_stats: see above.
-inline SynthesisResult fillBatchnormBackwardInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBatchnormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                SynthesisTracker& tracker,
+                                std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BatchnormBackwardAttributes();
     if(a == nullptr)
@@ -176,8 +177,8 @@ inline SynthesisResult fillBatchnormBackwardInputs(
 // ── Matmul ────────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillMatmulInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                    SynthesisTracker& tracker,
-                                    std::mt19937& rng)
+                                        SynthesisTracker& tracker,
+                                        std::mt19937& rng)
 {
     const auto* a = node.attributes_as_MatmulAttributes();
     if(a == nullptr)
@@ -192,8 +193,8 @@ inline SynthesisResult fillMatmulInputs(const hipdnn_flatbuffers_sdk::data_objec
 // ── Pointwise ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       SynthesisTracker& tracker,
-                                       std::mt19937& rng)
+                                           SynthesisTracker& tracker,
+                                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_PointwiseAttributes();
     if(a == nullptr)
@@ -210,8 +211,8 @@ inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_ob
 // ── Reduction ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillReductionInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       SynthesisTracker& tracker,
-                                       std::mt19937& rng)
+                                           SynthesisTracker& tracker,
+                                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ReductionAttributes();
     if(a == nullptr)
@@ -225,8 +226,8 @@ inline SynthesisResult fillReductionInputs(const hipdnn_flatbuffers_sdk::data_ob
 // ── LayerNorm ─────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillLayernormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                       SynthesisTracker& tracker,
-                                       std::mt19937& rng)
+                                           SynthesisTracker& tracker,
+                                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormAttributes();
     if(a == nullptr)
@@ -242,10 +243,10 @@ inline SynthesisResult fillLayernormInputs(const hipdnn_flatbuffers_sdk::data_ob
 
 // mean and inv_variance are computed by the forward pass — a standalone backward
 // can't produce correct gradients without them.
-inline SynthesisResult fillLayernormBackwardInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillLayernormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                SynthesisTracker& tracker,
+                                std::mt19937& rng)
 {
     const auto* a = node.attributes_as_LayernormBackwardAttributes();
     if(a == nullptr)
@@ -264,8 +265,8 @@ inline SynthesisResult fillLayernormBackwardInputs(
 // ── RMSNorm ───────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                     SynthesisTracker& tracker,
-                                     std::mt19937& rng)
+                                         SynthesisTracker& tracker,
+                                         std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormAttributes();
     if(a == nullptr)
@@ -280,10 +281,10 @@ inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_obje
 }
 
 // inv_rms is computed by the forward pass.
-inline SynthesisResult fillRmsnormBackwardInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillRmsnormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                              SynthesisTracker& tracker,
+                              std::mt19937& rng)
 {
     const auto* a = node.attributes_as_RMSNormBackwardAttributes();
     if(a == nullptr)
@@ -300,8 +301,8 @@ inline SynthesisResult fillRmsnormBackwardInputs(
 // ── Resample ──────────────────────────────────────────────────────────────────
 
 inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         SynthesisTracker& tracker,
-                                         std::mt19937& rng)
+                                             SynthesisTracker& tracker,
+                                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_ResampleFwdAttributes();
     if(a == nullptr)
@@ -316,10 +317,10 @@ inline SynthesisResult fillResampleFwdInputs(const hipdnn_flatbuffers_sdk::data_
 
 // Scale tensor holds per-block quantization factors that must match the
 // quantized data — random scales would produce garbage dequantized values.
-inline SynthesisResult fillBlockScaleDequantizeInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBlockScaleDequantizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                   SynthesisTracker& tracker,
+                                   std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleDequantizeAttributes();
     if(a == nullptr)
@@ -331,10 +332,10 @@ inline SynthesisResult fillBlockScaleDequantizeInputs(
     return SynthesisResult::ok();
 }
 
-inline SynthesisResult fillBlockScaleQuantizeInputs(
-    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-    SynthesisTracker& tracker,
-    std::mt19937& rng)
+inline SynthesisResult
+    fillBlockScaleQuantizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                 SynthesisTracker& tracker,
+                                 std::mt19937& rng)
 {
     const auto* a = node.attributes_as_BlockScaleQuantizeAttributes();
     if(a == nullptr)
@@ -361,8 +362,8 @@ inline SynthesisResult fillBlockScaleQuantizeInputs(
 // sparse attention patterns, and dropout seed/offset must match between fwd and
 // bwd. Most of these are optional — absent ones (uid 0) are silently ignored.
 inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         SynthesisTracker& tracker,
-                                         std::mt19937& rng)
+                                             SynthesisTracker& tracker,
+                                             std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaAttributes();
     if(a == nullptr)
@@ -401,9 +402,10 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
 // correct gradients. In a fused forward+backward graph these are virtual
 // inter-node tensors (not owned, so silently skipped). A standalone backward
 // without a forward is refused.
-inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                          SynthesisTracker& tracker,
-                                          std::mt19937& rng)
+inline SynthesisResult
+    fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                           SynthesisTracker& tracker,
+                           std::mt19937& rng)
 {
     const auto* a = node.attributes_as_SdpaBackwardAttributes();
     if(a == nullptr)
@@ -439,8 +441,8 @@ inline SynthesisResult fillSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data
 // a diagnostic when the op is unrecognized or an input can't be synthesized.
 
 inline SynthesisResult synthesizeNodeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                        SynthesisTracker& tracker,
-                                        std::mt19937& rng)
+                                            SynthesisTracker& tracker,
+                                            std::mt19937& rng)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 
