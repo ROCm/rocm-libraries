@@ -767,6 +767,8 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
         COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
         COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in ${coverage_dir}/index.html"
+        COMMAND bash -c "if [ -f '${coverage_dir}/test_exit_code.txt' ]; then echo ''; echo 'WARNING: Some tests failed (see above), but coverage report was still generated'; echo 'HTML report: ${coverage_dir}/index.html'; exit $$(cat '${coverage_dir}/test_exit_code.txt'); else echo 'All tests passed'; fi"
         COMMENT "Generating code coverage report"
       )
 endif()

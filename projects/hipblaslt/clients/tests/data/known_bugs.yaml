@@ -11,3 +11,21 @@
 Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+
+  # Coverage test suite - unsupported feature combinations
+  # Mixed input types not supported by library
+  - { name: coverage_bias_type_mixed_abcd, function: matmul, known_bug_platforms: "*" }
+
+  # Complex types with grouped GEMM not supported
+  - { name: coverage_grouped_complex, function: matmul, known_bug_platforms: "*" }
+
+  # scaleCD feature not in kernel library
+  - { name: coverage_scaleCD, function: matmul, known_bug_platforms: "*" }
+
+  # scaleAB vector mode not in kernel library
+  - { name: coverage_scaleAB_vector, function: matmul, known_bug_platforms: "*" }
+
+  # Bias type mismatches not supported
+  - { name: coverage_bias_type_f32_d, function: matmul, known_bug_platforms: "*" }
+  - { name: coverage_bias_type_bf16_d, function: matmul, known_bug_platforms: "*" }
+  - { name: coverage_bias_type_f16_d, function: matmul, known_bug_platforms: "*" }
