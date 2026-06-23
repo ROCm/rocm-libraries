@@ -9278,6 +9278,66 @@ TEST_F(TestGraph, RankAndSelectWinnerCustomRankingFnChangesWinnerThroughProducti
     EXPECT_EQ(results[3].rank, -1);
 }
 
+TEST_F(TestGraph, RankAndSelectWinnerContiguousRanksSucceededTimeOrderFailedMinusOne)
+{
+    // Succeeded entries (out of time order) interleaved with failures. After
+    // ranking, succeeded entries take contiguous ranks 0..n-1 in ascending
+    // minTimeMs order, and every failed entry takes rank -1.
+    std::vector<AutotuneResult> results;
+    results.push_back(makeSucceededResult(0, 30.0f, 0, 30.0f));
+    results.push_back(makeFailedResult(1));
+    results.push_back(makeSucceededResult(2, 10.0f, 1, 10.0f));
+    results.push_back(makeFailedResult(3));
+    results.push_back(makeSucceededResult(4, 20.0f, 2, 20.0f));
+
+    size_t activePlanIndex = 99;
+    const AutotuneConfig config;
+    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+        results, config, activePlanIndex);
+
+    ASSERT_TRUE(err.is_good()) << err.err_msg;
+    ASSERT_EQ(results.size(), 5u);
+
+    // (a) Succeeded results first, contiguous ranks 0..2 in time order {2,4,0}.
+    EXPECT_TRUE(results[0].succeeded);
+    EXPECT_TRUE(results[1].succeeded);
+    EXPECT_TRUE(results[2].succeeded);
+    EXPECT_EQ(results[0].engineId, 2);
+    EXPECT_EQ(results[1].engineId, 4);
+    EXPECT_EQ(results[2].engineId, 0);
+    EXPECT_EQ(results[0].rank, 0);
+    EXPECT_EQ(results[1].rank, 1);
+    EXPECT_EQ(results[2].rank, 2);
+
+    // (b) Failed results last, each rank -1.
+    EXPECT_FALSE(results[3].succeeded);
+    EXPECT_FALSE(results[4].succeeded);
+    EXPECT_EQ(results[3].rank, -1);
+    EXPECT_EQ(results[4].rank, -1);
+}
+
+TEST_F(TestGraph, RankAndSelectWinnerAllFailedReturnsBackendErrorWithPinnedMessage)
+{
+    // (c) No succeeded results → fatal error with the pinned message.
+    std::vector<AutotuneResult> results;
+    results.push_back(makeFailedResult(0));
+    results.push_back(makeFailedResult(1));
+
+    size_t activePlanIndex = 99;
+    const AutotuneConfig config;
+    auto err = hipdnn_frontend::GraphTestUtils::callRankAndSelectWinner(
+        results, config, activePlanIndex);
+
+    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(err.err_msg, "All engines failed during autotuning. No winner selected.");
+
+    // Failed entries are still ranked -1 even on the error path.
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results[0].rank, -1);
+    EXPECT_EQ(results[1].rank, -1);
+}
+
 // ============================================================================
 // dedup / strip / max driving real production APIs
 // ============================================================================

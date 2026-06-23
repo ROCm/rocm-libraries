@@ -267,10 +267,10 @@ std::string ProfilingControlDescriptor::toString() const
     std::string str
         = fmt::format("ProfilingControlDescriptor: {{eventsCreated={}, startRecorded={}, "
                       "stopRecorded={}, finalized={}",
-                      (_startEvent != nullptr) ? "true" : "false",
-                      _startRecorded ? "true" : "false",
-                      _stopRecorded ? "true" : "false",
-                      isFinalized() ? "true" : "false");
+                      _startEvent != nullptr,
+                      _startRecorded,
+                      _stopRecorded,
+                      isFinalized());
     if(isFinalized())
     {
         str += ", elapsedMs=" + std::to_string(_elapsedMs);

@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -241,74 +242,44 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
                          });
     }
 
-    // Reassemble: succeeded first, then failed
+    const size_t succeededCount = succeededResults.size();
+    const size_t failedCount    = failedResults.size();
+
+    // Reassemble succeeded-then-failed while assigning ranks and selecting the
+    // winner in a single pass. Succeeded results get 0-based ranks in sorted
+    // order; failed results get -1. The winner is the first succeeded result
+    // with a valid compiledPlanIndex, whose index sets the active plan directly
+    // (avoiding the fragile O(n*m) (engineId, knobSettings) search loop).
     allResults.clear();
-    allResults.reserve(succeededResults.size() + failedResults.size());
-    for(auto& r : succeededResults)
+    std::optional<AutotuneResult> winner;
+    for(size_t i = 0; i < succeededResults.size(); ++i)
     {
-        allResults.push_back(std::move(r));
+        succeededResults[i].rank = static_cast<int>(i);
+        if(!winner && succeededResults[i].compiledPlanIndex >= 0)
+        {
+            activePlanIndex = static_cast<size_t>(succeededResults[i].compiledPlanIndex);
+            winner          = succeededResults[i];
+        }
+        allResults.push_back(std::move(succeededResults[i]));
     }
-    for(auto& r : failedResults)
+    for(auto& result : failedResults)
     {
-        allResults.push_back(std::move(r));
+        result.rank = -1;
+        allResults.push_back(std::move(result));
     }
 
-    // Assign ranks: succeeded get 0-based ranks, failed get -1
-    for(size_t i = 0; i < allResults.size(); ++i)
-    {
-        if(allResults[i].succeeded)
-        {
-            allResults[i].rank = static_cast<int>(i);
-        }
-        else
-        {
-            allResults[i].rank = -1;
-        }
-    }
+    HIPDNN_FE_LOG_INFO("autotune: ranking complete — " << succeededCount << " succeeded, "
+                                                       << failedCount << " failed");
 
-    // ── Log ranking summary ────────────────────────────────────────
-    {
-        size_t succeededCount = 0;
-        size_t failedCount = 0;
-        for(const auto& r : allResults)
-        {
-            if(r.succeeded)
-            {
-                ++succeededCount;
-            }
-            else
-            {
-                ++failedCount;
-            }
-        }
-        HIPDNN_FE_LOG_INFO("autotune: ranking complete — " << succeededCount << " succeeded, "
-                                                           << failedCount << " failed");
-    }
-
-    // ── Select winner ───────────────────────────────────────────────
-    // Find the first successful result and use its compiledPlanIndex
-    // to set the active plan directly, avoiding the fragile O(n*m)
-    // (engineId, knobSettings) search loop.
-    bool winnerFound = false;
-    for(const auto& result : allResults)
-    {
-        if(!result.succeeded || result.compiledPlanIndex < 0)
-        {
-            continue;
-        }
-        activePlanIndex = static_cast<size_t>(result.compiledPlanIndex);
-        winnerFound = true;
-        HIPDNN_FE_LOG_INFO("autotune: winner — engine "
-                           << result.engineName << " (ID " << result.engineId
-                           << "), min=" << result.minTimeMs << "ms");
-        break;
-    }
-
-    if(!winnerFound)
+    if(!winner)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
                 "All engines failed during autotuning. No winner selected."};
     }
+
+    HIPDNN_FE_LOG_INFO("autotune: winner — engine " << winner->engineName << " (ID "
+                                                    << winner->engineId
+                                                    << "), min=" << winner->minTimeMs << "ms");
 
     return {ErrorCode::OK, ""};
 }

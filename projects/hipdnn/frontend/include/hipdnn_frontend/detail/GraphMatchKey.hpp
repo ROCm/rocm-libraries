@@ -66,6 +66,20 @@ struct PrioritizedAutotuneConfigMatchKey
     AutotuneConfigMatchKey key;
 };
 
+// Per-operation-class priorities used to pick the most specific match key when a
+// graph contains multiple ops. Higher wins.
+namespace match_priority
+{
+inline constexpr int CONVOLUTION = 70;
+inline constexpr int SDPA        = 60;
+inline constexpr int MATMUL      = 50;
+inline constexpr int BATCHNORM   = 40;
+inline constexpr int NORM        = 30;
+inline constexpr int REDUCTION   = 20;
+inline constexpr int RESAMPLE    = 20;
+inline constexpr int POINTWISE   = 10;
+} // namespace match_priority
+
 inline bool appendRequiredMatchTensor(AutotuneConfigMatchKey& key,
                                       std::string_view tensorId,
                                       const std::shared_ptr<graph::TensorAttributes>& tensor)
@@ -117,7 +131,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::CONVOLUTION, std::move(key)};
     }
     case graph::NodeType::CONVOLUTION_DGRAD:
     {
@@ -128,7 +142,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::CONVOLUTION, std::move(key)};
     }
     case graph::NodeType::CONVOLUTION_WGRAD:
     {
@@ -139,7 +153,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{70, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::CONVOLUTION, std::move(key)};
     }
 #ifdef HIPDNN_ENABLE_SDPA
     case graph::NodeType::SDPA_FWD:
@@ -174,7 +188,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key, config_tensor::DESCALE_S, sdpa.attributes.get_descale_s());
         appendOptionalMatchTensor(key, config_tensor::SCALE_S, sdpa.attributes.get_scale_s());
         appendOptionalMatchTensor(key, config_tensor::SCALE_O, sdpa.attributes.get_scale_o());
-        return PrioritizedAutotuneConfigMatchKey{60, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::SDPA, std::move(key)};
     }
     case graph::NodeType::SDPA_BWD:
     {
@@ -201,7 +215,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
             key, config_tensor::DROPOUT_SCALE, sdpa.attributes.get_dropout_scale());
         appendOptionalMatchTensor(
             key, config_tensor::DROPOUT_SCALE_INV, sdpa.attributes.get_dropout_scale_inv());
-        return PrioritizedAutotuneConfigMatchKey{60, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::SDPA, std::move(key)};
     }
 #endif
     case graph::NodeType::MATMUL:
@@ -213,7 +227,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{50, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::MATMUL, std::move(key)};
     }
     case graph::NodeType::BATCHNORM:
     {
@@ -235,7 +249,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
                                   batchnorm.attributes.get_prev_running_variance());
         appendOptionalMatchTensor(
             key, config_tensor::MOMENTUM, batchnorm.attributes.get_momentum());
-        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::BATCHNORM_INFERENCE:
     {
@@ -251,7 +265,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::BATCHNORM_INFERENCE_VARIANCE_EXT:
     {
@@ -269,7 +283,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::BATCHNORM_BACKWARD:
     {
@@ -285,7 +299,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key, config_tensor::MEAN, batchnorm.attributes.get_mean());
         appendOptionalMatchTensor(
             key, config_tensor::INV_VARIANCE, batchnorm.attributes.get_inv_variance());
-        return PrioritizedAutotuneConfigMatchKey{40, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::BATCHNORM, std::move(key)};
     }
     case graph::NodeType::LAYER_NORM:
     {
@@ -303,7 +317,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::NORM, std::move(key)};
     }
     case graph::NodeType::RMS_NORM:
     {
@@ -320,7 +334,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
             return std::nullopt;
         }
         appendOptionalMatchTensor(key, config_tensor::BIAS, rmsnorm.attributes.get_bias());
-        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::NORM, std::move(key)};
     }
     case graph::NodeType::RMS_NORM_BACKWARD:
     {
@@ -334,7 +348,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{30, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::NORM, std::move(key)};
     }
     case graph::NodeType::REDUCTION:
     {
@@ -347,7 +361,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{20, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::REDUCTION, std::move(key)};
     }
     case graph::NodeType::RESAMPLE_FWD:
     {
@@ -365,7 +379,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         {
             return std::nullopt;
         }
-        return PrioritizedAutotuneConfigMatchKey{20, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::RESAMPLE, std::move(key)};
     }
     case graph::NodeType::POINTWISE:
     {
@@ -381,7 +395,7 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         }
         appendOptionalMatchTensor(key, config_tensor::IN_1, pointwise.attributes.get_input_1());
         appendOptionalMatchTensor(key, config_tensor::IN_2, pointwise.attributes.get_input_2());
-        return PrioritizedAutotuneConfigMatchKey{10, std::move(key)};
+        return PrioritizedAutotuneConfigMatchKey{match_priority::POINTWISE, std::move(key)};
     }
     case graph::NodeType::UNKNOWN:
     case graph::NodeType::BLOCK_SCALE_QUANTIZE:

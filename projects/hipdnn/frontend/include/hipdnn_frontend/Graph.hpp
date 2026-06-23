@@ -259,7 +259,7 @@ protected:
             return;
         }
 
-        _executionPlanFinalized = detail::isFinalized(finalization);
+        _executionPlanFinalized = (finalization == detail::ActivePlanFinalization::FINALIZED);
         _selectedEngineId = _compiledPlans[_activePlanIndex].engineId;
     }
 
@@ -278,6 +278,24 @@ protected:
         plans.reserve(1);
         plans.push_back(std::move(plan));
         replaceCompiledPlans(std::move(plans), 0, finalization);
+    }
+
+    // Wrap a deserialized execution-plan descriptor as the single active compiled
+    // plan, recovering its engine id and installing it finalized.
+    void installDeserializedExecutionPlan(hipdnnBackendDescriptor_t executionPlan)
+    {
+        CompiledPlan plan;
+        plan.executionPlanDesc
+            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+
+        // A deserialized compiled plan is finalized by construction and can be re-serialized.
+        auto engineId = detail::getExecutionPlanEngineId(plan.executionPlanDesc->get());
+        if(engineId.has_value())
+        {
+            plan.engineId = *engineId;
+        }
+
+        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::FINALIZED);
     }
 
     /// Get the active plan's engine config descriptor, or nullptr if no active plan exists
@@ -1073,7 +1091,7 @@ private:
                        void* workspace,
                        int64_t maxWorkspaceSize,
                        const AutotuneConfig& config,
-                       const AutotuneStorageConfig& storageConfig,
+                       [[maybe_unused]] const AutotuneStorageConfig& storageConfig,
                        std::vector<AutotuneResult>* results)
     {
         // ── Config validation ───────────────────────────────────────────
@@ -1259,18 +1277,11 @@ private:
                     // Check if this engine supports exhaustive priming
                     std::vector<Knob> knobs;
                     auto knobErr = get_knobs_for_engine(spec.engineId, knobs);
-                    bool supportsBenchmarking = false;
-                    if(knobErr.is_good())
-                    {
-                        for(const auto& knob : knobs)
-                        {
-                            if(knob.knobId() == autotune::detail::BENCHMARKING_KNOB_NAME)
-                            {
-                                supportsBenchmarking = true;
-                                break;
-                            }
-                        }
-                    }
+                    const bool supportsBenchmarking
+                        = knobErr.is_good()
+                          && std::any_of(knobs.begin(), knobs.end(), [](const Knob& knob) {
+                                 return knob.knobId() == autotune::detail::BENCHMARKING_KNOB_NAME;
+                             });
 
                     if(!supportsBenchmarking)
                     {
@@ -2106,8 +2117,6 @@ private:
                                    << graph_attributes.get_name() << "; skipping config write");
             }
         }
-#else
-        (void)storageConfig;
 #endif
 
         // ── Output results ──────────────────────────────────────────────
@@ -2839,20 +2848,8 @@ public:
                     detail::hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
                         handle, &plan, data.data(), data.size()),
                     "Failed to deserialize embedded execution plan");
-                CompiledPlan compiledPlan;
-                compiledPlan.executionPlanDesc
-                    = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(plan);
 
-                // A deserialized compiled plan is finalized by construction and can be re-serialized.
-                auto engineId
-                    = detail::getExecutionPlanEngineId(compiledPlan.executionPlanDesc->get());
-                if(engineId.has_value())
-                {
-                    compiledPlan.engineId = *engineId;
-                }
-
-                replaceWithSingleCompiledPlan(std::move(compiledPlan),
-                                              detail::ActivePlanFinalization::FINALIZED);
+                installDeserializedExecutionPlan(plan);
             }
             else
             {
@@ -2945,18 +2942,7 @@ public:
                 handle, &executionPlan, data.data(), data.size()),
             "Failed to deserialize compiled plan");
 
-        CompiledPlan plan;
-        plan.executionPlanDesc
-            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
-
-        // A deserialized compiled plan is finalized by construction and can be re-serialized.
-        auto engineId = detail::getExecutionPlanEngineId(plan.executionPlanDesc->get());
-        if(engineId.has_value())
-        {
-            plan.engineId = *engineId;
-        }
-
-        replaceWithSingleCompiledPlan(std::move(plan), detail::ActivePlanFinalization::FINALIZED);
+        installDeserializedExecutionPlan(executionPlan);
         resetGraphDesc();
         _sub_nodes.clear();
         _isOverrideShapeEnabled = false;
@@ -3717,14 +3703,15 @@ public:
 
             // Strip benchmarking knob from fixed settings to avoid duplicate
             // warnings in the per-combination loop below.
-            std::map<KnobType_t, KnobValueVariant> filteredFixedSettings;
+            std::vector<KnobSetting> filteredFixedSettings;
+            filteredFixedSettings.reserve(sweepSpec.fixedSettings.size());
             for(const auto& [knobId, value] : sweepSpec.fixedSettings)
             {
                 if(knobId == autotune::detail::BENCHMARKING_KNOB_NAME)
                 {
                     continue; // Already logged during validation above
                 }
-                filteredFixedSettings[knobId] = value;
+                filteredFixedSettings.emplace_back(knobId, value);
             }
 
             // Compute Cartesian product from filtered axes (benchmarking axis excluded)
@@ -3742,11 +3729,8 @@ public:
                 spec.engineId = sweepSpec.engineId;
                 spec.workspaceSize = engineWsSize;
 
-                // Add pre-filtered fixed settings
-                for(const auto& [knobId, value] : filteredFixedSettings)
-                {
-                    spec.knobSettings.emplace_back(knobId, value);
-                }
+                // Seed with pre-filtered fixed settings (swept settings appended below)
+                spec.knobSettings = filteredFixedSettings;
 
                 // Add swept settings from pre-filtered axes
                 for(auto& setting : combo)
@@ -4001,9 +3985,8 @@ public:
     Error autotune(hipdnnHandle_t handle,
                    std::unordered_map<int64_t, void*>& variantPack,
                    void* workspace,
-                   void* userImpl = nullptr)
+                   [[maybe_unused]] void* userImpl = nullptr)
     {
-        (void)userImpl;
         const auto& constPack = variantPack;
         return autotune(handle, constPack, workspace);
     }
@@ -4025,9 +4008,8 @@ public:
     Error autotune(hipdnnHandle_t handle,
                    std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
                    void* workspace,
-                   void* userImpl = nullptr)
+                   [[maybe_unused]] void* userImpl = nullptr)
     {
-        (void)userImpl;
         const auto& constLookup = tensorLookup;
         return autotune(handle, constLookup, workspace);
     }

@@ -19,11 +19,6 @@ enum class ActivePlanFinalization
     FINALIZED
 };
 
-constexpr bool isFinalized(ActivePlanFinalization finalization) noexcept
-{
-    return finalization == ActivePlanFinalization::FINALIZED;
-}
-
 inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
 {
     int64_t availableEngineCount = 0;
