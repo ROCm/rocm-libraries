@@ -193,8 +193,11 @@ class GlobalWriteBatchWriter:
        i*gwvw offset only matches the arch-VGPR layout for one contiguous block;
        with multiple wave-tiles the acc registers are grouped per tile (e.g. TN +
        2x2 read the wrong registers).
+    7. CompactLoopStore is off. CLS-loop store reads acc VGPRs via
+       v_movrelsd_2_b32 indexing, which relies on the rearrangement layout.
     """
     if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel.get("CompactLoopStore", False) or \
        self.kernel.get("ActivationFuncCall", False) or \
        self.applyAlpha or \
        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
