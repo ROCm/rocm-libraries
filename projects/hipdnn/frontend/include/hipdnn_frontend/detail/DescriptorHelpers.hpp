@@ -211,6 +211,12 @@ inline Error
                                                isVirtual,
                                                "tensor is_virtual"));
 
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                               HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                               HIPDNN_TYPE_INT64,
+                                               tensor->get_alignment(),
+                                               "tensor byte alignment"));
+
     if(tensor->get_pass_by_value())
     {
         HIPDNN_CHECK_ERROR(std::visit(

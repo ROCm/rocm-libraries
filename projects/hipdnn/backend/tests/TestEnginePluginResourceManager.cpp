@@ -1255,6 +1255,116 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
     }
 }
 
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphThrowsOnMisalignedTensorPointer)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // Second tensor's pointer (0x1001) violates its 16-byte alignment requirement.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1001)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {16, 16};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+
+    // The op graph must never be dispatched when alignment validation fails.
+    EXPECT_CALL(*mockPlugin, executeOpGraph(_, _, _, _, _)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
+            HIPDNN_STATUS_BAD_PARAM);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphSucceedsWhenTensorPointersAreAligned)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // 0x1000 satisfies 256-byte alignment, 0x2000 satisfies 64-byte alignment.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {256, 64};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+    EXPECT_CALL(*mockExecutionPlan, getExecutionContext())
+        .WillOnce(::testing::Return(hipdnnEnginePluginExecutionContext_t(0xcafebabe)));
+
+    EXPECT_CALL(*mockPlugin,
+                executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                               hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                               reinterpret_cast<void*>(0x4000),
+                               _,
+                               static_cast<uint32_t>(tensorIds.size())));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get());
+    }
+}
+
 TEST(TestEnginePluginResourceManager, GetLoadedPluginFiles)
 {
     const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();

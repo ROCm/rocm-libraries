@@ -67,11 +67,13 @@ protected:
     }
 
     // Sets up EXPECT_CALL expectations for a single tensor via createOrFindTensorDesc.
-    // The 6 setAttribute calls are: uid, name, data_type, dims, strides, is_virtual.
+    // The 7 setAttribute calls are: uid, name, data_type, dims, strides, is_virtual,
+    // byte alignment.
     void expectTensorSetAttributes(int64_t uid,
                                    const std::string& name,
                                    const std::vector<int64_t>& dims,
-                                   const std::vector<int64_t>& strides)
+                                   const std::vector<int64_t>& strides,
+                                   int64_t alignment = 16)
     {
         EXPECT_CALL(*_mockBackend,
                     backendSetAttribute(_,
@@ -112,6 +114,13 @@ protected:
                                         1,
                                         pointsToScalar<bool>(false)))
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend,
+                    backendSetAttribute(_,
+                                        HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                        HIPDNN_TYPE_INT64,
+                                        1,
+                                        pointsToScalar<int64_t>(alignment)))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
     }
 
     static std::shared_ptr<TensorAttributes> makeTensor(int64_t uid)
@@ -142,6 +151,26 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescCreatesNewDescriptor)
     EXPECT_TRUE(err.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
     EXPECT_TRUE(tensorDescs.find(K_DEFAULT_TENSOR_UID) != tensorDescs.end());
+}
+
+TEST_F(TestDescriptorHelpers, EnsureTensorDescPropagatesCustomAlignment)
+{
+    constexpr int64_t K_ALIGNMENT = 256;
+
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES),
+                              K_ALIGNMENT);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    tensor->set_alignment(K_ALIGNMENT);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good());
 }
 
 TEST_F(TestDescriptorHelpers, EnsureTensorDescDeduplicatesByUid)
