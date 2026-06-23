@@ -198,6 +198,10 @@ _VCMPX_RE = _re.compile(
     r"^(\s*)(v_cmpx_\w+)\s+(.+?)(\s*//\s*(.*))?$"
 )
 
+_SBARRIER_RE = _re.compile(
+    r"^(\s*)s_barrier\s*(//.+)?$"
+)
+
 
 def _postprocess_vcmpx(asm: str) -> str:
     """Expand ``v_cmpx_*`` into ``v_cmp_* + s_mov_b32 exec_lo`` for gfx1250."""
@@ -237,6 +241,28 @@ def _postprocess_vcmpx(asm: str) -> str:
     return "\n".join(out)
 
 
+def _postprocess_sbarrier(asm: str) -> str:
+    """Expand ``s_barrier`` into ``s_barrier_signal -1 + s_barrier_wait -1`` for gfx1250."""
+    lines = asm.split("\n")
+    out: List[str] = []
+    for line in lines:
+        m = _SBARRIER_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        indent = m.group(1)
+        comment_part = m.group(2) or ""
+        sig_line = f"{indent}s_barrier_signal -1"
+        wait_line = f"{indent}s_barrier_wait -1"
+        if comment_part:
+            comment_text = comment_part.strip()
+            pad = max(1, 51 - len(wait_line))
+            wait_line += " " * pad + comment_text
+        out.append(sig_line)
+        out.append(wait_line)
+    return "\n".join(out)
+
+
 class _PostProcessModule:
     """Wraps a StinkyAsmModule and post-processes emitAssembly() output.
 
@@ -257,6 +283,7 @@ class _PostProcessModule:
         asm = self._inner.emitAssembly()
         asm = _postprocess_wait_markers(asm)
         asm = _postprocess_vcmpx(asm)
+        asm = _postprocess_sbarrier(asm)
         return asm
 
     def getName(self) -> str:
