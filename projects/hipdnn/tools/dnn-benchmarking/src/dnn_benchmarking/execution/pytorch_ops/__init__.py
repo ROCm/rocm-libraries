@@ -19,6 +19,7 @@ from ._registry import (
     register_handler,
     supports_graph,
 )
+from ._common import ReplayTensors
 from ._warnings import get_reference_warnings
 
 # Import handler submodules so their @register_handler decorators run.
@@ -37,6 +38,7 @@ __all__ = [
     "OpHandler",
     "CompiledOp",
     "CompiledGraph",
+    "ReplayTensors",
     "register_handler",
     "get_handler",
     "get_supported_operations",

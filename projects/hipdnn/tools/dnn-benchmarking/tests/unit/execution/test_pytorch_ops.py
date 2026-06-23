@@ -1497,3 +1497,32 @@ class TestPyTorchOpsNewHandlers:
             v.repeat_interleave(4, dim=-3),
         )
         torch.testing.assert_close(tensors[4], expected, rtol=1e-5, atol=1e-5)
+
+
+class TestReplayTensorsScalarCache:
+    """ReplayTensors memoizes host scalar reads; plain dicts do not."""
+
+    def test_replay_tensors_caches_scalar_read(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _scalar_value
+
+        scalar = torch.tensor([0.5])
+        tensors = pytorch_ops.ReplayTensors({1: scalar})
+
+        assert _scalar_value(tensors, 1, {}) == 0.5
+        # Mutating the source tensor must not be observed: the cached value is
+        # served without a second .item() read (the property that keeps the
+        # staged benchmark's timed iterations free of device->host syncs).
+        scalar.fill_(9.0)
+        assert _scalar_value(tensors, 1, {}) == 0.5
+
+    def test_plain_dict_resolves_scalar_each_call(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _scalar_value
+
+        scalar = torch.tensor([0.5])
+        tensors = {1: scalar}
+
+        assert _scalar_value(tensors, 1, {}) == 0.5
+        scalar.fill_(9.0)
+        # No cache on a plain dict: the read reflects the current tensor value,
+        # preserving the one-shot reference path's behavior.
+        assert _scalar_value(tensors, 1, {}) == 9.0

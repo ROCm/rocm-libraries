@@ -34,7 +34,27 @@ __all__ = [
     "_store_tensor_for_uid",
     "_strip_leading_singletons",
     "_sum_to_shape",
+    "ReplayTensors",
 ]
+
+
+class ReplayTensors(dict):
+    """Tensor map that memoizes host-resolved scalar reads.
+
+    Reading a scalar input (e.g. batchnorm/layernorm epsilon, SDPA scale) calls
+    ``Tensor.item()``, a device->host copy that synchronizes the stream. During
+    a stalled-queue benchmark the work stream is gated, so any such sync inside
+    the timed region would deadlock. Because the benchmark replays the same
+    inputs every iteration, those scalars are constant: resolve each once and
+    cache it here so timed iterations are pure asynchronous enqueue.
+
+    Plain ``dict`` inputs (the one-shot reference path) carry no cache, so
+    ``_scalar_value`` resolves normally with no behavior change.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._scalar_cache: Dict[int, float] = {}
 
 
 def _as_tuple(
@@ -207,10 +227,20 @@ def _channel_broadcast(values: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 def _scalar_value(
     tensors: Dict[int, torch.Tensor], uid: int, node: Dict[str, Any]
 ) -> float:
+    # Reuse a previously resolved value when the caller supplies a caching
+    # tensor map (ReplayTensors); this avoids the .item() device->host sync on
+    # every replay so a stalled-queue benchmark stays a pure asynchronous
+    # enqueue. Plain dicts have no cache and resolve normally.
+    cache = getattr(tensors, "_scalar_cache", None)
+    if cache is not None and uid in cache:
+        return cache[uid]
     tensor = _tensor(tensors, uid, node)
     if tensor.numel() < 1:
         raise ValueError(f"Scalar tensor UID {uid} is empty")
-    return float(tensor.detach().reshape(-1)[0].item())
+    value = float(tensor.detach().reshape(-1)[0].item())
+    if cache is not None:
+        cache[uid] = value
+    return value
 
 
 def _numel(shape: Sequence[int]) -> int:
