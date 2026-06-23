@@ -380,6 +380,8 @@ class memcpy_benchmark : public primbench::benchmark_interface
 
     void run(primbench::state& state) override
     {
+        const auto& stream = state.stream;
+
         // Allocate device buffers
         // Note: since this benchmark only tests memcpy performance between device
         // buffers, we don't really need to copy data into these from the host -
@@ -395,7 +397,9 @@ class memcpy_benchmark : public primbench::benchmark_interface
 
         state.run(
             [&] {
-                HIP_CHECK(hipMemcpy(d_output, d_input, Size * sizeof(T), hipMemcpyDeviceToDevice));
+                // We deliberately call hipMemcpyAsync() instead of hipMemcpy() here,
+                // since hipMemcpy() uses the slow default legacy stream (stream 0).
+                HIP_CHECK(hipMemcpyAsync(d_output, d_input, Size * sizeof(T), hipMemcpyDeviceToDevice, stream));
             });
 
         HIP_CHECK(hipFree(d_input));
