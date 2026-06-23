@@ -31,6 +31,7 @@ import subprocess
 import sys
 import argparse
 import glob
+import json
 
 from datetime import datetime
 from pathlib import Path
@@ -274,37 +275,25 @@ def get_gpu_max_frequency_smi(device_id):
     Get the maximum frequency of the specified GPU device
     '''
     try:
-        # Run rocm-smi command and capture output
-        result = subprocess.run(['rocm-smi', '-s'], capture_output=True, text=True)
+        # Run amd-smi command and capture the GFX clock info as JSON
+        result = subprocess.run(
+            ['amd-smi', 'metric', '-g', str(device_id), '--clock', '--json'],
+            capture_output=True, text=True)
 
         if result.returncode != 0:
-           print(f"Error running rocm-smi: {result.stderr}")
+           print(f"Error running amd-smi: {result.stderr}")
            return None
 
-        # Parse the output
-        lines = result.stdout.split('\n')
-        sclk_section = False
+        data = json.loads(result.stdout)
+        clocks = data['gpu_data'][0]['clock']
+
+        # Collect the max GFX (sclk) clock across all gfx engines/partitions
         frequencies = []
-
-        # Look for the sclk section of the specified device
-        for line in lines:
-            line = line.split(" ")
-            if 'sclk' in line and f"GPU{device_id}" in line:
-                sclk_section = True
-                continue
-
-           # Parse frequencies in the sclk section
-            if sclk_section:
-                for part in line:
-                    if part.endswith("Mhz"):
-                        try:
-                            frequency = part.replace("Mhz", "")
-                            frequencies.append(int(frequency))
-                        except ValueError:
-                            print(f"Error parsing frequency: {part}")
-                        break
-                if "socclk" in line:
-                    break
+        for name, info in clocks.items():
+            if name.startswith('gfx'):
+                max_clk = info.get('max_clk', {}).get('value')
+                if isinstance(max_clk, int):
+                    frequencies.append(max_clk)
 
         # Return the maximum frequency found
         return max(frequencies) if frequencies else None
@@ -625,7 +614,7 @@ def Tensile(userArgs):
         max_frequency = get_gpu_max_frequency(device_id)
 
         if not max_frequency or max_frequency <= 0:
-            max_frequency = get_gpu_max_frequency_smi(device_id) # Using rocm-smi just in case
+            max_frequency = get_gpu_max_frequency_smi(device_id) # Using amd-smi just in case
 
         if not max_frequency or max_frequency <= 0:
             print(f"Could not detect valid GPU frequency for device {device_id}")
