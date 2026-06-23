@@ -16,7 +16,6 @@ The auxiliary functions are divided into the following categories:
 * :ref:`householder`: Generation and application of Householder matrices.
 * :ref:`rotations`: Generation and application of Givens (plane) rotations.
 * :ref:`bidiag`: Computations specialized in bidiagonal matrices.
-* :ref:`hessenberg`: Computations specialized in Hessenberg matrices.
 * :ref:`tridiag`: Computations specialized in tridiagonal matrices.
 * :ref:`symmetric`: Computations specialized in symmetric matrices.
 * :ref:`orthonormal`: Generation and application of orthonormal matrices.
@@ -281,29 +280,6 @@ rocsolver_<type>bdsvdx()
 .. doxygenfunction:: rocsolver_dbdsvdx
    :outline:
 .. doxygenfunction:: rocsolver_sbdsvdx
-
-
-
-.. _hessenberg:
-
-Hessenberg forms
-==================================
-
-.. contents:: List of functions for Hessenberg forms
-   :local:
-   :backlinks: top
-
-.. _lahr2:
-
-rocsolver_<type>lahr2()
----------------------------------------
-.. doxygenfunction:: rocsolver_zlahr2
-   :outline:
-.. doxygenfunction:: rocsolver_clahr2
-   :outline:
-.. doxygenfunction:: rocsolver_dlahr2
-   :outline:
-.. doxygenfunction:: rocsolver_slahr2
 
 
 
