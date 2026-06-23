@@ -427,7 +427,7 @@ _defaultProblemType = {
     "UseE": False,  # =True use output E to output gemm results before activation
     "Gradient": False,  # =True set globalWriteElements to gradient mode
     "UseBias": 0,  # =1 support bias vector on M direction, =2 support bias vector on N direction, =3 support bias vector on both M,N direction
-    "UseGateResidual": True,  # =True apply gate residual: D = gate * spmm_result + gate
+    "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", and "Vector"
     "UseScaleCD": False,  # =True use scaleC, scaleD
@@ -901,7 +901,7 @@ class ProblemType(Mapping):
       self["BiasDataTypeList"] = []
 
     # Gate Residual
-    if self["UseGateResidual"]:
+    if "UseGateResidual" in config and config["UseGateResidual"]:
       if "GateResidualDataTypeList" in config:
         self["GateResidualDataTypeList"] = [DataType(gtype) for gtype in config["GateResidualDataTypeList"]]
         self["GateResidualDataTypeList"].sort() # Make name unique
