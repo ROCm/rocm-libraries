@@ -573,7 +573,12 @@ install_torch() {
 }
 
 select_binding_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # An explicit --rocm-prefix wins. Otherwise the prefix follows the torch
+    # mode (where ROCm comes from), NOT whether --force-build was passed:
+    # force-build only controls *whether* hipDNN is rebuilt, not *where*. In
+    # rocm/existing-rocm mode that is the torch wheel's bundled SDK, so a forced
+    # rebuild works with no system ROCm.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -596,7 +601,11 @@ select_binding_prefix() {
 }
 
 select_provider_toolchain_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # Same rule as select_binding_prefix: the compiler/devel toolchain follows
+    # the torch mode. For rocm/existing-rocm that is the wheel's devel SDK
+    # (clang + lib/cmake/hip), which a forced rebuild must use too -- the
+    # libraries wheel ships no compiler.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
