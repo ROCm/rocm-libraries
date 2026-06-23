@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Test unrolled loop lowering in CK DSL.
 
 This tests Phase 3 implementation: _lower_unrolled_for().
 """
+
 import sys
 from pathlib import Path
 
@@ -11,8 +16,8 @@ CKDSL_ROOT = Path("/workspace/rocm-libraries/projects/composablekernel/python")
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
-from ck_dsl.core.ir import IRBuilder, I32, F32, PtrType
-from ck_dsl.helpers import compile_kernel
+from ck_dsl.core.ir import IRBuilder, I32, F32, PtrType  # noqa: E402 -- import after sys.path shim
+from ck_dsl.helpers import compile_kernel  # noqa: E402 -- import after sys.path shim
 
 
 def test_simple_unrolled_loop():
@@ -30,10 +35,12 @@ def test_simple_unrolled_loop():
 
     # Create unrolled loop
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("sum", init_sum)],
         iv_name="i",
-        unroll=True  # Request unrolling
+        unroll=True,  # Request unrolling
     )
 
     with for_op as (i, [sum_var]):
@@ -61,8 +68,8 @@ def test_simple_unrolled_loop():
     br_count = llvm_ir.count("  br ")
     phi_count = llvm_ir.count("  %sum")
 
-    print(f"  ✓ Compiled successfully")
-    print(f"  LLVM IR analysis:")
+    print("  ✓ Compiled successfully")
+    print("  LLVM IR analysis:")
     print(f"    Branch instructions: {br_count}")
     print(f"    Sum variables: {phi_count}")
 
@@ -71,7 +78,7 @@ def test_simple_unrolled_loop():
     assert "for.body" not in llvm_ir, "Should not have loop body label"
     assert "for.latch" not in llvm_ir, "Should not have loop latch"
 
-    print(f"  ✓ Loop is fully unrolled (no control flow)")
+    print("  ✓ Loop is fully unrolled (no control flow)")
     print()
 
 
@@ -91,10 +98,12 @@ def test_unrolled_with_iter_args():
     init_prod = b.const_i32(1)
 
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("sum", init_sum), ("prod", init_prod)],
         iv_name="i",
-        unroll=True
+        unroll=True,
     )
 
     with for_op as (i, [sum_var, prod_var]):
@@ -118,10 +127,12 @@ def test_unrolled_with_iter_args():
 
     # Verify unrolling
     assert "for.header" not in llvm_ir, "Should not have loop header"
-    assert "phi i32" not in llvm_ir or llvm_ir.count("phi i32") <= 2, "Should have minimal phi nodes"
+    assert "phi i32" not in llvm_ir or llvm_ir.count("phi i32") <= 2, (
+        "Should have minimal phi nodes"
+    )
 
-    print(f"  ✓ Compiled successfully")
-    print(f"  ✓ Multiple iter args handled correctly")
+    print("  ✓ Compiled successfully")
+    print("  ✓ Multiple iter args handled correctly")
     print()
 
 
@@ -139,11 +150,7 @@ def test_unroll_vs_normal():
         step = b.const_i32(1)
         init = b.const_i32(0)
 
-        for_op = b.scf_for_iter(
-            lower, upper, step,
-            [("acc", init)],
-            unroll=unroll
-        )
+        for_op = b.scf_for_iter(lower, upper, step, [("acc", init)], unroll=unroll)
 
         with for_op as (i, [acc]):
             new_acc = b.add(acc, i)
@@ -165,25 +172,25 @@ def test_unroll_vs_normal():
     print("  Compiling normal version...")
     artifact_normal = compile_kernel(kernel_normal, isa="amdgcn-amd-amdhsa--gfx950")
 
-    llvm_unrolled = artifact_unrolled.llvm_ir
-    llvm_normal = artifact_normal.llvm_ir
+    llvm_unrolled = artifact_unrolled.llvm_text
+    llvm_normal = artifact_normal.llvm_text
 
     # Analyze differences
     unrolled_has_loop = "for.header" in llvm_unrolled
     normal_has_loop = "for.header" in llvm_normal
 
-    print(f"\n  Unrolled version:")
+    print("\n  Unrolled version:")
     print(f"    Has loop structure: {unrolled_has_loop}")
     print(f"    LLVM IR size: {len(llvm_unrolled)} bytes")
 
-    print(f"\n  Normal version:")
+    print("\n  Normal version:")
     print(f"    Has loop structure: {normal_has_loop}")
     print(f"    LLVM IR size: {len(llvm_normal)} bytes")
 
     assert not unrolled_has_loop, "Unrolled should not have loop"
     assert normal_has_loop, "Normal should have loop"
 
-    print(f"\n  ✓ Unroll hint correctly changes lowering strategy")
+    print("\n  ✓ Unroll hint correctly changes lowering strategy")
     print()
 
 
@@ -202,10 +209,12 @@ def test_conv_like_loop():
     init_acc = b.const_f32(0.0)
 
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("acc", init_acc)],
         iv_name="k_iter",
-        unroll=True  # Full unrolling like actual conv kernel
+        unroll=True,  # Full unrolling like actual conv kernel
     )
 
     with for_op as (k, [acc]):
@@ -231,10 +240,10 @@ def test_conv_like_loop():
     # Count fadd instructions (should be 72 for 72 iterations)
     fadd_count = llvm_ir.count("fadd ")
 
-    print(f"  ✓ Compiled successfully")
+    print("  ✓ Compiled successfully")
     print(f"  LLVM IR size: {len(llvm_ir)} bytes")
     print(f"  fadd instructions: {fadd_count} (expected ~72)")
-    print(f"  ✓ 72 iterations fully unrolled")
+    print("  ✓ 72 iterations fully unrolled")
     print()
 
 
@@ -255,9 +264,11 @@ def test_non_constant_fallback():
 
     # Request unrolling, but should fall back to normal loop
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("acc", init)],
-        unroll=True  # Request unroll, but can't
+        unroll=True,  # Request unroll, but can't
     )
 
     with for_op as (i, [acc]):
@@ -279,8 +290,8 @@ def test_non_constant_fallback():
     assert "for.header" in llvm_ir, "Should have loop (fallback)"
     assert "phi i32" in llvm_ir, "Should have phi nodes (fallback)"
 
-    print(f"  ✓ Correctly fell back to normal loop lowering")
-    print(f"  ✓ Handles non-constant bounds gracefully")
+    print("  ✓ Correctly fell back to normal loop lowering")
+    print("  ✓ Handles non-constant bounds gracefully")
     print()
 
 

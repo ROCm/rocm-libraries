@@ -97,8 +97,12 @@ This is not currently exposed through `compile_kernel`; call `build_hsaco_from_l
 
 ### Library loading
 
-The HIP module loader follows the same pattern: default ROCm library
-locations first, then bare `libamdhip64.so` via dlopen.
+The HIP module loader follows the same `_candidate_lib_paths` order as
+COMGR: `$CK_DSL_HIP_LIB` override, then the torch-bundled
+`<torch>/lib/libamdhip64.so` if torch is already imported, then
+`/opt/rocm/lib/libamdhip64.so` (and the `.so.7` SONAME), then bare
+`libamdhip64.so` via the dynamic linker. Preferring torch's bundled lib
+keeps ck_dsl and torch on the same HIP runtime instance.
 
 Failure raises `HipError`.
 

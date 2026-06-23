@@ -122,8 +122,9 @@ ISA confirms the combo keeps all 4 W1 B-fragment register pairs live and
 --conv1-int8 --pk-maxpool
 ```
 Escape hatches: `--no-native-int` (fp16 path), `--no-fused-c0a1`,
-`--no-conv1-prefetch-k`, `--no-conv1-sched-fuse`, `--no-conv1-int8`,
-`--no-pk-maxpool`, `--warp-m N`.
+`--no-conv1-prefetch-k`, `--no-conv1-sched-fuse`, `--warp-m N`. `--conv1-int8` and
+`--pk-maxpool` are plain default-off switches (no `--no-` form) — simply omit them
+to fall back to the iu4 conv1 GEMM and the per-channel cmp/select maxpool.
 
 ### F. Warp geometry: max waves/WG (warp 16×1)  **+23.8 %** (biggest native-int lever)
 `warp_m` = #waves along M (= block_size/32 at warp_n=1). The conv1 iu4 GEMM
@@ -346,22 +347,25 @@ this fixed-shape fused op:
 
 ## 7. Reproduce
 
-From `projects/composablekernel` (dev host = gfx950, builds gfx11 ELFs but can't
-run them; full-shape timing happens on the gfx1151 board — see
-`STATUS-remote-testing-infra.md`).
+From the `ck_dsl` Python root, `projects/composablekernel/python` (dev host =
+gfx950, builds gfx11 ELFs but can't run them; full-shape timing happens on the
+gfx1151 board). `export PYTHONPATH=$(pwd)` and set `VENV` to your interpreter.
 
 ```text
-# Correctness (bit-exact) — toy + multi-CTA, runs anywhere that can build:
-PYTHONPATH=python ../../.venv-ckdsl/Scripts/python.exe \
+# Correctness (bit-exact) — toy + multi-CTA, runs anywhere that can build.
+# With the default 2x64 pool tile, W must be a multiple of 128 (H of 4); a
+# too-small shape exits "invalid spec: pool dims ... must be divisible ...".
+PYTHONPATH=$(pwd) $VENV \
   -m ck_dsl.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
-  --arch gfx1151 --verify --native-int --direct --h 16 --w 16 --c 8 --k0 32 --k1 24
-#   also --h 32 --w 64 for the multi-CTA grid (1,4,4)
+  --arch gfx1151 --verify --native-int --direct --h 4 --w 128 --c 8 --k0 32 --k1 24
+#   also --h 32 --w 128 for the multi-CTA grid (1,8,1)
 
 # Best config = the structural DEFAULTS (warp 16x1 + native_int + direct +
 # fused_c0a1 + prefetch_k + sched_fuse, pt2x64, compv4) PLUS the i8+pk winner
 # additions --conv1-int8 --pk-maxpool, which are NOT yet default-on and must be
 # passed explicitly. Build hsaco + manifest for the board (gfx11-generic, NOT gfx1151):
-python ck_dsl/examples/gfx1151/deep_conv_fusion/deep_fused_conv_pool_verify.py \
+PYTHONPATH=$(pwd) $VENV \
+  -m ck_dsl.examples.gfx1151.deep_conv_fusion.deep_fused_conv_pool_verify \
   --arch gfx11-generic --n 1 --h 2160 --w 3840 --c 8 --k0 32 --k1 24 \
   --conv1-int8 --pk-maxpool \
   --emit-hsaco /tmp/deep/deep.hsaco
@@ -369,20 +373,20 @@ python ck_dsl/examples/gfx1151/deep_conv_fusion/deep_fused_conv_pool_verify.py \
 # Same-session interleaved A/B at full shape (ONLY valid way to compare on the
 # auto-clocking board): compare_configs.py (in-process builds) or
 # compare_prebuilt.py (manifest-driven over prebuilt hsacos, with --rotate):
-PYTHONPATH=python ../../.venv-ckdsl/Scripts/python.exe \
+PYTHONPATH=$(pwd) $VENV \
   -m ck_dsl.examples.gfx1151.deep_conv_fusion.compare_configs \
   --h 2160 --w 3840 --rounds 8 --iters 50 --warmup 200
 ```
 
-Discipline (runbook S8.6): every lever behind a correctness-neutral spec toggle;
-verify `max_abs_diff=0` at toy / multi-CTA / full before any speed quote; speed
-only from same-session interleaved A/B. rocprofv3/ATT unavailable on the Windows
+Discipline: every lever behind a correctness-neutral spec toggle; verify
+`max_abs_diff=0` at toy / multi-CTA / full before any speed quote; speed only
+from same-session interleaved A/B. rocprofv3/ATT unavailable on the Windows
 board → interpretation is bench + static-ISA reasoning, always confirmed by A/B.
 
 ---
 
-## 8. Surviving docs in this folder
-This case study supersedes and replaces the dated analysis/status docs. Remaining
-files are operational reference, not analysis: `README.md` (overview + quant
-explanation), `inputs.md` (problem spec), `STATUS-remote-testing-infra.md`
-(board build/deploy/run workflow), `standalone_cpp/README.md` (C++ launcher).
+## 8. Other docs in this folder
+This case study is the optimization record. The other files are operational
+reference, not analysis: `README.md` (overview, quant explanation, run commands),
+`ALGORITHM.md` (the algorithm and per-CTA steps from the math up), and
+`inputs.md` (the `encoder_0` problem spec).

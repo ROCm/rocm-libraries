@@ -16,6 +16,13 @@ epilogue), and (3) an honest A/B throughput read of the two.
 > the lane distribution. These are minimal **correctness-first reference kernels**
 > (4–15 % of peak); ratios, not absolute rates, are the headline.
 
+> **New to the gfx11 WMMA instruction or the lane/fragment ABI?**
+> [`ALGORITHM.md`](ALGORITHM.md) derives the kernels from the math up — the GEMM
+> spec, the one-wave-per-16×16-tile mapping, the lane→data layout, and how each
+> quantization rung (f16 / int8→f16 / true int8 / int4) is one stage swapped in a
+> shared skeleton. Read it first to understand *what* the kernels compute before
+> reading *how* they were measured below.
+
 ## The ladder
 
 | # | rung | A·B dtype | accumulate | atom | status |
@@ -84,8 +91,8 @@ the same f16 WMMA. Verifies against `C = A @ dequant(B, scales)^T`.
 > absolute `--tol 1e-2` → **FAIL**, but this is *not* an int4 bug. It's one f16
 > output ULP (0.0625–0.125 at outputs of magnitude ~128–256), produced by the
 > WMMA f32-accumulation order differing from numpy's; relative error is ~0.08 %.
-> Confirmed: the *same* kernel at `K=256` passes (`max_abs 1.6e-6`), and a pristine
-> upstream checkout reproduces the `0.125` identically. The fix is a relative
+> Confirmed: the *same* kernel at a smaller `K` passes well under the gate, and a
+> pristine upstream checkout reproduces the `0.125` identically. The fix is a relative
 > tolerance in the verify (as the int8 scripts use) — a harness change, deferred.
 
 ## Step 03 — int8 storage / f16 compute, "Path B" (`03_int8_pathb_verify.py`)
@@ -103,10 +110,12 @@ reuses the proven f16 path. Random asymmetric small int8 + `np.allclose`. Result
 the i32 accumulator to f16 in the epilogue (`f16 = trunc(sitofp(acc) *
 scale_a*scale_b)`). A/B are the *same int8 bytes* as Path B, read as i32-packed
 (4 int8/i32 — the iu8 fragment ABI); C is f16. Random asymmetric int8 +
-`np.allclose`. Result: **PASS** (max_abs `0.0` at 16³, ≤8e-7 at 64/128/256).
+`np.allclose`. Result: **PASS** (`data/04_iu8_dequant_verify.json`: 256×128×256,
+`max_abs_diff ≈ 7.7e-7`, `bad=0`) — the i32 accumulation is exact, so the only
+error is the final f16 store rounding.
 
 > The `wmma_i32_16x16x16_iu8` atom (and iu4) is **upstream's** native-int landing
-> (#8091): the atom lives in the DSL core (`core/arch`, the generalized `mma()` in
+> (#8118): the atom lives in the DSL core (`core/arch`, the generalized `mma()` in
 > `core/ir.py`, `core/isa/backend.py`, `core/lower_llvm.py`), and upstream ships an
 > i32-**output** GEMM at `instances/gfx1151/wmma_gemm_iu8.py` + a probe at
 > `examples/gfx1151/wmma_iu8_probe.py`. This step is the **f16-dequant-output**
@@ -159,7 +168,8 @@ GPU-clock/thermal jitter; the A/B ratio measured back-to-back is the stable sign
 
 ```
 ck_dsl/examples/gfx1151/gemm/
-├── README.md                              # this file
+├── README.md                              # this file (the ladder + A-vs-B throughput study)
+├── ALGORITHM.md                           # the math-up derivation: GEMM spec, WMMA ABI, the rungs
 ├── scripts/
 │   ├── 01_f16_verify.py                   # f16 baseline (run_manifest verify)
 │   ├── 02_int4_matmul_nbits_verify.py     # int4 weight-only W4A16
@@ -173,7 +183,7 @@ ck_dsl/examples/gfx1151/gemm/
 Instances under test: `instances/gfx1151/{wmma_gemm, wmma_gemm_int8,
 wmma_gemm_iu8_dequant}.py` and `instances/common/matmul_nbits.py`. The
 `wmma_i32_16x16x16_iu8` core atom and the raw-i32-output `wmma_gemm_iu8.py` are
-upstream's (#8091); step 04 builds the f16-dequant variant on that atom.
+upstream's (#8118); step 04 builds the f16-dequant variant on that atom.
 
 ## CK example that inspired the int8 work
 

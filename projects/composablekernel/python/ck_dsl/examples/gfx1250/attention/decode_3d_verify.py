@@ -74,8 +74,13 @@ def _ref_decode(q_f32, kc_f32, vc_f32, *, block_tables, seq_lens, scale, sinks_f
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--arch", default=None, help="default: auto-detect the local device")
+    ap.add_argument(
+        "--arch", default=None, help="default: auto-detect the local device"
+    )
     ap.add_argument("--kv-len", type=int, default=1024)
     ap.add_argument("--num-seqs", type=int, default=2)
     ap.add_argument("--num-segments", type=int, default=16)
@@ -99,40 +104,48 @@ def main() -> int:
     ap.add_argument("--wide-kv-load", action="store_true")
     ap.add_argument("--no-wide-kv-load", action="store_true")
     ap.add_argument(
-        "--dtla", action="store_true",
-        help="force DTLA (#2): async global->LDS V staging + double-buffer + prefetch",
+        "--dtla",
+        action="store_true",
+        help="force DTLA: async global->LDS V staging + double-buffer + prefetch",
     )
     ap.add_argument("--no-dtla", action="store_true")
     ap.add_argument(
-        "--ds-tr", action="store_true",
+        "--ds-tr",
+        action="store_true",
         help="HW transpose-LDS read (ds_load_tr16_b128) for the PV V operand",
     )
     ap.add_argument("--no-ds-tr", action="store_true")
     ap.add_argument(
-        "--sw-pipeline", action="store_true",
+        "--sw-pipeline",
+        action="store_true",
         help="software-pipeline stack: DTLA async-V shadow + iglp/sched cadence",
     )
     ap.add_argument(
-        "--ablate-softmax", action="store_true",
+        "--ablate-softmax",
+        action="store_true",
         help="DEBUG perf-only: drop softmax wave-reduce+exp2 (output garbage)",
     )
     ap.add_argument(
-        "--ablate-pv", action="store_true",
+        "--ablate-pv",
+        action="store_true",
         help="DEBUG perf-only: drop V staging + PV-GEMM (output garbage); "
         "measures the PV+V-staging ceiling. Implies --plain.",
     )
     ap.add_argument(
-        "--plain", action="store_true",
+        "--plain",
+        action="store_true",
         help="force the plain stage_v_tile + compute_pv path (no wide-LDS-reads "
         "or other V levers); matches the ablate-pv baseline",
     )
     ap.add_argument(
-        "--dpp-softmax", action="store_true",
+        "--dpp-softmax",
+        action="store_true",
         help="softmax cross-lane reduction via DPP row_xmask (VALU) instead of "
         "ds_swizzle (LDS port); default on for gfx1250 3D decode",
     )
     ap.add_argument(
-        "--no-dpp-softmax", action="store_true",
+        "--no-dpp-softmax",
+        action="store_true",
         help="force the ds_swizzle softmax reduction (disable the DPP default)",
     )
     ap.add_argument("--invariant-hoist", action="store_true")
@@ -174,9 +187,18 @@ def main() -> int:
     # wave64) and gfx1250 (WMMA wave32) on identical shapes / ABIs.
     au._RESOLVED_ATTENTION_ARCH = arch
     problem = au.UnifiedAttentionProblem(
-        total_q=total_q, num_seqs=num_seqs, num_query_heads=_NQH, num_kv_heads=_NKVH,
-        head_size=_HD, block_size=_BS, max_seqlen_q=1, max_seqlen_k=args.kv_len,
-        dtype="bf16", q_dtype="bf16", sliding_window=0, use_sinks=use_sinks,
+        total_q=total_q,
+        num_seqs=num_seqs,
+        num_query_heads=_NQH,
+        num_kv_heads=_NKVH,
+        head_size=_HD,
+        block_size=_BS,
+        max_seqlen_q=1,
+        max_seqlen_k=args.kv_len,
+        dtype="bf16",
+        q_dtype="bf16",
+        sliding_window=0,
+        use_sinks=use_sinks,
         use_fp8=kv_is_fp8,
     )
     ok, why = au.supports_native_unified_attention_3d_tiled(problem)
@@ -243,17 +265,23 @@ def main() -> int:
             seg_updates["use_dpp_softmax"] = False
     seg_spec = replace(base_seg_spec, **seg_updates)
     red_spec = ReduceSpec(
-        head_size=_HD, num_query_heads=_NQH, num_kv_heads=_NKVH, dtype="bf16",
+        head_size=_HD,
+        num_query_heads=_NQH,
+        num_kv_heads=_NKVH,
+        dtype="bf16",
         num_segments=NUM_SEG,
     )
     import os as _os
+
     _seg_compile = compile_kernel
     if _os.environ.get("CK_DSL_DECODE3D_HIPCC") == "1":
         from ck_dsl.helpers.compile import compile_kernel_via_hipcc as _seg_compile
     seg_art = _seg_compile(build_seg(seg_spec, arch=arch), arch=arch)
     red_art = compile_kernel(build_red(red_spec, arch=arch), arch=arch)
-    print(f"[{arch}] wave{wave_size} seg={seg_art.kernel_name} ({seg_art.hsaco_bytes}B) "
-          f"reduce={red_art.kernel_name} ({red_art.hsaco_bytes}B)")
+    print(
+        f"[{arch}] wave{wave_size} seg={seg_art.kernel_name} ({seg_art.hsaco_bytes}B) "
+        f"reduce={red_art.kernel_name} ({red_art.hsaco_bytes}B)"
+    )
 
     rng = np.random.default_rng(args.seed)
     q_f32 = (rng.standard_normal((total_q, _NQH, _HD)) * 0.3).astype(np.float32)
@@ -314,6 +342,7 @@ def main() -> int:
     segm_max_d = rt.alloc(4 * segm_ml_n)
     segm_exp_d = rt.alloc(4 * segm_ml_n)
     import os as _os
+
     if _os.environ.get("CK_DSL_DECODE3D_ZERO_WS") == "1":
         rt.memset(segm_out_d, 0, 4 * segm_out_n)
         rt.memset(segm_max_d, 0, 4 * segm_ml_n)
@@ -329,12 +358,29 @@ def main() -> int:
 
     seg_packed = struct.pack(
         "<" + "Q" * 12 + "f" * 4 + "i" * 3,
-        segm_out_d, segm_max_d, segm_exp_d,
-        qd, kd, vd, sink_d, bt_d, sl_d, alibi_d, qq_d, cuq_d,
-        scale, k_scale, v_scale, 0.0,
-        num_seqs, int(block_tables.shape[1]), 0,
+        segm_out_d,
+        segm_max_d,
+        segm_exp_d,
+        qd,
+        kd,
+        vd,
+        sink_d,
+        bt_d,
+        sl_d,
+        alibi_d,
+        qq_d,
+        cuq_d,
+        scale,
+        k_scale,
+        v_scale,
+        0.0,
+        num_seqs,
+        int(block_tables.shape[1]),
+        0,
     )
-    red_packed = struct.pack("<" + "Q" * 5, od, segm_out_d, segm_max_d, segm_exp_d, sl_d)
+    red_packed = struct.pack(
+        "<" + "Q" * 5, od, segm_out_d, segm_max_d, segm_exp_d, sl_d
+    )
     red_grid = (int(total_q), int(_NQH), 1)
 
     if _os.environ.get("CK_DSL_DECODE3D_PROBE_WS") == "1":
@@ -353,7 +399,11 @@ def main() -> int:
         smf = _readback(segm_max_d, segm_ml_n, (total_q, _NQH, NUM_SEG))
         sef = _readback(segm_exp_d, segm_ml_n, (total_q, _NQH, NUM_SEG))
         sof = _readback(segm_out_d, segm_out_n, (total_q, _NQH, NUM_SEG, _HD))
-        for name, arr in (("segm_max", smf), ("segm_expsum", sef), ("segm_output", sof)):
+        for name, arr in (
+            ("segm_max", smf),
+            ("segm_expsum", sef),
+            ("segm_output", sof),
+        ):
             uw = np.argwhere(np.isnan(arr))
             print(f"[probe] {name}: {len(uw)} unwritten; first: {uw[:6].tolist()}")
         return 0
@@ -366,10 +416,12 @@ def main() -> int:
     out = np.frombuffer(bytes(u8_out), dtype=_BF16).reshape(out.shape).copy()
 
     if _os.environ.get("CK_DSL_DECODE3D_DUMP") == "1":
+
         def _rb(ptr, n, shape):
             buf = (ctypes.c_uint8 * (4 * n))()
             rt.memcpy_d2h(buf, ptr, 4 * n)
             return np.frombuffer(bytes(buf), dtype=np.float32).reshape(shape)
+
         smf = _rb(segm_max_d, segm_ml_n, (total_q, _NQH, NUM_SEG))
         sef = _rb(segm_exp_d, segm_ml_n, (total_q, _NQH, NUM_SEG))
         sof = _rb(segm_out_d, segm_out_n, (total_q, _NQH, NUM_SEG, _HD))
@@ -380,16 +432,16 @@ def main() -> int:
         inv = np.where(denom == 0, 0.0, 1.0 / denom)
         np_out = (sof * fac[:, :, :, None]).sum(axis=2) * inv[:, :, None]
         ws_huge = np.argwhere(np.abs(sof) > 1e20)
-        print(f"[dump] workspace |segm_output|>1e20: {len(ws_huge)}; "
-              f"segm_max range [{smf.min():.3g},{smf.max():.3g}] "
-              f"segm_expsum range [{sef.min():.3g},{sef.max():.3g}]")
+        print(
+            f"[dump] workspace |segm_output|>1e20: {len(ws_huge)}; "
+            f"segm_max range [{smf.min():.3g},{smf.max():.3g}] "
+            f"segm_expsum range [{sef.min():.3g},{sef.max():.3g}]"
+        )
         if len(ws_huge):
             print(f"[dump] segm_output huge first: {ws_huge[:12].tolist()}")
             unique_slots, counts = np.unique(ws_huge[:, :3], axis=0, return_counts=True)
             order = np.argsort(-counts)
-            summary = [
-                unique_slots[i].tolist() + [int(counts[i])] for i in order[:12]
-            ]
+            summary = [unique_slots[i].tolist() + [int(counts[i])] for i in order[:12]]
             print(f"[dump] huge slot summary [token,head,seg,count]: {summary}")
             first_t, first_h, first_s, _first_d = (int(x) for x in ws_huge[0])
             print(
@@ -401,8 +453,10 @@ def main() -> int:
             )
         krn = out.astype(np.float32)
         red_mismatch = np.argwhere(np.abs(krn - np_out) > 1e-2)
-        print(f"[dump] kernel-reduce vs numpy-reduce-of-workspace mismatches: "
-              f"{len(red_mismatch)}; first: {red_mismatch[:4].tolist()}")
+        print(
+            f"[dump] kernel-reduce vs numpy-reduce-of-workspace mismatches: "
+            f"{len(red_mismatch)}; first: {red_mismatch[:4].tolist()}"
+        )
 
     bench_us = None
     bench_seg_us = None
@@ -452,15 +506,33 @@ def main() -> int:
             er1.destroy()
             rt.sync()
 
-    for ptr in (qd, kd, vd, od, sink_d, bt_d, sl_d, alibi_d, qq_d, cuq_d,
-                segm_out_d, segm_max_d, segm_exp_d):
+    for ptr in (
+        qd,
+        kd,
+        vd,
+        od,
+        sink_d,
+        bt_d,
+        sl_d,
+        alibi_d,
+        qq_d,
+        cuq_d,
+        segm_out_d,
+        segm_max_d,
+        segm_exp_d,
+    ):
         rt.free(ptr)
     seg_mod.unload()
     red_mod.unload()
 
     ref = _ref_decode(
-        q_f32, kc_f32, vc_f32, block_tables=block_tables, seq_lens=seq_lens,
-        scale=scale, sinks_f32=sinks_f32,
+        q_f32,
+        kc_f32,
+        vc_f32,
+        block_tables=block_tables,
+        seq_lens=seq_lens,
+        scale=scale,
+        sinks_f32=sinks_f32,
     )
     out_f = out.astype(np.float32)
     diff = np.abs(out_f - ref)

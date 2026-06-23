@@ -2,6 +2,12 @@
 
 Quick reference for the shipped instance builders. Each row points to the per-family doc.
 
+The instance modules listed by bare filename below live under `instances/common/`
+(arch-polymorphic builders) or `instances/<gfx>/` (genuinely arch-divergent
+variants, e.g. the tiled attention kernels under `instances/gfx942/`). Import via
+the `ck_dsl.instances` package, which re-exports every spec and builder; there are
+no flat `ck_dsl.instances.<name>` modules.
+
 ## GEMM Family
 
 | File | Spec | Doc |
@@ -16,12 +22,12 @@ Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 
 Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: `RCR`.
 
-Planned work: `architecture/matmul_nbits_plan.md` tracks gfx1151 `MatMulNBits`
-support for fp16 x int4 group-size-32 shapes.
+Quantized weight GEMM: `matmul_nbits.py` ships the `MatMulNBits` instance
+(fp16 x packed-int4, group-size-32), supported on the RDNA WMMA targets
+`gfx1151` / `gfx1201` (`SUPPORTED_ARCHES`).
 
-`architecture/gfx950_deep_fusion_plan.md` tracks the gfx950-first deep fusion
-prototype plan for virtual concat -> conv -> epilogue -> conv -> pool using
-supported fp16/bf16 MFMA before quantized int8/int4 bring-up.
+Deep fusion: `deep_fused_conv_pool.py` ships the conv -> epilogue -> conv -> pool
+fused prototype with per-arch variants under `instances/{common,gfx950,gfx1151,gfx1201}/`.
 
 ## Convolution Family
 

@@ -11,7 +11,6 @@ Reports TFLOP/s and % of the ~59 TF f16 WMMA peak for each.
 
 from __future__ import annotations
 
-import math
 
 from .bench_v_staging import _find_objdump
 from .fmha_singlewave import SingleWaveCfg
@@ -26,7 +25,7 @@ PEAK_TF = 59.0  # Radeon 8060S f16 WMMA peak: 40 CU * 512 FLOP/clk * 2.9 GHz
 # 25 shapes: vary head_size, seqlen, batch, heads, GQA, causal.
 SHAPES = [
     # D64 sweep (seqlen / batch / causal)
-    Shape(batch=4, heads=8, seqlen_q=512,  seqlen_k=512,  head_size=64),
+    Shape(batch=4, heads=8, seqlen_q=512, seqlen_k=512, head_size=64),
     Shape(batch=4, heads=8, seqlen_q=1024, seqlen_k=1024, head_size=64),
     Shape(batch=4, heads=8, seqlen_q=2048, seqlen_k=2048, head_size=64),
     Shape(batch=8, heads=8, seqlen_q=1024, seqlen_k=1024, head_size=64),
@@ -35,7 +34,7 @@ SHAPES = [
     Shape(batch=4, heads=8, seqlen_q=2048, seqlen_k=2048, head_size=64, causal=True),
     Shape(batch=2, heads=8, kv_heads=2, seqlen_q=1024, seqlen_k=1024, head_size=64),
     # D128 sweep
-    Shape(batch=4, heads=8, seqlen_q=512,  seqlen_k=512,  head_size=128),
+    Shape(batch=4, heads=8, seqlen_q=512, seqlen_k=512, head_size=128),
     Shape(batch=4, heads=8, seqlen_q=1024, seqlen_k=1024, head_size=128),
     Shape(batch=4, heads=8, seqlen_q=2048, seqlen_k=2048, head_size=128),
     Shape(batch=8, heads=8, seqlen_q=1024, seqlen_k=1024, head_size=128),
@@ -64,9 +63,9 @@ def _sdpa_tf(shape: Shape):
     dev = "cuda"
     B, H, Hk = shape.batch, shape.heads, shape.kvh
     Sq, Sk, D = shape.seqlen_q, shape.seqlen_k, shape.head_size
-    q = (torch.randn(B, H, Sq, D, device=dev, dtype=torch.float16) * 0.3)
-    k = (torch.randn(B, Hk, Sk, D, device=dev, dtype=torch.float16) * 0.3)
-    v = (torch.randn(B, Hk, Sk, D, device=dev, dtype=torch.float16) * 0.3)
+    q = torch.randn(B, H, Sq, D, device=dev, dtype=torch.float16) * 0.3
+    k = torch.randn(B, Hk, Sk, D, device=dev, dtype=torch.float16) * 0.3
+    v = torch.randn(B, Hk, Sk, D, device=dev, dtype=torch.float16) * 0.3
     if Hk != H:
         k = k.repeat_interleave(H // Hk, dim=1)
         v = v.repeat_interleave(H // Hk, dim=1)
@@ -94,10 +93,19 @@ def _best_mine(shape: Shape, objdump):
     """Run fmha_pipelined and fmha_singlewave(fuse_k auto); return the faster verified one."""
     results = []
     mask = "causal" if shape.causal else "none"
-    sp = PipelinedCfg(head_size=shape.head_size, num_query_heads=shape.heads,
-               num_kv_heads=shape.kv_heads, mask_mode=mask)
-    opt = SingleWaveCfg(head_size=shape.head_size, num_query_heads=shape.heads,
-                 num_kv_heads=shape.kv_heads, mask_mode=mask, fuse_k=None)
+    sp = PipelinedCfg(
+        head_size=shape.head_size,
+        num_query_heads=shape.heads,
+        num_kv_heads=shape.kv_heads,
+        mask_mode=mask,
+    )
+    opt = SingleWaveCfg(
+        head_size=shape.head_size,
+        num_query_heads=shape.heads,
+        num_kv_heads=shape.kv_heads,
+        mask_mode=mask,
+        fuse_k=None,
+    )
     try:
         r = sp_tune.verify_and_time(sp, shape, objdump=objdump)
         if r["ok"]:
@@ -120,10 +128,12 @@ def main():
     print(f"{'shape':46s} {'mine':>16s} {'%pk':>5s}  {'sdpa':>9s}  {'speedup':>7s}")
     rows = []
     for sh in SHAPES:
-        tag = (f"B{sh.batch} H{sh.heads}"
-               + (f"/{sh.kvh}" if sh.kvh != sh.heads else "")
-               + f" S{sh.seqlen_q} D{sh.head_size}"
-               + ("c" if sh.causal else ""))
+        tag = (
+            f"B{sh.batch} H{sh.heads}"
+            + (f"/{sh.kvh}" if sh.kvh != sh.heads else "")
+            + f" S{sh.seqlen_q} D{sh.head_size}"
+            + ("c" if sh.causal else "")
+        )
         best = _best_mine(sh, objdump)
         try:
             sdpa = _sdpa_tf(sh)
@@ -144,8 +154,12 @@ def main():
         best = max(rows, key=lambda x: x[2])
         avg_pk = sum(x[3] for x in rows) / len(rows)
         avg_spd = sum(x[5] for x in rows if x[5] == x[5]) / len(rows)
-        print(f"\nbest: {best[0]} -> {best[2]:.2f} TF ({best[3]:.1f}% of {PEAK_TF} peak)")
-        print(f"avg: {avg_pk:.1f}% of peak, {avg_spd:.1f}x vs SDPA over {len(rows)} shapes")
+        print(
+            f"\nbest: {best[0]} -> {best[2]:.2f} TF ({best[3]:.1f}% of {PEAK_TF} peak)"
+        )
+        print(
+            f"avg: {avg_pk:.1f}% of peak, {avg_spd:.1f}x vs SDPA over {len(rows)} shapes"
+        )
         n25 = sum(1 for x in rows if x[3] >= 25.0)
         print(f"shapes >=25% peak: {n25}/{len(rows)}")
 

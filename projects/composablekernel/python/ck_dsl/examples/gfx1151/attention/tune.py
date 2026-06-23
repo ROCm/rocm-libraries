@@ -50,7 +50,9 @@ def _mem_counts(hsaco: bytes, name: str, objdump):
     tmp = Path(tempfile.gettempdir()) / (name + ".hsaco")
     tmp.write_bytes(hsaco)
     try:
-        out = subprocess.run([objdump, "-d", str(tmp)], capture_output=True, text=True).stdout
+        out = subprocess.run(
+            [objdump, "-d", str(tmp)], capture_output=True, text=True
+        ).stdout
     finally:
         try:
             os.remove(tmp)
@@ -102,9 +104,9 @@ def _resource_counts(hsaco: bytes):
         if b0 == 0xCC:
             return raw[j + 1]
         if b0 == 0xCD:
-            return int.from_bytes(raw[j + 1:j + 3], "big")
+            return int.from_bytes(raw[j + 1 : j + 3], "big")
         if b0 == 0xCE:
-            return int.from_bytes(raw[j + 1:j + 5], "big")
+            return int.from_bytes(raw[j + 1 : j + 5], "big")
         return None
 
     return {
@@ -115,8 +117,16 @@ def _resource_counts(hsaco: bytes):
     }
 
 
-def verify_and_time(cfg: SingleWaveCfg, shape: Shape, *, warmup=15, iters=100, tol=2e-2,
-                    objdump=None, arch="gfx1151"):
+def verify_and_time(
+    cfg: SingleWaveCfg,
+    shape: Shape,
+    *,
+    warmup=15,
+    iters=100,
+    tol=2e-2,
+    objdump=None,
+    arch="gfx1151",
+):
     import numpy as np
 
     art = compile_kernel(build_wmma_fmha_singlewave(cfg, arch=arch), arch=arch)
@@ -148,8 +158,22 @@ def verify_and_time(cfg: SingleWaveCfg, shape: Shape, *, warmup=15, iters=100, t
     rt.memcpy_h2d(vd, u8(Vv), Vv.nbytes)
     rt.memset(od, 0, Out.nbytes)
     packed = struct.pack(
-        "<QQQQfiiiiiiiiii", qd, kd, vd, od, scale_log2, Sq, Sk,
-        Hq * D, D, Hk * D, D, Hk * D, D, Hq * D, D,
+        "<QQQQfiiiiiiiiii",
+        qd,
+        kd,
+        vd,
+        od,
+        scale_log2,
+        Sq,
+        Sk,
+        Hq * D,
+        D,
+        Hk * D,
+        D,
+        Hk * D,
+        D,
+        Hq * D,
+        D,
     )
 
     rt.launch(fn, grid, block, packed)
@@ -167,7 +191,9 @@ def verify_and_time(cfg: SingleWaveCfg, shape: Shape, *, warmup=15, iters=100, t
     max_abs = float(np.abs(Out.astype(np.float32) - ref.astype(np.float32)).max())
     ok = max_abs <= tol
 
-    ms = time_launches(lambda: rt.launch(fn, grid, block, packed), warmup=warmup, iters=iters)
+    ms = time_launches(
+        lambda: rt.launch(fn, grid, block, packed), warmup=warmup, iters=iters
+    )
 
     for ptr in (qd, kd, vd, od):
         rt.free(ptr)
@@ -178,8 +204,13 @@ def verify_and_time(cfg: SingleWaveCfg, shape: Shape, *, warmup=15, iters=100, t
         flops *= 0.5
     tflops = flops / (ms * 1e-3) / 1e12
     return {
-        "cfg": cfg, "ok": ok, "max_abs": max_abs,
-        "us": ms * 1e3, "tflops": tflops, "grid": grid, **isa,
+        "cfg": cfg,
+        "ok": ok,
+        "max_abs": max_abs,
+        "us": ms * 1e3,
+        "tflops": tflops,
+        "grid": grid,
+        **isa,
     }
 
 
@@ -188,9 +219,9 @@ def _fmt(r):
     return (
         f"bm{c.bm_tiles} p={c.p_mode:<7} v={c.v_mode:<6} pf={int(c.prefetch_k)} | "
         f"{'Y' if r['ok'] else 'N'} {r['max_abs']:.2e} {r['us']:8.1f}us {r['tflops']:7.2f} TF | "
-        f"gld={r.get('gld','-')} dsld={r.get('dsld','-')} dsst={r.get('dsst','-')} "
-        f"wmma={r.get('wmma','-')} instr={r.get('instr','-')} "
-        f"vgpr={r.get('vgpr','-')} spill={r.get('vspill','-')}"
+        f"gld={r.get('gld', '-')} dsld={r.get('dsld', '-')} dsst={r.get('dsst', '-')} "
+        f"wmma={r.get('wmma', '-')} instr={r.get('instr', '-')} "
+        f"vgpr={r.get('vgpr', '-')} spill={r.get('vspill', '-')}"
     )
 
 
@@ -211,13 +242,19 @@ def main():
     args = ap.parse_args()
 
     shape = Shape(
-        batch=args.batch, heads=args.heads, kv_heads=args.kv_heads,
-        seqlen_q=args.seqlen_q, seqlen_k=args.seqlen_k,
-        head_size=args.head_size, causal=args.causal,
+        batch=args.batch,
+        heads=args.heads,
+        kv_heads=args.kv_heads,
+        seqlen_q=args.seqlen_q,
+        seqlen_k=args.seqlen_k,
+        head_size=args.head_size,
+        causal=args.causal,
     )
     objdump = _find_objdump()
-    print(f"shape: B{shape.batch} Sq{shape.seqlen_q} Sk{shape.seqlen_k} D{shape.head_size} "
-          f"Hq{shape.heads} Hk{shape.kvh} causal={shape.causal}")
+    print(
+        f"shape: B{shape.batch} Sq{shape.seqlen_q} Sk{shape.seqlen_k} D{shape.head_size} "
+        f"Hq{shape.heads} Hk{shape.kvh} causal={shape.causal}"
+    )
     best = None
     for bm in args.bm:
         for pm in args.pmode:
@@ -225,11 +262,15 @@ def main():
                 for qp in args.qpreload:
                     for fk in args.fusek:
                         cfg = SingleWaveCfg(
-                            head_size=shape.head_size, num_query_heads=shape.heads,
+                            head_size=shape.head_size,
+                            num_query_heads=shape.heads,
                             num_kv_heads=shape.kv_heads,
                             mask_mode="causal" if shape.causal else "none",
-                            bm_tiles=bm, p_mode=pm, v_mode=vm,
-                            q_preload=bool(qp), fuse_k=bool(fk),
+                            bm_tiles=bm,
+                            p_mode=pm,
+                            v_mode=vm,
+                            q_preload=bool(qp),
+                            fuse_k=bool(fk),
                         )
                         try:
                             r = verify_and_time(cfg, shape, objdump=objdump)

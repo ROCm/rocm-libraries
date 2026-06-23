@@ -1,5 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+# ruff: noqa: E402 -- curated registry: re-exports are grouped after section comments
 
 """Parametric instance builders for the CK DSL.
 
@@ -118,6 +119,7 @@ from .common.attention_unified import (  # noqa: F401
     supports_native_unified_attention_tiled,
     supports_native_unified_attention_3d_tiled,
 )
+
 # Tiled-2D attention is arch-divergent (gfx950 wide-K/transpose-read vs gfx942
 # narrow-atom/strided-V). Route the public re-exports through the arch-aware
 # ``_tiled_2d_impl(arch)`` seam instead of binding the gfx950 module directly,
@@ -150,6 +152,8 @@ def supports_tiled_2d(*, arch: str = "gfx950", **kwargs):
 
     _, _, _supports = _tiled_2d_impl(arch)
     return _supports(arch=arch, **kwargs)
+
+
 from .gfx950.attention_tiled_3d import (  # noqa: F401
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,

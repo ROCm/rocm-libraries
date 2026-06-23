@@ -64,7 +64,7 @@ subdirectories and CK DSL Python root.
 Example:
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel
+cd <repo>/projects/composablekernel
 
 PYTHONPATH="python:python/ck_dsl/dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark" \
   python/ck_dsl/.venv/bin/python \

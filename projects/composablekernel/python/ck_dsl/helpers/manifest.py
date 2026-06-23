@@ -35,8 +35,15 @@ Schema (version `ck.dsl.example.manifest/v1`):
       "hsaco_bytes": <int>,
       "notes": <str>,
       "ck_dependency": false,
-      "ir_authored": true
+      "ir_authored": true,
+      "engine_build_id": <str>,   // content hash of the engine that produced this
+      "engine_version": <str>     // engine version that produced this
     }
+
+The `engine_build_id` / `engine_version` fields stamp the engine provenance so a
+consumer (e.g. the ck-dsl-provider) can fail loud on a stale/mixed bundle whose
+engine does not match the engine it is linked against, rather than silently
+mixing artifacts.
 
 The runner cares about `kind`, `kernel_name`, `hsaco`, `block_m/n/k`,
 `threads_per_block`, the shape-providing field (`default_shape` or
@@ -60,6 +67,8 @@ __all__ = [
     "MANIFEST_SCHEMA",
     "attention_args_signature",
     "conv_args_signature",
+    "engine_build_id",
+    "engine_version",
     "gemm_args_signature",
     "make_attention_manifest",
     "make_conv_manifest",
@@ -67,6 +76,45 @@ __all__ = [
     "make_simple_op_manifest",
     "write_artifact",
 ]
+
+
+# ---------------------------------------------------------------------
+# Engine freshness / provenance stamp
+# ---------------------------------------------------------------------
+#
+# Every manifest records the engine build-id + version it was produced with, so
+# a consumer (e.g. the ck-dsl-provider) can fail loud when a shipped bundle was
+# built by a different engine than the one it is linked against, instead of
+# silently mixing stale artifacts. The values come from the C++ engine's
+# ckc_build_id()/ckc_engine_version() (exposed via the ckc_engine binding) when
+# that module is importable; otherwise they fall back to "unknown" so manifest
+# emission never hard-depends on the binding being built. These are artifact
+# stamps only -- they never enter the emitted IR.
+
+
+def _engine_provenance() -> tuple:
+    """(build_id, version) from the ckc_engine binding, or ("unknown", ...)."""
+    try:
+        import ckc_engine  # noqa: PLC0415
+
+        return ckc_engine.build_id(), ckc_engine.engine_version()
+    except Exception:  # noqa: BLE001
+        return "unknown", "unknown"
+
+
+def engine_build_id() -> str:
+    """Engine source content hash recorded in manifests (or 'unknown')."""
+    return _engine_provenance()[0]
+
+
+def engine_version() -> str:
+    """Engine version recorded in manifests (or 'unknown')."""
+    return _engine_provenance()[1]
+
+
+def _provenance_fields() -> Dict[str, str]:
+    bid, ver = _engine_provenance()
+    return {"engine_build_id": bid, "engine_version": ver}
 
 
 # ---------------------------------------------------------------------
@@ -218,6 +266,7 @@ def make_simple_op_manifest(
         "ck_dependency": False,
         "ir_authored": True,
         "is_binary": bool(is_binary),
+        **_provenance_fields(),
     }
     if elems_per_block is not None:
         manifest["elems_per_block"] = int(elems_per_block)
@@ -285,6 +334,7 @@ def make_gemm_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
+        **_provenance_fields(),
     }
     if extra:
         manifest.update(dict(extra))
@@ -357,6 +407,7 @@ def make_conv_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
+        **_provenance_fields(),
     }
     if grid_explicit is not None:
         manifest["grid_explicit"] = [int(x) for x in grid_explicit]
@@ -397,6 +448,7 @@ def make_attention_manifest(
         "notes": notes,
         "ck_dependency": False,
         "ir_authored": True,
+        **_provenance_fields(),
     }
     if extra:
         manifest.update(dict(extra))

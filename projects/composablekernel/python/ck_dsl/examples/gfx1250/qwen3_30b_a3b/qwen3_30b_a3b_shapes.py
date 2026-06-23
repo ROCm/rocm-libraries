@@ -205,18 +205,60 @@ def qwen3_30b_a3b_config(batch: int = 2) -> Qwen3A3BConfig:
 def decode_gemm_shapes(batch: int = 2) -> Tuple[GemmShape, ...]:
     cfg = qwen3_30b_a3b_config(batch)
     return (
-        GemmShape("qkv_decode_bf16", cfg.batch, cfg.qkv_width, cfg.hidden, role="attention", op="qkv"),
-        GemmShape("o_decode_bf16", cfg.batch, cfg.hidden, cfg.attention_width, role="attention", op="o"),
-        GemmShape("router_decode_bf16", cfg.batch, cfg.num_experts, cfg.hidden, role="moe", op="router"),
+        GemmShape(
+            "qkv_decode_bf16",
+            cfg.batch,
+            cfg.qkv_width,
+            cfg.hidden,
+            role="attention",
+            op="qkv",
+        ),
+        GemmShape(
+            "o_decode_bf16",
+            cfg.batch,
+            cfg.hidden,
+            cfg.attention_width,
+            role="attention",
+            op="o",
+        ),
+        GemmShape(
+            "router_decode_bf16",
+            cfg.batch,
+            cfg.num_experts,
+            cfg.hidden,
+            role="moe",
+            op="router",
+        ),
     )
 
 
 def prefill_gemm_shapes(total_tokens: int, batch: int = 2) -> Tuple[GemmShape, ...]:
     cfg = qwen3_30b_a3b_config(batch)
     return (
-        GemmShape("qkv_prefill_bf16", total_tokens, cfg.qkv_width, cfg.hidden, role="attention", op="prefill_qkv"),
-        GemmShape("o_prefill_bf16", total_tokens, cfg.hidden, cfg.attention_width, role="attention", op="prefill_o"),
-        GemmShape("router_prefill_bf16", total_tokens, cfg.num_experts, cfg.hidden, role="moe", op="prefill_router"),
+        GemmShape(
+            "qkv_prefill_bf16",
+            total_tokens,
+            cfg.qkv_width,
+            cfg.hidden,
+            role="attention",
+            op="prefill_qkv",
+        ),
+        GemmShape(
+            "o_prefill_bf16",
+            total_tokens,
+            cfg.hidden,
+            cfg.attention_width,
+            role="attention",
+            op="prefill_o",
+        ),
+        GemmShape(
+            "router_prefill_bf16",
+            total_tokens,
+            cfg.num_experts,
+            cfg.hidden,
+            role="moe",
+            op="prefill_router",
+        ),
     )
 
 
@@ -328,7 +370,13 @@ def layer_shapes(
         QwenOpShape(
             "qkv_proj",
             "dense_gemm",
-            _dims(M=config.batch, N=config.qkv_width, K=config.hidden, dtype=config.dtype, layout="RCR"),
+            _dims(
+                M=config.batch,
+                N=config.qkv_width,
+                K=config.hidden,
+                dtype=config.dtype,
+                layout="RCR",
+            ),
             "gemm",
             "ATOM LinearBase / torch.matmul",
             False,
@@ -355,7 +403,13 @@ def layer_shapes(
         QwenOpShape(
             "o_proj",
             "dense_gemm",
-            _dims(M=config.batch, N=config.hidden, K=config.attention_width, dtype=config.dtype, layout="RCR"),
+            _dims(
+                M=config.batch,
+                N=config.hidden,
+                K=config.attention_width,
+                dtype=config.dtype,
+                layout="RCR",
+            ),
             "gemm",
             "ATOM LinearBase / torch.matmul",
             False,
@@ -373,7 +427,12 @@ def layer_shapes(
         QwenOpShape(
             "router_topk",
             "router_topk",
-            _dims(tokens=config.batch, experts=config.num_experts, topk=config.topk, dtype="fp32"),
+            _dims(
+                tokens=config.batch,
+                experts=config.num_experts,
+                topk=config.topk,
+                dtype="fp32",
+            ),
             "routing",
             "aiter.moe_fused_gate_or_torch_topk",
             True,
@@ -449,8 +508,16 @@ def bf16_universal_gemm_spec(shape: GemmShape):
             warp_tile_n=16,
             warp_tile_k=32,
         ),
-        trait=TraitSpec(pipeline="mem", epilogue="default", pad_m=True, pad_n=True, pad_k=True),
-        data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32", layout=shape.layout),
+        trait=TraitSpec(
+            pipeline="mem", epilogue="default", pad_m=True, pad_n=True, pad_k=True
+        ),
+        data=DataSpec(
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_c="bf16",
+            dtype_acc="fp32",
+            layout=shape.layout,
+        ),
         wave_size=WAVE_SIZE,
     )
 

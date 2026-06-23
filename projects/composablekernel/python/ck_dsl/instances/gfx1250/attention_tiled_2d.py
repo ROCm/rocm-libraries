@@ -24,15 +24,13 @@ from dataclasses import dataclass
 import math
 from typing import Optional, Tuple
 
-from ...core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type, Value
+from ...core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type
 from ...helpers.attention import PagedKvDescriptor, binary_search_seq_idx
 from ._wmma_attention_common import (
     BLOCK_M as _BLOCK_M,
     HEAD_SIZE as _HEAD_SIZE,
     WAVE as _WAVE,
-    WMMA_K as _WMMA_K,
     WMMA_N as _WMMA_N,
-    WMMA_OP_ID as _WMMA_OP_ID,
     check_wmma_arch,
     compute_pv,
     compute_pv_from_probs,
@@ -181,11 +179,20 @@ def supports_tiled_2d(
     if arch != "gfx1250":
         return False, f"gfx1250 tiled 2D only supports arch='gfx1250' (got {arch!r})"
     if dtype != "bf16":
-        return False, f"gfx1250 tiled 2D currently supports bf16 Q/O only (got {dtype!r})"
+        return (
+            False,
+            f"gfx1250 tiled 2D currently supports bf16 Q/O only (got {dtype!r})",
+        )
     if head_size != _HEAD_SIZE:
-        return False, f"gfx1250 tiled 2D currently supports head_size=64 (got {head_size})"
+        return (
+            False,
+            f"gfx1250 tiled 2D currently supports head_size=64 (got {head_size})",
+        )
     if block_size != _BLOCK_SIZE:
-        return False, f"gfx1250 tiled 2D currently supports block_size=32 (got {block_size})"
+        return (
+            False,
+            f"gfx1250 tiled 2D currently supports block_size=32 (got {block_size})",
+        )
     if num_queries_per_kv != _NQK:
         return False, (
             "gfx1250 tiled 2D currently supports GQA-8 "
@@ -224,7 +231,11 @@ def _declare_params(b: IRBuilder):
         "query_ptr", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
     )
     key = b.param(
-        "key_cache_ptr", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
+        "key_cache_ptr",
+        PtrType(FP8E4M3, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
     )
     value = b.param(
         "value_cache_ptr",
@@ -234,13 +245,17 @@ def _declare_params(b: IRBuilder):
         align=16,
     )
     sinks = b.param("sink_ptr", PtrType(BF16, "global"), readonly=True, align=16)
-    block_tables = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    block_tables = b.param(
+        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
     seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
     alibi_slopes_ptr = b.param(
         "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
     )
     qq_bias_ptr = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    cu_q = b.param("query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    cu_q = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
     scale = b.param("scale", F32)
     k_scale = b.param("k_scale", F32)
     v_scale = b.param("v_scale", F32)
@@ -356,8 +371,14 @@ def build_unified_attention_2d_tiled(
         b.add(b.mul(q_token, b.const_i32(NUM_QH)), qh_safe), b.const_i32(HD)
     )
     q_frags = load_q_frags(
-        b, query, q_addr_row_base, half_k, q_valid_for_a,
-        head_size=HD, a_frag=a_frag, dtype=dtype,
+        b,
+        query,
+        q_addr_row_base,
+        half_k,
+        q_valid_for_a,
+        head_size=HD,
+        a_frag=a_frag,
+        dtype=dtype,
     )
 
     kv_desc = PagedKvDescriptor(
@@ -452,10 +473,20 @@ def build_unified_attention_2d_tiled(
         phys_block = lambda _tok: physical_block  # noqa: E731
 
         scores = compute_qk_scores(
-            b, q_frags, key, kv_desc,
-            tile_base=tile_base, lane_row=lane_row, half_k=half_k,
-            kv_head_idx=kv_head_idx, block_size=BS, head_size=HD,
-            kv_dtype=FP8E4M3, k_scale=k_scale, dtype=dtype, c_frag=c_frag,
+            b,
+            q_frags,
+            key,
+            kv_desc,
+            tile_base=tile_base,
+            lane_row=lane_row,
+            half_k=half_k,
+            kv_head_idx=kv_head_idx,
+            block_size=BS,
+            head_size=HD,
+            kv_dtype=FP8E4M3,
+            k_scale=k_scale,
+            dtype=dtype,
+            c_frag=c_frag,
             phys_block=phys_block,
         )
 
@@ -488,7 +519,12 @@ def build_unified_attention_2d_tiled(
                 srs.append(b.select(keep, score_log2, neg_inf))
 
             m_new, l_new, alpha, p = softmax_row_update(
-                b, ms[r], ls[r], srs, neg_inf=neg_inf, zero_f=zero_f,
+                b,
+                ms[r],
+                ls[r],
+                srs,
+                neg_inf=neg_inf,
+                zero_f=zero_f,
             )
             new_ms.append(m_new)
             new_ls.append(l_new)
@@ -514,24 +550,53 @@ def build_unified_attention_2d_tiled(
                     1,
                 )
         stage_v_tile(
-            b, V_lds, value, kv_desc,
-            kv_head_idx=kv_head_idx, tile_base=tile_base, lane=lane,
-            block_size=BS, head_size=HD, kv_dtype=FP8E4M3, v_scale=v_scale,
-            dtype=dtype, phys_block=phys_block,
+            b,
+            V_lds,
+            value,
+            kv_desc,
+            kv_head_idx=kv_head_idx,
+            tile_base=tile_base,
+            lane=lane,
+            block_size=BS,
+            head_size=HD,
+            kv_dtype=FP8E4M3,
+            v_scale=v_scale,
+            dtype=dtype,
+            phys_block=phys_block,
         )
         b.sync()
 
         if spec.use_register_p:
             new_accs = compute_pv_from_probs(
-                b, ps[0], ps[1], V_lds, new_accs,
-                a_map=a_map, c_map=c_map, lane=lane, col=col, a_frag=a_frag, c_frag=c_frag,
-                head_size=HD, dtype=dtype,
+                b,
+                ps[0],
+                ps[1],
+                V_lds,
+                new_accs,
+                a_map=a_map,
+                c_map=c_map,
+                lane=lane,
+                col=col,
+                a_frag=a_frag,
+                c_frag=c_frag,
+                head_size=HD,
+                dtype=dtype,
             )
         else:
             new_accs = compute_pv(
-                b, P_lds, V_lds, new_accs,
-                a_map=a_map, c_map=c_map, lane=lane, lane_row=lane_row, col=col,
-                a_frag=a_frag, c_frag=c_frag, head_size=HD, dtype=dtype,
+                b,
+                P_lds,
+                V_lds,
+                new_accs,
+                a_map=a_map,
+                c_map=c_map,
+                lane=lane,
+                lane_row=lane_row,
+                col=col,
+                a_frag=a_frag,
+                c_frag=c_frag,
+                head_size=HD,
+                dtype=dtype,
             )
 
         yields = []
@@ -563,7 +628,9 @@ def build_unified_attention_2d_tiled(
             out_token = b.add(cu_q_start, q_pos)
             o_col = b.add(b.const_i32(d * _WMMA_N), col_n)
             out_addr = b.add(
-                b.mul(b.add(b.mul(out_token, b.const_i32(NUM_QH)), qh), b.const_i32(HD)),
+                b.mul(
+                    b.add(b.mul(out_token, b.const_i32(NUM_QH)), qh), b.const_i32(HD)
+                ),
                 o_col,
             )
             with b.scf_if(out_valid):

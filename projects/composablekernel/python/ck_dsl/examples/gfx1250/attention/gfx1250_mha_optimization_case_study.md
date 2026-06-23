@@ -215,16 +215,16 @@ disassemble with `llvm-objdump -d`. This is a profiler substitute.
 **Key correction:** gfx1250 **can** do async LDS DMA. `async_buffer_load_lds_addr`
 lowers cleanly to `llvm.amdgcn.raw.ptr.buffer.load.lds` for gfx1250 (verified).
 The `arch_specs.json` `has_async_global_lds:false` flag is **conservative/wrong**
-— DTLA is usable. (Flag flip is task #4 below.)
+— DTLA is usable. (Flag flip is lever 4 below.)
 
-**Per-tile ISA hot-path (segment kernel, before #1):**
+**Per-tile ISA hot-path (segment kernel, before lever 1):**
 - `ds_load_u16` ×64 + `s_wait_dscnt` ×109 — the LDS-read wall (no `ds_read_tr`);
   the PV/P operand gather reads one 16-bit element per lane per slot.
 - `s_delay_alu` ×209 — serial dependency chains, no prefetch overlap.
 - `global_load_b128` ×8 — **KV loads are already wide/coalesced** (not the problem).
 - `global_store_b32` (scattered) — the fp32 partials workspace writes.
 
-**Four levers (implementing all; #1 default-on, #2–#4 behind flags, then a
+**Four levers (implementing all; lever 1 default-on, levers 2–4 behind flags, then a
 combined run). Dispatcher env knobs: `HIPDNN_GFX1250_3D_{WLDS,DTLA,FRED,WAVES}`.**
 
 1. **DONE ✅ — Wide LDS reads (`use_wide_lds_reads`, default on).** Stage V
@@ -232,7 +232,7 @@ combined run). Dispatcher env knobs: `HIPDNN_GFX1250_3D_{WLDS,DTLA,FRED,WAVES}`.
    (2× vec8 + concat) instead of 16 scalar `ds_load_u16`. ISA: 64 → 10 LDS read
    ops/tile. GPU-correct across the cohort + flaky seeds; ~neutral standalone
    (transpose cost shifts to `ds_store_b16` ×80 on the store side), a building
-   block for #2. Committed `026c8dab7f`.
+   block for lever 2. Committed `026c8dab7f`.
 2. **NEXT — DTLA + double-buffer + prefetch/scheduled loop (`use_dtla_prefetch`).**
    Mirror gfx950 `_issue_v_load`: byte paged-KV descriptor
    (`TensorDescriptor.naive(...).transform(indirect(block_table), unmerge(linear_half→token,dim))`),
@@ -255,13 +255,13 @@ combined run). Dispatcher env knobs: `HIPDNN_GFX1250_3D_{WLDS,DTLA,FRED,WAVES}`.
    KV byte-reduction is already in decode + prefill.
 
 Then: **combined cross-arch run** toggling the flags to find the best stack vs
-gfx950 (goal #1). Accept per-stage regressions; the combined stack is what matters.
+gfx950 (primary goal). Accept per-stage regressions; the combined stack is what matters.
 
 Deferred (still valid): faster reduce kernel (gfx1250 reduce 2–3x gfx950's,
 serial over segments), small-batch startup/graph-replay, occupancy-gate
 `num_waves` into production, prefill-2D parity pass.
 
-## 8. Methodology notes (for the next agent)
+## 8. Methodology notes
 
 - **Always cross-arch benchmark** with `decode_3d_verify.py --bench
   --bench-split --csv` (local gfx950 = MI355X, remote gfx1250). Segment-vs-reduce
@@ -287,7 +287,7 @@ serial over segments), small-batch startup/graph-replay, occupancy-gate
   `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_yraparti_amdeng -o IdentitiesOnly=yes" git push`
   (that key authenticates as `yraparti_amdeng`, which has repo access).
 
-## 9. Session checkpoint (2026-06-16, evening)
+## 9. Checkpoint (2026-06-16, evening)
 
 **Landed today:**
 - **DPP `row_xmask` softmax reduction — default on** (§4). New IR primitives
@@ -312,7 +312,7 @@ DPP closed the production large-batch cohort to **1.07–1.20×** (`s256 kv4096`
 the DPP-winning nseg for each cohort — so production lands on the right side of
 the latency/throughput regime split with **no per-shape regression and no
 dispatcher change needed**. (Tooling glitch aside: working tree was wiped by a
-sparse-checkout hiccup mid-session; `git restore` recovered it — all work was
+sparse-checkout hiccup; `git restore` recovered it — all work was
 already committed in `b27ffa1c1b`.)
 
 **Next steps (in priority order):**
@@ -331,4 +331,4 @@ already committed in `b27ffa1c1b`.)
 4. prefill-2D parity pass.
 
 Prior checkpoint: branch `users/yraparti/ck-dsl/gfx1250_attention_prototype`;
-#1 wide-LDS-reads + #2 DTLA (opt-in) landed earlier this session.
+lever 1 wide-LDS-reads + lever 2 DTLA (opt-in) landed earlier.

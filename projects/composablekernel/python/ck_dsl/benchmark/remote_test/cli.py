@@ -8,11 +8,11 @@ Examples:
   python -m ck_dsl.benchmark.remote_test.cli run   --arch gfx1151
   python -m ck_dsl.benchmark.remote_test.cli all   --arch gfx942,gfx1151
 """
+
 from __future__ import annotations
 
 import argparse
 import shlex
-import sys
 from typing import List
 
 from . import build, config, persistent, slurm, transport
@@ -81,7 +81,9 @@ def _cmd_persist(args: argparse.Namespace) -> int:
         print(f"\n[persist:{arch}] Running initial test...")
         rc = alloc.run_test()
         if rc != 0:
-            print(f"[persist:{arch}] Initial test FAILED (rc={rc}) - continuing anyway...")
+            print(
+                f"[persist:{arch}] Initial test FAILED (rc={rc}) - continuing anyway..."
+            )
 
         # Enter interactive loop
         print(f"\n[persist:{arch}] Node reserved. Commands:")
@@ -129,8 +131,10 @@ def _cmd_hold(args: argparse.Namespace) -> int:
     alloc = persistent.PersistentAllocation(arch)
     alloc.allocate()
     alloc.save_state()
-    print(f"[hold:{arch}] node {alloc.nodename} held by job {alloc.jobid}; "
-          f"use `exec --arch {arch}` to run tests, `free --arch {arch}` to release")
+    print(
+        f"[hold:{arch}] node {alloc.nodename} held by job {alloc.jobid}; "
+        f"use `exec --arch {arch}` to run tests, `free --arch {arch}` to release"
+    )
     return 0
 
 
@@ -173,27 +177,48 @@ def _cmd_free(args: argparse.Namespace) -> int:
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="ck_dsl.benchmark.remote_test")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("probe", _cmd_probe), ("build", _cmd_build),
-                     ("run", _cmd_run), ("all", _cmd_all), ("persist", _cmd_persist),
-                     ("hold", _cmd_hold), ("exec", _cmd_exec), ("free", _cmd_free)):
+    for name, fn in (
+        ("probe", _cmd_probe),
+        ("build", _cmd_build),
+        ("run", _cmd_run),
+        ("all", _cmd_all),
+        ("persist", _cmd_persist),
+        ("hold", _cmd_hold),
+        ("exec", _cmd_exec),
+        ("free", _cmd_free),
+    ):
         sp = sub.add_parser(name)
-        sp.add_argument("--arch", default=",".join(config.ARCHES),
-                        help="comma-separated archs (default: all configured)")
-        sp.add_argument("--no-clean", action="store_true",
-                        help="keep prior stage dir contents")
+        sp.add_argument(
+            "--arch",
+            default=",".join(config.ARCHES),
+            help="comma-separated archs (default: all configured)",
+        )
+        sp.add_argument(
+            "--no-clean", action="store_true", help="keep prior stage dir contents"
+        )
         if name in ("persist", "hold"):
-            sp.add_argument("--no-build", action="store_true",
-                            help="skip initial local build (reuse prior artifacts)")
+            sp.add_argument(
+                "--no-build",
+                action="store_true",
+                help="skip initial local build (reuse prior artifacts)",
+            )
         if name in ("hold", "exec"):
-            sp.add_argument("--build-args", default="",
-                            help="extra args forwarded to the example build "
-                                 "(shlex-split), e.g. '--m 64 --n 128 --k 128'")
+            sp.add_argument(
+                "--build-args",
+                default="",
+                help="extra args forwarded to the example build "
+                "(shlex-split), e.g. '--m 64 --n 128 --k 128'",
+            )
         if name == "exec":
-            sp.add_argument("--rebuild", action="store_true",
-                            help="rebuild locally before running")
-            sp.add_argument("--debug", action="store_true",
-                            help="set CKDSL_NBITS_DEBUG=1 on the remote run "
-                                 "for matmul_nbits mismatch diagnostics")
+            sp.add_argument(
+                "--rebuild", action="store_true", help="rebuild locally before running"
+            )
+            sp.add_argument(
+                "--debug",
+                action="store_true",
+                help="set CKDSL_NBITS_DEBUG=1 on the remote run "
+                "for matmul_nbits mismatch diagnostics",
+            )
         sp.set_defaults(_fn=fn)
     args = p.parse_args(argv)
     return args._fn(args)

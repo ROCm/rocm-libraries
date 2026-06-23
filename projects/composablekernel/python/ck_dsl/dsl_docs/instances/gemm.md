@@ -2,22 +2,24 @@
 
 This page covers:
 
-Core GEMM family:
+Core GEMM family (all under `instances/common/`):
 
-- `instances/gemm_universal.py`
-- `instances/batched_gemm.py`
-- `instances/grouped_gemm.py`
+- `gemm_universal.py`
+- `batched_gemm.py`
+- `grouped_gemm.py`
 
  GEMM extensions:
 
-- `instances/gemm_multi_d.py` -- CK Tile `19_gemm_multi_d`
-- `instances/gemm_multi_abd.py` -- CK Tile `22_gemm_multi_abd`
+- `gemm_multi_d.py` -- CK Tile `19_gemm_multi_d`
+- `gemm_multi_abd.py` -- CK Tile `22_gemm_multi_abd`
 
  GEMM variants (StreamK + flat / contraction):
 
-- `instances/streamk_gemm.py` -- CK Tile `40_streamk_gemm`
-- `instances/flatmm.py` -- CK Tile `18_flatmm`
-- `instances/batched_contraction.py` -- CK Tile `41_batched_contraction`
+- `streamk_gemm.py` -- CK Tile `40_streamk_gemm`
+- `flatmm.py` -- CK Tile `18_flatmm`
+- `batched_contraction.py` -- CK Tile `41_batched_contraction`
+
+(public symbols re-exported from `ck_dsl.instances`)
 
 The main implementation is universal GEMM. Batched GEMM is a thin
 wrapper. Grouped GEMM currently dispatches one universal GEMM kernel
@@ -127,13 +129,13 @@ Shipped tile geometries cover `64..256 x 64..256 x 16..128` with warp grids `1x1
 
 `is_valid_spec(spec)` returns `(ok, reason)` and rejects unsupported combinations before IR build:
 
-- target architecture support (current focus: gfx950);
+- target architecture support (gfx942 / gfx950 CDNA wave64, gfx1151 / gfx1201 RDNA wave32; `is_valid_spec(spec, arch="gfx950")` defaults to gfx950 but is arch-aware — the WMMA RDNA path is limited to the 16x16x16 atom + `mem` pipeline + `default` epilogue);
 - dtype combinations supported by IR lowering and the MFMA atom catalog;
 - supported layout string (`RCR` is the production family);
 - `tile_m`, `tile_n` divisible by `warp_* * warp_tile_*`;
 - `tile_k` divisible by `warp_tile_k`;
 - `block_size = warp_m * warp_n * warp_k * wave_size` consistent;
-- LDS allocation under the per-block budget (~160 KiB practical cap);
+- LDS allocation under the per-block budget (arch-keyed via `ArchTarget.lds_capacity_bytes`: 160 KiB on gfx950, 64 KiB on gfx942 / gfx1151 / gfx1201);
 - vector load widths divide tile shape;
 - requested epilogue is implemented;
 - scheduler and pipeline names are recognized.

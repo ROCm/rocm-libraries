@@ -1,272 +1,238 @@
 # Square GEMM: climbing from the tile-pipeline baseline toward matrix peak
 
-A case study in taking a square `fp16` GEMM from the stock CK DSL tile pipeline
-to the matrix unit's throughput ceiling on **MI355X / gfx950 (CDNA4)** — one
-measured technique at a time, each verified for correctness (`bad=0`) and read
-straight off the hardware counters.
+A single-geometry optimization case study that takes a square `fp16` GEMM from
+the stock CK DSL universal-GEMM tile pipeline up toward the matrix-unit throughput
+ceiling on **MI355X / gfx950 (CDNA4)** — one measured, correctness-gated technique
+at a time. The kernel is the production `UniversalGemmSpec` driven at a fixed
+geometry (`256×256×64`, `4×4` warps, `8192³`, RCR `fp16`); the example demonstrates
+and reproduces a six-rung performance **ladder** (A–F) where each rung enables one
+additional `TraitSpec` lever.
 
-The headline result is a single, reproducible **ladder** at one fixed geometry
-(256×256×64, 4×4 warps, 8192³, `fp16`):
+> For the precise algorithm, data layout, the LDS bank-conflict arithmetic, and
+> *why* the operand-streaming schedule is shaped the way it is, see
+> [`ALGORITHM.md`](ALGORITHM.md). This file is the field guide: prerequisites, the
+> file map, the exact run command, the substantiated ladder, and the durable
+> findings (what worked, what only *looked* like a lever, and the structural reason
+> the kernel lands at ~0.81× of hand-tuned rocBLAS at boost clock).
 
-| # | technique layered on | TF/s | % of matrix peak† | what it removes |
-|---|---|---:|---:|---|
-| A | plain tile pipeline (VGPR-staged double buffer) | 584 | 21% | — (starting point) |
-| B | + direct-to-LDS load | 645 | 23% | the global→VGPR→LDS round-trip |
-| C | + depth-2 prefetch, **single-barrier** mainloop | 1023 | 36% | the per-tile barrier bubble |
-| D | + 4-way LDS swizzle | 1397 | 50% | 52% → 25% bank conflict |
-| E | + **element-granular swizzle** | 1434 | 51% | 25% → **0%** bank conflict |
-| F | + **`dtl_cache_b=CACHE_ALL`** | **1549** | **55%** | B L2 eviction on reuse |
+> **A note on the directory name.** The directory is named `warpspec`, but the
+> shipped kernel uses the production universal-GEMM body with these traits — it is
+> **not** a producer/consumer warp-specialized pipeline, and no warp specialization
+> is implemented or claimed. The ladder varies only how operands are streamed past
+> the matrix unit; the accumulation math is fixed throughout.
 
-†"Matrix peak" is the matrix-issue ceiling the `MfmaUtil` counter measures
-against — i.e. the rate at which the MFMA unit can retire `v_mfma_f32_16x16x32`
-back-to-back. % of peak is `MfmaUtil` read directly; on this part it implies a
-ceiling of ≈2.8 PF/s `fp16`. **2.7× from baseline to F, every rung bit-exact.**
-Absolute TF/s varies ±5–10% with GPU clock state; ratios measured same-session
-are stable. Run `scripts/ladder.py` to reproduce with the current clock.
+## What it shows
 
-The rest of this document is how each rung was found and proven, the things that
-*looked* like levers but weren't, and exactly what stands between 54% and 100%.
+- A correct, bit-exact (`bad=0`) square `fp16` GEMM whose operand-streaming
+  schedule climbs ~2.6× from the stock tile pipeline toward the matrix-unit ceiling,
+  each rung gated against an in-session reference before it is timed.
+- A counter- and ISA-driven path: every rung is justified by a hardware counter
+  (`MfmaUtil`, `LDSBankConflict`) and the emitted ISA, never guessed.
+- The levers that *looked* like wins but measured neutral-or-negative (higher
+  occupancy, in-phase prefetch, LDS padding, register-staged depth-2 prefetch,
+  `iglp_opt`), kept so they are not re-tried.
 
-## Reproducing the results
-
-```
-HIP_VISIBLE_DEVICES=0 python scripts/ladder.py
-```
-
-Builds and measures all six rungs A–F in a single interleaved session (same GPU
-clock state throughout), prints TF/s and ratio vs rocBLAS for each, verifies
-correctness before benching. Takes ~5 minutes.
-
-## Tools
-
-The whole study is counter- and ISA-driven, never guessed:
-
-* **`rocprofv3`** — `MfmaUtil` (distance to peak), `LDSBankConflict`,
-  `OccupancyPercent`, `MemUnitStalled`. These four decide every question.
-* **ISA inspection** — `KernelDef` → LLVM IR → `libamd_comgr` HSACO →
-  `llvm-objdump` (via `ck_dsl.analysis.analyze_hsaco`); opcode histogram +
-  resource counts so the emitted mainloop can be read instruction-for-instruction.
-  To diff against a hand-written C++/HIP reference, use
-  `dsl_docs/optimization/utilities/tools/utils/reference_isa_diff.py`.
-* **Isolated-subprocess sweeps** — every config benched in its own process, so a
-  single bad geometry that GPU-faults can't poison the rest of a sweep.
-* **LDS round-trip dump** — write a tile through the real load path, read it back
-  row-major, diff vs input — used to prove a layout correct *before* chasing a
-  perf bug as a correctness bug.
-
-## Hardware / software pin
+## Hardware / software
 
 | | |
 |---|---|
-| GPU | MI355X / gfx950 (CDNA4), 160 KB LDS/CU, 32 LDS banks |
+| GPU | AMD Instinct MI355X (gfx950, CDNA4), 160 KB LDS/CU, 32 LDS banks, wave64 |
 | ROCm | 7.2 |
-| atom | `v_mfma_f32_16x16x32` (CDNA4 wide-K), wave64 |
-| shape | square `fp16`, RCR, 4096³ / 8192³ |
+| atom | `v_mfma_f32_16x16x32` (CDNA4 wide-K) |
+| shape | square `fp16`, RCR, `8192³` (`S = 8192`) |
+| geometry | macro-tile `256×256×64`, warp grid `4×4`, warp_k = 1 → **1 workgroup / CU** |
+| dtype | `fp16` in / `fp16` out / `fp32` accumulate |
 
----
+> **Measurement.** Only **same-session** ratios are meaningful — the box thermally
+> throttles, so absolute TF/s drifts ±5–10% between runs with the GPU clock state.
+> The driver therefore builds all six rungs first, then measures them **interleaved**
+> against an in-session rocBLAS reference (`torch.matmul`) so every rung sees the
+> same clock; the printed `vs rocBLAS` ratio is the number to trust, not the absolute
+> TF/s.
 
-## Rung A → B: direct-to-LDS
+## Prerequisites
 
-The stock pipeline stages every tile global→VGPR→LDS (a `buffer_load` then a
-`ds_write`). The hardware can stream global memory **straight into LDS**
-(`buffer_load_dwordx4 ... lds`, via `async_buffer_load_lds_addr`), eliminating
-the `ds_write` entirely and the VGPRs that held the staged data. ISA-confirmed:
-**0 `ds_write`** in the mainloop. `TraitSpec.direct_to_lds`. Small alone
-(589→647) but it's the foundation the prefetch and swizzle both build on.
+- A **gfx950** GPU (this study is pinned to MI355X / CDNA4).
+- `ck_dsl` on `PYTHONPATH` (the example imports `compile_kernel`, `Runtime`, and
+  `build_universal_gemm` from the package).
+- `torch` built with HIP (used both for the rocBLAS reference and for the
+  correctness check), plus `numpy`.
 
-## Rung B → C: depth-2 prefetch with a single barrier (the biggest jump)
+## Reproduce
 
-This is where most of the climb happens (647 → 1026, +59%). Two ideas:
+The single entry point is `scripts/ladder.py`. It has **no command-line flags** —
+the geometry (`S = 8192`, the `256×256×64 4×4` tile), `ITERS = 50`, `CYCLES = 10`,
+and the per-rung `TraitSpec` toggles are constants in the script; the only external
+control is which GPU it runs on. From the example directory, with `ck_dsl` on
+`PYTHONPATH`:
 
-**Depth-2 ping-pong.** Two LDS half-buffers; while the MFMAs consume half *p*,
-the next K-tile streams into half *p^1*. `TraitSpec.dtl_prefetch`.
-
-**One barrier per K-tile, not two.** A double-buffer has a write-after-read
-hazard (this iteration overwrites the half the *previous* iteration just read)
-and a read-after-write hazard (this iteration reads the half just loaded). The
-natural-but-wrong structure spends a barrier on each. At **1 workgroup per CU**
-there is no second workgroup to hide a barrier bubble, so a second barrier
-directly halves the time the MFMA unit has to run. The fix is *ordering* — issue
-the next-tile async write **after** the single barrier:
-
-```
-for each K-tile (parity p, other half p^1):
-    s_waitcnt(vmcnt=0, lgkmcnt=0)   # vmcnt0: half(p) has LANDED          (RAW)
-                                    # lgkmcnt0: prev reads of half(p^1) DRAINED (WAR)
-    s_barrier                       # one WG rendezvous: half(p) visible to all
-    load  -> half(p^1)             # async; issued AFTER the drain, so it cannot
-                                    #   race the just-finished reads -> no 2nd barrier
-    mma   <- half(p)               # matrix work overlaps the async HBM transfer
+```bash
+HIP_VISIBLE_DEVICES=0 python scripts/ladder.py
 ```
 
-One `s_waitcnt` + one bare `s_barrier` cover **both** hazards because the write
-comes after the drain. (`_emit_kloop_prefetch`.) This was found via a real bug:
-a depth-2 race that appeared only at 3–4 K-tiles — diagnosed with the LDS dump
-(layout correct), a discriminating test matrix (only the prefetch path wrong),
-and a K-sweep (the 3–4-tile signature of a race). The first fix added a *second*
-barrier and worked but cost the bubble above; collapsing back to one — correctly
-— is rung C.
+It builds and correctness-checks all six rungs A–F (each against an in-session
+`torch.matmul` reference, gate `err < 1e-2`), warms every rung plus rocBLAS, then
+times all of them interleaved across 10 cycles and prints a TF/s + `vs rocBLAS`
+table. Takes ~5 minutes.
 
-## Rung C → D → E: killing LDS bank conflicts
+The driver selects the rung-D coarse swizzle by setting `CK_SWZ_R/W/L = 3,1,4`
+through the environment for that one build and clearing them everywhere else, so
+rung E uses the auto-derived element-granular swizzle. (Those env vars are an
+experiment override, not a user knob for normal use.)
 
-With the mainloop tight, the counter said **52% `LDSBankConflict`** and 35%
-`MfmaUtil` — the MFMA unit was starving on LDS reads. This took two rungs and a
-piece of arithmetic.
+## File map
 
-**Why the conflict exists.** The A tile is row-major `[M][K]` with K = 64 halves
-= 128 bytes = **exactly 32 bank-words**. The bank an element hits is
-`(row·stride + col)/2 mod 32` — and with stride a multiple of the bank count,
-the `row` term **vanishes**:
+| path | purpose |
+|---|---|
+| `README.md` | this document — field guide, ladder, findings |
+| `ALGORITHM.md` | the spec, data layout, LDS bank-conflict arithmetic, and schedule reasoning |
+| `scripts/ladder.py` | the single reproduction driver: builds rungs A–F as `UniversalGemmSpec`/`TraitSpec` variants over the fixed geometry, correctness-gates each against `torch.matmul`, then interleaves 10 timing cycles of all rungs plus rocBLAS and prints TF/s + ratio |
+| `../../../instances/common/gemm_universal.py` | the production universal-GEMM spec and emitter that every rung is built from (`DataSpec`, `TileSpec`, `TraitSpec`, `UniversalGemmSpec`, `build_universal_gemm`, `is_valid_spec`) |
 
-```
-bank = (row·64 + col)·2/4 mod 32 = (row·32 + col/2) mod 32 = (col/2) mod 32
-```
+## The ladder
 
-So every one of the 16 M-rows in an atom reads the *same* column → the *same*
-banks. A stride alias, not a layout accident.
+The headline result is one reproducible ladder at the fixed geometry
+(`256×256×64`, `4×4` warps, `8192³`, `fp16`). Each rung layers one `TraitSpec`
+lever on the previous and is bit-exact (`bad=0`):
 
-**The tool is a swizzle, not padding.** XOR a function of the row into the
-column: `bank = ((col ^ f(row))/2) mod 32`. Now `f(row)` can spread rows across
-banks. Two things decide how far it spreads:
+| # | technique layered on | TF/s | vs rocBLAS | what it removes |
+|---|---|---:|---:|---|
+| A | plain tile pipeline (`compv4`, VGPR-staged double buffer) | ~590 | ~0.31× | — (starting point) |
+| B | `+ direct_to_lds` | ~650 | ~0.34× | the global→VGPR→LDS round-trip (0 `ds_write`) |
+| C | `+ dtl_prefetch`, **single-barrier** mainloop | ~1040 | ~0.54× | the per-tile barrier bubble |
+| D | `+ lds_swizzle` (coarse 4-way, `CK_SWZ=3,1,4`) | ~1420 | ~0.74× | 52% → 25% bank conflict |
+| E | `+ lds_swizzle` (auto **element-granular**) | ~1450 | ~0.75× | 25% → **0%** bank conflict |
+| F | `+ dtl_cache_b=CACHE_ALL` | ~1550 | ~0.81× | B L2 eviction on reuse |
 
-* **Granularity.** Swizzle whole `ds_read_b128` slots (8 halves = bit 3), so
-  every target stays 16-byte aligned. The LDS write is hardware-contiguous and
-  the read recomputes the same XOR, so it's a bijection — **bit-exact** with no
-  layout change (XOR is its own inverse: the load fetches `col^f(row)`, the read
-  asks for `col^f(row)`, they cancel).
-* **Which bits, how many.** The aliasing dimension is `m_in_atom` (0…15) — the
-  **low** row bits — and there are `block_k/8 = 8` slots to spread into.
+**≈2.6× from baseline A to rung F, every rung bit-exact (`bad=0`).** The TF/s and
+ratio columns are the approximate, clock-dependent figures the script's docstring
+records (`scripts/ladder.py`, lines 11–19); the script recomputes both live, so
+your printed numbers depend on the running GPU clock — trust the `vs rocBLAS`
+ratio over the absolute TF/s. The bank-conflict deltas in the last column are
+read from the `LDSBankConflict` hardware counter (52% with no swizzle, 25% at the
+coarse rung D, 0% at the element-granular rung E); the matrix unit's `MfmaUtil`
+counter tracks them upward (≈35% → ≈51% → ≈54% across the same three rungs). These
+counter readings are the basis for §5 of [`ALGORITHM.md`](ALGORITHM.md); they are
+not produced by `ladder.py` itself, which times the rungs but does not read
+hardware counters.
 
-**Rung D — the first swizzle keyed the wrong bits.** A 2-slot toggle on a *high*
-row bit (`col ^= ((row>>3)&1)<<4`) cut 52% → **25%** (51% util, 1448 TF). Better,
-but stuck: it distinguishes warp groups, not the rows inside an atom, and 2 slots
-against a 16-row alias is 4-way = 25% by construction.
+### vs hand-tuned assembly (rocBLAS)
 
-**Rung E — element-granular, low-bit, all-slots → 0%.** Deriving the parameters
-from the geometry instead of guessing — granularity `L = log2(8) = 3`, use all
-slots `W = log2(block_k/8) = 3`, key on the low bits `R = 0`:
+Measured like-for-like (`fp16`, same shape, same process, interleaved cycles so
+both see the same clock, all `bad=0`):
 
-```
-col ^= (row & 7) << 3          # permute all 8 b128 slots by the low row bits
-```
+| `fp16` @ 8192³ | TF/s | ratio |
+|---|---:|---:|
+| rocBLAS (Tensile, hand-scheduled GCN asm) | ~1920 | 1.00× |
+| **ck_dsl (direct-to-LDS + cache lever, rung F)** | ~1550 | **~0.81×** |
+| ck_dsl (direct-to-LDS, default cache, rung E) | ~1450 | ~0.75× |
 
-drives `LDSBankConflict` to **0.0%**, lifts `MfmaUtil` to **54%**, and is
-**bit-exact** (verified race-free on the K-sweep 1…13 tiles + rectangular +
-large). This is now the auto-derived default for `lds_swizzle` (it computes
-`L/W/R` from the atom and `block_k`; `CK_SWZ_R/W/L` override for experiments).
-**Yes — zero bank conflicts is achievable on this access pattern, and this is the
-mechanism.**
+Same-session, interleaved, fully warmed, all `bad=0` (the figures the script's
+docstring records). Two further `TraitSpec` knobs add a further ~0.5–1% on top of
+rung F: `chiplet_swizzle` (XCD grid remap, measured best with
+`chiplet_chunk_size=32`) and `waves_per_eu`. `scripts/ladder.py` does not enable
+them; set the fields in the script's per-rung `dict`s to try them.
+
+> **The ratio moves with the clock.** The ~0.81× above is measured with the GPU at
+> boost clock, where rocBLAS — being pure MFMA-issue-bound — scales better than
+> this kernel's fixed one-barrier-per-K-tile cost at 1 WG/CU. Measured *sustained*
+> (throttled) in the same session, the gap narrows substantially because both
+> kernels lose clock together while this kernel's fixed-latency term becomes a
+> smaller fraction. Only same-session ratios are meaningful either way; the
+> absolute TF/s is not.
+
+## Rung-by-rung (how each was found)
+
+The full derivation lives in [`ALGORITHM.md`](ALGORITHM.md); the short version:
+
+- **A → B — `direct_to_lds`.** The stock pipeline stages every tile global → VGPR
+  → LDS (`buffer_load` then `ds_write`). Direct-to-LDS streams global straight into
+  LDS in one instruction; ISA-confirmed **0 `ds_write`** in the mainloop. Small
+  alone, but it is the foundation prefetch and swizzle both build on.
+- **B → C — `dtl_prefetch`, one barrier (the biggest jump).** Two LDS half-buffers
+  ping-pong; while MFMAs consume half `p`, the next K-tile streams into half `p^1`.
+  The key trick is collapsing two barriers to one: a single `s_waitcnt`
+  (vmcnt0 for the just-landed half = RAW, lgkmcnt0 for the drained prior reads =
+  WAR) plus one bare `s_barrier` cover both hazards, because the next async write is
+  issued **after** the drain. At 1 WG/CU there is no second workgroup to hide a
+  second barrier, so collapsing two to one is the largest rung.
+  (`dtl_prefetch` requires `direct_to_lds=True` — the spec raises `ValueError`
+  otherwise.)
+- **C → D → E — killing LDS bank conflicts.** The A tile's `K = 64` halves =
+  exactly 32 bank-words, so the row term vanishes mod 32 and every M-row in an atom
+  hits the same banks (a stride alias). XOR-ing a function of the row into the
+  column spreads rows across banks; because the LDS write and the MFMA `ds_read`
+  recompute the same XOR it is a bijection (bit-exact, no layout change). Rung D's
+  coarse high-bit swizzle drops conflicts 52% → 25%; rung E's auto-derived
+  element-granular, low-bit, all-slots swizzle (`col ^= (row & 7) << 3`) drives
+  `LDSBankConflict` to **0%**. The element-granular form is the default when
+  `CK_SWZ_*` is unset.
+- **F — `dtl_cache_b=CACHE_ALL`.** A square GEMM reuses the *whole* B across every
+  M-tile, so the default `CACHE_STREAM` (one-shot) hint is wrong; setting
+  `dtl_cache_b = CACHE_ALL` (`0`) keeps B L2-resident. (`TraitSpec` defaults:
+  `dtl_cache_a=0`=ALL, `dtl_cache_b=2`=STREAM.)
 
 ## What looked like a lever but wasn't (measured negatives)
 
-* **Higher occupancy.** Hypothesis: smaller tiles → 2+ WG/CU → hide the barrier.
-  Measured the opposite — every 2+ WG/CU geometry is far slower, because `tk=32`
-  halves MFMAs/tile (barrier cost per FLOP explodes) and smaller M/N kills reuse:
+Kept so they are not re-tried — every one was built and measured, all `bad=0`:
 
-  | tile / warps | WG/CU | TF/s |
-  |---|---|---:|
-  | **256×256×64 4×4** | **1** | **1522** |
-  | 128×128×64 2×2 | 2 | ~870 |
-  | 256×256×32 4×4 | 2 | ~810 |
-  | 128×128×32 2×2 | 5 | ~430 |
+- **Higher occupancy.** Smaller tiles → 2+ WG/CU was the hypothesis (a second
+  workgroup hides the barrier). Measured the opposite: every 2+ WG/CU geometry is
+  far slower. Same-session `vs rocBLAS` ratios from the geometry sweep:
+  `256×256×64 4×4` at 1 WG/CU ≈ 0.74×; `128×128×64 2×2` ≈ 0.43×;
+  `256×256×32 4×4` ≈ 0.40×; `128×128×32 2×2` ≈ 0.21×. A `tk=32` step halves the
+  MFMAs/tile and smaller M/N kills reuse — both dominate any latency the second
+  workgroup could hide. Geometry is settled, not a lever.
+- **In-phase prefetch-local-read.** Reading the next k-step's fragments before the
+  current MFMAs was depth-1 neutral and, read a whole step ahead, spilled 16 live
+  fragments and **halved** throughput.
+- **LDS padding (`lds_k_pad`).** Widening the row stride also breaks the alias, but
+  spends LDS the 1-WG/CU tile cannot give up (>160 KB) and measured net-negative.
+  The free swizzle wins.
+- **Register-staged depth-2 prefetch (rocBLAS PGR2).** Built end-to-end and
+  numerically exact (rel-error 0 across 1–13 tiles, rectangular, large) but lands at
+  761 TF / ~0.42× — half the direct-to-LDS path — because register staging *requires*
+  an explicit `ds_write` that `comgr` will not schedule into the MFMA shadow.
+- **`iglp_opt`.** The sanctioned IR-level scheduling hint is *exactly neutral* on
+  the fast direct-to-LDS path (1559 → 1561 TF): that path has no `ds_write`s to
+  interleave and is barrier-bound, not schedule-bound.
 
-  The big tile at 1 WG/CU wins decisively. Geometry is settled, not a lever.
-* **In-phase prefetch-local-read.** Reading the next k-step's fragments before
-  the current MFMAs: depth-1 was **neutral** (the backend's schedule hint
-  already fills the in-tile shadow); reading a whole step ahead spilled 16 live
-  fragments to memory and **halved** throughput. Removed.
-* **LDS padding.** Widening the row stride also breaks the alias, but it spends
-  LDS the 1-WG/CU tile can't give up (>160 KB) and measured net-negative.
-  The *free* fix (swizzle) wins; the *LDS-spending* one loses on occupancy.
+## The residual gap to rocBLAS
 
-## Rung F: the L2 cache lever (`dtl_cache_b=ALL`, +9%)
+The kernel reaches rocBLAS's **exact geometry** (`DepthU = 64`, 256-wide macro-tile,
+double-buffered — confirmed by mining its Tensile solution), achieves **0 LDS bank
+conflicts**, and emits the same direct-to-LDS + double-buffer skeleton. The
+remaining gap (~19% at boost clock, narrower when sustained) is **instruction
+scheduling**, and the two capabilities are mutually exclusive in the IR world:
 
-The direct-to-LDS global loads carry a cache-coherency hint. B defaulted to
-`CACHE_STREAM` (SLC set — "one-shot, don't pollute L2"), which is right for a
-weight matrix read once. But a **square** GEMM reuses the *whole* B across every
-M-tile, so streaming it is exactly wrong: setting `dtl_cache_b=CACHE_ALL` keeps B
-L2-resident and recovers **+9%** (0.735→0.80× rocBLAS, measured interleaved,
-`bad=0`). Chiplet/XCD grid swizzle (`chiplet_swizzle`, `chunk=32`) and an
-`amdgpu-waves-per-eu` hint add ~0.5–1% on top → **~0.81× rocBLAS**.
-
-## What looked like a lever but wasn't — extended (from the moonshot)
-
-A 13-agent workflow mined the rocBLAS Tensile solution for large square and
-implemented seven of its techniques as ck_dsl experiments (all `bad=0`, all in
-isolated copies). **None beat the cache-tuned baseline.** The decisive one,
-**depth-2 global prefetch (PGR2)**, was then built *correctly* end-to-end with a
-real register-staging path (see "What the IR path cannot do" below) — it works
-and is bit-exact but lands at 0.42× because the `ds_write` it requires can't be
-hidden without assembly-level scheduling. `ScheduleIterAlg=3` eliminated all 12
-register spills but code bloat cancelled it;
-deeper `DepthU` lost the double-buffer. Recon also confirmed rocBLAS uses the
-**same geometry we converged on** independently: `DepthU=64`, 256-wide macro-tile,
-double-buffered.
-
-## How this compares to hand-tuned assembly (rocBLAS)
-
-rocBLAS GEMM is **Tensile-generated, hand-scheduled GCN assembly** — every
-instruction placed, operands register-double-buffered. Our kernel is authored in
-a Python DSL and lowered through LLVM IR (`libamd_comgr`). Measured **like-for-
-like** (fp16, same shape, same process, interleaved cycles so both see the same
-clock, all `bad=0`):
-
-| fp16 @ 8192³ | TF/s | ratio |
-|---|---:|---:|
-| rocBLAS | ~1900 | 1.00× |
-| **ck_dsl (DTL + cache lever)** | ~1550 | **~0.82×** |
-| ck_dsl (DTL, default cache) | ~1410 | ~0.73× |
-
-Measured same-session, interleaved, fully warmed, all `bad=0`. (Only same-session
-ratios are meaningful here — absolute TF drifts with the GPU's clock, so the
-kernels are always compared back-to-back in the same run.)
-
-### What the IR path matched
-
-Independently of rocBLAS we reached its **exact geometry** (`DepthU=64`, 256-wide
-macro-tile, double-buffered — confirmed by mining its Tensile solution), achieved
-**0 LDS bank conflicts**, and emit the same direct-to-LDS + double-buffer
-skeleton. The residual ~15% is **instruction scheduling**, and we proved that by
-building the missing piece, not guessing.
-
-### What the IR path cannot do — built and measured
-
-The one rocBLAS lever that should close the gap is **PGR2** (depth-2 global
-prefetch with register-staged operands). We implemented it fully: split the global
-`buffer_load` (→ VGPR) from the `ds_write`, carried **two** staged tiles across
-the single barrier as loop-carried registers (tile *i+3* loaded at iter *i*,
-written at iter *i+2* — two MFMA phases of latency hiding), K-boundary clamped.
-
-It is **numerically correct** (rel-error 0 across 1–13 tiles, rect, large) — but
-**761 TF, 0.42×, half the DTL path's speed.** The reason is decisive: register
-staging *requires* an explicit `ds_write` to LDS (the fused direct-to-LDS path
-has **zero** `ds_write`), and `comgr` does not schedule that `ds_write` into the
-MFMA shadow, so it costs full time and competes with the operand `ds_read`s. The
-two capabilities are mutually exclusive in the IR world:
-
-* **direct-to-LDS:** 0 `ds_write`, but depth-1 prefetch only (the fused load
-  can't be register-staged).
-* **register-staged:** depth-2 prefetch, but pays the `ds_write`.
+- **direct-to-LDS:** 0 `ds_write`, but depth-1 prefetch only.
+- **register-staged:** depth-2 prefetch, but pays the unhidden `ds_write`.
 
 rocBLAS gets **both** only because hand-written assembly places each `ds_write`
-into a specific MFMA issue slot so it is hidden (`ScheduleIterAlg=3`). That
-instruction-level placement is the **irreducible** missing capability — not the
-register-staging primitive (we built that), but the scheduler that hides its cost.
-A DSL→IR→comgr pipeline emits IR and lets the backend schedule; it cannot place
-individual instructions at that granularity.
+into a specific MFMA issue slot. That instruction-granularity placement is the
+irreducible missing capability — a DSL → IR → comgr pipeline emits IR and lets the
+backend schedule it, and cannot place individual instructions at that granularity.
+The gap is characterized down to that single capability, *proven by building the
+alternative (PGR2) and measuring it lose*. Every number in this document is a
+same-session, `bad=0` measurement on the pinned hardware.
 
-We also tried the *sanctioned* IR-level scheduling lever — `__builtin_amdgcn_iglp_opt`
-(the intrinsic CK's own attention pipeline uses; added to the DSL as `b.iglp_opt`)
-— which asks the backend to apply its canned GEMM MFMA/memory interleave. On the
-fast DTL path it is **exactly neutral** (1559→1561 TF), because that path has
-**no `ds_write`s to interleave** and is barrier-bound, not schedule-bound: there
-is nothing for the scheduler to reorder. It would only bite on the `ds_write`-heavy
-register-staged path, where the `ds_write` cost dominates anyway. So even the
-sanctioned scheduling hint cannot move the DTL ceiling.
+## Troubleshooting
 
-**Net:** a Python-authored kernel, lowered through IR, lands at **~0.81–0.85×
-rocBLAS** on the same tile geometry with zero bank conflicts — within ~15–19% of
-hand-tuned assembly, and that remaining gap is characterized down to a single
-capability the IR path structurally lacks (assembly-grade `ds_write`/MFMA
-interleaving), *proven by building the alternative and measuring it lose*. Every
-number here is a same-session, `bad=0` measurement on the pinned hardware.
+- **`dtl_prefetch requires direct_to_lds=True`** — `dtl_prefetch` (rung C and up)
+  cannot be enabled without `direct_to_lds`; there is nothing to ping-pong without
+  the fused load. The ladder always pairs them.
+- **`direct_to_lds requires block_k % … == 0`** — the direct-to-LDS path needs
+  `block_k` to be a multiple of the direct-to-LDS half granularity; `tile_k = 64`
+  satisfies it. Changing `tile_k` can trip this.
+- **`is_valid_spec` assertion** — the driver asserts `is_valid_spec(spec, "gfx950")`
+  before compiling each rung; an assertion here means the trait/tile combination is
+  not valid for the pinned arch. The shipped geometry is known-valid on gfx950.
+- **Correctness prints `WRONG(...)`** — the per-rung check compares against
+  `torch.matmul` with a `1e-2` gate; a `WRONG` line means the build for that rung
+  diverged. The shipped rungs are all bit-exact on gfx950.
+- **Absolute TF/s differs from the tables** — expected. The box throttles ±5–10%
+  with clock state; trust the **`vs rocBLAS`** ratio, which is measured
+  interleaved in the same session.
+- **No GPU / wrong arch** — this study is pinned to gfx950 (the MFMA atom, the
+  32-bank conflict arithmetic, and the LDS budget are CDNA4-specific). It is not
+  expected to reproduce on other architectures.

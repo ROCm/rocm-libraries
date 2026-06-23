@@ -43,11 +43,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
-
-_WMMA_M = 16
-_WMMA_N = 16
-_WMMA_K = 16
-_WAVE = 32
+from ._wmma_common import (
+    _WAVE,
+    _WMMA_K,
+    _WMMA_M,
+    _WMMA_N,
+    wmma16_grid,
+    wmma32_wave_guard,
+)
 
 
 @dataclass(frozen=True)
@@ -100,9 +103,7 @@ def is_valid_spec(spec: WmmaGemmSpec, arch: str = "gfx1151"):
             f"WMMA {_WMMA_M}x{_WMMA_N}x{_WMMA_K} {spec.dtype} atom absent on {arch} "
             f"(WMMA is an RDNA/gfx11 instruction)"
         )
-    if target.wave_size != _WAVE:
-        return False, f"this WMMA kernel is wave32; {arch} is wave{target.wave_size}"
-    return True, "ok"
+    return wmma32_wave_guard(target, arch)
 
 
 def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1151") -> KernelDef:
@@ -168,4 +169,4 @@ def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1151") -> KernelDef:
 
 def wmma_gemm_grid(M: int, N: int):
     """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile."""
-    return ((M + _WMMA_M - 1) // _WMMA_M, (N + _WMMA_N - 1) // _WMMA_N, 1)
+    return wmma16_grid(M, N)

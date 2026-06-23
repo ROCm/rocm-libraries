@@ -1,0 +1,12 @@
+{
+  "arch": "gfx950",
+  "args_signature": [],
+  "block_k": 0,
+  "block_m": 256,
+  "block_n": 64,
+  "hsaco": "",
+  "kernel_name": "ckdsl_attention_unified_2d_hd256_bs64",
+  "kind": "attention_unified",
+  "path": "2d",
+  "schema": "ck.dsl.example.manifest/v1"
+}

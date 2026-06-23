@@ -8,7 +8,6 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 |-------------------------------|--------------------------------------------------------------------------------------------------------|
 | `__init__.py` | Top-level re-exports. The canonical "what does the DSL expose" file. |
 | `__main__.py` | `python -m ck_dsl` lists discoverable entry points. |
-| `transforms.py` | Coordinate-transform DAG: `CoordVar`, `Transform`, `PassThrough`, `Pad`, `PadDynamic`, `Embed`, `Merge`, `Unmerge`, `Indirect`, `TensorDescriptor`, constructors (`pass_through`, `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, `indirect`). |
 | `run_manifest.py` | `python -m ck_dsl.run_manifest`; numpy-backed HSACO + manifest runner. |
 | `sweep.py` | Parallel build-on-the-fly sweep driver. `build_all_instances`, `build_default_dispatcher_set`, `write_sweep_manifest`. |
 | `sweep_bench.py` | Benchmark driver consuming a sweep manifest; CSV output. |
@@ -21,7 +20,11 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | `core/ir.py` | Typed SSA IR. `Type`, `VectorType`, `PtrType`, `SmemType`; singletons (`I1`, `I8`, `I32`, `I64`, `F16`, `BF16`, `F32`, `FP8E4M3`, `BF8E5M2`); cache-hint constants (`CACHE_ALL`, `CACHE_GLOBAL`, `CACHE_STREAM`, `NON_TEMPORAL`); `Value`, `Op`, `Region`, `Param`, `KernelDef`; `IRBuilder`. IRBuilder methods added in : `cvt_bf8_to_f32`, `cvt_f32_to_{fp8, bf8, i8_sat}`, `clamp_f32`, `global_atomic_add`, `lds_atomic_add`. |
 | `core/ir_print.py` | `print_ir(kernel)` — MLIR-style textual IR dump. |
 | `core/passes.py` | `optimize_kernel`, `canonicalize_region`, `eliminate_dead_pure_ops`, `PassStats`. Conservative constant fold + CSE + DCE. |
-| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. Production AMDGPU LLVM IR emission. Datalayout, intrinsic declarations, op-to-IR mapping. |
+| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`ck_dsl_c/`, reached through the `ckc_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
+| `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`CK_DSL_BACKEND`), auto-falling back to the native Python lowerer when the `ckc_engine` extension is not built. |
+| `core/ir_serialize.py` | `serialize` / round-trip of the `ck.dsl.ir/v1` artifact — the family-agnostic interchange the C++ engine lowers from. |
+| `core/arch/` | `ArchTarget`, `MmaOp`, `LayoutMap`, `known_arches`, the per-arch spec table (`arch_specs.json`), and the MFMA/WMMA layout-map SSOT. Supported targets: `gfx942`, `gfx950` (CDNA, wave64) and `gfx1151`, `gfx1201` (RDNA, wave32). |
+| `core/isa/` | Per-arch ISA backends that lower the target-neutral `tile.mma` op to the matching MFMA (CDNA) or WMMA (RDNA) call. |
 | `core/lower_hip.py` | `lower_kernel_to_hip(kernel)` — HIP C++ debug emission. |
 | `core/lower_cktile.py` | `lower_spec_to_cktile`, `lower_universal_gemm_to_cktile`, `lower_implicit_gemm_conv_to_cktile`. Spec-to-CK-Tile-C++ parity emitter. |
 
@@ -39,7 +42,8 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | Path | Primary contents |
 |---------------------------------------|-------------------------------------------------------------------------------------------------|
 | `helpers/__init__.py` | Re-exports for the helper layer. |
-| `helpers/atoms.py` | `MfmaAtom`, `MFMA_F16_ATOMS`, `MFMA_FP8_ATOMS`, `MFMA_ATOMS`, `mfma_atom(dtype, m, n, k)`. Nine atoms: f16 (4x4x4, 16x16x16, 16x16x32, 32x32x8, 32x32x16) + fp8 / bf8 (16x16x32, 32x32x16; ). |
+| `helpers/transforms.py` | Coordinate-transform DAG: `CoordVar`, `Transform`, `PassThrough`, `Pad`, `PadDynamic`, `Embed`, `Merge`, `Unmerge`, `Indirect`, `TensorDescriptor`, constructors (`pass_through`, `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, `indirect`). Re-exported at the top level (`from ck_dsl import ...`) and via `from ck_dsl.helpers.transforms import ...`. |
+| `helpers/atoms.py` | `MfmaAtom`, `WmmaAtom`, `mfma_atom(dtype, m, n, k)`, `wmma_atom(dtype, m, n, k)`. MFMA catalogs (wave64): `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, `MFMA_FP8_ATOMS` (fp8 / bf8, incl. the wide-K `fp8_16x16x128` hero), `MFMA_MX_ATOMS` (fp4 / fp6), and the unified `MFMA_ATOMS`. WMMA catalogs (RDNA wave32): `WMMA_F16_ATOMS`, `WMMA_BF16_ATOMS`, `WMMA_ATOMS`. |
 | `helpers/geometry.py` | `WarpGrid` — block/warp/lane decomposition. |
 | `helpers/loads.py` | `CoalescedTileLoader`, `AsyncTileLoader`, `AsyncTileLoaderSlot`, `DescriptorFn`, `lane_contiguous_descriptor`. |
 | `helpers/layouts.py` | `LdsLayout`, `TransposeLdsReader`, `xor_swizzle_bytes`. |
@@ -105,7 +109,6 @@ prefix for brevity).
 | `instances/batched_gemm.py` | `BatchedGemmSpec`, `build_batched_gemm`, `batched_gemm_signature`, `batched_gemm_grid`. |
 | `instances/grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `build_grouped_gemm`, `grouped_gemm_signature`, `GroupedGemmLauncher`, `grouped_gemm_problems`. |
 | `instances/conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec`, `make_a_descriptor`, `make_b_descriptor`, `make_d_descriptor`, `build_implicit_gemm_conv`. |
-| `instances/conv_implicit_gemm_auto.py` | Experimental alternate implicit-GEMM builder. Not exported from `instances/__init__.py`. |
 | `instances/conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec`, `build_direct_conv_16c`, `build_direct_conv_4c`. |
 | `instances/img2col.py` | `Img2ColSpec`, `build_img2col`, `img2col_grid`, `img2col_signature`. (CK Tile 04.) |
 | `instances/pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp`, `build_pooling2d`, `pooling2d_grid`, `pooling2d_signature`. (CK Tile 36.) |
@@ -153,12 +156,12 @@ prefix for brevity).
 
 | Path | Purpose |
 |---------------------------------------------------|--------------------------------------------------------------------|
-| `examples/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
-| `examples/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
-| `examples/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
-| `examples/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
-| `examples/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
-| `examples/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
+| `examples/common/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
+| `examples/common/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
+| `examples/common/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
+| `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
+| `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
+| `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
 | `examples/gfx950/attention/parity_unified_attention.py` | Triton vs CK DSL attention parity harness (all paths). |
 
 ## `example/ck_tile/dsl/<N>_*/gen.py`

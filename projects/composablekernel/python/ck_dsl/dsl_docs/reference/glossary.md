@@ -14,11 +14,11 @@ Bfloat16 storage dtype. Used by selected attention paths. The 16x16x16 bf16 MFMA
 
 ## Buffer Resource
 
-An AMDGPU 128-bit buffer descriptor used for bounds-checked raw buffer loads / stores. Created by `b.buffer_rsrc(ptr, num_bytes)` -> `llvm.amdgcn.make.buffer.rsrc.p1`. DW3 flags = `0x00027000` (TYPE=2, DATA_FORMAT=4, NUM_FORMAT=4). OOB byte offsets silently return zero.
+An AMDGPU 128-bit buffer descriptor used for bounds-checked raw buffer loads / stores. Created by `b.buffer_rsrc(ptr, num_bytes)` -> `llvm.amdgcn.make.buffer.rsrc.p1`. DW3 flags on CDNA (gfx942 / gfx950) = `0x00027000` (TYPE=2, DATA_FORMAT=4, NUM_FORMAT=4); the RDNA targets use a different DW3 word (the format-encoding moved relative to gfx9). OOB byte offsets silently return zero.
 
 ## CDNA
 
-AMD compute-die architecture family. CDNA3 = gfx940 / gfx942 / gfx950. CDNA4 = gfx950 successor.
+AMD compute-die architecture family. CDNA3 = gfx942 (MI300X / MI325X); CDNA4 = gfx950 (MI350X). Both are wave64 MFMA targets.
 
 ## CHIPLET / XCD
 
@@ -56,9 +56,13 @@ AMDGPU wave64 cross-lane permute via LDS. Lane `l` reads `data[(addr[l] >> 2) & 
 
 General matrix multiply. In the DSL the canonical builder is `build_universal_gemm` with `RCR` layout.
 
-## gfx940/942/950
+## gfx942/950
 
-AMDGPU MCPU strings for CDNA3 family devices. The default in this repo is `gfx950`.
+AMDGPU MCPU strings for CDNA family devices (gfx942 = CDNA3, gfx950 = CDNA4); both are wave64 MFMA targets. The default target in this repo is `gfx950`, but the engine also supports the RDNA wave32 / WMMA targets `gfx1151` and `gfx1201` (see RDNA).
+
+## RDNA
+
+AMD graphics-die architecture family. The wave32 / WMMA targets supported here are `gfx1151` (RDNA3.5) and `gfx1201` (RDNA4, incl. WMMA-based attention). The matrix path on these targets is `WmmaAtom` / `tile.mma` (wave32), not MFMA.
 
 ## HSACO
 
@@ -158,7 +162,7 @@ The AMDGPU wait-counter instruction. Used to drain pending VMEM / LGKM / EXP ope
 
 ## Wave64
 
-AMD wavefront of 64 lanes. Current MFMA lane mappings and helpers assume wave64. No wave32 path exists today.
+AMD wavefront of 64 lanes — the wavefront width on the CDNA (gfx942 / gfx950) MFMA targets. The RDNA targets (gfx1151 / gfx1201) are wave32 and use the WMMA path (`WmmaAtom`); the MFMA lane mappings described here are the wave64 layouts.
 
 ## WorkspacePool
 

@@ -66,6 +66,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence, Tuple
 
 from ...core.ir import F16, KernelDef, Type
+from ...helpers.spec import WarpTileBlockSizeMixin
 from ...helpers.transforms import (
     Merge,
     TensorDescriptor,
@@ -108,7 +109,7 @@ def _flatten_batch(shape: Sequence[int]) -> int:
 
 
 @dataclass(frozen=True)
-class BatchedContractionSpec:
+class BatchedContractionSpec(WarpTileBlockSizeMixin):
     """One concrete batched-contraction kernel configuration.
 
     Mirrors :class:`BatchedGemmSpec` (which is itself a thin wrapper
@@ -125,13 +126,7 @@ class BatchedContractionSpec:
     name: str = "ck_dsl_batched_contraction"
 
     def __post_init__(self) -> None:
-        if self.block_size == 0:
-            t = self.tile
-            object.__setattr__(
-                self,
-                "block_size",
-                t.warp_m * t.warp_n * t.warp_k * self.wave_size,
-            )
+        self._init_block_size()
 
     @property
     def batch_count(self) -> int:

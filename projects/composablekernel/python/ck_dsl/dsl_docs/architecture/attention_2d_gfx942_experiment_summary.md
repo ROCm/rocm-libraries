@@ -25,6 +25,19 @@ per-lane V distribution, NOT an ISA ceiling — flash and CK-Tile are existence 
 `PARKED` (proven-negative as implemented, resumable) · `DEFERRED` (out of scope / blocked on a
 precondition).
 
+> **Backend-validity note (read first).** Perf and register/occupancy numbers in
+> this log were measured on an **llvm20 + comgr 7.0.1** backend. The production
+> backend is **llvm22 + comgr 7.2** (selected by importing `torch` first). On
+> gfx950 the same llvm20→llvm22 switch erased an apparent d128 register/occupancy
+> wall (256 VGPR + spills / 1 WG/CU on llvm20 → 213 VGPR / 0 spill / 2 WG/CU on
+> llvm22) and moved the prefill gap from ~0.5–0.7× to ~0.95–1.01× Triton. The
+> gfx942 **AGPR-residency / occupancy / vs-flash** numbers below (e.g. the
+> `archVGPR 128 / accumVGPR 384`, the `~1 wg/CU`, the `340` V+A count, the
+> `63 % of flash`, and the `~0.53–0.90× vs flash` standing) are therefore
+> flagged as **backend-dependent and pending production-llvm22 re-validation**.
+> mfma-vgpr-form may eliminate the AGPR spill here too, as it did on gfx950.
+> ISA-availability and correctness facts are backend-independent and stand.
+
 ---
 
 ## Baseline
@@ -597,6 +610,54 @@ today.
 2. If conflict-free V lands, the next structural gap is **accumulator residency**: flash carries
    384 AGPR (deeper SW pipeline / larger acc tiles) vs our 152 — independent of the V fix.
 3. bf16 D128 has no wide flash atom yet — a separate enablement, not a tuning lever.
+
+---
+
+## Update (2026-06-19) — D128 is already 2 WG/CU; the residual is scheduling, not occupancy
+
+> **Backend caveat.** The register/occupancy and vs-flash numbers in this
+> update were measured on **llvm20 + comgr 7.0.1**, not production **llvm22 +
+> comgr 7.2**. On gfx950 the analogous d128 body's register/occupancy reading
+> flipped between those backends; the `340` V+A count and the `~0.53–0.90×
+> vs flash` standing here are **backend-dependent and pending production-llvm22
+> re-validation**. The qualitative conclusion (occupancy is not the wall; the
+> residual is inner-loop scheduling) is the right framing regardless of backend.
+
+A follow-up occupancy re-check (`llvm-readelf`-exact, throttle-free)
+**overturns the occupancy framing** that ran through Batches 1–4. The shipped
+gfx942 D128 wide config (transposed-x8 with K **single-buffered**) read as
+**already 2 WG/CU** on llvm20: LDS = 32 KB (`K_lds[1]` 16 KB + `V_lds[1]` 16 KB),
+V+A = 340 (a large fraction of which is accumulator residency in the AGPR file —
+exactly what the llvm22 backend reorganizes, so re-measure before citing). The
+earlier "D128 wide = 48 KB → 1 WG/CU" lines (and the "narrower-N accumulator
+redesign" idea) are **superseded** — K single-buffering already halved `K_lds`,
+so there is **no occupancy wall left to break**. Consequently the gfx950
+"small-tile breaks the 1-WG wall" thesis (see that arch's experiment summary)
+**does not transfer** to gfx942.
+
+A small-tile `T=32` **double-K** `num_warps=2` variant (LDS = 24 KB, still 2
+WG/CU) does still give a robust **+11–14 %** at S≤2048 (both dtypes; fp16 S4096
+0.814 → 0.903) — but via a *different* mechanism than gfx950's: it **restores the
+K double-buffer prefetch** that the shipped `T=64` path gives up to fit LDS. That
+is a prefetch/scheduling win, not occupancy. The literal LDS-halving
+`num_warps=1` / `T=32` / K-single (4 WG/CU at 16 KB) is a **trap** (regresses
+long-S; `BLOCK_M=32` starves the grid; occupancy past 2 WG/CU is useless here).
+
+**Caveat for landing the small-tile win:** `T=32` requires a paged-KV cache
+`block_size=32` (`tile_size` must be a multiple of `block_size`). If production
+cache is `block_size=64`, `T=32` is illegal and the win must be re-validated
+(`T=64` double-K = 48 KB → back to 1 WG/CU, likely loses it).
+
+**Standing (llvm20-measured, re-validation pending):** on the llvm20 backend,
+even *with* the small-tile win, gfx942 D128 prefill **still lost to flash**
+(best ~0.53–0.67× bf16, ~0.67–0.90× fp16). Given the gfx950 llvm20→llvm22
+reversal, **these ratios must be re-measured on production llvm22 before being
+treated as the gfx942 gap.** The residual was attributed to **algorithmic /
+inner-loop scheduling** — the same lever family as the parked cfv-store (conflict-free V via
+a store-path transpose) and gfx950's S4096 push (direct-to-LDS async, staggered
+partial `lgkmcnt` waits, conflict-free V). gfx942's wide bf16/fp16 atom is
+`mfma_f32_32x32x8` (K=8); the K=16 atom and `ds_read_tr16` gfx950 uses for
+conflict-free V are not available here.
 
 ---
 

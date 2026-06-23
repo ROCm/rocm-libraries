@@ -300,8 +300,8 @@ level (via a flag-config on the production kernel, or a curated snapshot under
 per-level ledger (T1 and T8). No external dependencies.
 
 ```bash
-cd /workspace/rocm-libraries-streaming/projects/composablekernel/python
-VENV=/workspace/rocm-libraries-streaming/.venv/bin/python
+cd <repo>/projects/composablekernel/python
+VENV=python  # or the path to your venv's python
 
 # whole ledger (parity + numeric perf, T1 and T8)
 PYTHONPATH=$(pwd) $VENV -m ck_dsl.examples.gfx950.fused_mega_moe.reproduce_levels

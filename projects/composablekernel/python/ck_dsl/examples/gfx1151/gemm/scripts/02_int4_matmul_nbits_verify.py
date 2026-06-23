@@ -5,7 +5,7 @@
 Builds the fp16-activation / packed-int4-weight large-N WMMA kernel, writes a
 ``matmul_nbits_fp16`` manifest, and runs ``ck_dsl.run_manifest --verify`` (numpy
 reference ``C = A @ dequant(B, scales)^T``). Must run on a gfx1151 device (e.g.
-alola ``ctr-halo-*``) for the verify step; ``--no-verify`` only builds and writes
+a gfx1151 SLURM node) for the verify step; ``--no-verify`` only builds and writes
 the artifact so a remote node can run the numeric gate.
 
   python scripts/02_int4_matmul_nbits_verify.py --m 128 --n 4096 --k 4096
@@ -43,7 +43,9 @@ def _subprocess_env() -> dict:
     return env
 
 
-def _large_n_spec(name: str, n: int, k: int, group: int, scale_dtype: str) -> MatMulNBitsSpec:
+def _large_n_spec(
+    name: str, n: int, k: int, group: int, scale_dtype: str
+) -> MatMulNBitsSpec:
     """The first tuned large-N geometry: 64x128x16, 2x2 warps, WMMA 16x16x16."""
     return MatMulNBitsSpec(
         name=name,
@@ -165,7 +167,9 @@ def main() -> int:
         f"{args.m},{args.n},{args.k}",
         "--verify",
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env())
+    r = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env()
+    )
     sys.stdout.write(r.stdout)
     if r.returncode != 0 and "max_abs_diff" not in r.stdout:
         sys.stderr.write(r.stderr[-2000:])
@@ -186,8 +190,11 @@ def main() -> int:
         {
             "kernel": "matmul_nbits large_n (int4 weight-only, W4A16)",
             "shape": {"M": args.m, "N": args.n, "K": args.k},
-            "group_size": args.group_size, "scale_dtype": args.scale_dtype,
-            "tol": args.tol, "max_abs_diff": max_abs, "pass": ok,
+            "group_size": args.group_size,
+            "scale_dtype": args.scale_dtype,
+            "tol": args.tol,
+            "max_abs_diff": max_abs,
+            "pass": ok,
         },
     )
     return 0 if ok else 1

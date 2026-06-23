@@ -6,7 +6,7 @@ Source: `core/ir.py` (`IRBuilder.lane_id`, `readfirstlane`, `pin_sgpr`, `to_sgpr
 
 ## Wave Geometry
 
-AMDGPU CDNA waves are 64 lanes. CK Tile / `ck_dsl` MFMA lane mappings assume wave64. There is no wave32 lowering today.
+AMDGPU CDNA waves are 64 lanes. CK Tile / `ck_dsl` MFMA lane mappings assume wave64, which covers the CDNA targets (`gfx942`, `gfx950`). The RDNA targets (`gfx1151`, `gfx1201`) are wave32 and lower their matmuls through the WMMA path (`WmmaAtom`, `wave_size=32`) rather than MFMA; the cross-lane primitives below are wave64-oriented, so a wave32 kernel must use the WMMA fragment layouts and reduce within 32-lane groups.
 
 ```text
 lane = lane_id()       # 0..63

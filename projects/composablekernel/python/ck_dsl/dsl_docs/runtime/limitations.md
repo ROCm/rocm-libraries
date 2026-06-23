@@ -7,7 +7,7 @@ This page is blunt. It lists what the DSL does not currently handle generally, p
 `ck_dsl` is a high-performance AMDGPU kernel DSL, not a full Python-to-GPU compiler. It expects kernel authors to understand:
 
 - GPU grid / block decomposition;
-- wave64 lane behavior;
+- wave lane behavior (wave64 on CDNA gfx942 / gfx950, wave32 on RDNA gfx1151 / gfx1201);
 - LDS allocation, layout, and bank-conflict semantics;
 - MFMA operand and accumulator layouts;
 - explicit synchronization (waitcnt, barriers);
@@ -18,15 +18,15 @@ It is strongest for kernels whose performance depends on explicit CK Tile-style 
 
 ## Architecture
 
-Current default and most-tested target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also runs on `gfx940 / gfx942` for the atoms that exist there.
+Current default and most-tested target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also runs on the other CDNA target `gfx942` (and `gfx940` for the atoms that exist there), and on the RDNA targets `gfx1151` (RDNA3.5, wave32 WMMA) and `gfx1201` (RDNA4, wave32 WMMA, including attention). Backends are registered in `core/isa/backend.py` (`backend_for`).
 
 Risk areas when changing architecture:
 
-- MFMA intrinsic availability — K-packed atoms (`f16_16x16x32`, `f16_32x32x16`) are gfx950-only; bf16 16x16x16 lowers via the `_1k` variant only.
-- `s_waitcnt` encoding (vmcnt bit layout differs by family).
+- MFMA / WMMA intrinsic availability — K-packed MFMA atoms (`f16_16x16x32`, `f16_32x32x16`) are gfx950-only; bf16 16x16x16 lowers via the `_1k` variant only on CDNA; the RDNA targets use WMMA atoms (16x16x16) instead of MFMA.
+- `s_waitcnt` encoding (vmcnt bit layout differs by family; RDNA gfx11/gfx12 use a different field layout than gfx9/10).
 - LDS bank-conflict expectations.
 - COMGR target ISA behavior.
-- Wave size is fixed at 64; no wave32 path exists today.
+- Wave size differs by family: CDNA (gfx942 / gfx950) is wave64; RDNA (gfx1151 / gfx1201) is wave32.
 
 Do not assume a kernel tuned for one target is optimal — or even valid — on another.
 
@@ -51,6 +51,8 @@ Coverage caveats:
 ## Lowering Coverage
 
 Every IR op must have explicit production lowering. Unsupported ops raise at lowering time.
+
+There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `ck_dsl_c/` port, reached via the `ckc_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`CK_DSL_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
 
 HIP debug lowering is narrower than LLVM production lowering. CK Tile spec emission is narrower still and operates from selected specs, not `KernelDef`.
 

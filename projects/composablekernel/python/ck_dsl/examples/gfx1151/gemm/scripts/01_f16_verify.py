@@ -4,7 +4,7 @@
 
 Builds the RDNA3.5 WMMA GEMM, writes a gemm manifest, and runs
 ``ck_dsl.run_manifest --verify`` (numpy reference ``C = A @ B.T``, RCR f16).
-Must run on a gfx1151 device (e.g. alola ``ctr-halo-*``).
+Must run on a gfx1151 device (e.g. a gfx1151 SLURM node).
 
   python scripts/01_f16_verify.py --m 128 --n 128 --k 128
 """
@@ -100,7 +100,9 @@ def main() -> int:
         f"{args.m},{args.n},{args.k}",
         "--verify",
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env())
+    r = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env()
+    )
     sys.stdout.write(r.stdout)
     if r.returncode != 0 and "max_abs_diff" not in r.stdout:
         # A real launch/runtime failure (not just a zero-tol mismatch).
@@ -122,7 +124,9 @@ def main() -> int:
         {
             "kernel": "wmma_gemm (f16 baseline)",
             "shape": {"M": args.m, "N": args.n, "K": args.k},
-            "tol": args.tol, "max_abs_diff": max_abs, "pass": ok,
+            "tol": args.tol,
+            "max_abs_diff": max_abs,
+            "pass": ok,
         },
     )
     return 0 if ok else 1

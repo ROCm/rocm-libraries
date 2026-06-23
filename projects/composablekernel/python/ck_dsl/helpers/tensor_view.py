@@ -374,8 +374,12 @@ class TensorView:
         return b.global_load(self.base, off, dtype=self.dtype)
 
     def store_scalar(
-        self, b: IRBuilder, indices: Sequence[Value], value: Value,
-        *, align: Optional[int] = None,
+        self,
+        b: IRBuilder,
+        indices: Sequence[Value],
+        value: Value,
+        *,
+        align: Optional[int] = None,
     ) -> None:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
@@ -856,7 +860,10 @@ class TileWindow:
         return self.view.load_scalar(b, self._global_indices(b, local_indices))
 
     def store_scalar(
-        self, b: IRBuilder, *local_indices: Value, value: Value,
+        self,
+        b: IRBuilder,
+        *local_indices: Value,
+        value: Value,
         align: Optional[int] = None,
     ) -> None:
         self.view.store_scalar(

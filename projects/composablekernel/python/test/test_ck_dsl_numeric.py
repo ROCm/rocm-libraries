@@ -20,7 +20,7 @@ breach):
                                              see test_extended_parity for the
                                              gfx942 status)
 
-Requires a ROCm GPU and torch (use the cluster's ~/ckdsl-venv); skipped otherwise.
+Requires a ROCm GPU and torch (e.g. a dedicated ~/.venv); skipped otherwise.
 Run:  PYTHONPATH=python <torch-python> python/test/test_ck_dsl_numeric.py
 """
 
@@ -59,7 +59,7 @@ GPU, ARCH = _detect_gpu_arch()
 _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
 
 
-@unittest.skipUnless(ARCH and GPU, "needs a ROCm GPU + torch (run under ~/ckdsl-venv)")
+@unittest.skipUnless(ARCH and GPU, "needs a ROCm GPU + torch (run under a torch venv)")
 class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 

@@ -82,9 +82,9 @@ class TestGfx1250QwenGateRouting(unittest.TestCase):
 
     def test_enabled_gate_still_falls_back_without_operator_branch(self):
         gates = GateConfig.from_env({MASTER_ENV: "1", GATE_ENVS["attention"]: "1"})
-        decision = {
-            item.op_name: item for item in plan_qwen_layer(gates=gates)
-        }["decode_attention"]
+        decision = {item.op_name: item for item in plan_qwen_layer(gates=gates)}[
+            "decode_attention"
+        ]
         self.assertTrue(decision.enabled)
         self.assertFalse(decision.accelerated)
         self.assertIn("operator branch unavailable", decision.reason)
@@ -115,7 +115,13 @@ class TestGfx1250QwenGateRouting(unittest.TestCase):
             }
         )
         availability = OperatorAvailability.from_mapping(
-            {"gemm": True, "attention": True, "norm": True, "routing": True, "moe": True}
+            {
+                "gemm": True,
+                "attention": True,
+                "norm": True,
+                "routing": True,
+                "moe": True,
+            }
         )
         plan = plan_qwen_layer(gates=gates, availability=availability)
         self.assertTrue(all(decision.enabled for decision in plan))
@@ -170,8 +176,14 @@ class TestGfx1250QwenOneLayerHarness(unittest.TestCase):
             self.skipTest(f"torch unavailable: {exc}")
 
         config = Qwen3A3BConfig(
-            batch=2, hidden=4, moe_intermediate=3, num_experts=4, topk=2,
-            num_query_heads=1, num_kv_heads=1, head_dim=4,
+            batch=2,
+            hidden=4,
+            moe_intermediate=3,
+            num_experts=4,
+            topk=2,
+            num_query_heads=1,
+            num_kv_heads=1,
+            head_dim=4,
         )
         gates = GateConfig.from_env({MASTER_ENV: "1", GATE_ENVS["routing"]: "1"})
         harness = QwenOneLayerHarness(

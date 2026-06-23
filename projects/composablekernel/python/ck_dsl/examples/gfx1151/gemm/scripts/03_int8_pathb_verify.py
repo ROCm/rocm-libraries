@@ -9,7 +9,7 @@ row-major ``M×K`` int8 and B row-major ``N×K`` int8, per-tensor symmetric scal
 
     C = (A.astype(f32) * scale_a) @ (B.astype(f32) * scale_b).T   -> f16
 
-Must run on a gfx1151 device (e.g. alola ``--gres=gpu:gfx1151:1``).
+Must run on a gfx1151 device (e.g. ``--gres=gpu:gfx1151:1`` on a SLURM cluster).
 
     python scripts/03_int8_pathb_verify.py --m 128 --n 128 --k 128
 
@@ -51,8 +51,12 @@ def main() -> int:
     p.add_argument("--m", type=int, default=128)
     p.add_argument("--n", type=int, default=128)
     p.add_argument("--k", type=int, default=128)
-    p.add_argument("--scale-a", type=float, default=0.05, help="per-tensor A dequant scale")
-    p.add_argument("--scale-b", type=float, default=0.05, help="per-tensor B dequant scale")
+    p.add_argument(
+        "--scale-a", type=float, default=0.05, help="per-tensor A dequant scale"
+    )
+    p.add_argument(
+        "--scale-b", type=float, default=0.05, help="per-tensor B dequant scale"
+    )
     p.add_argument("--tol", type=float, default=2e-2, help="np.allclose rtol and atol")
     p.add_argument("--no-verify", action="store_true")
     args = p.parse_args()
@@ -61,7 +65,9 @@ def main() -> int:
 
     for d, name in ((args.m, "M"), (args.n, "N"), (args.k, "K")):
         if d % 16:
-            raise SystemExit(f"{name}={d} must be a multiple of 16 (WMMA 16x16x16 tile)")
+            raise SystemExit(
+                f"{name}={d} must be a multiple of 16 (WMMA 16x16x16 tile)"
+            )
 
     spec = WmmaGemmInt8Spec(name=f"wmma_gemm_int8_{args.arch}")
     art = compile_kernel(build_wmma_gemm_int8(spec, arch=args.arch), arch=args.arch)
@@ -106,19 +112,24 @@ def main() -> int:
     rt.sync()
     rt.memcpy_d2h(u8(C), cd, C.nbytes)
 
-    ref = (
-        (A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T
-    ).astype(np.float16)
+    ref = ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T).astype(
+        np.float16
+    )
 
     diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
     max_abs = float(diff.max())
-    bad = int(np.count_nonzero(diff > (args.tol + args.tol * np.abs(ref.astype(np.float32)))))
+    bad = int(
+        np.count_nonzero(diff > (args.tol + args.tol * np.abs(ref.astype(np.float32))))
+    )
     for ptr in (ad, bd, cd):
         rt.free(ptr)
     module.unload()
 
-    ok = bool(np.allclose(C.astype(np.float32), ref.astype(np.float32),
-                          rtol=args.tol, atol=args.tol))
+    ok = bool(
+        np.allclose(
+            C.astype(np.float32), ref.astype(np.float32), rtol=args.tol, atol=args.tol
+        )
+    )
     tag = "PASS" if ok else "FAIL"
     print(
         f"[{args.arch}] WMMA int8 GEMM {M}x{N}x{K} (scale_a={sa}, scale_b={sb}): "
@@ -129,8 +140,12 @@ def main() -> int:
         {
             "kernel": "wmma_gemm_int8 (Path B: int8 storage / f16 compute)",
             "shape": {"M": M, "N": N, "K": K},
-            "scale_a": sa, "scale_b": sb, "tol": args.tol,
-            "max_abs_diff": max_abs, "bad": bad, "size": int(C.size),
+            "scale_a": sa,
+            "scale_b": sb,
+            "tol": args.tol,
+            "max_abs_diff": max_abs,
+            "bad": bad,
+            "size": int(C.size),
             "pass": ok,
         },
     )

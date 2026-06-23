@@ -64,6 +64,7 @@ from .gemm_universal import (
     _mfma_atom_widths,
     _storage_dtype,
     is_valid_spec as is_valid_gemm_spec,
+    mono_data_spec,
 )
 from ...helpers.tensor_view import make_tile_window
 from .gemm_universal import _emit_mfma, _emit_smem_load
@@ -142,8 +143,7 @@ class FusedMegaKernelSpec:
     # -- data / tile spec helpers ----------------------------------------
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def gate_up_tile(self) -> TileSpec:
         """Block/warp tile for the gate+up GEMM (M x I_slice, contract H)."""

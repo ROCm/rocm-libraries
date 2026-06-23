@@ -3234,6 +3234,10 @@ def run_deep_fused_conv_pool_i8i4_manifest_problem(
         ref_f = ref.astype(np.float64)
         err = np.abs(got.astype(np.float64) - ref_f)
         bad = err > tol + tol * np.abs(ref_f)
-        return float(err.max()) if err.size else 0.0, int(np.count_nonzero(bad)), got.size
+        return (
+            float(err.max()) if err.size else 0.0,
+            int(np.count_nonzero(bad)),
+            got.size,
+        )
 
     return make_args, grid, block, flop, bytes_xfer, check

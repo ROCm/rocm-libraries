@@ -17,6 +17,14 @@ The strides are passed as additional ``i32`` kernel arguments so we can
 support irregular per-batch layouts (e.g. a 3D ``(B, M, K)`` torch
 tensor where ``stride_a = M*K`` packed, or one with extra row padding).
 
+Precondition (i32 offsets): because the strides are i32 and the per-batch
+offset ``block_id_z * stride_X`` is computed in i32, the caller must keep
+``batch * stride_X <= 2**31 - 1`` for each of A/B/C, or the index silently
+wraps and the kernel touches the wrong batch. Validate a concrete launch with
+:func:`check_batched_offsets_fit_i32` before packing the kernel arguments.
+Tensors larger than that need i64 strides (a coordinated ABI change, not yet
+implemented).
+
 The MFMA / LDS body is the same as ``build_universal_gemm`` (which is
 already battle-tested by the GEMM bake-off). This makes batched GEMM
 inherit all of universal_gemm's perf knobs:
@@ -38,10 +46,10 @@ universal-GEMM body it calls into is not):
   stores. CK Tile's reference does exactly this -- see
   ``batched_gemm_kernel.hpp:215-230`` where every
   ``batch_stride_X``, ``batch_offset_X``, ``i_m``, and ``i_n`` goes
-  through ``amd_wave_read_first_lane``. Tracked as out-of-scope
-  proposal in the deliverable notes (the change lives in
-  ``instances/gemm_universal.py`` which is outside this file's
-  scope).
+  through ``amd_wave_read_first_lane``. This is an out-of-scope
+  optimization here -- the change would live in
+  ``instances/gemm_universal.py``, outside this file's
+  scope.
 """
 
 from __future__ import annotations
@@ -58,6 +66,7 @@ from .gemm_universal import (
     UniversalGemmSpec,
     build_universal_gemm,
     is_valid_spec as is_valid_gemm_spec,
+    mono_data_spec,
 )
 
 
@@ -83,8 +92,7 @@ class BatchedGemmSpec(WarpTileBlockSizeMixin):
         self._init_block_size()
 
     def _data_spec(self) -> DataSpec:
-        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
-        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
+        return mono_data_spec(self.dtype)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
@@ -103,6 +111,42 @@ class BatchedGemmSpec(WarpTileBlockSizeMixin):
 
 def is_valid_spec(spec: BatchedGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     return is_valid_gemm_spec(spec.to_universal_spec(), arch=arch)
+
+
+# Largest value representable in the i32 stride/index arithmetic the kernel uses.
+_I32_MAX = (1 << 31) - 1
+
+
+def check_batched_offsets_fit_i32(
+    batch: int, stride_a: int, stride_b: int, stride_c: int
+) -> None:
+    """Runtime precondition for a batched-GEMM launch.
+
+    The per-batch element offsets ``block_id_z * stride_X`` (plus the
+    within-batch tile index) are computed in **i32** -- the strides are i32
+    kernel arguments. The caller MUST therefore ensure every per-tensor index
+    fits a signed 32-bit integer; conservatively, ``batch * stride_X`` must stay
+    ``<= 2**31 - 1`` for each of A/B/C. Beyond that the index silently wraps and
+    the kernel reads/writes the wrong batch.
+
+    This raises ``ValueError`` when the bound is exceeded (or a stride is
+    negative) so callers fail loudly instead of corrupting memory. Tensors that
+    exceed the bound need i64 strides -- a coordinated change to the kernel ABI
+    (the stride parameters and the offset arithmetic on both engines), not yet
+    implemented; this guard is the documented contract until then.
+    """
+    for name, s in (
+        ("stride_a", stride_a),
+        ("stride_b", stride_b),
+        ("stride_c", stride_c),
+    ):
+        if s < 0:
+            raise ValueError(f"batched GEMM {name} must be non-negative (got {s})")
+        if batch > 0 and s > _I32_MAX // batch:
+            raise ValueError(
+                f"batched GEMM offset overflows i32: batch={batch} * {name}={s} "
+                f"exceeds 2**31-1; i64 strides are required for tensors this large"
+            )
 
 
 def build_batched_gemm(spec: BatchedGemmSpec, arch: str = "gfx950") -> KernelDef:

@@ -30,11 +30,8 @@ from dataclasses import dataclass
 
 from ...core.arch import ArchTarget
 from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from ._wmma_common import _WAVE, _WMMA_K, wmma16_grid, wmma32_wave_guard
 
-_WMMA_M = 16
-_WMMA_N = 16
-_WMMA_K = 16
-_WAVE = 32
 _K_PER_I32 = 4  # int8 K-values packed per i32 fragment slot
 _OP_ID = "wmma_i32_16x16x16_iu8"
 
@@ -64,9 +61,7 @@ def is_valid_spec(spec: WmmaGemmIu8DequantSpec, arch: str = "gfx1151"):
         return False, str(e)
     if target.mma.by_op_id(_OP_ID) is None:
         return False, f"{_OP_ID} atom absent on {arch}"
-    if target.wave_size != _WAVE:
-        return False, f"this WMMA kernel is wave32; {arch} is wave{target.wave_size}"
-    return True, "ok"
+    return wmma32_wave_guard(target, arch)
 
 
 def build_wmma_gemm_iu8_dequant(
@@ -137,4 +132,4 @@ def build_wmma_gemm_iu8_dequant(
 
 def wmma_gemm_iu8_dequant_grid(M: int, N: int):
     """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile."""
-    return ((M + _WMMA_M - 1) // _WMMA_M, (N + _WMMA_N - 1) // _WMMA_N, 1)
+    return wmma16_grid(M, N)

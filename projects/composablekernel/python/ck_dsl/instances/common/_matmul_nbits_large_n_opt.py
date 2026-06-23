@@ -7,13 +7,13 @@ This is an experimental variant of :mod:`._matmul_nbits_large_n` that folds in
 three optimizations at once so their *combination* can be measured against the
 baseline body on real hardware:
 
-  #1  **LDS-staged A** — the ``tile_m x tile_k`` activation tile is loaded once
+  (1)  **LDS-staged A** — the ``tile_m x tile_k`` activation tile is loaded once
       per K-group cooperatively into LDS, then every wave reads its A fragments
       from LDS. The baseline reloads A from global once per wave (warp_n-fold
       redundant); staging removes that redundancy at the cost of two workgroup
       barriers per group.
 
-  #2  **tile_k = group_size (scale on accumulator)** — the K tile spans exactly
+  (2)  **tile_k = group_size (scale on accumulator)** — the K tile spans exactly
       one int4 group (``tile_k == group_size == 32``), so the per-group scale is
       constant across the whole tile. The B fragments are dequantised to fp16
       **without** the scale (raw signed int4 -> f16, exact in ``[-8, 7]``); the
@@ -22,7 +22,7 @@ baseline body on real hardware:
       accumulator) and added into the main accumulator. This hoists the scale
       multiply out of the per-fragment dequant.
 
-  #3  **LDS epilogue transpose (vectorized stores)** — the WMMA accumulator is
+  (3)  **LDS epilogue transpose (vectorized stores)** — the WMMA accumulator is
       column-distributed on gfx12 (each lane owns one column x 8 rows), so the
       baseline epilogue emits 64 scalar ``global_store_b16``. Here the whole
       ``tile_m x tile_n`` output tile is written to LDS, then stored to global
@@ -91,7 +91,9 @@ def build_large_n_opt_matmul_nbits(
 
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
-    Sp = b.param("Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8)
+    Sp = b.param(
+        "Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8
+    )
     C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
     M = b.param("M", I32)  # noqa: F841 — full-tile precondition; kept for ABI parity
 
@@ -102,7 +104,7 @@ def build_large_n_opt_matmul_nbits(
     cK = b.const_i32(K)
     cN = b.const_i32(N)
     c16 = b.const_i32(16)
-    c8 = b.const_i32(8)
+    c8 = b.const_i32(8)  # noqa: F841 -- side-effecting: emits a kernel constant; keep for byte-identity
     c2 = b.const_i32(2)
     c_tile_k = b.const_i32(tile_k)
     c_group = b.const_i32(group)
@@ -115,9 +117,7 @@ def build_large_n_opt_matmul_nbits(
     half = b.div(lane, c16)  # lane/16: gfx12 K-half / column-distribution half
 
     half_k_elem = b.mul(half, b.const_i32(wp.frag_k)) if wp.split_k_by_half else c0
-    half_k_byte = (
-        b.mul(half, b.const_i32(wp.frag_k // 2)) if wp.split_k_by_half else c0
-    )
+    half_k_byte = b.mul(half, b.const_i32(wp.frag_k // 2)) if wp.split_k_by_half else c0
 
     wave_m = b.div(wave_id, b.const_i32(t.warp_n))
     wave_n = b.mod(wave_id, b.const_i32(t.warp_n))
@@ -143,7 +143,7 @@ def build_large_n_opt_matmul_nbits(
         k_grp = b.div(k0, c_group)  # scale group index
         k_half_base = b.div(k0, c2)  # packed-byte base for this group
 
-        # --- #1: cooperatively stage the A tile [tile_m x tile_k] into LDS ---
+        # --- step 1: cooperatively stage the A tile [tile_m x tile_k] into LDS ---
         for ch in range(a_chunks):
             lin = b.add(b.mul(tid, b.const_i32(a_chunks * 8)), b.const_i32(ch * 8))
             r = b.div(lin, c_tile_k)
@@ -153,7 +153,7 @@ def build_large_n_opt_matmul_nbits(
             b.smem_store_vN_f16(a_smem, [r, c], a_vec, 8)
         b.sync()  # A tile visible to all waves
 
-        # --- #2: contract the whole group into a group-local f32 accumulator,
+        # --- step 2: contract the whole group into a group-local f32 accumulator,
         #          feeding UNSCALED int4->f16 fragments to the WMMA atom. ---
         gacc = [b.zero_vec_f32(8) for _ in range(n_acc)]
         for ks in range(n_ksub):
@@ -205,7 +205,7 @@ def build_large_n_opt_matmul_nbits(
 
     results = loop.results
 
-    # --- #3: write the column-distributed accumulator to LDS, then store the
+    # --- step 3: write the column-distributed accumulator to LDS, then store the
     #         whole tile to global as coalesced b128 (8 halves/transaction). ---
     wn_local = b.mul(wave_n, b.const_i32(cols_per_wave))  # LDS col base of wave
     for sm in range(n_sub_m):

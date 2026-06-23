@@ -5,7 +5,13 @@ AMD MI355X (gfx950).  Each numbered script benchmarks one layer against the
 production AITER/ATOM baseline, explains every optimization applied, and shows
 the measured speedup.
 
-**Net result: 1.28× end-to-end speedup — saves ~43 µs per decode step.**
+**Net result: ≈1.28× end-to-end speedup at the GPU-kernel level — saves ~46 µs
+of GPU time per decode step (rolled up live by `07_full_decode_step.py`).**
+
+> New here? [`ALGORITHM.md`](ALGORITHM.md) explains *what each layer computes and
+> why each kernel is shaped the way it is* — the per-layer strategy and, crucially,
+> the two cost models (GPU compute vs. host dispatch) that decide every number in
+> this README. Read it first if you want the *why* before the *how-fast*.
 
 ---
 
@@ -118,13 +124,14 @@ More importantly, for the smallest kernels (RMSNorm, TopK) the reported
 numbers depend heavily on *how* the kernel is dispatched:
 
 - **Without CUDA graph**: the timer captures GPU execution + HIP command
-  submission latency (~5–8 µs from Python).  The reported ~8 µs for RMSNorm
-  is therefore the cost of *calling* the kernel, not of running it.
+  submission latency (~5–8 µs from Python).  The ~3.6 µs no-graph reading for
+  RMSNorm is therefore dominated by the cost of *calling* the kernel, not of
+  running it.
 - **With CUDA graph**: the timer captures only GPU execution + ~0.45 µs
-  graph-replay packet.  The reported ~0.5 µs is the cost of *scheduling*
+  graph-replay packet.  The reported ~0.45 µs is the cost of *scheduling*
   the pre-recorded work.
 
-This means the 6–30× "speedup" seen on RMSNorm and TopK is **not a kernel
+This means the 13–30× "speedup" seen on RMSNorm and TopK is **not a kernel
 algorithmic improvement** — it is the gain from eliminating the Python/HIP
 dispatch path.  The GPU does exactly the same work either way.  These gains
 are real and matter for end-to-end latency (dispatch overhead adds up across
@@ -197,16 +204,20 @@ L2 bandwidth fetching large B tiles that cannot be reused across the 2 output ro
    the useful L2 bandwidth by 8×.
 
 **Results** (bf16, MI355X / gfx950, serial / exclusive GPU, 10 warmup ×
-200 iters × 5 samples → median; re-measured 2026-05-29):
+200 iters × 5 samples → median; numbers reported in `01_gemm_skinny.py`):
 ```
   QKV proj  M=2 N=2560 K=2048  tile_k=512
-    hipBLASLt (torch.matmul):  12.64 µs
-    DSL universal_gemm:         7.20 µs   1.75×   (max|err|=1.22e-4 PASS)
+    hipBLASLt (torch.matmul):  11.1 µs
+    DSL universal_gemm:         6.8 µs   1.63×   (max|err| within bf16 PASS)
 
   O proj    M=2 N=2048 K=2048  tile_k=1024
-    hipBLASLt (torch.matmul):  11.98 µs
-    DSL universal_gemm:         6.99 µs   1.72×   (max|err|=1.22e-4 PASS)
+    hipBLASLt (torch.matmul):  11.1 µs
+    DSL universal_gemm:         6.6 µs   1.68×   (max|err| within bf16 PASS)
 ```
+
+> These absolute µs are a point-in-time reading; the box thermally drifts,
+> so treat the **ratio** (≈1.6–1.7×) as the durable claim. `01_gemm_skinny.py`
+> always re-measures live on the machine it runs on.
 
 ---
 
@@ -220,17 +231,17 @@ takes ~3 µs, but Python dispatch overhead adds another 5–8 µs.
 
 1. **CUDA graph capture**: The kernel itself cannot be made faster (it is already
    memory-bandwidth-bound).  Graph capture eliminates the 5–8 µs dispatch
-   overhead, reducing total measured time from ~8 µs to ~0.5 µs.
+   overhead, reducing total measured time from ~3.6 µs (raw launch) to ~0.45 µs.
 
 2. **Pre-allocated output tensors**: Graph capture requires stable pointers.
-   `out`, `invRMS` are pre-allocated before capture; the input `x + residual`
-   is written in-place.
+   The two outputs (`Xout` = residual sum, `Yout` = normalized result) are
+   pre-allocated before capture and reused on every replay.
 
-**Results** (T=2, H=2048, bf16):
+**Results** (T=2, H=2048, bf16; numbers reported in `02_rmsnorm.py`):
 ```
-  AITER add_rmsnorm2d_fwd (eager):     ~8 µs   ← includes ~5 µs HIP dispatch
-  DSL add_rmsnorm2d + CUDA graph:    ~0.5 µs   ← includes ~0.45 µs graph replay
-  Apparent speedup:                     ~16×
+  AITER rmsnorm2d_fwd_with_add (production):  5.90 µs   ← includes HIP dispatch
+  DSL add_rmsnorm2d (no graph):               3.62 µs   1.63×
+  DSL add_rmsnorm2d + CUDA graph:             0.45 µs  13.1×  ← graph-replay floor
 ```
 
 **Caveat**: neither number is the raw GPU kernel time (~3 µs).  The AITER
@@ -405,13 +416,17 @@ multi-kernel chain.
 A3B has 128 experts; the default `sort_block_size=64` would assert.
 `sort_block_size=128` is required.
 
-**Results** (T=2, E=128, K=8, H=2048, I=768, bf16):
+**Results** (T=2, E=128, K=8, H=2048, I=768, bf16; numbers reported in
+`06_moe_e2e.py`):
 ```
   Backend                           Latency   Speedup
   AITER fused_moe (2-stage CK)      101.3 µs    1.00×   ← eager dispatch
-  DSL FusedMoeForward (no graph)    ~115 µs     0.88×   ← slower without graph
   DSL FusedMoeForward + graph        92.3 µs    1.10×   ← graph removes ~15 µs overhead
 ```
+
+The script also reports the no-graph (`dynamic`) DSL path; without CUDA-graph
+capture the multi-kernel chain is *slower* than AITER (see the caveat below),
+which is why `06` captures the whole pipeline into one graph and times `replay`.
 
 **Caveat**: without CUDA graph capture the DSL pipeline is *slower* than
 AITER, not faster.  The multi-kernel chain (topk → gather → 2× batched GEMM
@@ -429,23 +444,30 @@ graph is what makes it *visible* by removing the dispatch noise floor.
 **Problem**: Collect all per-layer measurements and compute the end-to-end
 speedup using Amdahl's Law.
 
-**Output format**:
+**Output format** (illustrative — `07` recomputes every row live on the GPU it
+runs on; RMSNorm is weighted ×3 per decode block; absolute µs drift with the
+box's thermal state, the ratios and the end-to-end factor are the durable
+claims):
 ```
-  Layer               Baseline   DSL       Speedup   Fraction   DSL contrib
-  RMSNorm (×2)         10 µs      1 µs      10.0×    0.048      +0.45
-  QKV proj              56 µs     33 µs      1.70×    0.269      +0.19
-  Decode attention      52 µs     53 µs      0.977×   0.249      -0.01
-  O-proj                33 µs     20 µs      1.65×    0.158      +0.10
-  TopK softmax          13 µs      0.45 µs   29×      0.062      +1.80
-  MoE sort              (skipped by static-offset mode)
-  Fused MoE fwd        101 µs     92 µs      1.10×    0.484      +0.05
-  Total                209 µs    163 µs      1.28×
+  Layer               Baseline   DSL        Speedup   %step    Saved µs
+  RMSNorm              5.90 µs    0.45 µs    13.1×      2.9%    +5.45
+  QKV proj            11.10 µs    6.80 µs     1.63×     5.4%    +4.30
+  Decode attention    51.90 µs   53.30 µs     0.97×    25.1%    -1.40
+  O-proj              11.10 µs    6.60 µs     1.68×     5.4%    +4.50
+  RMSNorm (post-attn)  5.90 µs    0.45 µs    13.1×      2.9%    +5.45
+  RMSNorm (pre-MoE)    5.90 µs    0.45 µs    13.1×      2.9%    +5.45
+  TopK softmax        13.30 µs    0.45 µs    29.6×      6.4%   +12.85
+  Fused MoE fwd      101.30 µs   92.30 µs     1.10×    49.1%    +9.00
+  Total              206.40 µs  160.80 µs     1.28×   100.0%   +45.60
 ```
+(MoE token sorting is skipped entirely in decode via static-offset mode, so it
+is not a row in the roll-up — see `05`/`06`.)
 
 **Key insight from Amdahl**: Even a 29× improvement on the router TopK only
-contributes +1.80% to end-to-end because it is 6.2% of total time.  The
-largest gains come from the GEMM layers (QKV + O-proj) which together are
-42.7% of the total budget.
+contributes ~6 µs of the ~46 µs saved because it is just ~6% of total time.
+The dominant layer is the fused MoE forward (~49% of the step); the attention
+layer is the second largest (~25%) and is near-parity, which is why the
+end-to-end ceiling is ~1.28× rather than higher.
 
 ---
 
@@ -484,7 +506,7 @@ _dsl_gemm_cache: dict = {}
 
 # ---- compilation helper (called once per unique M,N,K shape) ----
 def _dsl_compile_gemm(M, N, K, device):
-    from ck_dsl.instances.gemm_universal import (
+    from ck_dsl.instances.common.gemm_universal import (
         UniversalGemmSpec, TileSpec, TraitSpec, DataSpec, build_universal_gemm,
     )
     from ck_dsl.helpers import compile_kernel
@@ -664,8 +686,9 @@ subprocess, plus scheduler and sampler overhead — contributes approximately
 DSL saves ~50–100 µs of GPU time, which is under 1% of the total 4500 µs step
 and below the measurement noise floor.
 
-The true GPU-level speedup (1.28×, ~209 µs → ~163 µs) is confirmed by the
-per-kernel benchmarks in `07_full_decode_step.py`.  Exposing it end-to-end
+The true GPU-level speedup (≈1.28×, ~206 µs → ~161 µs of summed per-layer GPU
+time) is confirmed by the per-kernel benchmarks in `07_full_decode_step.py`.
+Exposing it end-to-end
 requires reducing the ATOM engine loop overhead from ~4200 µs to below ~500 µs.
 
 ### Production env-var reference
@@ -700,7 +723,8 @@ ATOM_USE_DSL_ATTENTION=1 python -m atom.serve --model <model> ...
 
 ```
 qwen3_30b_a3b/
-├── README.md               ← this file
+├── README.md               ← this file (optimization walkthrough + ATOM integration + results)
+├── ALGORITHM.md            ← per-layer math/strategy + the two cost models (read first)
 ├── _common.py              ← shared constants, timing, GEMM builder
 ├── 01_gemm_skinny.py       ← QKV/O-proj: DTLA + tile_k + chiplet swizzle
 ├── 02_rmsnorm.py           ← add_rmsnorm2d: CUDA graph capture

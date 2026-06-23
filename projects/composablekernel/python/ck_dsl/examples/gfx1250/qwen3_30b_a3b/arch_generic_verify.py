@@ -85,8 +85,12 @@ def verify_add_rmsnorm2d_bf16(rt) -> tuple:
 
     M, N, eps = 2, 2048, 1e-6
     spec = AddRMSNorm2DBF16Spec(
-        n_per_block=N, block_size=256, vec=4, dtype="bf16",
-        save_residual=True, wave_size=32,
+        n_per_block=N,
+        block_size=256,
+        vec=4,
+        dtype="bf16",
+        save_residual=True,
+        wave_size=32,
     )
     art = compile_kernel(build_add_rmsnorm2d_bf16(spec, arch=ARCH), arch=ARCH)
 
@@ -101,12 +105,15 @@ def verify_add_rmsnorm2d_bf16(rt) -> tuple:
     aA, aB, aG = d.inp(A), d.inp(B), d.inp(Gam)
     aX, aY = d.out(Xout), d.out(Yout)
     packed = struct.pack("<QQQQQiif", aA, aB, aG, aX, aY, M, N, eps)
-    mod = _launch(rt, art, add_rmsnorm2d_bf16_grid(M, spec), (spec.block_size, 1, 1), packed)
+    mod = _launch(
+        rt, art, add_rmsnorm2d_bf16_grid(M, spec), (spec.block_size, 1, 1), packed
+    )
     got_y = _read(rt, aY, Yout).astype(np.float32)
     got_x = _read(rt, aX, Xout).astype(np.float32)
-    d.free(); mod.unload()
+    d.free()
+    mod.unload()  # noqa: E702
 
-    x = (A.astype(np.float32) + B.astype(np.float32))
+    x = A.astype(np.float32) + B.astype(np.float32)
     inv = 1.0 / np.sqrt((x * x).mean(-1, keepdims=True) + eps)
     ref_y = x * inv * Gam.astype(np.float32)[None, :]
     err_y = np.abs(got_y - ref_y).max()
@@ -124,8 +131,14 @@ def verify_add_rmsnorm2d_rdquant(rt) -> tuple:
 
     M, N, eps_rms, eps_q = 2, 2048, 1e-6, 1e-10
     spec = AddRmsnorm2DRdquantSpec(
-        n_per_block=N, dtype="bf16", out_dtype="i8", block_size=256, vec=4,
-        save_residual=True, save_yscale=True, wave_size=32,
+        n_per_block=N,
+        dtype="bf16",
+        out_dtype="i8",
+        block_size=256,
+        vec=4,
+        save_residual=True,
+        save_yscale=True,
+        wave_size=32,
     )
     art = compile_kernel(build_add_rmsnorm2d_rdquant(spec, arch=ARCH), arch=ARCH)
 
@@ -141,12 +154,15 @@ def verify_add_rmsnorm2d_rdquant(rt) -> tuple:
     aA, aB, aG = d.inp(A), d.inp(B), d.inp(Gam)
     aX, aQ, aS = d.out(Xout), d.out(QY), d.out(YScale)
     packed = struct.pack("<QQQQQQiiff", aA, aB, aG, aX, aQ, aS, M, N, eps_rms, eps_q)
-    mod = _launch(rt, art, add_rmsnorm2d_rdquant_grid(M, spec), (spec.block_size, 1, 1), packed)
+    mod = _launch(
+        rt, art, add_rmsnorm2d_rdquant_grid(M, spec), (spec.block_size, 1, 1), packed
+    )
     got_q = _read(rt, aQ, QY).astype(np.int32)
     got_s = _read(rt, aS, YScale)
-    d.free(); mod.unload()
+    d.free()
+    mod.unload()  # noqa: E702
 
-    x = (A.astype(np.float32) + B.astype(np.float32))
+    x = A.astype(np.float32) + B.astype(np.float32)
     g = Gam.astype(np.float32)
     inv = 1.0 / np.sqrt((x * x).mean(-1, keepdims=True) + eps_rms)
     xg = x * g[None, :]
@@ -168,7 +184,9 @@ def verify_topk_softmax(rt) -> tuple:
     )
 
     T, E, K = 2, 128, 8
-    spec = TopkSoftmaxSpec(n_per_row=E, k=K, dtype="f32", out_dtype="f32", block_size=128)
+    spec = TopkSoftmaxSpec(
+        n_per_row=E, k=K, dtype="f32", out_dtype="f32", block_size=128
+    )
     art = compile_kernel(build_topk_softmax(spec, arch=ARCH), arch=ARCH)
 
     rng = np.random.default_rng(3)
@@ -183,7 +201,8 @@ def verify_topk_softmax(rt) -> tuple:
     mod = _launch(rt, art, topk_softmax_grid(T, spec), (spec.block_size, 1, 1), packed)
     got_y = _read(rt, aY, Y)
     got_i = _read(rt, aI, Idx)
-    d.free(); mod.unload()
+    d.free()
+    mod.unload()  # noqa: E702
 
     ref_i = np.argsort(-logits, axis=-1, kind="stable")[:, :K]
     picked = np.take_along_axis(logits, ref_i, axis=-1)
@@ -229,12 +248,27 @@ def verify_moe_sorting(rt) -> tuple:
     aHist, aOff, aCnt, aCtr = d.out(hist), d.out(offs), d.out(counts), d.out(counter)
     aSt, aSk, aSw = d.out(s_tok), d.out(s_kid), d.out(s_wts)
 
-    m1 = _launch(rt, a_h, moe_sort_histogram_grid(spec), (BS, 1, 1),
-                 struct.pack("<QQii", aIds, aHist, P, E))
-    m2 = _launch(rt, a_s, moe_sort_scan_grid(spec), (BS, 1, 1),
-                 struct.pack("<QQQi", aHist, aOff, aCnt, E))
-    m3 = _launch(rt, a_c, moe_sort_scatter_grid(spec), (BS, 1, 1),
-                 struct.pack("<QQQQQQQiii", aIds, aW, aOff, aCtr, aSt, aSk, aSw, T, K, E))
+    m1 = _launch(
+        rt,
+        a_h,
+        moe_sort_histogram_grid(spec),
+        (BS, 1, 1),
+        struct.pack("<QQii", aIds, aHist, P, E),
+    )
+    m2 = _launch(
+        rt,
+        a_s,
+        moe_sort_scan_grid(spec),
+        (BS, 1, 1),
+        struct.pack("<QQQi", aHist, aOff, aCnt, E),
+    )
+    m3 = _launch(
+        rt,
+        a_c,
+        moe_sort_scatter_grid(spec),
+        (BS, 1, 1),
+        struct.pack("<QQQQQQQiii", aIds, aW, aOff, aCtr, aSt, aSk, aSw, T, K, E),
+    )
     got_counts = _read(rt, aCnt, counts)
     got_offs = _read(rt, aOff, offs)
     got_tok = _read(rt, aSt, s_tok)
@@ -252,14 +286,17 @@ def verify_moe_sorting(rt) -> tuple:
     flat_tok = ids.reshape(-1)
     for e in range(E):
         beg, cnt = ref_offs[e], ref_counts[e]
-        region = sorted(int(x) for x in got_tok[beg:beg + cnt])
+        region = sorted(int(x) for x in got_tok[beg : beg + cnt])
         want = sorted(int(p // K) for p in range(P) if flat_tok[p] == e)
         if region != want:
             region_ok = False
             break
     ok = counts_ok and offs_ok and region_ok
-    return ("moe_sorting", ok,
-            f"counts={counts_ok} offsets={offs_ok} regions={region_ok} sum={int(got_counts.sum())}")
+    return (
+        "moe_sorting",
+        ok,
+        f"counts={counts_ok} offsets={offs_ok} regions={region_ok} sum={int(got_counts.sum())}",
+    )
 
 
 def verify_smoothquant(rt) -> tuple:
@@ -271,8 +308,13 @@ def verify_smoothquant(rt) -> tuple:
 
     M, N, eps = 2, 2048, 1e-10
     spec = SmoothQuantSpec(
-        n_per_block=N, dtype="bf16", out_dtype="i8", block_size=256, vec=4,
-        save_yscale=True, wave_size=32,
+        n_per_block=N,
+        dtype="bf16",
+        out_dtype="i8",
+        block_size=256,
+        vec=4,
+        save_yscale=True,
+        wave_size=32,
     )
     art = compile_kernel(build_smoothquant(spec, arch=ARCH), arch=ARCH)
 
@@ -289,7 +331,8 @@ def verify_smoothquant(rt) -> tuple:
     mod = _launch(rt, art, smoothquant_grid(M, spec), (spec.block_size, 1, 1), packed)
     got_q = _read(rt, aQ, QY).astype(np.int32)
     got_s = _read(rt, aS, YS)
-    d.free(); mod.unload()
+    d.free()
+    mod.unload()  # noqa: E702
 
     y = X.astype(np.float32) * Sm[None, :]
     amax = np.abs(y).max(-1, keepdims=True)
@@ -310,8 +353,16 @@ def verify_moe_smoothquant(rt) -> tuple:
 
     T, N, K, E, eps = 2, 2048, 8, 128, 1e-10
     spec = MoeSmoothQuantSpec(
-        n_per_block=N, topk=K, experts=E, dtype="bf16", out_dtype="i8",
-        block_size=256, vec=4, save_yscale=True, wave_size=32, tokens=T,
+        n_per_block=N,
+        topk=K,
+        experts=E,
+        dtype="bf16",
+        out_dtype="i8",
+        block_size=256,
+        vec=4,
+        save_yscale=True,
+        wave_size=32,
+        tokens=T,
     )
     art = compile_kernel(build_moe_smoothquant(spec, arch=ARCH), arch=ARCH)
 
@@ -326,10 +377,13 @@ def verify_moe_smoothquant(rt) -> tuple:
     aX, aSm, aId = d.inp(X), d.inp(Sm.reshape(-1)), d.inp(ids)
     aQ, aS = d.out(QY), d.out(YS)
     packed = struct.pack("<QQQQQiif", aX, aSm, aId, aQ, aS, T, N, eps)
-    mod = _launch(rt, art, moe_smoothquant_grid(T, spec), (spec.block_size, 1, 1), packed)
+    mod = _launch(
+        rt, art, moe_smoothquant_grid(T, spec), (spec.block_size, 1, 1), packed
+    )
     got_q = _read(rt, aQ, QY).astype(np.int32)
     got_s = _read(rt, aS, YS)
-    d.free(); mod.unload()
+    d.free()
+    mod.unload()  # noqa: E702
 
     q_err = 0
     sc_err = 0.0
@@ -348,6 +402,9 @@ def verify_moe_smoothquant(rt) -> tuple:
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     rt = Runtime()
     checks = [
         verify_add_rmsnorm2d_bf16,
@@ -363,6 +420,7 @@ def main() -> int:
             name, ok, detail = fn(rt)
         except Exception as exc:  # noqa: BLE001
             import traceback
+
             traceback.print_exc()
             name, ok, detail = fn.__name__, False, f"EXC {exc}"
         all_ok = all_ok and ok

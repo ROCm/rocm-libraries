@@ -748,14 +748,18 @@ def time_launches(
         rt.sync()
         e0 = rt.event()
         e1 = rt.event()
-        e0.record(stream=resolved)
-        for _ in range(int(iters)):
-            fn()
-        e1.record(stream=resolved)
-        e1.synchronize()
-    ms = e0.elapsed_to(e1) / int(iters)
-    e0.destroy()
-    e1.destroy()
+        try:
+            e0.record(stream=resolved)
+            for _ in range(int(iters)):
+                fn()
+            e1.record(stream=resolved)
+            e1.synchronize()
+            ms = e0.elapsed_to(e1) / int(iters)
+        finally:
+            # Destroy both events even if ``fn`` raised mid-loop, so a failed
+            # timing run does not leak two HIP events.
+            e0.destroy()
+            e1.destroy()
     # Drain the per-launch events accumulated during the timed loop.
     rt.wait_stream(resolved)
     return ms

@@ -1,0 +1,24 @@
+# Forward conv (implicit-GEMM) shape corpus for C++<->Python dispatcher parity.
+# One problem per line: N C K Hi Wi Y X [pad_h pad_w stride_h stride_w]
+# (defaults pad=0 stride=1). Derived implicit-GEMM dims:
+#   M = N*Ho*Wo, N_gemm = K, K_gemm = Y*X*C
+# gfx950 candidates: cshuffle 64x64x64 (prio 10), mem 64x64x32 (prio 20).
+#   cshuffle needs M%64==0, K%64==0, K_gemm%64==0
+#   mem      needs M%64==0, K%64==0, K_gemm%32==0
+#
+# N  C    K    Hi  Wi  Y X  pad_h pad_w sh sw
+8    64   64   56  56  3 3  1 1 1 1     # M=25088 K_gemm=576 -> cshuffle
+8    64   64   58  58  3 3  0 0 1 1     # M=8*56*56=25088 K_gemm=576 -> cshuffle
+2    64   128  16  16  3 3  1 1 1 1     # M=512 Ng=128 K_gemm=576 -> cshuffle
+4    32   64   16  16  3 3  1 1 1 1     # M=1024 K_gemm=288 (=32*9) %64!=0 %32==0 -> mem
+8    32   64   8   8   3 3  1 1 1 1     # M=512 K_gemm=288 -> mem
+2    96   64   8   8   1 1  0 0 1 1     # M=128 K_gemm=96 %64!=0 %32==0 -> mem
+1    64   64   8   8   1 1  0 0 1 1     # M=64 K_gemm=64 -> cshuffle
+16   128  256  14  14  3 3  1 1 1 1     # M=3136 K_gemm=1152 -> cshuffle
+2    48   64   8   8   3 3  1 1 1 1     # K_gemm=432 %64!=0 %32!=0 (432/32=13.5) -> neither -> reject
+2    64   80   8   8   3 3  1 1 1 1     # Ng=80 %64!=0 -> reject
+1    64   64   3   3   5 5  0 0 1 1     # filter>input -> Ho<=0 -> reject
+4    16   64   28  28  1 1  0 0 1 1     # M=3136 K_gemm=16 %64!=0 %32!=0 -> reject(K_gemm)
+8    64   64   28  28  3 3  1 1 2 2     # strided: Ho=14 M=1568 K_gemm=576 -> cshuffle
+1    256  512  7   7   1 1  0 0 1 1     # M=49 %64!=0 -> reject(M)
+2    64   64   32  32  1 1  0 0 1 1     # M=2048 K_gemm=64 -> cshuffle

@@ -36,7 +36,7 @@ step table):
 
 Run from ``projects/composablekernel/python`` with ``PYTHONPATH=$(pwd)``::
 
-    PYTHONPATH=$(pwd) /workspace/rocm-libraries-streaming/.venv/bin/python \
+    PYTHONPATH=$(pwd) python \
         -m ck_dsl.examples.gfx950.fused_mega_moe.reproduce_levels
 
     # subset / toggles

@@ -84,9 +84,7 @@ def main() -> int:
         name=f"wmma_fmha_bench_{args.arch}",
     )
     art = compile_kernel(build_wmma_fmha_fwd(spec, arch=args.arch), arch=args.arch)
-    print(
-        f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})"
-    )
+    print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})")
 
     B, Hq, Hk, D = args.batch, args.heads, kvh, args.head_size
     Sq, Sk = args.seqlen_q, args.seqlen_k
@@ -128,12 +126,21 @@ def main() -> int:
 
     packed = struct.pack(
         "<QQQQfiiiiiiiiii",
-        qd, kd, vd, od,
-        scale_log2, Sq, Sk,
-        stride_q_token, stride_q_head,
-        stride_k_token, stride_k_head,
-        stride_v_token, stride_v_head,
-        stride_o_token, stride_o_head,
+        qd,
+        kd,
+        vd,
+        od,
+        scale_log2,
+        Sq,
+        Sk,
+        stride_q_token,
+        stride_q_head,
+        stride_k_token,
+        stride_k_head,
+        stride_v_token,
+        stride_v_head,
+        stride_o_token,
+        stride_o_head,
     )
 
     # ---- Correctness gate (one launch) before timing ----
@@ -168,7 +175,7 @@ def main() -> int:
     tflops = flops / (ms * 1e-3) / 1e12
 
     # HBM traffic lower bound: read Q/K/V once, write O once (fp16).
-    bytes_io = (Q.nbytes + K.nbytes + V.nbytes + Out.nbytes)
+    bytes_io = Q.nbytes + K.nbytes + V.nbytes + Out.nbytes
     gbps = bytes_io / (ms * 1e-3) / 1e9
 
     for ptr in (qd, kd, vd, od):
@@ -178,7 +185,7 @@ def main() -> int:
     print(
         f"[{args.arch}] WMMA FMHA B={B} Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
         f"causal={args.causal}: max_abs={max_abs:.2e} grid={grid} | "
-        f"{ms*1e3:.1f} us/iter  {tflops:.2f} TFLOP/s  {gbps:.1f} GB/s (IO-floor)"
+        f"{ms * 1e3:.1f} us/iter  {tflops:.2f} TFLOP/s  {gbps:.1f} GB/s (IO-floor)"
     )
     return 0
 

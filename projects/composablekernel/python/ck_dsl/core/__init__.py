@@ -13,7 +13,12 @@ Modules:
   - ``ir``         : `IRBuilder`, `KernelDef`, `Value`, `Op`, `Region`,
                      plus type system (`F16`, `F32`, `I32`, `I64`,
                      `VectorType`, `PtrType`, `SmemType`).
-  - ``ir_print``   : MLIR-style textual dump (`print_ir(kernel)`).
+  - ``ir_print``   : MLIR-style textual dump (`print_ir(kernel)`); human-only.
+  - ``ir_serialize``: round-trippable ``ck.dsl.ir/v1`` machine format
+                     (`serialize` / `parse`) with explicit SSA ids, plus
+                     `canonicalize` / `canonical_equal` for semantic diff.
+  - ``verify``     : LLVM-`verify`-style well-formedness pass
+                     (`verify(kernel) -> list[Diagnostic]`).
   - ``lower_llvm`` : `lower_kernel_to_llvm(kernel) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
@@ -52,7 +57,19 @@ from .ir import (
     Value,
     VectorType,
 )
+from .backend import (
+    BackendError,
+    BackendMismatch,
+    lower_universal_gemm,
+    resolve_backend,
+)
 from .ir_print import print_ir
+from .ir_serialize import (
+    canonical_equal,
+    canonicalize,
+    parse,
+    serialize,
+)
 from .lower_cktile import (
     lower_implicit_gemm_conv_to_cktile,
     lower_spec_to_cktile,
@@ -66,6 +83,7 @@ from .passes import (
     eliminate_dead_pure_ops,
     optimize_kernel,
 )
+from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
     "BF16",
@@ -85,7 +103,18 @@ __all__ = [
     "Type",
     "Value",
     "VectorType",
+    "BackendError",
+    "BackendMismatch",
+    "lower_universal_gemm",
+    "resolve_backend",
     "print_ir",
+    "serialize",
+    "parse",
+    "canonicalize",
+    "canonical_equal",
+    "Diagnostic",
+    "verify",
+    "verify_or_raise",
     "lower_implicit_gemm_conv_to_cktile",
     "lower_kernel_to_hip",
     "lower_kernel_to_llvm",

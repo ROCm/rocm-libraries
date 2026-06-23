@@ -69,9 +69,17 @@ __all__ = [
     "is_valid_spec",
 ]
 
-_WMMA_OP_ID = "wmma_f32_16x16x16_f16"
+_WMMA_OP_ID = "wmma_f32_16x16x16_f16"  # RDNA3/3.5 (gfx11) atom
+_WMMA_OP_ID_GFX12 = "wmma_gfx12_f32_16x16x16_f16"  # RDNA4 (gfx12) split-K atom
 _BLOCK_M = 16  # Q rows per wave per CTA
 _BLOCK_K = 16  # K positions per K-tile (WMMA N dim of QK^T)
+
+
+def _wmma_op_id_for_arch(arch: str) -> str:
+    """The f16 WMMA attention atom op_id for ``arch``: the RDNA4 split-K atom on
+    gfx1201, else the RDNA3/3.5 cross-half-duplicated atom. Mirrors
+    :func:`ck_dsl.helpers.mfma_attention._wmma_attn_op_id`."""
+    return _WMMA_OP_ID_GFX12 if arch == "gfx1201" else _WMMA_OP_ID
 
 
 @dataclass(frozen=True)
@@ -147,11 +155,13 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
-    op = target.mma.by_op_id(_WMMA_OP_ID)
+    op_id = _wmma_op_id_for_arch(arch)
+    op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         return False, (
-            f"WMMA {_WMMA_OP_ID} atom absent on {arch} "
-            f"(WMMA is an RDNA/gfx11 instruction; this kernel is gfx1151-only)"
+            f"WMMA {op_id} atom absent on {arch} "
+            f"(WMMA is an RDNA gfx11/gfx12 instruction; this kernel needs a "
+            f"wave32 RDNA target)"
         )
     if target.wave_size != op.wave_size:
         return False, (

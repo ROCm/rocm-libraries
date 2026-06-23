@@ -133,6 +133,16 @@ class UnifiedAttention3DTiledSpec:
     tile_size_override: Optional[int] = None
     use_invariant_hoist: bool = False
     use_wide_kv_load: bool = False
+    # 64-bit paged-KV addressing. When the paged K/V cache exceeds the ~2 GiB
+    # i32 buffer-voffset cap, the per-block byte offset
+    # (``physical_block * block_stride``) overflows the 32-bit voffset and
+    # silently corrupts the load. With this set, the per-block base is folded
+    # into a 64-bit buffer base (a wave-uniform ``make_buffer_rsrc`` per block)
+    # and only the within-block byte offset stays in the i32 voffset -- exactly
+    # the 2D tiled kernel's ``use_i64_kv_addr`` path. The dispatcher only sets
+    # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
+    # so the default (small-cache) build is byte-identical to before.
+    use_i64_kv_addr: bool = False
 
     def __post_init__(self):
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
@@ -177,6 +187,7 @@ class UnifiedAttention3DTiledSpec:
             f"seg{self.num_segments}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "i64kv" if self.use_i64_kv_addr else "",
             "sinks" if self.use_sinks else "",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
@@ -285,6 +296,8 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    # 64-bit paged-KV addressing for caches > 2 GiB (see spec docstring).
+    I64_KV_ADDR = spec.use_i64_kv_addr
     # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
     KV_BYTES = 1 if KV_FP8 else 2
@@ -578,6 +591,10 @@ def build_unified_attention_3d_tiled(
     kv_stride_tok_b = NUM_KV * HD * KV_BYTES
     kv_stride_h_b = HD * KV_BYTES
     bytes_per_buf = T * HD * 2
+    # One-block buffer bound for the i64-addressing path: each per-block
+    # buffer descriptor only spans a single physical KV block, so the
+    # within-block i32 voffset can never overflow.
+    kv_block_bytes_c = b.const_i32(kv_stride_blk_b)
 
     lane_half_base = b.mul(tid, b.const_i32(8))
     K_lds_addr = b.smem_addr_of(K_lds)
@@ -606,14 +623,27 @@ def build_unified_attention_3d_tiled(
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            voff, _ = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear_half,
-                kv_head=kv_head_idx,
-            )
+            call_rsrc = key_rsrc
+            if I64_KV_ADDR:
+                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
+                call_rsrc = b.buffer_rsrc(
+                    b.global_ptr_add(key, base_i64), kv_block_bytes_c
+                )
+            else:
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, 4)
+            b.async_buffer_load_lds_addr(call_rsrc, k_dst, voff, zero_soff, 4)
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
@@ -621,14 +651,27 @@ def build_unified_attention_3d_tiled(
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
-            voff, _ = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear_half,
-                kv_head=kv_head_idx,
-            )
+            call_rsrc = value_rsrc
+            if I64_KV_ADDR:
+                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
+                call_rsrc = b.buffer_rsrc(
+                    b.global_ptr_add(value, base_i64), kv_block_bytes_c
+                )
+            else:
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, 4)
+            b.async_buffer_load_lds_addr(call_rsrc, v_dst, voff, zero_soff, 4)
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
     # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,
@@ -684,12 +727,24 @@ def build_unified_attention_3d_tiled(
                 b.const_i32(fp8_elems_per_chunk),
             )
             linear_half_first = b.add(b.mul(row, b.const_i32(HD)), col)
-            voff, _ = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear_half_first,
-                kv_head=kv_head_idx,
-            )
+            if I64_KV_ADDR:
+                # Flat per-lane global load: full i64 byte/element offset so
+                # the per-thread physical_block * stride cannot overflow the
+                # cache addressing for paged caches > 2 GiB.
+                voff, _ = paged_kv_desc.offset_i64(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half_first,
+                    kv_head=kv_head_idx,
+                )
+            else:
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half_first,
+                    kv_head=kv_head_idx,
+                )
             fp8_vec = b.global_load_vN(
                 src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
             )

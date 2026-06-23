@@ -1,5 +1,13 @@
 # ck_dsl
 
+> ⚠️ **Contributors — never run `ruff check --fix` on emitter code** (`ck_dsl/core`,
+> `helpers`, `instances`). The IR builder is **side-effecting**: `b.const_i32(8)`
+> emits an instruction even when its Python handle is unused, so ruff's `F841`
+> autofix **deletes the op and silently changes the kernel**. Lint with `ruff
+> check` (no `--fix`), use `# noqa: F841` for intentional handles, and re-run the
+> byte-identity gate after any lint/format pass. See
+> [`dsl_docs/development/invariants.md`](dsl_docs/development/invariants.md) rule 9.
+
 ## Why
 CK Tile kernels are expressive and fast, but editing them through C++
 templates can make iteration slow. `ck_dsl` keeps the CK Tile programming
@@ -65,7 +73,8 @@ python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
-Run the core static test suite:
+Run the core unit test suite (the IR/lowering tests need no GPU; ~20
+harness/timer tests require a GPU):
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
@@ -126,15 +135,25 @@ runs without per-launch fences inside the timed loop, and returns average
 milliseconds per launch.
 
 ## Requirements
-- ROCm with HIP runtime and `libamd_comgr` available through the default ROCm
-  installation or the dynamic linker.
-- Python with the dependencies used by CK's Python tests.
-- A supported AMDGPU target for GPU launch tests.
+Recommended stack (what the example READMEs' numbers are reproduced on):
+- **ROCm 7.2** with HIP runtime and `libamd_comgr` (also works on ROCm 7.0.x —
+  set `CK_DSL_LLVM_FLAVOR=llvm22` if your `comgr` is 7.2 but `/opt/rocm` is older).
+- **PyTorch 2.12 (+rocm7.2 build)** in a virtual environment — the wheel bundles
+  the `libamd_comgr` the DSL prefers, so the venv selects the build toolchain.
+- **Python 3.12**; plus `numpy` (references) and `ruff` (lint).
+- A supported AMDGPU target for GPU launch tests: CDNA `gfx942`/`gfx950`
+  (Linux) or RDNA `gfx1151`/`gfx1201` (Linux + Windows HIP SDK).
 
 Static IR and lowering tests do not require a GPU. Runtime, parity, and
 benchmark paths do.
 
+**Full setup (venv, building the C++ engine, env-variable flags, Linux &
+Windows):** see [`dsl_docs/development/setup_guide.md`](dsl_docs/development/setup_guide.md).
+
 ## More Documentation
+- `dsl_docs/development/setup_guide.md` — prerequisites, venv, env flags (Linux & Windows)
+- `dsl_docs/reference/env_flags.md` — every environment variable
+- `dsl_docs/development/engine_parity.md` — the Python⇄C++ parity rule (every optimization needs both)
 - `dsl_docs/architecture/mental_model.md`
 - `dsl_docs/runtime/compile_launch_and_manifest.md`
 - `dsl_docs/runtime/manifest_schema.md`

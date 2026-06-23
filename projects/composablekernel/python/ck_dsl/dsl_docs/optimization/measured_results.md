@@ -11,7 +11,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
   python python/test/test_ck_dsl.py
 ```
 
-Result on this checkout: **286 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
+Result on this checkout: **245 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
 
 ## Documentation Verifier
 
@@ -92,11 +92,11 @@ Shape: N=8, Hi=Wi=56, C=K=64, Y=X=3, pad=1, stride=1, dilation=1. Implicit-GEMM 
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
+  python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 # -> distribution-driven reduce  M=32 N=4096 bs=256 vec=8  max_abs=0.000e+00
 
 PYTHONPATH=python python \
-  python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+  python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 # -> 2D distribution-driven add  H=64 W=128 tile=(32,64) vec=8  max_abs=0.000e+00
 ```
 
@@ -106,7 +106,7 @@ Both demos go through the full `TileDistributionEncoding -> make_static_tile_dis
 
 ```bash
 PYTHONPATH=python python \
-  python/ck_dsl/examples/ck_tile_parity.py --op all
+  python/ck_dsl/examples/common/ck_tile_parity.py --op all
 ```
 
 | op                                          | max_abs    | CK lat | torch ref | speedup | ok |
@@ -132,7 +132,7 @@ PYTHONPATH=python python \
 | batched_gemm.B16_512x512x128                | 3.125e-02  | 12.1us |    20.2us |   1.67x | OK |
 | grouped_gemm.5                              | 3.125e-02  | 53.3us |    96.9us |   1.82x | OK |
 
-All passes within the per-op tolerance table (`examples/ck_tile_parity.py::TOL`):
+All passes within the per-op tolerance table (`examples/common/ck_tile_parity.py::TOL`):
 
 - elementwise linear ops: bit-exact (`max_abs <= 0`);
 - silu / gelu_tanh: `<= 2e-4`;
@@ -177,6 +177,53 @@ auto vs auto    : 11.00x   (Triton picks 2D here, CK picks 3D)
 ```
 
 These are **one** attempt with zero warmup. The README's published speedups (~1.799x auto geomean over 11 scenarios, ~1.743x 3D vs 3D) come from the mean of 5 full harness runs at 10 attempts each. Single-attempt smoke runs should not be cited as headline numbers; they confirm the kernels build, verify, and land in the expected ballpark.
+
+## Attention Prefill vs PyTorch Flash + Occupancy (gfx950, single-batch d128/d64)
+
+These are the optimization-pass results for the single-batch d128/d64 forward
+prefill cohort (`UnifiedAttention2DTiledSpec`, `num_seqs=1`, bf16/fp16, no-FP8,
+no-SW, `max_seqlen_q>256`). They are **same-session HIP-event A/B vs torch SDPA
+flash** (MI355X / gfx950, LLVM backend llvm22 + comgr 7.2); a ratio >1.0 means CK
+DSL is faster. On a clock-throttled box only same-session ratios and occupancy
+are trustworthy (runbook §10.6) — these are not absolute hero numbers.
+
+**d128 prefill on production llvm22 (winning config: `use_q_direct_reg` +
+`waves_per_eu=2` + `use_softmax_mfma_interleave`):**
+
+| dtype | metric | S1024 | S2048 | S4096 |
+|---|---|---:|---:|---:|
+| bf16 | vs Triton | 1.012× (cross) | 0.953× | 0.947× |
+| bf16 | vs flash | ~1.41× | ~1.04× | ~0.96× |
+| fp16 | vs Triton | 0.984× | 0.951× | 0.945× |
+| fp16 | vs flash | ~1.41× | ~1.05× | ~0.96× |
+
+So d128 prefill is **0.95–1.01× Triton** on production (it crosses Triton at
+bf16 S1024 and crosses flash at S1024/S2048). Correctness held at the flash
+level at every S (rel ~7.8e-3 bf16 / ~1.1e-3 fp16). d64 prefill wins; decode
+beats flash (and ~2× CK Tile via hipGraph replay).
+
+**Occupancy, `llvm-readelf` on the HSACO** — throttle-independent. On llvm22
+the shipped `BLOCK_M=128` `use_q_direct_reg` body is already occupancy-clean;
+`waves_per_eu=2` does the occupancy work:
+
+| d128 config (production llvm22) | VGPR | AGPR | spill | LDS | WG/CU |
+|---|---:|---:|---:|---:|---:|
+| `BLOCK_M=128`, `use_q_direct_reg` (shipped body) | 213 | 0 | 0 | 32 KB | 2 |
+| + `use_softmax_mfma_interleave` (winning config) | 240 | 0 | 0 | 32 KB | 2 |
+
+> **Backend caveat.** An earlier llvm20 measurement of this body reported
+> 256 VGPR with spills and only 1 WG/CU, and an LDS-cut occupancy story (a
+> `T=block_size` small-tile vs a `T=64` K-single-buffer lever, 229 / 173 / 215
+> VGPR). That wall was an **llvm20 backend artifact** — on production llvm22
+> the body is 213 VGPR / 0 spill / 2 WG/CU and the schedule lever
+> (`use_softmax_mfma_interleave`, an `iglp_opt`), not an LDS cut, is what
+> closes the gap. The `HIPDNN_GFX950_D128_SMALL_TILE` hatch and the
+> single-buffer/small-tile levers remain in the tree but are not the
+> production lever.
+
+Production 142-shape trace cohort geomean Triton/CK DSL ~1.11 (105/142 win).
+Full per-lever detail:
+[attention 2D experiment summary](../architecture/attention_2d_experiment_summary.md).
 
 ## Build Timings
 
@@ -225,9 +272,9 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl_examp
 PYTHONPATH=python python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-PYTHONPATH=python python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=python python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-PYTHONPATH=python python python/ck_dsl/examples/ck_tile_parity.py --op all
+PYTHONPATH=python python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=python python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=python python python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \

@@ -1,6 +1,6 @@
 # Core IR Model
 
-The core IR lives in `python/ck_dsl/core/ir.py`. It is a small typed SSA IR designed around CK Tile-style kernels and AMDGPU intrinsics. Every operation it represents has a direct LLVM lowering in `core/lower_llvm.py`.
+The core IR lives in `python/ck_dsl/core/ir.py`. It is a small typed SSA IR designed around CK Tile-style kernels and AMDGPU intrinsics. Every operation it represents has a direct LLVM lowering, served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`ck_dsl_c/`). The engine is chosen by `core/backend.py::resolve_backend()` (default `cpp`, with automatic fallback to the Python lowerer); the IR model below is identical for both.
 
 ## Core Objects
 
@@ -218,7 +218,7 @@ mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx9
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
 ```
 
-The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`.
+The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.
 
 ### Wave / cross-lane
 

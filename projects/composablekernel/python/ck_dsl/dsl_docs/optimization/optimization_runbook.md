@@ -11,6 +11,49 @@ it, measure it, and explain it — without leaving this tree.
 Use it as a menu of considerations. Do not apply every item blindly.
 Start from the operation contract and the measured bottleneck.
 
+## Step 0 — Exhaust the existing lever space first (do this BEFORE touching the algorithm or structure)
+
+**This is mandatory and comes before everything below.** Before you change the
+kernel body, the tiling strategy, or the algorithm — before you conclude a gap
+is "structural" — you must first prove the *current* implementation cannot
+already hit the target with a different configuration. The cheapest way to be
+wrong is to redesign a kernel that only needed a different knob.
+
+For the specific shape you are optimizing:
+
+1. **Enumerate EVERY implemented lever.** Walk
+   [§12.1 the Knob Catalog](#121-knob-catalog-master-list) *and* the instance's spec
+   dataclass and list every lever that applies: algorithmic variant, tile
+   geometry (`tile_size`, `block_m_per_warp`), `num_warps`, `waves_per_eu`,
+   MFMA atom, pipeline / prefetch-ring depth, single- vs double-buffer flags
+   (K *and* V), scheduling hints (`sched_barrier`, `iglp_opt`), LDS layout
+   (conflict-free / bank-pad), transposed-softmax sub-flags, epilogue variant,
+   compiler backend (`llvm` vs `hipcc`), and **every default-off opt-in flag**.
+   Include the levers that are currently OFF — those are exactly the ones a
+   heuristic may be mis-picking.
+2. **Run an EXHAUSTIVE cartesian sweep over that space for the shape.** The
+   DSL's cheap comgr compile is the entire point: enumerate the legal product
+   (the spec `__post_init__` rejects illegal combos), compile in **batches**
+   (threaded comgr, hundreds-to-thousands of configs), correctness-prune
+   against an fp32 reference, then time the survivors against the baseline you
+   must beat. The autotuner funnel ([§12 Autotune](#12-autotuning-strategy)) is built for
+   exactly this.
+3. **Only THEN enter the optimization loops below.** If the swept ceiling
+   already meets the target you are done — and you have probably found that the
+   production heuristic was mis-routing (turn the swept winner into a tuned
+   knob). If the swept ceiling still falls short, you now *know* the gap is
+   genuinely structural, a body/algorithm redesign is justified, and the sweep
+   has told you which config to redesign *from* and against which resource
+   budget.
+
+This ordering is not optional. Real failures from skipping it: a selector
+routed a shape to a ~2× slower configuration that an exhaustive sweep beat
+immediately; a gap assumed "structural" turned out to be a single mis-set
+`num_warps`; and — conversely — a kernel-body redesign was correctly justified
+*only after* an exhaustive sweep proved no existing config could close the gap
+(and the sweep pinned the exact resource budget the redesign had to hit).
+Identify the levers, sweep them exhaustively, then loop.
+
 ## The Loop (one-page summary)
 
 If you take only one thing from this runbook, take this loop:
@@ -80,8 +123,9 @@ transpose-read and cross-lane intrinsics, VGPR / AGPR / occupancy caps,
 chiplet swizzle parameters, buffer-descriptor flags, fp8 / quantization
 support, and compiler caveats), see
 **[§21 Target Architecture Reference](#21-target-architecture-reference)** —
-the single hub that lists the per-arch files (currently gfx950, the
-DSL's default target). The base runbook itself stays arch-neutral; the
+the single hub that lists the per-arch files (gfx950 — the DSL's
+default target — and gfx942; RDNA wave32 targets gfx1151 / gfx1201 are
+also supported). The base runbook itself stays arch-neutral; the
 arch reference holds the concrete facts.
 - `utilities/skills/` — focused skill docs (`gemm-optimization`,
   `lds-optimization`, `kernel-trace-analysis`,
@@ -162,7 +206,7 @@ Decide what the kernel computes before deciding how it should run.
   `ir_to_qdtype`). `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`.
 - MX block-scale support in `helpers/mx_scale.py` and the spec
   `MxGemmSpec`.
-- Always set a tolerance policy. The `examples/ck_tile_parity.py`
+- Always set a tolerance policy. The `examples/common/ck_tile_parity.py`
   harness encodes the per-op tolerances we currently believe in
   (elementwise linear ops bit-exact, silu/gelu `<= 2e-4`, layer/rms
   norm `<= 5e-3` (was 2.5e-3 before noise widening, see
@@ -198,8 +242,10 @@ Decide what the kernel computes before deciding how it should run.
 The DSL ships several layered correctness gates. Use them in order
 from cheapest to most expensive:
 
-1. `pytest test/test_ck_dsl.py` — 286 static tests (IR construction,
-   transform DAG, helpers, instance smoke). ~1.7 s.
+1. `pytest test/test_ck_dsl.py` — 245 unit tests (IR construction,
+   transform DAG, helpers, instance smoke). The IR/lowering subset needs
+   no GPU; ~20 harness/validation/launch-timer tests require a GPU
+   (torch+HIP).
 2. `python python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` —
    imports every symbol, exercises every IR builder method, lowers
    every spec to LLVM/HIP/CK Tile, builds HSACO, launches small
@@ -207,13 +253,13 @@ from cheapest to most expensive:
 3. `python -m ck_dsl.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python python/ck_dsl/examples/ck_tile_parity.py --op all` — small
+4. `python python/ck_dsl/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python python/ck_dsl/examples/parity_extended_kernels.py --op all`
+5. `python python/ck_dsl/examples/common/parity_extended_kernels.py --op all`
    — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
 6. `python python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python python/ck_dsl/examples/hip_lowering_parity.py` — production
+7. `python python/ck_dsl/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit across every shipped
    spec.
 
@@ -233,7 +279,7 @@ Use the best available vendor / library baseline:
 - Triton: AITER ships the production `unified_attention` kernel that
   vLLM and AITER use. Path comes in via `AITER_PATH` env var.
 - AITER FA / FA2 for the FMHA shapes.
-- Torch eager: `examples/ck_tile_parity.py::_bench_torch`.
+- Torch eager: `examples/common/ck_tile_parity.py::_bench_torch`.
 - A naive scalar `_fmha_warp_body.py` (`fmha_warp_fwd_inner_body`) is
   the **correctness oracle** for the FMHA family. Several FMHA specs
   still ship with the warp-scalar body (paged_prefill, splitkv_decode,
@@ -539,7 +585,7 @@ Consider:
 |---|---|
 | Direct convolution | `instances/conv_direct_grouped.py::DirectConv16cSpec`, `DirectConv4cSpec` |
 | Implicit GEMM | `instances/conv_implicit_gemm.py::ImplicitGemmConvSpec` |
-| Implicit GEMM (auto-unrolled) | `instances/conv_implicit_gemm_auto.py` |
+| Implicit GEMM (auto-unrolled) | `instances/conv_implicit_gemm.py` with `unroll_k=True` |
 | im2col + GEMM | `instances/img2col.py` materializes the im2col operand |
 | Winograd | not yet implemented |
 | FFT | not yet implemented |
@@ -989,13 +1035,15 @@ else:
     benchmark_both()       # 96 KB <= LDS_b < 128 KB
 ```
 
-> Arch-specific caveat: on some arches the LLVM backend silently
-> removes explicit scheduling barriers (`s_sched_barrier`,
-> `s_sched_group_barrier`), so you cannot rely on them to mitigate XOR
-> address overhead. Check the
+> Arch-specific caveat: on gfx950 the scheduling barriers
+> (`s_sched_barrier` / `s_sched_group_barrier`) are compile-time fences
+> that usually leave no runtime instruction in the object — so do not
+> rely on a runtime `s_sched_barrier` showing up to mitigate XOR address
+> overhead, and do not read its absence from the ISA as "no effect"
+> (§8.4). Check the
 > [architecture reference](#21-target-architecture-reference)
-> (§21.3/§21.8); where they are dropped, verify with
-> `probe_isa_inspect.py` that the `sched_barrier` sub-bucket is 0.
+> (§21.3/§21.8); confirm a hint's effect by diffing the mainloop ISA,
+> not by the `sched_barrier` sub-bucket count.
 
 Critical asymmetry: conflict periods can differ between `ds_read_b128`
 and `ds_write_b128` (and across arches), so reads and writes may need
@@ -1054,7 +1102,11 @@ General selection guidance (then confirm against the arch catalog):
 - `4x4x4` for many independent small-channel computations
   (used by `DirectConv4cSpec`).
 - Scaled MFMA for fp8 / fp6 / fp4 where available.
-- WMMA for RDNA / wave32 architectures — not currently exposed.
+- WMMA for RDNA / wave32 architectures (`gfx1151`, `gfx1201`): the
+  `WmmaAtom` catalog in `helpers/atoms.py::WMMA_*_ATOMS` and the
+  `Gfx11RdnaBackend` lowering path expose the `16x16x16` f16 / bf16 WMMA
+  atoms. The base runbook stays CDNA-focused; pick the atom against your
+  target's catalog.
 
 Always confirm the emitted intrinsic with `probe_intrinsic_counts.py`.
 For example, switching from the default to `mfma_f32_32x32x16_f16` is
@@ -1163,9 +1215,10 @@ layout match, independent of the atom's compute throughput.
 
 ### 8.4 Scheduling Hints
 
-> Arch-specific (which scheduling intrinsics survive the backend vs are
-> silently dropped or ICE the compiler — `sched_barrier`,
-> `sched_group_barrier`, `iglp_opt`, named/split barriers): see the
+> Arch-specific (which scheduling intrinsics emit a runtime instruction
+> vs act as a compile-time-only fence, and which ICE the compiler —
+> `sched_barrier`, `sched_group_barrier`, `iglp_opt`, named/split
+> barriers): see the
 > [architecture reference](#21-target-architecture-reference)
 > (§21.3/§21.8). The gfx950 facts below are illustrative of one such
 > arch.
@@ -1179,11 +1232,19 @@ layout match, independent of the atom's compute throughput.
 - Some flags can break generated kernels even when they work for
   hand-written HIP.
 
-On gfx950 the LLVM backend silently removes explicit
-`s_sched_barrier` / `s_sched_group_barrier` instructions; verify with
-`probe_isa_inspect.py` (the `sched_barrier` sub-bucket should be 0)
-or `probe_intrinsic_counts.py` (`sched.barrier` / `sched.group.barrier`
-should be 0 after lowering on gfx950).
+On gfx950, `b.sched_barrier(mask)` lowers to `llvm.amdgcn.sched.barrier`
+(so `probe_intrinsic_counts.py` *does* show a non-zero `sched.barrier`
+after lowering — it is emitted). That intrinsic is a **compile-time
+scheduling fence**: it constrains the post-RA scheduler during codegen
+and frequently leaves **no runtime `s_sched_barrier` instruction** in the
+object. So a zero `sched_barrier` sub-bucket in `probe_isa_inspect.py`
+confirms the runtime instruction is absent — **not** that the directive
+was dropped. The fence has a measurable effect (an early llvm20 backend
+measurement recorded ~+35 % on one single-batch d128 attention cohort at
+`num_warps==1`; that win is backend-specific and superseded on production
+llvm22 by `iglp_opt` — arch reference §21.8). Always confirm a hint's
+effect by diffing the mainloop ISA, not by perf or the ISA-bucket count
+alone.
 
 The converse is also actionable on gfx950: the schedule directives the
 compv4/compv3 GEMM pipeline *emits* (`sched_group_barrier` HotLoop +
@@ -1513,8 +1574,13 @@ hand-tuned assembly (Tensile/rocBLAS, or a hand-written tile kernel). Know what
 it *cannot* express so you don't burn cycles trying:
 
 - **No per-instruction placement.** You declare ops + dependencies; the backend
-  orders them. `iglp_opt` / `s_setprio` / `sched_group_barrier` are *hints* (and
-  `sched_barrier`/`sched_group_barrier` are dropped entirely on gfx950). You
+  orders them. `iglp_opt` / `s_setprio` / `sched_barrier` / `sched_group_barrier`
+  are *compile-time hints* — `sched_barrier` is a scheduling fence that
+  constrains the post-RA scheduler and frequently leaves no runtime instruction
+  in the object (so "0 in the ISA bucket" means *the runtime instruction is
+  absent*, not *the directive was dropped*; see arch reference §21.8 and the
+  ~+35% it produced on one attention cohort on an early llvm20 backend —
+  backend-specific and since superseded). You still
   cannot say "this `ds_write` issues in *this* MFMA slot" — which is exactly how
   assembly (Tensile `ScheduleIterAlg=3`) hides LDS-write cost under the matrix
   pipe. Net effect measured: a fused direct-to-LDS GEMM tops out ~0.82× rocBLAS
@@ -1540,6 +1606,45 @@ keeping the rest in the DSL; (3) add a scheduled-assembly backend / custom
 post-RA pass (this is what Tensile *is* — a multi-month compiler effort). The
 front-end being Python is **not** the limiter — a Python→IR framework can reach
 near-assembly results (cf. Triton); the work is always in the backend/scheduler.
+
+**CK Tile is NOT a hand-assembly baseline — there is no ceiling against it.**
+When measuring against CK Tile FMHA / GEMM, remember the comparison is
+IR-frontend vs IR-frontend, not IR vs assembly. CK Tile is C++ templates →
+`hipcc` (clang) → the **same** LLVM AMDGPU backend (same instruction selection,
+register allocation, post-RA scheduler) the DSL emits IR into. The DSL's control
+is a strict superset: it *states* the atom, the LDS swizzle, the partial
+`lgkmcnt` waits, the direct-to-LDS async copies, and the scheduling fences that
+hipcc must *infer*. So matching and beating CK Tile everywhere is the correct
+expectation — a gap to CK Tile is undone engineering (a missing technique or a
+selection bug), not an architectural wall. The hand-assembly ceiling above
+applies **only** to full hand-asm targets that bypass the LLVM scheduler
+(rocBLAS/Tensile, hand-written whole-kernel asm); do not conflate the two.
+
+### 10.6 Occupancy methodology on a clock-throttled box
+
+When you do not have `sudo` to lock clocks (`rocm-smi --setperflevel high
+--setsclk 7`), the GPU auto-throttles ±25–30 % between runs, and *absolute*
+latency/TFLOPS numbers are not trustworthy across runs. Two disciplines make
+optimization possible anyway:
+
+- **Occupancy is the throttle-free primary signal.** VGPR / AGPR / LDS are
+  fixed by codegen and independent of clock state. Extract them with
+  `llvm-readelf --notes` (or `probe_occupancy.py`, which wraps it):
+  `.vgpr_count` / `.agpr_count` (against the 256 / 256 + 512-total file) and
+  `.group_segment_fixed_size` (LDS bytes, against the per-CU LDS budget) give
+  the achievable WG/CU exactly. This is also how a backend artifact gets
+  caught: an early llvm20 reading of the d128 attention prefill body showed
+  256 VGPR + spills / 1 WG/CU and pointed at an LDS-cut occupancy story; the
+  production llvm22 reading of the same body is 213 VGPR / 0 spill / 2 WG/CU,
+  so occupancy was never the wall and the lever is a schedule hint
+  (`iglp_opt`), not a register/LDS redesign — see arch reference §21.4a.
+  (Register/occupancy counts are backend-sensitive; always read them on the
+  production backend — llvm22 + comgr 7.2, torch imported first.)
+- **Perf only via same-session ratios + large effects.** Benchmark the
+  candidate and its reference (flash, CK Tile, or the prior config)
+  **back-to-back in one process**, and only trust the *ratio*; the throttle
+  applies equally to both within a session. Treat anything under ~5 % as noise.
+  Single-attempt or cross-process absolute numbers must not be cited as wins.
 
 ---
 
@@ -1651,16 +1756,19 @@ family. For each knob: where it lives, what it controls, what direction
 it usually moves perf, and when **not** to flip it.
 
 To discover all knobs for a specific kernel: open the spec dataclass
-under `instances/<kernel>.py` and read the `@dataclass` field list.
-Every field is a knob (the validator in `__post_init__` documents the
-constraints).
+under `instances/common/<kernel>.py` (arch-specialized overrides, when
+they exist, live under `instances/<arch>/<kernel>.py`) and read the
+`@dataclass` field list. Every field is a knob (the validator in
+`__post_init__` documents the constraints). The shorthand
+`instances/<kernel>.py` used throughout this runbook refers to that
+`instances/common/` builder unless an arch directory is named.
 
 #### 12.1.A Algorithmic variant (choose the kernel before the knobs)
 
 | Lever | Where | Direction |
 |---|---|---|
 | GEMM family member | `instances/gemm_universal.py` / `batched_gemm.py` / `grouped_gemm.py` / `streamk_gemm.py` / `gemm_multi_d.py` / `gemm_multi_abd.py` / `mfma_gemm.py` / `flatmm.py` / `block_scale_gemm.py` / `mx_gemm.py` | small / decode shapes → `flatmm`; many small problems → `grouped_gemm` or `persistent`; tail-balance → `streamk_gemm`; fused chain → `gemm_multi_d` / `gemm_multi_abd` |
-| Conv family | `conv_implicit_gemm.py` / `conv_implicit_gemm_auto.py` / `conv_direct_grouped.py` (16c, 4c) / `img2col.py` | tiny K or C*R*S → direct conv; 3×3 hero shapes → implicit GEMM; explicit im2col → if downstream stage is plain GEMM |
+| Conv family | `conv_implicit_gemm.py` (incl. `unroll_k=True` auto-unrolled path) / `conv_direct_grouped.py` (16c, 4c) / `img2col.py` | tiny K or C*R*S → direct conv; 3×3 hero shapes → implicit GEMM; explicit im2col → if downstream stage is plain GEMM |
 | Attention family | `attention_unified.py` (scalar oracle) / `attention_tiled_2d.py` / `attention_tiled_3d.py` (split-KV) | prefill → 2D; long-context decode → 3D; sliding-window — see §17.4 final policy |
 | FMHA family | `fmha_mfma.py` / `fmha_varlen.py` / `fmha_head_grouping.py` / `fmha_paged_prefill.py` / `fmha_splitkv_decode.py` / `fmha_fwd_fp8.py` / `fmha_bwd.py` / `fmha_appendkv.py` / `sage_attention.py` / `sparse_attention.py` | choose based on KV layout (paged vs varlen), GQA, dtype, sparse pattern |
 
@@ -1711,11 +1819,14 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | `b.iglp_opt(n)` | IR primitive | `0` / `1` / `2` | Canned backend GEMM MFMA/memory interleave (`llvm.amdgcn.iglp.opt`). *Survives* on gfx950. Place once at loop-body top; suppress manual sched hints when used. Helps schedule-bound loops w/ `ds_write` traffic; **neutral on direct-to-LDS / barrier-bound** (§8.4, §8.6, §17.5) |
 | `b.s_barrier_bare()` | IR primitive | — | Bare WG rendezvous, no implicit waitcnt — enables single-barrier ping-pong loops (§8.6, §17.5) |
 
-Caveat: explicit `s_sched_barrier` / `s_sched_group_barrier`
-intrinsics are silently dropped by the LLVM backend on gfx950
-(§3.1a / §8.4) — but `iglp_opt` and `s_barrier_bare` (above) survive.
-Verify with `probe_isa_inspect.py` (`sched_barrier` sub-bucket should
-be 0).
+Caveat: `s_sched_barrier` / `s_sched_group_barrier` are **compile-time
+scheduling fences** on gfx950 (§3.1a / §8.4) — they constrain the
+post-RA scheduler at codegen and frequently leave no runtime instruction
+in the object, so a zero `sched_barrier` sub-bucket in
+`probe_isa_inspect.py` means the runtime instruction is absent, not that
+the directive was dropped (it can have a real effect — see §8.4).
+`iglp_opt` and `s_barrier_bare` (above) also survive. Confirm a hint's
+effect by diffing the mainloop ISA, not by the bucket count alone.
 
 #### 12.1.E Epilogue
 
@@ -1808,8 +1919,29 @@ read the validator before combining flags. Cohort impact is from §17.4.
 | `use_transposed_mask_limit` | Collapse causal + prefix masks into one compare | Full R4_s1mask stack |
 | `use_grouped_kv2_softmax` | 2 KV tiles per acc update | Smoke OK, full cohort regressed (§17.4 "did not help") |
 | `use_fast_paged_kv_desc` | Specialized paged-KV byte descriptor for the hot R4 shape (bf16, h64kv8, HD=64, BS=32, T=64, nw=4) | Use only on supported shape class |
-| `use_early_v_schedule` | Issue V async before QK; V overlaps QK + softmax | No-SW prefill only |
-| `use_agpr_alloc_zero` | Force VGPR-form MFMA | Currently redundant on R4 (already 0 AGPR moves) |
+| `use_early_v_schedule` | Issue V async before QK; V overlaps QK + softmax | No-SW d64 long prefill only (d128 regresses) |
+| `use_v_double_buffer` | Prefetch `V[i+1]` into a second LDS slot | **d64 short single-batch combo only**; off for d128 (the no-prefetch path is the faster pick) |
+| `use_softmax_mfma_interleave` | One `iglp_opt` at the loop top so the backend interleaves the causal-mask + softmax VALU into the MFMA window (shrinks the inter-MFMA gap) | **The production d128 schedule lever** (gfx950 single-batch combo, llvm22): crosses Triton at bf16 S1024. Mutually exclusive with `use_sched_barrier` |
+| `use_k_single_buffer` | One `K_lds` slot instead of two, keeping `T=2*block_size` | In the tree but **not the production lever** — it addressed an llvm20 occupancy wall that does not exist on llvm22 (the d128 body is already 213 VGPR / 2 WG/CU) |
+| `use_sched_barrier` | Compile-time `llvm.amdgcn.sched.barrier` fence between the QK MFMA cluster and the post-QK prefetch issue (keeps QK MFMAs packed) | An early llvm20 measurement gave +35–36 % at `num_warps==1` only; **backend-specific and superseded** by `use_softmax_mfma_interleave` on llvm22 — off on every live cohort, kept for the mechanism |
+| `use_agpr_alloc_zero` | Force VGPR-form MFMA | Bit-accurate but **not** the d128 lever on llvm22 (leaves the inter-MFMA gap unchanged); redundant on R4 (already 0 AGPR moves) |
+
+**Selector-driven (auto-on) attention routing levers.** The single-batch d128
+levers above are *selected automatically* by
+`instances/common/attention_unified.py` for the qualifying gfx950 cohort
+(`head_size=128`, `num_seqs=1`, bf16/fp16, no-FP8, no-SW, `max_seqlen_q>256`) —
+you do not flip the spec field directly. On the production **llvm22** backend the
+d128 body is already occupancy-clean (213 VGPR / 0 spill / 2 WG/CU), so the
+production lever is the **MFMA-schedule hint** `use_softmax_mfma_interleave`
+(paired with `use_q_direct_reg`); the selector also forces `num_warps=2`
+(`_select_2d_num_warps` — `num_warps=1` is occupancy-starved on the tiny
+single-seq grid) and `waves_per_eu=2` (`_select_2d_waves_per_eu`, which does the
+occupancy work; the older `waves_per_eu=3`-at-long-S rule regressed this cohort),
+and disables the V double-buffer (`_enable_v_double_buffer`). d64 single-batch
+combo uses `num_warps=4`. The K-single-buffer / small-tile occupancy levers and
+the `HIPDNN_GFX950_D128_SMALL_TILE=0` opt-out hatch remain in the tree but
+address an llvm20-only occupancy wall — they are not the production lever. See
+arch reference §21.4a and §17.4 for the measured occupancy and per-shape numbers.
 
 #### 12.1.L Multi-XCD / chiplet grid swizzle
 
@@ -2305,8 +2437,9 @@ that dominate every MFMA-tiled kernel's optimisation log.
 
 The documented validation pass at the time of writing exercises:
 
-- The 286-test static unit suite (`test_ck_dsl.py`) — IR construction,
-  transform DAG, helpers, instance smoke.
+- The 245-test unit suite (`test_ck_dsl.py`) — IR construction,
+  transform DAG, helpers, instance smoke. Most run without a GPU; ~20
+  harness/validation/timer tests require one.
 - `verify_dsl_docs.py` — imports every symbol referenced by the docs,
   exercises every IR builder method, lowers every spec to LLVM / HIP
   / CK Tile, builds HSACO, launches small kernels.
@@ -2936,9 +3069,11 @@ For a new kernel or a regression:
    `probe_isa_inspect.py` to see the post-codegen instruction mix.
    This is where you confirm that vector stores actually emit
    `buffer_store_dwordx{2,4}` (and not `buffer_store_short`), that
-   the cshuffle epilogue is using wide stores, and that
-   `s_sched_barrier` was silently removed on gfx950 (it always is —
-   see Section 8.4).
+   the cshuffle epilogue is using wide stores, and whether a runtime
+   `s_sched_barrier` instruction is present on gfx950 (usually it is
+   not — `b.sched_barrier` is a compile-time fence that constrains the
+   scheduler without leaving a runtime instruction; absence here does
+   *not* mean the directive had no effect — see Section 8.4).
 5. **Lowering parity check (only if HIP debug parity is failing)**.
    Run `probe_lowering_compare.py` — if the HSACO sizes diverge >2×
    or the VGPR/LDS deltas are large, one backend is missing an op
@@ -2978,7 +3113,7 @@ from probe_config_sweep import probe_config_sweep
 from probe_targeted_bench import bench_shapes, time_cuda_event
 
 # Example: feed a custom kernel + spec to probe_occupancy
-from ck_dsl.instances.attention_tiled_2d import (
+from ck_dsl.instances import (
     UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
 )
 spec = UnifiedAttention2DTiledSpec(
@@ -3040,9 +3175,9 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
-python python/ck_dsl/examples/ck_tile_parity.py --op all
+python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \

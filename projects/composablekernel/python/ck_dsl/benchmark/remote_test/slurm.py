@@ -6,6 +6,7 @@ the requested arch constraint.
 
 Output from srun is streamed back over the SSH session.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,8 +50,9 @@ def push_artifacts(arch: str) -> str:
     return remote
 
 
-def _build_srun_argv(arch: str, remote_pkg: str, remote_art: str,
-                     run_spec: dict) -> str:
+def _build_srun_argv(
+    arch: str, remote_pkg: str, remote_art: str, run_spec: dict
+) -> str:
     profile = config.ARCHES[arch]
     shape = run_spec.get("shape", {})
     shape_str = f"{shape.get('m', 0)},{shape.get('n', 0)},{shape.get('k', 0)}"
@@ -75,8 +77,8 @@ def _build_srun_argv(arch: str, remote_pkg: str, remote_art: str,
         f"set -e; cd {shlex.quote(remote_pkg)}; "
         f"export PYTHONPATH={shlex.quote(remote_pkg)}:$PYTHONPATH; "
         f"echo '[remote] host='$(hostname)' arch={arch}'; "
-        + preflight +
-        f"python3 -m ck_dsl.run_manifest {shlex.quote(hsaco)} "
+        + preflight
+        + f"python3 -m ck_dsl.run_manifest {shlex.quote(hsaco)} "
         f"{shlex.quote(manifest)} --shape {shape_str} --verify"
     )
     if config.DOCKER_IMAGE:
@@ -86,15 +88,21 @@ def _build_srun_argv(arch: str, remote_pkg: str, remote_art: str,
         # "no such file or directory". The DRI_FLAGS shell var below is
         # filled in only when /dev/dri actually exists on the host.
         docker = [
-            "docker", "run", "--rm",
+            "docker",
+            "run",
+            "--rm",
             "--network=host",
             "--device=/dev/kfd",
             "$DRI_FLAGS",
-            "-v", "/var/lib/docker/:/var/lib/docker",
-            "--group-add", "video",
+            "-v",
+            "/var/lib/docker/:/var/lib/docker",
+            "--group-add",
+            "video",
             "--ipc=host",
-            "-v", "$HOME:$HOME",
-            "-w", remote_pkg,
+            "-v",
+            "$HOME:$HOME",
+            "-w",
+            remote_pkg,
         ]
         if config.DOCKER_EXTRA_FLAGS:
             docker += shlex.split(config.DOCKER_EXTRA_FLAGS)
@@ -102,9 +110,7 @@ def _build_srun_argv(arch: str, remote_pkg: str, remote_art: str,
         # Tokens that must reach the remote shell unquoted (so $VAR
         # expansion happens there, not via shlex.quote on this side).
         _unquoted = {"$HOME:$HOME", "$DRI_FLAGS"}
-        docker_str = " ".join(
-            a if a in _unquoted else shlex.quote(a) for a in docker
-        )
+        docker_str = " ".join(a if a in _unquoted else shlex.quote(a) for a in docker)
         # Probe /dev/dri on the compute node and only forward the device
         # flags if it actually exists.
         inner = (
@@ -120,20 +126,25 @@ def _build_srun_argv(arch: str, remote_pkg: str, remote_art: str,
         f"--constraint={profile.slurm_constraint}",
         f"--gres={profile.slurm_gres}",
         f"--time={profile.slurm_time}",
-        "--job-name", f"ckdsl-{arch}",
-        "--output", f"{remote_art}/srun.out",
-        "--error",  f"{remote_art}/srun.err",
+        "--job-name",
+        f"ckdsl-{arch}",
+        "--output",
+        f"{remote_art}/srun.out",
+        "--error",
+        f"{remote_art}/srun.err",
         # Site-specific srun args (e.g. --nodelist / --exclude to steer
         # around nodes whose GPU is bound to vfio-pci instead of amdgpu).
         # Env-driven so nothing site-specific lands in the repo.
         *shlex.split(config.SLURM_EXTRA),
-        "bash", "-lc", inner,
+        "bash",
+        "-lc",
+        inner,
     ]
     return " ".join(shlex.quote(a) for a in srun)
 
 
 def run_arch(arch: str) -> int:
-    profile = config.ARCHES[arch]
+    profile = config.ARCHES[arch]  # noqa: F841
     local = config.stage_dir(arch)
     spec_path = local / "run_spec.json"
     if not spec_path.exists():
@@ -149,7 +160,8 @@ def run_arch(arch: str) -> int:
     tail = transport.ssh_run(
         f"tail -n +1 {shlex.quote(remote_art)}/srun.out "
         f"{shlex.quote(remote_art)}/srun.err 2>/dev/null || true",
-        capture=True, check=False,
+        capture=True,
+        check=False,
     )
     if tail.stdout:
         print(f"[slurm:{arch}] --- remote logs ---\n{tail.stdout}")

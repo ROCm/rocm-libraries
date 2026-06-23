@@ -188,6 +188,13 @@ def run_manifest(
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    # Pin the newest (torch-bundled) comgr/HIP runtime before loading any HSACO,
+    # so runtime/flavor selection cannot depend on import order: a stale
+    # /opt/rocm otherwise loads a disjoint HIP runtime (hipError 500 / wrong LLVM
+    # flavor on a torch-newer-than-system venv). No-op when torch is absent.
+    from .runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()
     ap = argparse.ArgumentParser()
     ap.add_argument("hsaco")
     ap.add_argument("manifest")

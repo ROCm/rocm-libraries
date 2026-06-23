@@ -623,9 +623,7 @@ def _emit_wmma_moe_db_kloop(
     K_minus = b.sub(K, c_block_k)
 
     # Prologue: tile 0 -> half 0.
-    _db_load_store(
-        plan, a_view, a_lds_view, a_mn_origin, operands, b_mn_origin, c0, c0
-    )
+    _db_load_store(plan, a_view, a_lds_view, a_mn_origin, operands, b_mn_origin, c0, c0)
 
     group_sizes = [len(g) for g in acc_groups]
     carried: List[Tuple[str, Value]] = [("gupar", c0)]
@@ -636,8 +634,16 @@ def _emit_wmma_moe_db_kloop(
         a_par = b.mul(parity, c_block_m)
         b_par = b.mul(parity, c_block_n)
         return _emit_wmma_moe_phase(
-            plan, a_smem, operands, cur_groups, warp_m_idx, warp_n_idx, lane,
-            sched, a_par, b_par,
+            plan,
+            a_smem,
+            operands,
+            cur_groups,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched,
+            a_par,
+            b_par,
         )
 
     for_op = b.scf_for_iter(c0, K_minus, c_block_k, carried, iv_name="k0")
@@ -975,8 +981,16 @@ def _emit_wmma_down_db_kloop(
         _load_store_b(k_next, nxt)
         b_par = b.mul(parity, c_block_n)
         new_accs = _emit_wmma_down_phase_lds_a(
-            plan, a_smem_persistent, k0, operand, cur_accs,
-            warp_m_idx, warp_n_idx, lane, sched, b_par,
+            plan,
+            a_smem_persistent,
+            k0,
+            operand,
+            cur_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched,
+            b_par,
         )
         b.scf_yield(nxt, *new_accs)
 
@@ -988,8 +1002,16 @@ def _emit_wmma_down_db_kloop(
     k_final = b.mul(b.sub(b.div(K, c_block_k), c1), c_block_k)
     b_par = b.mul(final_parity, c_block_n)
     return _emit_wmma_down_phase_lds_a(
-        plan, a_smem_persistent, k_final, operand, final_accs,
-        warp_m_idx, warp_n_idx, lane, sched, b_par,
+        plan,
+        a_smem_persistent,
+        k_final,
+        operand,
+        final_accs,
+        warp_m_idx,
+        warp_n_idx,
+        lane,
+        sched,
+        b_par,
     )
 
 
@@ -1058,9 +1080,7 @@ def _emit_wmma_down_reduce_atomic(
             def inner(_c_m=c_m, _i=i, _mi=mi):
                 bucket = b.add(batch_bucket_off, _c_m)
                 token = b.global_load_i32(SortedTokenIds, bucket)
-                valid = b.land(
-                    b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, tokens)
-                )
+                valid = b.land(b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, tokens))
                 with b.scf_if(valid):
                     w = b.global_load_f32(SortedWeights, bucket)
                     for ni in range(mfmas_n):
@@ -1151,7 +1171,7 @@ def build_moe_fused_mega_wmma(
     tokens = b.param("tokens", I32)
 
     t = spec.gate_up_tile()
-    c_per_lane = op_gu.c_frag_len
+    c_per_lane = op_gu.c_frag_len  # noqa: F841
 
     block_m = t.tile_m
     block_n = t.tile_n
@@ -1269,9 +1289,7 @@ def build_moe_fused_mega_wmma(
     c_block_n_down = b.const_i32(block_n_down)
 
     bd_rows = nbuf * block_n_down
-    Bd_smem = b.smem_alloc(
-        storage_dtype, [bd_rows, block_k_down], name_hint="Bd_smem"
-    )
+    Bd_smem = b.smem_alloc(storage_dtype, [bd_rows, block_k_down], name_hint="Bd_smem")
     bd_lds_view = TensorView(
         base=Bd_smem,
         desc=TensorDescriptor.packed((bd_rows, block_k_down), storage_dtype),
@@ -1282,9 +1300,7 @@ def build_moe_fused_mega_wmma(
         WDown, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, N, 1)
     )
     plan_down = _WmmaMoePlan(b, u_down, op_down, tid)
-    down_operand = _MoeOperand(
-        global_view=wd_view, lds_view=bd_lds_view, smem=Bd_smem
-    )
+    down_operand = _MoeOperand(global_view=wd_view, lds_view=bd_lds_view, smem=Bd_smem)
     c_down_k = b.const_i32(spec.tile_n_inter)
     down_acc_init = _emit_zero_acc_op(b, op_down)
     down_pad_m = bool(u_down.trait.pad_m)

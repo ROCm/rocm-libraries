@@ -1,0 +1,17 @@
+{
+  "arch": "gfx950",
+  "args_signature": [],
+  "block_k": 32,
+  "block_m": 64,
+  "block_n": 64,
+  "conv_layout": "implicit_gemm",
+  "epilogue": "default",
+  "grid_order": "NM",
+  "hsaco": "",
+  "kernel_name": "ckdsl_cdna_mem_64x64",
+  "kind": "conv_fp16",
+  "pipeline": "mem",
+  "priority": 20,
+  "schema": "ck.dsl.example.manifest/v1",
+  "threads_per_block": 256
+}

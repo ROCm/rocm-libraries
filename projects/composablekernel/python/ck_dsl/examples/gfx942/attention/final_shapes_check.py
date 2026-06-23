@@ -78,7 +78,10 @@ from ck_dsl.instances import UnifiedAttentionProblem
 from ck_dsl.instances.common import attention_unified as au
 from ck_dsl.runtime import synchronize_and_release, time_launches
 from parity_unified_attention import (
-    compare, load_shapes, make_inputs, ref_paged_attn,
+    compare,
+    load_shapes,
+    make_inputs,
+    ref_paged_attn,
 )
 
 # Graph-replay policy overrides for CK's dispatcher. ``_NO_GRAPH`` forces the
@@ -86,8 +89,8 @@ from parity_unified_attention import (
 # internal CUDA graph. The graph cell builds CK's internal graph once and times
 # its replay directly (pure kernel, no Python dispatch) -- symmetric with the
 # Torch baseline's external CUDA-graph capture.
-_NO_GRAPH = lambda problem: False   # noqa: E731
-_ALL_GRAPH = lambda problem: True   # noqa: E731
+_NO_GRAPH = lambda problem: False  # noqa: E731
+_ALL_GRAPH = lambda problem: True  # noqa: E731
 
 
 def time_graphed(fn, *, warmup, iters):
@@ -138,7 +141,7 @@ def reduce_times(vals, method, trim):
         return statistics.fmean(vals)
     if method == "trimmed":
         k = int(len(vals) * trim)
-        core = vals[k:len(vals) - k] if len(vals) - 2 * k >= 1 else vals
+        core = vals[k : len(vals) - k] if len(vals) - 2 * k >= 1 else vals
         return statistics.fmean(core)
     raise ValueError(f"unknown reduce method: {method}")
 
@@ -178,7 +181,9 @@ def time_ck_graph(call, *, warmup, iters, reps, method, trim):
         new = [au._2D_GRAPHS[k] for k in au._2D_GRAPHS if k not in before2d]
         new += [au._3D_GRAPHS[k] for k in au._3D_GRAPHS if k not in before3d]
         if len(new) != 1:
-            raise RuntimeError(f"could not isolate CK internal graph (found {len(new)})")
+            raise RuntimeError(
+                f"could not isolate CK internal graph (found {len(new)})"
+            )
         g = new[0]
 
         def one():
@@ -216,7 +221,12 @@ def make_torch_once(s, data, is_causal):
         vs.append(data["value_cache"][bt].reshape(-1, s.kv_heads, s.head_size)[:klen])
     kh = torch.stack(ks, 0).transpose(1, 2).repeat_interleave(nrep, 1).contiguous()
     vh = torch.stack(vs, 0).transpose(1, 2).repeat_interleave(nrep, 1).contiguous()
-    qh = data["query"].view(s.batch, s.seqlen_q, s.heads, s.head_size).transpose(1, 2).contiguous()
+    qh = (
+        data["query"]
+        .view(s.batch, s.seqlen_q, s.heads, s.head_size)
+        .transpose(1, 2)
+        .contiguous()
+    )
 
     def once_with(backends):
         def once():
@@ -224,17 +234,24 @@ def make_torch_once(s, data, is_causal):
                 F.scaled_dot_product_attention(
                     qh, kh, vh, is_causal=is_causal, scale=data["scale"]
                 )
+
         return once
 
     flash_once = once_with([SDPBackend.FLASH_ATTENTION])
     try:
-        flash_once(); torch.cuda.synchronize()
+        flash_once()
+        torch.cuda.synchronize()
         return flash_once, "flash"
     except RuntimeError:
         deflt = once_with(
-            [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+            [
+                SDPBackend.FLASH_ATTENTION,
+                SDPBackend.EFFICIENT_ATTENTION,
+                SDPBackend.MATH,
+            ]
         )
-        deflt(); torch.cuda.synchronize()
+        deflt()
+        torch.cuda.synchronize()
         return deflt, "default"
 
 
@@ -243,42 +260,74 @@ def _us(med_cv):
     med, cv = med_cv
     if med <= 0:
         return f"{'N/A':>12}", False
-    return f"{med*1000:12.1f}", cv > 0.10
+    return f"{med * 1000:12.1f}", cv > 0.10
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--groups", nargs="+", default=None,
-                    help="shape groups to run (default: all groups in shapes.json)")
+    ap.add_argument(
+        "--groups",
+        nargs="+",
+        default=None,
+        help="shape groups to run (default: all groups in shapes.json)",
+    )
+    ap.add_argument(
+        "--shapes",
+        default=None,
+        help="path to an alternate shapes json (default: shipped shapes.json)",
+    )
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--iters", type=int, default=50)
-    ap.add_argument("--reps", type=int, default=10,
-                    help="timed measurements per cell, reduced per --reduce (default 10)")
-    ap.add_argument("--reduce", choices=("median", "mean", "trimmed"), default="trimmed",
-                    help="how to reduce the --reps measurements (default: trimmed)")
-    ap.add_argument("--trim", type=float, default=0.2,
-                    help="fraction stripped from each end for --reduce trimmed (default 0.2)")
+    ap.add_argument(
+        "--reps",
+        type=int,
+        default=10,
+        help="timed measurements per cell, reduced per --reduce (default 10)",
+    )
+    ap.add_argument(
+        "--reduce",
+        choices=("median", "mean", "trimmed"),
+        default="trimmed",
+        help="how to reduce the --reps measurements (default: trimmed)",
+    )
+    ap.add_argument(
+        "--trim",
+        type=float,
+        default=0.2,
+        help="fraction stripped from each end for --reduce trimmed (default 0.2)",
+    )
     args = ap.parse_args()
     if args.reps < 1 or args.iters < 1 or args.warmup < 0:
         ap.error("--reps and --iters must be >= 1, --warmup must be >= 0")
     if not 0.0 <= args.trim < 0.5:
         ap.error("--trim must be in [0.0, 0.5)")
-    print(f"device,{torch.cuda.get_device_name(0)} torch {torch.__version__}", flush=True)
-    print(f"timing: reps={args.reps} reduce={args.reduce}"
-          + (f" trim={args.trim}" if args.reduce == "trimmed" else "")
-          + f" (inner iters={args.iters}, warmup={args.warmup})", flush=True)
+    print(
+        f"device,{torch.cuda.get_device_name(0)} torch {torch.__version__}", flush=True
+    )
+    print(
+        f"timing: reps={args.reps} reduce={args.reduce}"
+        + (f" trim={args.trim}" if args.reduce == "trimmed" else "")
+        + f" (inner iters={args.iters}, warmup={args.warmup})",
+        flush=True,
+    )
     # By default run every group EXCEPT those suffixed "_disabled" (e.g.
     # "d256_disabled" -- see the module docstring). Pass --groups explicitly to
     # include them, e.g. `--groups d256_disabled`.
-    shapes = [s for s in load_shapes()
-              if (args.groups is None and not s.group.endswith("_disabled"))
-              or (args.groups is not None and s.group in args.groups)]
+    _shapes_kw = {"path": Path(args.shapes).resolve()} if args.shapes else {}
+    shapes = [
+        s
+        for s in load_shapes(**_shapes_kw)
+        if (args.groups is None and not s.group.endswith("_disabled"))
+        or (args.groups is not None and s.group in args.groups)
+    ]
     stream = int(torch.cuda.current_stream().cuda_stream)
     n_pass = n_fail = n_fallback = 0
     win_e = win_c = cmp_e = cmp_c = 0
-    hdr = (f"{'shape':30s} {'dt':4s} {'CK-Eager':>12} {'CK-Graph':>12} "
-           f"{'Torch-Eager':>12} {'Torch-Graph':>12} {'Eager-Ratio':>12} {'Graph-Ratio':>12} "
-           f"{'backend':>7}  result   (us; ratio = CK/Torch, <1 = CK faster)")
+    hdr = (
+        f"{'shape':30s} {'dt':4s} {'CK-Eager':>12} {'CK-Graph':>12} "
+        f"{'Torch-Eager':>12} {'Torch-Graph':>12} {'Eager-Ratio':>12} {'Graph-Ratio':>12} "
+        f"{'backend':>7}  result   (us; ratio = CK/Torch, <1 = CK faster)"
+    )
     print(hdr, flush=True)
 
     def time_eager(fn):
@@ -286,31 +335,55 @@ def main():
 
     for s in shapes:
         data = make_inputs(s)
-        ref = ref_paged_attn(data["query"], data["key_cache"], data["value_cache"],
-                             data["query_lens"], data["kv_lens_list"],
-                             data["block_tables"], data["scale"]).float()
+        ref = ref_paged_attn(
+            data["query"],
+            data["key_cache"],
+            data["value_cache"],
+            data["query_lens"],
+            data["kv_lens_list"],
+            data["block_tables"],
+            data["scale"],
+        ).float()
         decode = s.seqlen_q == 1
         problem = UnifiedAttentionProblem(
-            total_q=data["query"].shape[0], num_seqs=s.batch, num_query_heads=s.heads,
-            num_kv_heads=s.kv_heads, head_size=s.head_size, block_size=64,
+            total_q=data["query"].shape[0],
+            num_seqs=s.batch,
+            num_query_heads=s.heads,
+            num_kv_heads=s.kv_heads,
+            head_size=s.head_size,
+            block_size=64,
             max_seqlen_q=(1 if decode else data["max_query_len"]),
-            max_seqlen_k=data["max_kv_len"], dtype=s.dtype, num_sms=120)
+            max_seqlen_k=data["max_kv_len"],
+            dtype=s.dtype,
+            num_sms=120,
+        )
         out = torch.empty_like(data["query"])
 
-        def call():
+        def call(data=data):  # bind at def-time (immune to the later `del data`)
             au.run_unified_attention_torch(
-                problem=problem, q=data["query"], k=data["key_cache"], v=data["value_cache"],
-                out=out, cu_seqlens_q=data["cu_q"], seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"], block_table=data["block_tables"], softcap=0.0,
-                backend="auto", stream=stream)
+                problem=problem,
+                q=data["query"],
+                k=data["key_cache"],
+                v=data["value_cache"],
+                out=out,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                softmax_scale=data["scale"],
+                block_table=data["block_tables"],
+                softcap=0.0,
+                backend="auto",
+                stream=stream,
+            )
 
         # Correctness (eager production dispatch).
         au._recommend_graph_replay = _NO_GRAPH
-        call(); torch.cuda.synchronize()
+        call()
+        torch.cuda.synchronize()
         mx = compare(ref, out)["max_abs"]
         tol = 2e-2 if s.dtype == "fp16" else 4e-2
         ok = mx < tol
-        n_pass += ok; n_fail += (not ok)
+        n_pass += ok
+        n_fail += not ok
         res = "PASS" if ok else "FAIL"
 
         # --- CK timing: eager (production dispatch), then graph ---
@@ -319,11 +392,19 @@ def main():
         # only) -- CK's dispatcher isn't externally capture-safe, so we replay
         # the graph CK itself builds. Symmetric with the Torch external capture.
         au._recommend_graph_replay = _NO_GRAPH
-        cke = robust(lambda: time_eager(call), reps=args.reps, method=args.reduce, trim=args.trim)
+        cke = robust(
+            lambda: time_eager(call), reps=args.reps, method=args.reduce, trim=args.trim
+        )
         synchronize_and_release(stream)
         try:
-            ckc = time_ck_graph(call, warmup=args.warmup, iters=args.iters,
-                                reps=args.reps, method=args.reduce, trim=args.trim)
+            ckc = time_ck_graph(
+                call,
+                warmup=args.warmup,
+                iters=args.iters,
+                reps=args.reps,
+                method=args.reduce,
+                trim=args.trim,
+            )
         except Exception:
             ckc = (0.0, 0.0)
         synchronize_and_release(stream)
@@ -332,12 +413,21 @@ def main():
         once, backend = make_torch_once(s, data, is_causal=(not decode))
         if backend == "default":
             n_fallback += 1
-            print(f"  [warn] {s.name}: AOTriton flash ineligible; comparing vs "
-                  f"Torch default SDPA backend.", flush=True)
-        fle = robust(lambda: time_eager(once), reps=args.reps, method=args.reduce, trim=args.trim)
+            print(
+                f"  [warn] {s.name}: AOTriton flash ineligible; comparing vs "
+                f"Torch default SDPA backend.",
+                flush=True,
+            )
+        fle = robust(
+            lambda: time_eager(once), reps=args.reps, method=args.reduce, trim=args.trim
+        )
         try:
-            flc = robust(lambda: time_graphed(once, warmup=args.warmup, iters=args.iters),
-                         reps=args.reps, method=args.reduce, trim=args.trim)
+            flc = robust(
+                lambda: time_graphed(once, warmup=args.warmup, iters=args.iters),
+                reps=args.reps,
+                method=args.reduce,
+                trim=args.trim,
+            )
         except Exception:
             flc = (0.0, 0.0)
 
@@ -345,26 +435,42 @@ def main():
         eR = cke[0] / fle[0] if fle[0] > 0 else 0.0
         cR = ckc[0] / flc[0] if (ckc[0] > 0 and flc[0] > 0) else 0.0
         if fle[0] > 0:
-            cmp_e += 1; win_e += eR < 1.0
+            cmp_e += 1
+            win_e += eR < 1.0
         if ckc[0] > 0 and flc[0] > 0:
-            cmp_c += 1; win_c += cR < 1.0
+            cmp_c += 1
+            win_c += cR < 1.0
 
-        cke_s, n1 = _us(cke); ckc_s, n2 = _us(ckc)
-        fle_s, n3 = _us(fle); flc_s, n4 = _us(flc)
+        cke_s, n1 = _us(cke)
+        ckc_s, n2 = _us(ckc)
+        fle_s, n3 = _us(fle)
+        flc_s, n4 = _us(flc)
         noisy = " noisy" if (n1 or n2 or n3 or n4) else ""
         bk = "flash" if backend == "flash" else "default"
         eR_s = f"{eR:12.3f}" if eR > 0 else f"{'-':>12}"
         cR_s = f"{cR:12.3f}" if cR > 0 else f"{'-':>12}"
-        print(f"{s.name:30s} {s.dtype:4s} {cke_s} {ckc_s} {fle_s} {flc_s} "
-              f"{eR_s} {cR_s} {bk:>7}  {res}{noisy}", flush=True)
+        print(
+            f"{s.name:30s} {s.dtype:4s} {cke_s} {ckc_s} {fle_s} {flc_s} "
+            f"{eR_s} {cR_s} {bk:>7}  {res}{noisy}",
+            flush=True,
+        )
         del data, ref
         torch.cuda.empty_cache()
 
     print(f"\ncorrectness: {n_pass} PASS / {n_fail} FAIL", flush=True)
-    print(f"Eager ratio (host overhead + kernel): CK faster on {win_e}/{cmp_e} shapes", flush=True)
-    print(f"Graph ratio (kernel only, host overhead removed): CK faster on {win_c}/{cmp_c} shapes", flush=True)
+    print(
+        f"Eager ratio (host overhead + kernel): CK faster on {win_e}/{cmp_e} shapes",
+        flush=True,
+    )
+    print(
+        f"Graph ratio (kernel only, host overhead removed): CK faster on {win_c}/{cmp_c} shapes",
+        flush=True,
+    )
     if n_fallback:
-        print(f"({n_fallback} shapes compared vs Torch default — flash ineligible)", flush=True)
+        print(
+            f"({n_fallback} shapes compared vs Torch default — flash ineligible)",
+            flush=True,
+        )
     return 1 if n_fail else 0
 
 

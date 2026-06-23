@@ -1,0 +1,17 @@
+{
+  "arch": "gfx950",
+  "args_signature": [],
+  "atom_k": 32,
+  "block_k": 32,
+  "block_m": 16,
+  "block_n": 256,
+  "hsaco": "",
+  "kernel_name": "ckdsl_mega_f16",
+  "kind": "moe_fused_mega",
+  "moe_path": "f16",
+  "schema": "ck.dsl.example.manifest/v1",
+  "threads_per_block": 256,
+  "tile_k_gu": 32,
+  "tile_m": 16,
+  "tile_n_inter": 256
+}

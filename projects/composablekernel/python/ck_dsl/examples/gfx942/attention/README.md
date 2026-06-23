@@ -1,179 +1,206 @@
-# CK DSL gfx942 unified-attention — levers & benchmark harness
+# gfx942 unified attention — parity + benchmark harness
 
-Torch-reference parity + benchmark harness for the **gfx942 (CDNA3 / MI300X)**
-unified-attention SDPA-fwd kernels (`ck_dsl.instances.gfx942.attention_tiled_2d`
-for prefill, `..._tiled_3d` for the split-KV decode path).
+A torch-reference **parity + latency** harness for the **gfx942 (CDNA3 /
+MI300X)** unified-attention SDPA-forward kernels: `attention_tiled_2d` for
+prefill and `attention_tiled_3d` for the split-KV decode path, both in
+`ck_dsl.instances.gfx942.attention_tiled_2d` / `..._tiled_3d`. Unlike the gfx950
+attention harness it has **no Triton/AITER dependency** — the oracle is an fp32
+torch reference — so it runs on any box with torch + a gfx942 GPU.
 
-Like the [gfx950 harness](../../gfx950/attention/README.md), this README is a
-**technical discussion of the levers** that took the gfx942 attention stack from
-losing to PyTorch's flash attention to beating it on (almost) every shape in
-`shapes.json`, and how each lever was found and validated.
+> **New to flash attention?** [`ALGORITHM.md`](ALGORITHM.md) derives what these
+> kernels compute from the math up — the online-softmax recurrence, the paged-KV
+> layout the harness feeds them, the causal masking, and the CDNA3-specific
+> transposed-x8 (register-$P^\top$) matmul that the D128-fp16 flash regime uses.
+> Read it first if you want the *why* before the *how to run*.
 
-## Headline results
+## What it shows
 
-MI300X / gfx942 / ROCm 7.2 / torch 2.12, via the production dispatcher
-(`run_unified_attention_torch(backend="auto")`) vs PyTorch SDPA. Mean per-launch
-over 50 timed iters; **CK beats Torch on all 14 `shapes.json` shapes, all
-bit-accurate** (`final_shapes_check.py`). **`speedup` = torch ÷ CK (>1 means CK
-is faster).** "graph" = the dispatcher auto-engages CUDA-graph replay for that
-shape (see the graph heuristic lever).
+- A correct gfx942 tiled SDPA-forward over a canonical shape set
+  (`shapes.json`): fp16/bf16, `head_size` 64 / 128, MHA + GQA, and the
+  decode / short-prefill / long-prefill regimes — each gated against an fp32
+  paged reference.
+- The two shipped D128-fp16 flash geometries side by side: the provider's
+  analytic-default **wide4** (workgroup 256, `num_warps=4`) and the **L4**
+  (workgroup 64) contrast, selectable by environment variable.
+- A CK-vs-Torch latency comparison in **two timing modes** — eager (host launch
+  overhead + kernel) and CUDA-graph (kernel-only, host overhead removed) — so a
+  perf gap can be attributed to kernel time vs launch overhead.
 
-| shape | dtype | CK | Torch | **speedup** | path |
-|-------|-------|---:|------:|:-----------:|:----:|
-| `Fp16_Prefill_GQA_S2048_D128` | fp16 | 218 us | 233 us | **1.07×** | 2d ring |
-| `Fp16_Prefill_GQA_S2048_D64`  | fp16 | 126 us | 138 us | **1.09×** | 2d ring |
-| `Fp16_Decode_GQA_S2048_D128`  | fp16 | 29 us | 93 us | **3.2×** | 3d graph |
-| `Fp16_Decode_GQA_S2048_D64`   | fp16 | 28 us | 68 us | **2.5×** | 3d graph |
-| `Fp16CausalMhaD64S512`        | fp16 | 29 us | 43 us | **1.50×** | 2d narrow graph |
-| `Fp16CausalGqa8D128S512`      | fp16 | 44 us | 54 us | **1.22×** | 2d narrow graph |
-| `Fp16CausalGqaD128S528`       | fp16 | 60 us | 61 us | **1.02×** | 3d graph |
-| `Fp16CausalD128` / `GqaD128` (S64) | fp16 | 14-15 us | 36-38 us | **2.4-2.7×** | 2d narrow graph |
-| `Bf16CausalD128` / `GqaD128` (S64) | bf16 | 15-16 us | 36-38 us | **2.2-2.5×** | 2d narrow graph |
-| `Bf16CausalGqa8D128S512`      | bf16 | 50 us | 55 us | **1.10×** | 2d narrow graph |
-| `Bf16CausalD64` (S64)         | bf16 | 15 us | 32 us | **2.2×** | 2d narrow graph |
-| `Fp16CausalD64` (S64)         | fp16 | 18 us | 32 us | **1.8×** | 2d narrow graph |
+## Prerequisites
 
-D128 prefill widens to **1.45× at S4096** (664 vs 993 us). Every shape wins —
-the smallest shapes via the graph + host-overhead fast path (below), which
-collapsed a tiny call from ~38 us to ~16 us.
+- A gfx942 (CDNA3 / MI300X) GPU and a ROCm PyTorch build (`torch.cuda` must
+  resolve to the HIP device).
+- The repo's `python/` on `PYTHONPATH` (commands below set it).
+- No numpy required: the harness uses plain Python lists for the block tables so
+  it runs on the minimal container torch build.
 
-Relative to the baseline this work started from (transposed-x8 `cfvst`, T=64,
-double-buffered K — the prior "wide4" default), the headline prefill deltas:
+## File map
 
-| shape (S2048) | original | final | vs-original | vs-torch (speedup) |
-|---------------|---------:|------:|------------:|-------------------:|
-| D128 prefill  | ~310 us (0.75× torch, loses) | **218 us** | **1.42× faster** | **1.07× (wins)** |
-| D64 prefill   | ~158 us (0.87× torch, loses) | **126 us** | **1.25× faster** | **1.09× (wins)** |
-
-## The levers
-
-The fp16 prefill kernel is the transposed-x8 flash pipeline: `S^T = K·Q^T` via
-the gfx942-legal `mfma_f32_32x32x8_f16` atom, `P^T` register-resident as the PV
-B-operand (no `P_lds` round-trip), conflict-free V LDS. On that foundation:
-
-| # | lever | mechanism | effect |
-|---|-------|-----------|--------|
-| 1 | **Sliced-K ring** (`ksring`, T=64) | stage K as a 3-slot ring of 32-head-dim slices instead of double-buffering full `[T,HD]` K; depth-3 prefetch with `s_waitcnt` partial waits, within the 64 KB LDS cap. **T=64, not T=128** — the smaller tile keeps occupancy high; the ring amortises best there. | D128 prefill ~310→218 us (**1.42×**), beats torch S2048/S4096; the dominant prefill win |
-| 2 | **Ring on D64** | the ring's `HD/32` slicing divides D64 (`k_groups=2`) too; relax the D128-only gate so D64 & D128 prefill share one geometry (T=64, nw4, ring+cfvst+mask-limit). | D64 prefill **+13-17%** vs the prior bespoke nw2/single config — beats torch S2048 (**1.09×**), ~parity→win S4096 |
-| 3 | **mask-limit** | collapse causal + prefix masks into one compare vs `min(causal, prefix_tail)`; hoist the per-query-row MFMA base out of the 16-register score loop (pure VALU schedule, bit-identical). | small consistent positive on the T=64 ring; default-on D64+D128 |
-| 4 | **Wide 128-bit decode KV feed** | replace gfx942's 1-DWORD async `buffer_load_lds` (the b96/b128 LDS-DMA forms are gfx950-only → 4× the load instructions) with wide 8-half (16 B) global→reg→LDS loads (the in-kernel fp8 vehicle); convert the descriptor's byte offset → element index for `global_load_vN`. | **~8%** on D128 decode, neutral D64, bit-identical |
-| 5 | **bf16 D128 = T=64** (scalar-fallback fix) | bf16 D128 defaulted to T=128 → double-buffered K alone is 64 KB → tiled-2D LDS gate rejected → `auto` dropped to the **scalar kernel**. Force `T=64` for *all* gfx942 D128 → fits the narrow path at nw≤2. | `Bf16CausalGqa8D128S512` **176 614→173 us (1023×)**; `Bf16CausalD128` **5543→51 us** |
-| 6 | **Light narrow geometry for short context** | for `q ≤ 768` the ring's prelude (256 threads / 3-slot K / Q-direct / mask-limit / mw=32) is pure overhead on a 1-2-tile KV loop. `_enable_gfx942_small_q_narrow` turns flash off and forces 16×16×16, `nw`=1 (MHA) / 2 (GQA), `bmpw=16`, T=64. | every `q≤768` D64/D128 shape wins under graph (D64 S64 0.37×, D128 GQA S512 0.74× in the graph-timed sweep) |
-| 7 | **Host-overhead removal** | (a) memoize `_resolve_attention_arch()` (was resolved ~20×/launch); (b) make the per-call `dataclasses.replace(num_kv_blocks=…)` conditional — its sole consumer is the i64 (>2 GiB) addressing decision, so small caches skip it; (c) the graph fast path below looks up the graph by a **cheap shape signature BEFORE** `supports`/`_tiled_cache_key`, so a replay skips the ~16 us of selector work + the kernarg pack. | a graphed tiny call **33→16 us**; decode `b1` **−21%**, all prefill **−2 to −8%**, zero kernel change |
-| 8 | **Graph-vs-ungraph heuristic** | `_recommend_graph_replay`: graph when launch overhead is a large fraction — decode (`q==1`) and short prefill (`q ≤ 768`); ungraph long prefill (kernel-bound, varying tensors). The dispatcher auto-engages an internal graph (2D for short prefill, 3D for decode/short-prefill-on-3D) unless the caller is already capturing. | short-context shapes **52-62→14-46 us** (3-4×) → flips them from losing to winning; took graph-mode wins 4/14 → **14/14** |
-
-### Lever 8 in detail — the graph heuristic
-
-CUDA-graph capture only removes *per-launch host overhead* (Python dispatch +
-kernarg pack + `hipModuleLaunchKernel`), so it pays off precisely when that
-overhead is a large fraction of kernel time. `_recommend_graph_replay(problem)`
-encodes the rule:
-
-| regime | `max_seqlen_q` | graph? | why |
-|--------|----------------|:------:|-----|
-| decode | `== 1` | **yes** (3D) | tiny kernel, overhead-dominated; serving tensors are stable → replays |
-| short prefill | `2 … 768` | **yes** (2D, or 3D if `select_path` routed there) | 1-2 KV tiles, overhead is a big fraction |
-| long prefill | `> 768` | **no** | kernel-bound; overhead is noise and per-call tensors usually differ, so a graph would only add recapture cost |
-
-The internal graph caches on a **cheap shape signature + tensor identities +
-scalar args**, looked up *before* `supports`/`_tiled_cache_key` so a replay skips
-the ~16 us of selector work and the kernarg pack (a graphed tiny call dropped
-**33→16 us** — `dispatch_profile.py`); a new buffer set rebuilds (correctness)
-while a stable set replays. It is skipped entirely when
-`torch.cuda.is_current_stream_capturing()` so a framework that graphs the whole
-forward (vLLM/SGLang) takes precedence. Toggle with `HIPDNN_GFX942_2D_GRAPH` /
-`HIPDNN_GFX942_3D_GRAPH`.
-
-## How the levers were found
-
-> The sweep / probe / regression harnesses named below are archived under
-> **`~/attention-archive/`** — only `final_shapes_check.py` (+ `shapes.json`,
-> `parity_unified_attention.py`) ships in this folder. Copy one back to re-run it.
-
-The tile/warp/staging/graph choices came from **smart-exhaustive** sweeps
-(`exhaustive_sweep.py`, `loser_sweep.py`): enumerate the full Cartesian, filter
-to valid specs (`__post_init__` + the `supports_tiled_2d` LDS gate — both
-free), **deduplicate by `kernel_name()`** (~46 k enumerated → ~1.2 k unique),
-**compile in parallel** (spawned pool, `maxtasksperchild` recycling so LLVM
-workers don't bloat from ~25/s to ~1/s, SIGALRM per-compile watchdog),
-correctness-gate vs the fp32 reference, then time the survivors (graph-timed for
-the short-context sweep, to rank kernels not Python). `analyze_sweep.py`
-extracts best-of-best; `regression_check.py` snapshots + `--compare` gates.
-
-### What didn't work (so it isn't re-tried)
-
-| tried | result |
-|-------|--------|
-| **T=128 ring** (and `T≥128` for D64) | slower than T=64 ring at every context length — occupancy loss > deeper overlap |
-| `num_warps=8` / `ring_ldsseq` / `iglp_opt` / `early_v_schedule` | hang LLVM codegen for minutes (a Python SIGALRM can't interrupt a native-stuck compile) — excluded from the grids |
-| internal **2D auto-graph for long prefill** | would rebuild per-call for varying-tensor prefill → regression; gated off by the heuristic |
-| `grouped_kv2` softmax, 3D Q-fragment hoist | built + measured, no stable win; left behind flags |
-| larger 3D decode split counts | no `num_segments`/tile combo materially moves decode — it's bandwidth/structure-bound |
-
-## Cache-key safety & regression discipline
-
-Every lever that changes the emitted kernel is in both `kernel_name()` and the
-hot-path `_tiled_cache_key`/`_tiled_3d_cache_key`; the `_gfx942_flash_*` /
-`_enable_gfx942_small_q_narrow` selectors are the single source of truth,
-consumed identically by the spec builder, the support gate, and the cache key,
-so a config change can never alias a previously-compiled binary. Every change
-here was gated with `regression_check.py --compare`: the kernel levers held the
-S2048/S4096 prefill wins to ±0.5%, and the host-overhead lever then took all
-prefill **−2 to −8%** and decode `b1` **−21%** with zero kernel change.
+| file | role |
+|------|------|
+| `shapes.json` | the canonical shape set, grouped by regime: `decode`, `short_prefill`, `long_prefill`, and `d256_disabled` (off by default) |
+| `parity_unified_attention.py` | per-shape parity + latency harness; builds the gfx942 spec **explicitly** (wide4 vs L4) and exposes the `HIPDNN_GFX942_*` lever knobs via `--scenario` |
+| `final_shapes_check.py` | the definitive correctness + perf check over every shape via the **production dispatcher** (`run_unified_attention_torch`), timed eager + graph against PyTorch's flash SDPA |
+| `__init__.py` | package marker + module docstring |
 
 ## Running
 
-`PYTHONPATH=python:python/ck_dsl/examples/gfx942/attention`, needs torch + a
-gfx942 GPU:
+Both scripts need torch + a gfx942 GPU. From the repo's `composablekernel/`
+directory (so `python/` is the package root):
 
 ```bash
-# Correctness + perf over every shapes.json shape vs Torch (the headline table)
-python python/ck_dsl/examples/gfx942/attention/final_shapes_check.py
+# 1) The definitive correctness + perf check over every shape, via the
+#    production dispatcher, timed eager + graph vs PyTorch flash SDPA:
+PYTHONPATH=python python python/ck_dsl/examples/gfx942/attention/final_shapes_check.py
+
+# 2) The explicit parity + latency harness (builds the spec by hand; default
+#    runs the whole shapes.json set):
+PYTHONPATH=python python python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py
 ```
 
-The sweep / probe / regression harnesses live in `~/attention-archive/`; copy one
-into this folder (so it can `import parity_unified_attention`) to re-run it, e.g.:
+### `final_shapes_check.py` flags (all verified against `argparse`)
+
+| flag | default | meaning |
+|------|---------|---------|
+| `--groups G [G ...]` | all non-`*_disabled` groups | which `shapes.json` groups to run (e.g. `--groups decode`, or `--groups d256_disabled` to include the off-by-default d256 set) |
+| `--warmup N` | 10 | warm-up launches before timing |
+| `--iters N` | 50 | inner timed launches per measurement |
+| `--reps N` | 10 | timed measurements per cell, reduced per `--reduce` |
+| `--reduce {median,mean,trimmed}` | `trimmed` | how to reduce the `--reps` measurements |
+| `--trim F` | 0.2 | fraction stripped from each end for `--reduce trimmed` (must be in `[0, 0.5)`) |
+
+It prints, per shape, the eager and graph CK times, the eager and graph Torch
+times, the two CK/Torch ratios (a ratio `< 1` means CK is faster), the SDPA
+backend used (`flash` or `default`), and PASS/FAIL. It exits non-zero on any
+correctness failure.
+
+### `parity_unified_attention.py` flags
+
+| flag | default | meaning |
+|------|---------|---------|
+| `--scenario S` (repeatable) | all shapes | a group (`correctness` / `perf` / `decode` / `all`) **or** an exact shape name; multiple flags union together |
+| `--attempts N` | 30 | timed launches |
+| `--warmup N` | 10 | warm-up launches |
+| `--tol F` | `2e-2` fp16 / `4e-2` bf16 | absolute-tolerance override |
+| `--report PATH` | none | write a JSON results report |
+| `--debug-mismatch N` | 0 | on failure, print the `N` worst mismatch samples |
+
+> **Note on `--scenario`:** the selector special-cases the group names
+> `correctness`, `perf`, `decode`, and `all`. The current `shapes.json` groups
+> are `decode` / `short_prefill` / `long_prefill` / `d256_disabled`, so
+> `--scenario decode` selects the decode group and `--scenario all` (or no flag)
+> runs everything; any other value is matched as an **exact shape name**, e.g.
+> `--scenario fp16_h32kv8_b1_s2048x2048_d128`. To target the other regimes by
+> group, prefer `final_shapes_check.py --groups short_prefill long_prefill`.
 
 ```bash
-cp ~/attention-archive/{exhaustive_sweep,analyze_sweep,graph_probe,loser_sweep,regression_check}.py \
-   python/ck_dsl/examples/gfx942/attention/
-python .../exhaustive_sweep.py --grid tier1 --head-sizes 128 64 --seqlens 2048 --out ~/sweeps/2d.jsonl
-python .../analyze_sweep.py ~/sweeps/2d.jsonl   # best-of-best
-python .../graph_probe.py                       # graph vs un-graph ceiling
-python .../loser_sweep.py                        # short-context kernel-config sweep
-python .../regression_check.py --out base.json && python .../regression_check.py --compare base.json new.json
+# Force the L4 (WG=64) flash geometry instead of the default wide4, on one shape:
+HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python python \
+    python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py \
+    --scenario fp16_h32kv8_b1_s2048x2048_d128
 ```
 
-## Files
+## The shape set (`shapes.json`)
 
-**In this folder** (the minimal correctness + perf check):
+Grouped by regime; every shape is causal (the kernel always applies a causal
+mask), so non-causal *prefill* shapes are not included.
 
-| file | role |
-|------|------|
-| `shapes.json` | canonical correctness (10) + perf (2) + decode (2) shapes |
-| `final_shapes_check.py` | correctness + perf vs Torch over every shape (the headline) |
-| `parity_unified_attention.py` | torch-reference parity harness (`shapes.json` loader, fp32 oracle, input gen) |
+| group | what it covers |
+|-------|----------------|
+| `decode` | `seqlen_q == 1`, long KV (a single query attends to all keys) — fp16, D64/D128, MHA + GQA, batch 1–64 |
+| `short_prefill` | 1–2 KV tiles (`seqlen_q` 64 / 512 / 528) — fp16/bf16, D64/D128, MHA + GQA |
+| `long_prefill` | square prefill `seqlen_q == seqlen_k` up to 8192 — fp16/bf16, D64/D128, MHA + GQA, batch 1–51 |
+| `d256_disabled` | `head_size = 256` — **off by default** (no tiled d256 path on gfx942 → scalar fallback; see below) |
 
-**Archived** under `~/attention-archive/` (the sweep / probe / regression tooling
-that found & gated the levers):
+## Arch notes
 
-| file | role |
-|------|------|
-| `exhaustive_sweep.py` | smart-exhaustive 2D lever sweep (filter → dedup → parallel compile → gate) |
-| `loser_sweep.py` | graph-timed kernel-config sweep that found the light-narrow geometry |
-| `graph_probe.py` | un-graphed vs CUDA-graph latency — quantifies the host-overhead ceiling |
-| `dispatch_profile.py` | per-call host-dispatch breakdown (replace / supports / cache_key / replay) |
-| `analyze_sweep.py` / `validate_configs.py` / `decode_ab.py` | best-of-best ranking / cross-seqlen A/B / decode KV-feed A/B |
-| `regression_check.py` | latency+correctness snapshot, bandwidth-floor probe, `--compare` gate |
-| `decode_sweep.py` / `torch_probe.py` / `benchmark_prefill2d.py` / `sweep_attention_matrix.py` | decode-config sweep / torch-SDPA semantics probe / earlier 2D benchmarks |
-| `expected_perf.csv` | stale hand-maintained perf baseline, superseded by `final_shapes_check.py` |
+- **The D128-fp16 flash regime is the CDNA3 trick.** For `head_size = 128` fp16
+  the harness routes to the transposed-x8 path (`use_mfma_32x32x8` +
+  `use_transposed_qk_32x32`): it computes $S^\top = K Q^\top$ via the
+  gfx942-legal `mfma_f32_32x32x8_f16` atom so that $P^\top$ stays
+  **register-resident** as the PV B-operand — no `P_lds` round-trip. See
+  [`ALGORITHM.md`](ALGORITHM.md) §6.2.
+- **`use_mfma_32x32x8` is fp16-only** (gfx942 has no bf16 `32x32x8` atom), so
+  D128 **bf16** uses the narrow `16x16x16` path, not the flash regime.
+- **wide4 is the *provider's* analytic default, not the spec's.** A bare spec
+  with no flash knobs lands on **L4** (WG=64); `parity_unified_attention.py` sets
+  `num_warps=4` explicitly to reproduce the shipped peak. `HIPDNN_GFX942_FLASH_WIDE`
+  selects between them: unset / `4` → wide4, `0` → L4, `2` → wide2 (WG=64).
+- **The generic LDS support gate over-counts the flash path.**
+  `supports_tiled_2d` models the narrow footprint (`P_lds` present, K
+  double-buffered, full `Acc_lds`), which would wrongly reject the shipped wide4
+  D128 config (whose $P^\top$ is register-resident). The harness applies the gate
+  only to the narrow path and lets the spec's `__post_init__` + comgr arbitrate
+  the flash configs, mirroring the provider.
+- **Graph replay is overhead-driven.** The dispatcher's `_recommend_graph_replay`
+  graphs decode (`max_seqlen_q == 1`) and short prefill (`<= 768`) — where host
+  launch overhead is a large fraction — and ungraphs long prefill (kernel-bound).
+  Toggle with `HIPDNN_GFX942_2D_GRAPH` / `HIPDNN_GFX942_3D_GRAPH` (both default-on).
+
+### Lever environment variables
+
+`parity_unified_attention.py` exposes the spec knobs through environment
+variables (each is read by a small `_*_enabled()` / `_*_setting()` helper and
+echoed at startup):
+
+| variable | effect |
+|----------|--------|
+| `HIPDNN_GFX942_FLASH_WIDE` | flash-tile width for D128 fp16: unset/`4` = wide4 (WG=256), `0` = L4 (WG=64), `2` = wide2 (WG=64) |
+| `HIPDNN_GFX942_NUM_WARPS` | override `num_warps` in the flash regime |
+| `HIPDNN_GFX942_WAVES_PER_EU` | set the `waves_per_eu` occupancy hint |
+| `HIPDNN_GFX942_CFV_STORE` | opt into the experimental conflict-free V store path |
+| `HIPDNN_GFX942_CFV_STORE_SPLIT` / `HIPDNN_GFX942_CFV_CK_VLDS` | sub-knobs of the conflict-free V store (default-on) |
+| `HIPDNN_GFX942_CFV` | the legacy gather-fill conflict-free V diagnostic path |
+| `HIPDNN_GFX942_K_SLICED_RING` | the experimental sliced-K ring for the conflict-free-V-store path |
+| `HIPDNN_GFX942_K_LDSSEQ` | the CK Tile LdsSeq sliced-K variant |
+| `HIPDNN_GFX942_IGLP` | the `iglp_opt(1)` scheduling hint |
+| `HIPDNN_GFX942_KV_CACHE_POLICY` | the KV-cache load policy (default `stream`) |
+| `HIPDNN_GFX942_Q_DIRECT` | load Q directly from global (skip the Q LDS stage) |
+| `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K` | use direct global→LDS loads for K |
+| `HIPDNN_GFX942_Q_MAJOR_GRID` | transpose the launch grid to query-major |
+
+## Troubleshooting
+
+- **`head_size = 256` is off by default.** There is no tiled d256 path on gfx942,
+  so the dispatcher falls back to the scalar kernel, which is much slower than
+  flash, fails the tolerance on some shapes, and is slow enough at `S2048` to
+  stall graph capture (it can look like a hang). The `d256_disabled` group is
+  skipped unless you pass `--groups d256_disabled` (and expect failures /
+  slowness). A proper tiled d256 implementation is needed to revisit it.
+- **Flash-ineligible shapes fall back to Torch's default SDP backend.** In
+  `final_shapes_check.py`, non-square causal shapes (`seqlen_q != seqlen_k`) and
+  d256 are rejected by AOTriton flash, so those rows are timed against Torch's
+  *default* SDP backend (marked `default`) and excluded from the flash win-rate.
+  For non-square shapes the fp32 reference uses a bottom-right-aligned causal mask
+  while Torch's `is_causal=True` is top-left-aligned, so those rows reflect
+  slightly different masking and are reported for context only.
+- **Full sweeps are slow.** `final_shapes_check.py` runs the full set × 4 timing
+  cells × `--reps` × `--iters`, plus the fp32 reference on large (up to `S8192`)
+  shapes — tens of minutes on a single MI300X. Scope it with `--groups`,
+  `--iters`, and `--reps`. Cells whose spread exceeds ~10% are flagged `noisy`.
+- **`SKIP (unsupported on gfx942)`.** `parity_unified_attention.py` raises
+  `NotImplementedError` (and skips) when a *narrow*-path shape fails the
+  `supports_tiled_2d` LDS gate; flash-path shapes bypass the gate and are
+  arbitrated by comgr instead.
 
 ## How the harness maps a dense SDPA problem onto the paged kernel
 
-Each batch element becomes one sequence with `(query_len, kv_len) = (seqlen_q,
-seqlen_k)`; the per-sequence block table is a contiguous, **non-overlapping** run
-of `block_size=64`-token cache blocks, so the KV working set is genuinely
-per-sequence-distinct. The decode baseline uses `is_causal=False` (a length-1
-query attends to all keys); prefill uses `is_causal=True`. The launch grid is
-recomputed exactly as the production dispatcher does, so the example exercises
-the same build + launch plumbing as the provider.
+Each batch element becomes one sequence with
+`(query_len, kv_len) = (seqlen_q, seqlen_k)`; the per-sequence block table is a
+contiguous, **non-overlapping** run of `block_size = 64`-token cache blocks, so
+the KV working set is genuinely per-sequence-distinct. Inputs are filled
+`uniform(-0.1, 0.1)` to keep the softmax accumulation in a numerically friendly
+range. The decode group uses a length-1 query attending to all keys
+(`is_causal=False`, identical to causal at `q == 1`); prefill is causal. The
+launch grid (`(kv_heads, total_num_q_blocks, 1)`, or query-major under
+`HIPDNN_GFX942_Q_MAJOR_GRID`) and `block = (64 * num_warps, 1, 1)` are recomputed
+exactly as the production dispatcher does, so the example exercises the same build
++ launch plumbing as the provider.
+
+## Performance
+
+This example is a correctness-and-latency *harness*, not a published benchmark:
+absolute timings depend on the GPU, ROCm/torch versions, clocks, and thermal
+state of the box, and are **not benchmarked into this folder**. Run
+`final_shapes_check.py` to produce the CK-vs-Torch eager/graph table for your own
+machine; the script prints, and gates on, the correctness result for every shape.

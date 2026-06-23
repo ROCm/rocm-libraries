@@ -10,7 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any, Dict, Optional, Tuple
 
 from ...core.ir import (
@@ -409,6 +409,32 @@ def supports_native_unified_attention_tiled(
     if arch == "gfx1250" and problem.softcap > 0:
         return False, "gfx1250 tiled 2D does not support softcap yet"
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
+    gfx942_bf16_wide = _enable_gfx942_bf16_flash(problem)
+    if gfx942_bf16_wide:
+        # bf16 wide-K (32x32x8) transposed flash path mirrors the build spec
+        # in _tiled_spec_from_problem (T=64, mw=32, transposed-x8 bf16; D64 nw=4
+        # double-K, D128 nw=2 single-K).
+        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        return supports_tiled_2d(
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_queries_per_kv=problem.num_queries_per_kv,
+            use_alibi=problem.use_alibi,
+            use_qq_bias=problem.use_qq_bias,
+            use_fp8=problem.use_fp8,
+            q_dtype=problem.q_dtype,
+            num_warps=nw,
+            block_m_per_warp=32,
+            kv_storage_dtype=_kv_storage_dtype(problem),
+            tile_size=_gfx942_bf16_wide_tile_size(problem),
+            arch=arch,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+            use_k_single_buffer=single_k,
+            use_conflict_free_v_store=use_cfvst,
+        )
     gfx942_flash = _enable_gfx942_fp16_flash(problem)
     num_warps = (
         _select_gfx942_flash_num_warps(problem)
@@ -482,6 +508,83 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     )
 
 
+def _enable_d128_small_tile(problem: UnifiedAttentionProblem) -> bool:
+    """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
+    the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
+
+    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured same-session; re-verified
+    on the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
+    K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB at T=2*block_size -> only 1 workgroup
+    fits the 64 KB/CU budget; the register file already admits 2 waves/SIMD
+    (V+A=229 <= 256). Halving the tile to T=block_size makes LDS=24 KB and
+    VGPR=173 -> 2 WG/CU (measured via llvm-readelf on the produced HSACO:
+    OFF VGPR=229/256, LDS=48 KB -> 1 WG/CU; ON VGPR=173, AGPR=0, LDS=24 KB
+    -> 2 WG/CU, for S=1024/2048/4096 alike). Same-session vs torch SDPA FLASH
+    (apples-to-apples, OFF vs ON on this exact tree):
+      bf16: S1024 1.333x->1.437x, S2048 0.968x->1.059x (CROSS 1.0),
+            S4096 0.916x->0.974x (DSL 0.789->0.741 ms, +6% faster kernel).
+      fp16: S1024 1.312x->1.436x, S2048 0.973x->1.061x (CROSS 1.0),
+            S4096 0.918x->0.975x. Correctness rel ~4.4e-3 bf16 / ~5.5e-4 fp16
+            (IDENTICAL to baseline at every S).
+
+    **RECONCILIATION + DEFAULT-ON.** The small-tile win REQUIRES nw=2 for
+    ALL seqlens (the prior nw=4-at-S>=2048 rule + T=32 is occupancy-WORSE: 56 KB
+    LDS -> back to 1 WG/CU), so when this gate fires the num_warps selector
+    forces nw=2. Verified C-twin selector output == Python for the whole cohort
+    and that NO non-cohort shape changes (3826 trace records across the three
+    canonical aiter_ua* sets: 0 selector changes). It is therefore enabled by
+    DEFAULT for the gfx950 single-batch d128 no-FP8 combo. This is a production
+    ROUTING change (the dispatched d128 prefill kernel changes: T 64->32,
+    nw S>=2048 4->2); per-spec golden EMIT is unchanged (T=block_size is an
+    existing tile_size value, byte-identical to the old code path).
+
+    ESCAPE HATCH: ``HIPDNN_GFX950_D128_SMALL_TILE=0`` (or off/no/false) force-
+    DISABLES the lever, restoring the prior routing (T=64, nw=2/4). Any other
+    value (or unset) -> default-ON for the cohort.
+    """
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX950_D128_SMALL_TILE", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "false", "no", "off"):
+        return False
+    return (
+        problem.head_size == 128
+        and not problem.use_fp8
+        and _enable_single_batch_combo(problem)
+    )
+
+
+def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
+    """d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
+
+    For the same single-batch d128 cohort that ``_enable_d128_small_tile`` gates,
+    keep the LARGER T=64 tile (better long-context per-iter amortisation) but
+    halve K_lds via K single-buffer so LDS stays at 32 KB -> 2 WG/CU. The
+    next-K prefetch is re-issued after the PV-wait barrier (no WAR race). This
+    crosses flash at the S4096 holdout (0.976x -> 1.020x bf16+fp16) and beats
+    the small-tile T=32 pick at every measured shape (gfx950 MI355X, same-session
+    vs torch SDPA FLASH, GPU-idle; see the long-context analysis). Occupancy proof
+    (llvm-readelf):
+    T=64 + K-single -> VGPR=215 AGPR=0 LDS=32 KB -> 2 WG/CU.
+
+    Scoped to the EXACT V-single-buffer combo path the gfx950 emitter wires K
+    single-buffer on (no ring, no grouped_kv2, no FP8, V single-buffer). The
+    cohort already satisfies these; the spec __post_init__ re-validates loudly.
+
+    GEOMETRY GUARD: K-single needs Q to fit the lone K slot, i.e.
+    ``block_m <= tile_size``. The cohort runs num_warps=2 / block_m_per_warp=32
+    -> block_m=64, with tile_size = 2*block_size, so this only holds for
+    ``block_size >= 32`` (T>=64). At block_size=16 (T=32) Q (64 rows) cannot fit
+    the single 32-token K slot and the __post_init__ validator rejects it
+    (use_q_direct_reg would lift this but is not wired on this path). Fall back
+    to the no-K-single small-tile config there.
+    """
+    return _enable_d128_small_tile(problem) and problem.block_size >= 32
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -495,14 +598,14 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     refactor: the LDS savings (8 KiB Q + 8 KiB V) make the multi-block
     path fit comfortably for every workload class on MI355X. For decode,
     the higher per-iter amortization beats the smaller-tile choice by
-    ~24% (measured ``/workspace/probe_prefill_sweep.py``: decode_b1
+    ~24% (measured by an out-of-tree ``probe_prefill_sweep.py``: decode_b1
     drops 34 µs → 26 µs).
 
     The kernel's own gate (``supports_tiled_2d``) re-validates the
     choice against the per-wave-tokens / LDS-budget constraints.
 
     **FP8 sliding-window long-prefill exception** (round-2 cluster-B
-    sweep, ``/workspace/rounds/_summaries/prod_nw_sweep.log``): when the
+    sweep, ``prod_nw_sweep.log``): when the
     sliding window prunes the kv-loop to a handful of iters per CTA,
     bigger T over-allocates LDS without amortising any per-iter cost.
     For ``use_fp8 + sliding_window > 0 + max_seqlen_q > 256``, drop to
@@ -516,7 +619,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # Sliding-window long-prefill FP8 exception. The latest broad sweep
     # confirmed this should stay FP8-only: for bf16 SW long-prefill the
     # correctness-clean winner was T=64, not T=32
-    # (``/workspace/trace_bench/sweep_attention2d_configs.json``:
+    # (``trace_bench/sweep_attention2d_configs.json``:
     # bf16_sw_n16_q1000_k1050 best T=64/mw16/hipcc at ~257us; T=32
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
@@ -551,6 +654,35 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
+    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
+    # Autotuner-proven KV tile per shape (gfx950, no-SW):
+    #   * d128 -> T = 2 * block_size (32). The d128 winners all kept the
+    #     default 2x tile; wider tiles over-allocated LDS without amortising.
+    #   * d64  -> T = 128 (8 * block_size). Paired with num_warps=4 the wider
+    #     tile feeds the d64 KV loop and was the winner for both MHA and
+    #     GQA-8 d64 S2048 (1.19-2.68x over prod).
+    if _enable_single_batch_combo(problem):
+        if problem.head_size == 64:
+            return 128
+        # d128 occupancy lever (supersedes the small-tile pick for the
+        # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound
+        # (K_lds[2,T,HD]+V_lds[1,T,HD] = 48 KB at T=2*BS=64 -> 1 WG/CU). The
+        # small-tile lever halved the TILE (T=block_size=32) to drop LDS
+        # 48->24 KB -> 2 WG/CU, but at T=32 the long-context S4096 path runs
+        # 128 outer iters whose per-iter overhead under-amortises -> only
+        # 0.976x flash. The K-single-buffer lever instead
+        # keeps the LARGER T=64 tile (64 iters at S4096) and halves K_lds via
+        # ``use_k_single_buffer`` (K_lds[1,T,HD]=16 KB + V_lds[1,T,HD]=16 KB =
+        # 32 KB -> 2 WG/CU, VGPR=215 AGPR=0). This crosses flash at S4096
+        # (0.976x -> 1.020x bf16+fp16) AND beats the T=32 pick at every shape
+        # (S1024 1.451->1.476x, S2048 1.065->1.099x; same correctness rel).
+        # The single K slot re-issues the next-K prefetch AFTER the PV-wait
+        # barrier (all QK reads drained) so it cannot WAR-race -- avoiding the
+        # documented gfx942 naive-single-buffer hazard. Default-OFF behind the
+        # same env opt-in (golden/production routing unchanged) until landed.
+        if _enable_d128_small_tile(problem):
+            return 2 * problem.block_size
+        return 2 * problem.block_size
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
     # async DMA loader only 32*64 = 2048 bytes per iter, which under-feeds
@@ -594,13 +726,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     per-tile KV slab, otherwise the async DMA underfills.
 
     Tuning thresholds (calibrated against the trace shapes documented in
-    ``/workspace/trace_bench_report.md`` on MI355X / gfx950; the
-    ``warps``-sweep harness is at ``/workspace/probe_prefill_sweep.py``
-    and the prefill-time harness is at
-    ``/workspace/probe_prefill_time.py``):
+    an out-of-tree ``trace_bench_report.md`` on MI355X / gfx950; the
+    ``warps``-sweep harness is an out-of-tree ``probe_prefill_sweep.py``
+    and the prefill-time harness is an out-of-tree
+    ``probe_prefill_time.py``):
 
-    **Post Q-in-registers + single-buffer-V refactor** (measured at
-    ``/workspace/probe_prefill_sweep.py`` on MI355X):
+    **Post Q-in-registers + single-buffer-V refactor** (measured with
+    ``probe_prefill_sweep.py`` on MI355X):
 
       ``q <= 64``    (decode + tiny prefill) -> 1   (small grid; tiny
                                                      per-CTA work)
@@ -670,6 +802,46 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
                 continue
             break
         return max(1, target)
+    if _enable_single_batch_combo(problem):
+        # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort
+        # (re-tuned by the joint num_warps x schedule sweep). Per shape
+        # (gfx950, no-SW), same-session vs flash:
+        #   * d128 (BLOCK_M = 32 * nw): S<=1024 -> nw=2 (nw=1 is occupancy-
+        #     starved on the tiny single-seq grid; nw=2 with V-double-buffer
+        #     OFF = 1.30x flash vs nw=1's 0.89x). S>=2048 -> nw=4 (more
+        #     resident waves hide the long-KV-loop latency; nw=4 wpe=2 is +9%
+        #     over nw=2 and lifts S=4096 from 0.81 to 0.885x).
+        #   * d64: nw=4 paired with T=128 (the wider tile + 4 warps was the
+        #     winner for both MHA and GQA-8 d64 S2048).
+        #
+        # RECONCILIATION: the d128 SMALL-TILE occupancy win (T=block_size
+        # -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens. The prior nw=4-at-
+        # S>=2048 choice combined with T=block_size is occupancy-WORSE
+        # (nw=4 + T=32 -> 56 KB LDS -> back to 1 WG/CU); the measured 2-WG/CU
+        # crossing (S=2048 1.06x, S=4096 1.02x flash) only holds at nw=2 + T=32
+        # (V+A=173, LDS=24 KB). So when the small-tile cohort is active, force
+        # nw=2 here, overriding the S>=2048 -> nw=4 rule. When the small-tile
+        # gate is OFF this branch is byte-for-byte the prior behavior.
+        if problem.head_size == 64:
+            target = 4
+        elif _enable_d128_small_tile(problem):
+            target = 2
+        elif problem.max_seqlen_q <= 1024:
+            target = 2
+        else:
+            target = 4
+        HD = problem.head_size
+        BS = problem.block_size
+        T = _select_2d_tile_size(problem)
+        while target > 1:
+            if (T * HD) < 64 * target * 8:
+                target //= 2
+                continue
+            if (64 * 8) // HD > BS:
+                target //= 2
+                continue
+            break
+        return max(1, target)
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv>=4). The default heuristic was tuned for HD=128 /
     # multi-batch prefill; for this hd64 single-seq path the per-CTA cost
@@ -703,7 +875,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         target = 4
     elif problem.num_seqs <= 1:
         # Long prefill with num_seqs <= 1: the production-shape sweep
-        # (``/workspace/rounds/_summaries/prefill_n_sweep.log``) shows
+        # (an out-of-tree ``prefill_n_sweep.log``) shows
         # nw=2 beats nw=4 by 3-5% at n=1 (fewer CTAs hurt under-saturated
         # GPU at single-seq). The crossover happens at n=2 where nw=4
         # takes over (4-16% faster than nw=2 from n=2 up to bench-cap n=16).
@@ -735,7 +907,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     else:
         # Long prefill (q > 256) with num_seqs >= 2: nw=4 wins.
         # Round-1 cluster-A sweep
-        # (``/workspace/rounds/round_01_bf16_q1000_v1/cluster_a_sweep.md``)
+        # (an out-of-tree ``cluster_a_sweep.md``)
         # showed ``nw=4 mw=16 T=2*BS`` beats ``nw=2`` on 14 of 17 long-prefill
         # bf16 targets by 1.04-1.87× (no regressions). Resource analysis
         # (``resources.json``): nw=4 keeps WGs/CU at 4 (vs default 5), VGPR
@@ -826,12 +998,22 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
+        # Transposed-softmax VALU sub-flags + V-prefetch schedule. These
+        # vary with max_seqlen_q within the single-batch cohort independently of
+        # num_warps/wpe/tile, so they MUST be in the key to avoid a launcher
+        # collision between two seqlens that share the same geometry but differ
+        # on the V schedule (e.g. S=1500 vs S=2048).
+        _enable_transposed_subflags(problem),
+        _enable_v_double_buffer(problem),
+        _enable_early_v_schedule(problem),
         _enable_register_pv(problem),
         _enable_i64_kv_addr(problem),
         _select_2d_compile_backend(problem),
         _enable_gfx942_fp16_flash(problem),
         _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
-        _gfx942_flash_kv_cache_policy(problem) if _enable_gfx942_fp16_flash(problem) else None,
+        _gfx942_flash_kv_cache_policy(problem)
+        if _enable_gfx942_fp16_flash(problem)
+        else None,
         _enable_gfx942_flash_q_direct(problem),
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),
@@ -843,7 +1025,8 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     """Choose ``waves_per_eu`` for the tiled 2D kernel.
 
     Triton's ``select_2d_config`` uses ``waves_per_eu=2`` for every config
-    (verified at ``/workspace/aiter/aiter/ops/triton/attention/unified_attention.py``).
+    (verified against the aiter Triton reference
+    ``aiter/ops/triton/attention/unified_attention.py``).
     We match that: it gives the LLVM backend more VGPR headroom per wave
     (less risk of spill to scratch / LDS) while still meeting the
     occupancy targets (the double-buffered K/V kernel runs at 2-3 WGs/CU
@@ -858,6 +1041,15 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
         return problem.waves_per_eu
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
+    # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort
+    # (re-tuned by the joint num_warps x schedule sweep): wpe=2 across all
+    # seqlens. The prior wpe=3-at-S>=4096 rule REGRESSED the single-batch
+    # cohort (d128 S4096: nw=4 wpe=2 = 0.881 vs nw=4 wpe=3 = 0.856). Checked
+    # before the combo wpe=4 rule because the single-batch geometry is
+    # smaller-grid and prefers fewer waves. (The small-tile lever uses nw=2 + T=32
+    # which is 2 WG/CU at wpe=2; wpe=2 is correct for that cohort too.)
+    if _enable_single_batch_combo(problem):
+        return 2
     # Combo (incl. fp8 combo) wants wpe=4 -- handled below; check it before
     # the generic fp8 wpe=3 rule so fp8 combo prefill gets wpe=4, not 3.
     if _enable_combo_2d(problem):
@@ -929,6 +1121,144 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
 
 
+def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
+    """Single-batch (num_seqs == 1) d128/d64 prefill -> full 32x32 combo.
+
+    The combinatorial autotuner proved
+    that for SINGLE-BATCH (num_seqs == 1) long prefill the production
+    selector was routing d128 and d64 to the legacy 16x16x32 path, which is
+    ~1.5-2.7x SLOWER than the full 32x32 transposed "combo" and the combo is
+    correctness-equal (winner ``max_abs`` == flash's on every shape; bf16 +
+    fp16; S in {1024,2048,4096}).
+
+    The old ``_enable_transposed_qk_32x32`` / ``_select_2d_block_m_per_warp``
+    gates only picked mw=32 for ``num_seqs >= 2`` (the docstrings justified
+    that with a measurement of the PLAIN transposed path at 0.74-0.85x
+    slower at num_seqs == 1). That measurement was of the bare transposed
+    path -- the FULL combo (scalar-state + mask-once + mask-limit +
+    skip-legacy-qreg + half-local-PV, plus a V prefetch schedule) was never
+    built for num_seqs == 1, and it is 1.5-2.7x FASTER, not slower. So the
+    num_seqs >= 2 restriction was stale for the full combo.
+
+    Cohort (matches the autotuner's proven-winner shapes):
+      * gfx950 only (the wide-K 32x32 MFMA + transpose reads are gfx950-only;
+        gfx942 / RDNA stay on their narrow / flash paths).
+      * num_seqs == 1 (single-batch). Multi-batch keeps its existing combo /
+        transposed routing.
+      * dtype in {bf16, fp16} (the transposed softmax keeps m/l/acc in f32;
+        fp16 winners were as accurate as flash).
+      * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
+        the sync-dequant loader and its own routing).
+      * no ALiBi / QQ bias / softcap / sinks (not wired into the transposed
+        softmax VALU opts; the spec validator rejects them).
+      * no sliding window (the mask-once / mask-limit opts require no-SW).
+      * head_size in {64, 128}.
+      * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
+        split-KV path via ``select_path``, and the autotuner's win starts at
+        S=1024 -- short prefill stays on the legacy path where it is a tie).
+    """
+    if _resolve_attention_arch() != "gfx950":
+        return False
+    if problem.num_seqs != 1:
+        return False
+    if problem.dtype not in ("bf16", "fp16"):
+        return False
+    if problem.use_fp8:
+        return False
+    if problem.use_alibi or problem.use_qq_bias:
+        return False
+    if problem.softcap > 0 or problem.use_sinks:
+        return False
+    if problem.sliding_window > 0:
+        return False
+    if problem.head_size not in (64, 128):
+        return False
+    if problem.max_seqlen_q <= 256:
+        return False
+    return True
+
+
+def _enable_v_double_buffer(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the V[i+1] double-buffer prefetch on the single-batch combo.
+
+    SHORT single-batch combo prefill (max_seqlen_q <= 1024) on **d64** stacks
+    ``use_v_double_buffer`` on top of the combo: the extra in-flight V prefetch
+    hides the V async DMA latency the short KV loop cannot otherwise amortise.
+    Bit-identical to the no-flag path (a pure schedule rewrite); the spec
+    validator allows it on the bf16/fp16 no-FP8 combo.
+
+    **d128: V double-buffer is a NET DRAG and is OFF.** The joint num_warps x
+    schedule sweep found that on d128 removing the prefetch goes 0.89 -> 1.08x
+    even at nw=1, and the actual win path is nw=2 with NO V prefetch = 1.30x
+    flash (the earlier ~6-8% "win" measured the prefetch against an already
+    occupancy-starved nw=1 baseline). Turning vdbuf off for d128 also
+    auto-disables the lever-3 ``use_sched_barrier`` (it gates on this
+    predicate), which was only patching the symptom of the unwanted prefetch.
+    (The small-tile lever keeps d128 vdbuf OFF too: its 2-WG/CU LDS budget = K_lds[2]
+    24 KB + V_lds[1] 8 KB; a V[i+1] prefetch would re-inflate LDS and drop back
+    to 1 WG/CU.)
+
+    LONG prefill (>=2048) gets NO V double-buffer regardless of head_size: the
+    extra prefetch REGRESSES long prefill (the long KV loop already hides V
+    latency). d64 long uses ``use_early_v_schedule`` instead (mutually
+    exclusive).
+    """
+    if not _enable_single_batch_combo(problem):
+        return False
+    if _enable_early_v_schedule(problem):
+        return False
+    # d128: vdbuf is a net drag (see docstring) -- OFF; the nw=2 / no-prefetch
+    # path is the winner. This also auto-disables sched_barrier.
+    if problem.head_size == 128:
+        return False
+    return problem.max_seqlen_q <= 1024
+
+
+def _enable_sched_barrier(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the lever-3 sched_barrier fence (CK-Tile-derived).
+
+    A ``__builtin_amdgcn_sched_barrier`` is placed between the QK MFMA cluster
+    and the post-QK async prefetch issue so the LLVM post-RA scheduler keeps the
+    QK MFMAs packed instead of interleaving the next-tile ``buffer_load_lds``
+    into the MFMA window. Bit-identical numerics (pure scheduler hint).
+
+    Same-session A/B on MI355X (gfx950, LLVM backend):
+      * SINGLE-BATCH d128 S<=1024 (num_warps==1 + V-double-buffer): +35.6-36.0%
+        on bf16 AND fp16 (0.152 -> 0.112 ms) -> DSL/flash ~0.67x -> ~0.92x. The
+        lone resident wave cannot hide the prefetch-in-MFMA-window cost, so
+        packing the MFMAs is the dominant lever. ON.
+      * num_warps>=2 d128 (S>=2048): REGRESSES 2.5-4.6% (more ILP, the fence
+        over-constrains the scheduler) -> OFF.
+
+    Scoped to exactly the V-double-buffer cohort (single-batch combo,
+    max_seqlen_q <= 1024) where num_warps==1: ``_enable_v_double_buffer`` already
+    pins that cohort, so reuse it. Restricted to d128 (the measured win); d64
+    short single-batch combo uses num_warps==4 (BLOCK_M=128, ample ILP), where
+    the fence is the over-constrained num_warps>=2 regime, so leave it OFF.
+    """
+    if not _enable_v_double_buffer(problem):
+        return False
+    return problem.head_size == 128
+
+
+def _enable_early_v_schedule(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the early-V issue schedule on the single-batch combo.
+
+    LONG d64 single-batch combo prefill (head_size == 64, max_seqlen_q >= 2048)
+    issues the V load earlier in the iteration so the long KV loop overlaps the
+    V DMA with the QK MFMA + softmax window. Bit-identical to the no-flag path.
+
+    Scoped to d64-LONG by same-session ablation (MI355X gfx950 LLVM):
+      * d64 GQA-8 S2048: T128 + early-V 104.3us is the best (vs T128 none
+        108.1, T64 none 112.2) -> ON for d64 long.
+      * d128 S2048/S4096: early-V REGRESSES (e.g. fp16 S2048 187us vs none
+        143us) -> OFF; d128 long gets no V schedule flag.
+    """
+    if not _enable_single_batch_combo(problem):
+        return False
+    return problem.head_size == 64 and problem.max_seqlen_q >= 2048
+
+
 def _enable_mfma_32x32(problem: UnifiedAttentionProblem) -> bool:
     """Enable the in-kernel 32x32x16 migration on shapes where it wins.
 
@@ -964,13 +1294,29 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     The transposed path requires ``block_m_per_warp == 32`` (the M32N32K16
     MFMA shape) so the conditions here MUST be a strict subset of the
     ``_select_2d_block_m_per_warp`` conditions that pick ``mw=32``. The
-    latter requires ``max_seqlen_q > 256 AND num_seqs >= 2 AND not (sw
-    > 0 AND not use_fp8)``. Adding extra gates beyond those silently
-    breaks the post-init validation in the spec dataclass.
+    multi-batch branch requires ``max_seqlen_q > 256 AND num_seqs >= 2 AND
+    not (sw > 0 AND not use_fp8)``; the single-batch combo branch
+    (``_enable_single_batch_combo``) requires ``num_seqs == 1 AND
+    max_seqlen_q > 256`` for d64/d128 no-SW no-FP8. Adding extra gates
+    beyond those silently breaks the post-init validation in the spec
+    dataclass.
+
+    **Single-batch (num_seqs == 1) update:** the combinatorial
+    autotuner proved the FULL combo is 1.5-2.7x FASTER than the legacy
+    16x16x32 path for single-batch d128/d64 long prefill (and
+    correctness-equal). The old gate refused num_seqs == 1 based on a
+    measurement of the bare transposed path (0.74-0.85x); that was stale for
+    the full combo, so ``_enable_single_batch_combo`` now short-circuits to
+    True here for that cohort.
 
     Beyond the mw=32 prereq we gate on:
 
-      * dtype == bf16 (fp16/fp8 paths still use the default kernel)
+      * dtype in {bf16, fp16} (the transposed softmax/PV path is dtype-
+        generic -- it casts the f32 softmax probabilities to the working
+        dtype at the MFMA boundary and keeps m/l/acc in f32, so fp16 gets
+        the same fp32-accumulated online softmax bf16 does; the legacy
+        16x16 path it replaces lost accuracy on long-KV d128 fp16). The
+        fp8 K/V cache path still uses the default kernel.
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
       * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
@@ -990,7 +1336,11 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if _enable_combo_2d(problem):
         return True
-    if problem.dtype != "bf16":
+    # Single-batch d128/d64 prefill full-combo cohort. This is the
+    # routing fix: num_seqs == 1 now gets the 32x32 transposed combo.
+    if _enable_single_batch_combo(problem):
+        return True
+    if problem.dtype not in ("bf16", "fp16"):
         return False
     if problem.use_fp8:
         return False
@@ -1066,6 +1416,152 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
+    """Gate the gfx942 **bf16** wide-K (32x32x8) transposed flash path.
+
+    The wide bf16 MFMA atom that is actually legal on CDNA3/gfx942 is the K=8
+    ``mfma_f32_32x32x8_bf16`` (the ``.1k`` intrinsic ->
+    ``v_mfma_f32_32x32x8_bf16``; selectable on ROCm 7.2 gfx942). The K=16
+    ``mfma_f32_32x32x16_bf16`` advertised by the catalog is in fact CDNA4/gfx950-
+    only -- the gfx942 backend ``Cannot select`` it -- so bf16 wide flash uses the
+    SAME 32x32x8 path the fp16 flash family uses, just with the bf16 atom.
+
+    The transposed 32x32 orientation feeds QK from strided LDS + a register P^T
+    operand and PV from ordinary strided LDS reads, so it needs NONE of the
+    gfx950-only transpose reads. Routing bf16 prefill onto this wide atom replaces
+    the narrow 16x16x16 path (half-rate compute, ~63 KB LDS => 1 WG/CU) with a
+    wide path (the transposed PV consumes P from registers, dropping the P_lds
+    round-trip), addressing both throughput and occupancy.
+
+    OPT-IN / DEFAULT-OFF: gated behind ``HIPDNN_GFX942_BF16_WIDE=1`` so the
+    default dispatch (and every shipped kernel's byte-identity) is unchanged
+    while the path is being validated/tuned. The fp16 flash path
+    (``use_mfma_32x32x8``) is unaffected and takes precedence for fp16.
+    """
+    env = __import__("os").environ.get("HIPDNN_GFX942_BF16_WIDE", "").strip().lower()
+    if env not in ("1", "on", "enable", "enabled", "yes", "true"):
+        return False
+    return (
+        _resolve_attention_arch() == "gfx942"
+        and problem.head_size in (64, 128)
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and not problem.use_sinks
+        and problem.softcap == 0
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
+        # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
+        and problem.max_seqlen_q > 1
+        and not _enable_gfx942_small_q_narrow(problem)
+    )
+
+
+def _gfx942_bf16_wide_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the conflict-free V store (cfvst) on the gfx942 bf16 wide path.
+
+    The fp16 transposed-x8 flash family feeds the PV B-operand (V^T) through a
+    conflict-free LDS layout: V is stored TRANSPOSED ``[HD, T+pad]`` via an
+    in-register 2x2 ``perm_b32`` transpose + one contiguous ``ds_write``, then
+    read with a wide bank-spread ``ds_read_b64`` (vs the naive 4x strided
+    ``ds_read_u16`` that collapses 32 lanes onto one bank set). This is
+    byte-size driven, not fp16-specific (bf16 is also 2 bytes, the perm_b32
+    transpose works on raw i32 words, and the K=8 32x32x8 atom is gfx942-legal
+    for bf16), so it ports unchanged to bf16.
+
+    MEASURED (MI300X, graph, same-session steady-state, 3% median over 6 runs):
+    cfvst is a small consistent WIN on D64 (S1024 ~0.106->0.104ms, S2048
+    ~0.309->0.301ms, S4096 ~1.027->0.997ms = ~3% each). On D128 cfvst-only
+    cannot fit the nw=4/BLOCK_M=128 geometry within the 64 KB LDS cap (it needs
+    the sliced-K ring to fit, and the ring's per-slice sync overhead is NOT
+    amortised by the bf16 K=8 atom on this path -- it regressed every config
+    that compiled), so D128 stays on the naive-V wide geometry. So cfvst is
+    enabled for D64 prefill only.
+
+    OPT-IN: only fires under HIPDNN_GFX942_BF16_WIDE (the caller already gated
+    that). HIPDNN_GFX942_BF16_CFVST=0 forces the legacy naive-V feed for A/B.
+    """
+    env = __import__("os").environ.get("HIPDNN_GFX942_BF16_CFVST", "").strip().lower()
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    # D64 prefill only (the measured win); D128 nw=4 cfvst overflows LDS and the
+    # ring that would make it fit regresses. q==1 routes to the 3D/narrow path.
+    return problem.head_size == 64 and problem.max_seqlen_q > 1
+
+
+def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, bool]:
+    """(num_warps, use_k_single_buffer) for the gfx942 bf16 wide-K path.
+
+    D64: nw=4 (BLOCK_M=128). With cfvst (the default; see
+    _gfx942_bf16_wide_use_cfvst) the conflict-free transposed V_lds replaces the
+    naive strided-V feed; K stays double-buffered (single_buffer=False).
+    D128: nw=2 (BLOCK_M=64 == T=64) + K single-buffer; the nw=4 double-buffered
+    form is 80 KB (> 64 KB cap), so D128 trades the second K buffer + half the
+    BLOCK_M to land at 48 KB. K single-buffer requires BLOCK_M <= tile_size.
+    cfvst is not enabled on D128 (it needs nw=4, which only fits with the
+    sliced-K ring, and the ring regressed -- see _gfx942_bf16_wide_use_cfvst).
+    """
+    if problem.head_size == 128:
+        # gfx942 bf16 D128 small-tile double-K (synthesized from the gfx942
+        # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
+        # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
+        # so restore the K double-buffer (single_k=False) instead of the T=64
+        # K-single-buffer. Same-session MEASURED on MI300X (gfx942): xflash vs
+        # torch FLASH 0.24->0.57-0.65 (~2.3-2.4x the shipped T=64 single-K
+        # baseline) on bf16 D128 S1024/S2048/S4096, occupancy unchanged at
+        # 2 WG/CU (the win is K-double-buffer prefetch overlap, not occupancy --
+        # matches the CK Tile ground truth that D128 is already 2 WG/CU and the
+        # gap is inner-loop scheduling). Default-ON for the bf16 D128 prefill
+        # cohort with a paged cache block_size==32; env escape
+        # HIPDNN_GFX942_D128_SMALLTILE_DK=0 reverts to the shipped config. T=32
+        # is an EXISTING tile_size value so the per-spec emit is byte-identical
+        # (C-twin parity GREEN); only the selector routing changes.
+        if _enable_gfx942_d128_smalltile_doublek(problem):
+            return 2, False
+        return 2, True
+    return 4, False
+
+
+def _gfx942_bf16_wide_tile_size(problem: UnifiedAttentionProblem) -> int:
+    """tile_size (T) for the gfx942 bf16 wide-K path. Default T=64; the D128
+    small-tile double-K lever halves D128 to T=block_size(==32) to restore the
+    K double-buffer prefetch at the same 2 WG/CU. T=32 is an EXISTING tile_size
+    value -> per-spec EMIT byte-identical; this is a pure ROUTING change."""
+    if _enable_gfx942_d128_smalltile_doublek(problem):
+        return problem.block_size
+    return 64
+
+
+def _enable_gfx942_d128_smalltile_doublek(
+    problem: UnifiedAttentionProblem,
+) -> bool:
+    """gfx942 bf16 D128 small-tile (T=32) double-K geometry.
+
+    DEFAULT-ON for the gfx942 bf16 D128 prefill cohort with a paged cache
+    block_size==32 (T=32 must be a multiple of block_size). Env escape
+    HIPDNN_GFX942_D128_SMALLTILE_DK in {0,off,...} disables and reverts to the
+    shipped T=64 K-single-buffer config (byte-identical OFF path). T=32 is an
+    EXISTING tile_size value so the per-spec emit is byte-identical; only the
+    selector routing changes. Restricted to the bf16 wide path (D128); fp16
+    keeps its sliced-K ring (small-tile regressed fp16 prefill)."""
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX942_D128_SMALLTILE_DK", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    if _resolve_attention_arch() != "gfx942":
+        return False
+    if problem.head_size != 128:
+        return False
+    if problem.block_size != 32:
+        return False
+    return _enable_gfx942_bf16_flash(problem)
+
+
 def _enable_gfx942_d128_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """D128 subset used by the legacy L4 geometry helpers."""
     return _enable_gfx942_fp16_flash(problem) and problem.head_size == 128
@@ -1135,7 +1631,9 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # prefill now share the ring path.
     if not (_enable_gfx942_fp16_flash(problem) and problem.head_size in (64, 128)):
         return False
-    env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    env = (
+        __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    )
     if env in ("0", "off", "disable", "disabled", "no", "false"):
         return False
     if env in ("1", "on", "enable", "enabled", "yes", "true"):
@@ -1261,6 +1759,32 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     return True
 
 
+def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
+    """Whether to stack the no-SW transposed-softmax VALU sub-flags.
+
+    The sub-flags (``use_transposed_scalar_state`` + ``use_transposed_mask_once``
+    + ``use_transposed_mask_limit`` + ``use_mfma32_skip_legacy_qreg``) are the
+    correctness-equal, bit-identical VALU rewrites that turn the bare
+    transposed-32x32 path into the FULL combo. They require the transposed
+    path AND no sliding window (spec ``__post_init__`` enforces both).
+
+    Historically these only fired for the narrow ``_enable_combo_2d`` family
+    (bf16 / block_size==32 / GQA-8). The combinatorial autotuner showed
+    the SAME stack is the proven winner for:
+      * single-batch (num_seqs == 1) d128/d64 prefill (``_enable_single_batch_combo``);
+      * the multi-batch (num_seqs >= 2) transposed d128/d64 prefill path -- the
+        prod selector enabled mw=32 + transposed + half-local-PV there but
+        LEFT the sub-flags on the table (the autotuner's ~1.19x multi-batch
+        miss); they are correctness-equal and strictly faster.
+
+    So enable them whenever the transposed-32x32 path is on and there is no
+    sliding window (the SW combo keeps its own nw2/T32 mask handling).
+    """
+    if problem.sliding_window > 0:
+        return False
+    return _enable_transposed_qk_32x32(problem)
+
+
 def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     """Enable 64-bit paged-KV addressing when the cache may exceed ~2 GiB.
 
@@ -1312,6 +1836,46 @@ def _tiled_spec_from_problem(
             tile_size=_select_2d_tile_size(problem),
             block_m_per_warp=16,
         )
+    if _enable_gfx942_bf16_flash(problem):
+        # gfx942 bf16 wide-K (32x32x8) transposed flash path. OPT-IN
+        # (HIPDNN_GFX942_BF16_WIDE=1); default dispatch is byte-identical.
+        # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
+        # gfx950-only). The transposed orientation consumes V from strided LDS +
+        # P^T from registers (no P_lds, no gfx950-only transpose reads). Geometry:
+        #   * D64  -> nw=4 (BLOCK_M=128), double-buffered K: LDS=32 KB => 2 WG/CU.
+        #   * D128 -> nw=2 (BLOCK_M=64=T) + K single-buffer: LDS=48 KB (the
+        #     double-buffered nw=4 form is 80 KB and overflows the 64 KB cap).
+        nw, single_k = _gfx942_bf16_wide_geometry(problem)
+        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        return UnifiedAttention2DTiledSpec(
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            use_sinks=problem.use_sinks,
+            sliding_window=problem.sliding_window,
+            has_softcap=problem.softcap > 0,
+            use_alibi=problem.use_alibi,
+            use_qq_bias=problem.use_qq_bias,
+            num_seqs=problem.num_seqs,
+            num_warps=nw,
+            waves_per_eu=_select_2d_waves_per_eu(problem),
+            kv_storage_dtype=_kv_storage_dtype(problem),
+            tile_size=_gfx942_bf16_wide_tile_size(problem),
+            block_m_per_warp=32,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+            use_k_single_buffer=single_k,
+            # Port the fp16 flash family's conflict-free V store (cfvst) to bf16
+            # (byte-size driven: bf16 == 2 bytes == fp16, the perm_b32 transpose
+            # rides raw i32 words, the K=8 atom is gfx942-legal). Measured ~3%
+            # win on D64 prefill (the residual naive-V bottleneck); D128 and
+            # decode keep the naive-V feed (cfvst nw=4 overflows LDS there and
+            # the sliced-K ring that would make it fit regressed -- see
+            # _gfx942_bf16_wide_use_cfvst).
+            use_conflict_free_v_store=use_cfvst,
+        )
     if _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
         use_cfvst = _gfx942_flash_use_cfvst(problem)
@@ -1350,6 +1914,43 @@ def _tiled_spec_from_problem(
         )
     combo = _enable_combo_2d(problem)
     combo_no_sw = combo and problem.sliding_window == 0
+    # The transposed-softmax VALU sub-flags now fire for the WHOLE no-SW
+    # transposed-32x32 cohort (the narrow _enable_combo_2d family, the
+    # single-batch d128/d64 prefill cohort, AND the multi-batch transposed
+    # d128/d64 path that previously left them on the table -- the autotuner's
+    # ~1.19x multi-batch miss). ``_enable_transposed_subflags`` already
+    # excludes sliding window, so OR-ing it with the existing combo gates
+    # preserves the SW-combo behaviour byte-for-byte:
+    #   * scalar_state / skip_legacy_qreg : old ``combo``  -> ``combo OR sub``
+    #     (SW combo: combo=True keeps them True; sub=False under SW.)
+    #   * mask_once / mask_limit          : old ``combo_no_sw`` -> ``combo_no_sw OR sub``
+    #     (SW combo: both stay False.)
+    subflags = _enable_transposed_subflags(problem)
+    scalar_state = combo or subflags
+    skip_legacy_qreg = combo or subflags
+    mask_opts = combo_no_sw or subflags
+    # gfx950-only schedule fields: the gfx942 2D spec class does not declare
+    # ``use_v_double_buffer`` / ``use_sched_barrier``, and the default gfx942
+    # forward reaches this shared return (no flash opt-in). Pass them only when
+    # the resolved spec class actually declares the field -- gfx950 keeps the
+    # exact same construction (byte-identical), while gfx942 no longer raises
+    # ``TypeError: unexpected keyword argument`` on the unknown kwarg.
+    _spec_field_names = {f.name for f in fields(UnifiedAttention2DTiledSpec)}
+    _gfx950_schedule_fields = {}
+    if "use_v_double_buffer" in _spec_field_names:
+        _gfx950_schedule_fields["use_v_double_buffer"] = _enable_v_double_buffer(
+            problem
+        )
+    if "use_sched_barrier" in _spec_field_names:
+        _gfx950_schedule_fields["use_sched_barrier"] = _enable_sched_barrier(problem)
+    # d128 long-context lever: K single-buffer lets the larger T=64 tile fit
+    # the 2-WG/CU LDS budget at HD=128 (see _select_2d_tile_size). Gated on the
+    # same d128 small-tile cohort + opt-in env so default/production routing is
+    # byte-identical. Field-presence guarded (gfx942/gfx1250 spec classes lack
+    # it). _enable_k_single_buffer also re-asserts the T=64 / V-single-buffer /
+    # no-fp8 preconditions so it can never fire on an incompatible spec.
+    if "use_k_single_buffer" in _spec_field_names and _enable_k_single_buffer(problem):
+        _gfx950_schedule_fields["use_k_single_buffer"] = True
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -1370,12 +1971,21 @@ def _tiled_spec_from_problem(
         use_mfma_32x32=_enable_mfma_32x32(problem),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
         use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
-        # Full combo stack (only fires for the validated _enable_combo_2d
-        # family; a strict superset of the plain transposed path).
-        use_transposed_scalar_state=combo,
-        use_transposed_mask_once=combo_no_sw,
-        use_transposed_mask_limit=combo_no_sw,
-        use_mfma32_skip_legacy_qreg=combo,
+        # Full combo stack (fires for the validated _enable_combo_2d family,
+        # the single-batch d128/d64 prefill cohort, and the multi-batch
+        # transposed d128/d64 path; a strict superset of the plain transposed
+        # path). See the ``subflags`` reconciliation above.
+        use_transposed_scalar_state=scalar_state,
+        use_transposed_mask_once=mask_opts,
+        use_transposed_mask_limit=mask_opts,
+        use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
+        # Single-batch combo V-prefetch schedule (autotuner winners): short
+        # prefill -> V double-buffer; long prefill -> early-V issue. Mutually
+        # exclusive; both bit-identical to the no-flag path. Off for the
+        # multi-batch combo family (its winners did not stack a V schedule).
+        # (``use_v_double_buffer`` is injected via ``_gfx950_schedule_fields``
+        # below -- gfx942's spec class does not declare it.)
+        use_early_v_schedule=_enable_early_v_schedule(problem),
         # The fast paged-KV descriptor is specialised for bf16 / T=64 /
         # num_warps=4, which only the bf16 no-SW combo geometry uses (SW
         # combo is nw2 / T=32; fp8 combo uses the sync-dequant loader). The
@@ -1394,6 +2004,15 @@ def _tiled_spec_from_problem(
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        # CK-Tile-derived sched_barrier steering (lever 3 from the CK Tile ISA analysis). Fences the
+        # QK MFMA cluster from the post-QK async prefetch VMEM so the LLVM
+        # scheduler keeps the MFMAs packed. Additive perf knob (no routing
+        # change); enabled only for the single-batch d128 short-prefill cohort
+        # (num_warps==1 + V-double-buffer) where the single resident wave cannot
+        # otherwise hide the prefetch-in-MFMA-window cost.
+        # (``use_sched_barrier`` is injected via ``_gfx950_schedule_fields``
+        # below -- gfx942's spec class does not declare it.)
+        **_gfx950_schedule_fields,
     )
 
 
@@ -1633,7 +2252,7 @@ def _resolve_gfx1250_tiled3d(problem: UnifiedAttentionProblem) -> _ResolvedTiled
     num_waves = _gfx1250_3d_num_waves()
     if num_waves == -1:  # auto: policy picks the wave count from the shape
         num_waves = 1
-    # #1 default-on (transposed V + wide ds_load); auto-off when an incompatible
+    # lever 1, default-on (transposed V + wide ds_load); auto-off when an incompatible
     # lever (multi-wave / double-buffer / register-P) is on.
     use_wide_lds_reads = (
         num_waves == 1
@@ -1714,6 +2333,7 @@ def _tiled_3d_spec_from_problem(
         tile_size_override=tile_size_override,
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
 
 
@@ -1737,6 +2357,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_3d_invariant_hoist(problem),
         _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
+        _enable_i64_kv_addr(problem),
     )
     if _resolve_attention_arch() == "gfx1250":
         sp = _tiled_3d_spec_from_problem(problem)
@@ -2194,7 +2815,28 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
             return False
         if problem.sliding_window > 0:
             return False
-        env = __import__("os").environ.get("HIPDNN_GFX1250_3D_GRAPH", "").strip().lower()
+        env = (
+            __import__("os").environ.get("HIPDNN_GFX1250_3D_GRAPH", "").strip().lower()
+        )
+        return env in ("1", "on", "enable", "enabled", "yes", "true")
+    if arch == "gfx950":
+        # The 3D split-KV decode launch is host/dispatch bound here: the two
+        # kernels (segment + reduce) device-execute in ~26-35us but the eager
+        # Python dispatch adds a ~17us flat floor, so the wall time is ~43us and
+        # does not scale with context length. Capturing the (segment + reduce)
+        # launch sequence into a hipGraph and replaying it removes that
+        # per-launch host cost and roughly halves decode latency (43->21us at
+        # k=2048), producing bitwise-identical output. Gated to the decode /
+        # short-q regime (``max_seqlen_q <= 768``) so prefill routing is never
+        # affected, and feature-flagged shapes are excluded. Opt-in via
+        # ``HIPDNN_GFX950_3D_GRAPH=1`` until broadly validated across traces.
+        if problem.max_seqlen_q > 768:
+            return False
+        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
+            return False
+        if problem.sliding_window > 0 or problem.use_fp8:
+            return False
+        env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     return False
 
@@ -2220,18 +2862,47 @@ def _cheap_2d_sig(problem) -> Tuple:
     on replay. Env/monkeypatch changes (sweeps) invalidate via ``_2D_GRAPHS``
     being cleared, so the signature need not encode the env knobs."""
     return (
-        "2dg", problem.head_size, problem.num_query_heads, problem.num_kv_heads,
-        problem.block_size, problem.dtype, problem.max_seqlen_q,
-        problem.max_seqlen_k, problem.num_seqs, problem.sliding_window,
-        bool(problem.use_sinks), float(problem.softcap), bool(problem.use_alibi),
-        bool(problem.use_qq_bias), bool(problem.use_fp8), int(problem.total_q),
+        "2dg",
+        problem.head_size,
+        problem.num_query_heads,
+        problem.num_kv_heads,
+        problem.block_size,
+        problem.dtype,
+        problem.max_seqlen_q,
+        problem.max_seqlen_k,
+        problem.num_seqs,
+        problem.sliding_window,
+        bool(problem.use_sinks),
+        float(problem.softcap),
+        bool(problem.use_alibi),
+        bool(problem.use_qq_bias),
+        bool(problem.use_fp8),
+        int(problem.total_q),
     )
 
 
-def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
-                    softmax_scale, block_table, softcap, sinks, bt_stride,
-                    alibi_slopes, qq_bias, qq_bias_stride_0, k_scale, v_scale,
-                    out_scale, stream):
+def _run_2d_graphed(
+    problem,
+    *,
+    q,
+    k,
+    v,
+    out,
+    cu_seqlens_q,
+    seqused_k,
+    softmax_scale,
+    block_table,
+    softcap,
+    sinks,
+    bt_stride,
+    alibi_slopes,
+    qq_bias,
+    qq_bias_stride_0,
+    k_scale,
+    v_scale,
+    out_scale,
+    stream,
+):
     """Look up (or build once) + replay a CUDA graph around the single 2D launch.
 
     The graph cache is keyed on a cheap shape signature + tensor identities +
@@ -2243,12 +2914,23 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
     the non-graph path. Tensors + kernarg pack are held alive in
     ``_2D_GRAPH_REFS``."""
     graph_key = _cheap_2d_sig(problem) + (
-        int(stream), id(q), id(k), id(v), id(out), id(cu_seqlens_q), id(seqused_k),
-        id(block_table), id(sinks) if sinks is not None else 0,
+        int(stream),
+        id(q),
+        id(k),
+        id(v),
+        id(out),
+        id(cu_seqlens_q),
+        id(seqused_k),
+        id(block_table),
+        id(sinks) if sinks is not None else 0,
         id(alibi_slopes) if alibi_slopes is not None else 0,
         id(qq_bias) if qq_bias is not None else 0,
-        float(softmax_scale), float(k_scale), float(v_scale), float(softcap),
-        int(bt_stride), int(qq_bias_stride_0),
+        float(softmax_scale),
+        float(k_scale),
+        float(v_scale),
+        float(softcap),
+        int(bt_stride),
+        int(qq_bias_stride_0),
     )
     graph = _2D_GRAPHS.get(graph_key)
     if graph is not None:
@@ -2263,11 +2945,26 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
     key = _tiled_cache_key(problem)
     launcher = _get_2d_launcher(problem, key)
     vals = _attn_values(
-        problem=problem, q=q, k=k, v=v, out=out, cu_seqlens_q=cu_seqlens_q,
-        seqused_k=seqused_k, softmax_scale=softmax_scale, block_table=block_table,
-        softcap=softcap, sinks=sinks, bt_stride=bt_stride, include_bt_stride=True,
-        alibi_slopes=alibi_slopes, qq_bias=qq_bias, qq_bias_stride_0=qq_bias_stride_0,
-        include_qq_bias_stride=True, k_scale=k_scale, v_scale=v_scale, out_scale=out_scale,
+        problem=problem,
+        q=q,
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=cu_seqlens_q,
+        seqused_k=seqused_k,
+        softmax_scale=softmax_scale,
+        block_table=block_table,
+        softcap=softcap,
+        sinks=sinks,
+        bt_stride=bt_stride,
+        include_bt_stride=True,
+        alibi_slopes=alibi_slopes,
+        qq_bias=qq_bias,
+        qq_bias_stride_0=qq_bias_stride_0,
+        include_qq_bias_stride=True,
+        k_scale=k_scale,
+        v_scale=v_scale,
+        out_scale=out_scale,
     )
     meta = _get_2d_launch_meta(problem, key)
     cfg = LaunchConfig(grid=meta.grid, block=meta.block, stream=int(stream))
@@ -2285,8 +2982,17 @@ def _run_2d_graphed(problem, *, q, k, v, out, cu_seqlens_q, seqused_k,
             _do()
     _2D_GRAPHS[graph_key] = graph
     _2D_GRAPH_REFS[graph_key] = (
-        vals, q, k, v, out, cu_seqlens_q, seqused_k, block_table, sinks,
-        alibi_slopes, qq_bias,
+        vals,
+        q,
+        k,
+        v,
+        out,
+        cu_seqlens_q,
+        seqused_k,
+        block_table,
+        sinks,
+        alibi_slopes,
+        qq_bias,
     )
     graph.replay()
     return None
@@ -2430,13 +3136,18 @@ def _get_3d_pipeline(
     # same tuning policy (not the raw env reader, which now returns -1 for auto).
     seg_waves = (
         _resolve_gfx1250_tiled3d(problem).num_waves
-        if _resolve_attention_arch() == "gfx1250" else 1
+        if _resolve_attention_arch() == "gfx1250"
+        else 1
     )
     prepared = _Attention3DPrepared(
         pipeline=pipeline,
         pool=pool,
         seg_config=LaunchConfig(
-            grid=(int(total_num_q_blocks), int(problem.num_kv_heads), int(num_segments)),
+            grid=(
+                int(total_num_q_blocks),
+                int(problem.num_kv_heads),
+                int(num_segments),
+            ),
             block=(wave_size * seg_waves, 1, 1),
         ),
         red_config=LaunchConfig(
@@ -2469,7 +3180,7 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
     pins FP8 to ``llvm`` until ``hipcc`` is validated for that
     code path.
 
-    See ``/workspace/probe_hip_lowering.py`` for the per-shape sweep.
+    See the out-of-tree ``probe_hip_lowering.py`` for the per-shape sweep.
     """
     if _resolve_attention_arch() == "gfx1250":
         return "llvm"
@@ -2500,6 +3211,35 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
         and problem.head_size == 64
         and not _enable_combo_2d(problem)
     ):
+        return "llvm"
+    # Single-batch (num_seqs == 1) d128/d64 prefill combo cohort: pin to
+    # LLVM-direct. The hipcc scheduler's heavier unrolled-loop pass only pays
+    # off on the LARGE multi-batch grid; for the single-seq grid it is a big
+    # REGRESSION (same-session A/B: d128
+    # S1024 none_hipcc 95us vs none_llvm 49us; d128 S2048 hipcc ~174us vs llvm
+    # 143us). The total_work rule below would otherwise pick hipcc for these
+    # long single-seq shapes, so gate them to LLVM explicitly.
+    if _enable_single_batch_combo(problem):
+        return "llvm"
+    # P_LDS transposed-read PV path correctness pin. When the 2D
+    # kernel lands on the legacy 16x16x32 path with neither the register-P
+    # migration (``_enable_register_pv``) nor the 32x32 transposed combo
+    # (``_enable_mfma_32x32``), the PV stage publishes the softmax
+    # probabilities to LDS as 16-bit and reads them back transposed via
+    # ``ds_read_tr16``. The shipped system hipcc (ROCm 7.0 / LLVM 20)
+    # MISCOMPILES that transposed-LDS-read sequence: the output is ~0.84
+    # max-abs wrong (bad != 0) versus the fp32 reference, while the
+    # LLVM-direct (comgr / LLVM 22) build of the *same* IR is correct
+    # (rounding tol, bad == 0). The miscompile is path-specific, not
+    # dtype-specific -- it reproduces on bf16 too when register-P is forced
+    # off -- but the only production config that still routes onto this path
+    # is head_size==256 (the 32x32 combo excludes hd256 and register-P is
+    # bf16-only), so in practice this pins fp16 d256 long-prefill (which auto
+    # would otherwise compile via hipcc). Pin it to the proven LLVM-direct
+    # backend until the system hipcc is upgraded / the path is moved onto
+    # register-P for hd256. The perf delta is the ~5% hipcc-scheduler edge,
+    # which correctness strictly outranks.
+    if not _enable_register_pv(problem) and not _enable_mfma_32x32(problem):
         return "llvm"
     total_work = problem.num_seqs * max(problem.max_seqlen_q, 1)
     if problem.max_seqlen_q > 512 and total_work > 1024:
@@ -2660,7 +3400,9 @@ def run_unified_attention_torch(
     # replace, which otherwise dominates tiny-shape host latency.
     if problem.num_kv_blocks <= 0 and hasattr(k, "shape") and len(k.shape) >= 1:
         _eb = 1 if problem.use_fp8 else 2
-        _blk_stride = problem.block_size * problem.num_kv_heads * problem.head_size * _eb
+        _blk_stride = (
+            problem.block_size * problem.num_kv_heads * problem.head_size * _eb
+        )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
 
@@ -2725,11 +3467,26 @@ def run_unified_attention_torch(
         # caller is already capturing the forward (they take precedence).
         if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
             graphed = _run_2d_graphed(
-                problem, q=q, k=k, v=v, out=out, cu_seqlens_q=cu_seqlens_q,
-                seqused_k=seqused_k, softmax_scale=softmax_scale, block_table=block_table,
-                softcap=softcap, sinks=sinks, bt_stride=bt_stride, alibi_slopes=alibi_slopes,
-                qq_bias=qq_bias, qq_bias_stride_0=qq_bias_stride_0, k_scale=k_scale,
-                v_scale=v_scale, out_scale=out_scale, stream=stream)
+                problem,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                cu_seqlens_q=cu_seqlens_q,
+                seqused_k=seqused_k,
+                softmax_scale=softmax_scale,
+                block_table=block_table,
+                softcap=softcap,
+                sinks=sinks,
+                bt_stride=bt_stride,
+                alibi_slopes=alibi_slopes,
+                qq_bias=qq_bias,
+                qq_bias_stride_0=qq_bias_stride_0,
+                k_scale=k_scale,
+                v_scale=v_scale,
+                out_scale=out_scale,
+                stream=stream,
+            )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
         ok_t, reason_t = supports_native_unified_attention_tiled(problem)

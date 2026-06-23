@@ -1,0 +1,28 @@
+# Norm (rmsnorm/layernorm) shape corpus for C++<->Python dispatcher parity.
+# One problem per line: rows cols [kind]   (kind: rmsnorm|layernorm; default rmsnorm)
+#
+# Selection facts (both sides): one CTA per row, candidate grid =
+#   block_size in (1024,512,256,128,64), vec in (8,4,2); priority = largest
+#   block_size, then widest vec, among candidates where cols % (block_size*vec)==0.
+#
+# rows  cols   kind
+4096    4096   rmsnorm
+4096    8192   rmsnorm
+1024    2048   layernorm
+512     768    rmsnorm
+2048    4096   layernorm
+256     1024   rmsnorm
+128     512    rmsnorm
+8192    16384  rmsnorm
+333     1000   rmsnorm
+4096    6144   layernorm
+1024    3072   rmsnorm
+512     2048   layernorm
+2048    1536   rmsnorm
+640     896    rmsnorm
+4096    4096   layernorm
+100     100    rmsnorm
+777     4096   rmsnorm
+1234    8192   layernorm
+4096    12288  rmsnorm
+256     5120   rmsnorm

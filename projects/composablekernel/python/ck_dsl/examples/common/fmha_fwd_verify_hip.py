@@ -20,7 +20,7 @@ The accumulation order of the f32 matmul chain differs from numpy, so parity
 is judged within a tolerance (default ``2e-2``, matching the attention parity
 gate), not bit-for-bit.
 
-Must run on a device matching ``--arch`` (e.g. alola
+Must run on a device matching ``--arch`` (e.g. a SLURM cluster with
 ``--gres=gpu:gfx950-mi350x:1`` or ``--gres=gpu:gfx1151:1``).
 
     PYTHONPATH=python python3 -m ck_dsl.examples.common.fmha_fwd_verify_hip \

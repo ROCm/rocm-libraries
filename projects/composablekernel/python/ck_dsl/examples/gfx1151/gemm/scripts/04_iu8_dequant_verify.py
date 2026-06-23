@@ -53,8 +53,12 @@ def main() -> int:
     p.add_argument("--m", type=int, default=128)
     p.add_argument("--n", type=int, default=128)
     p.add_argument("--k", type=int, default=128)
-    p.add_argument("--scale-a", type=float, default=0.05, help="per-tensor A dequant scale")
-    p.add_argument("--scale-b", type=float, default=0.05, help="per-tensor B dequant scale")
+    p.add_argument(
+        "--scale-a", type=float, default=0.05, help="per-tensor A dequant scale"
+    )
+    p.add_argument(
+        "--scale-b", type=float, default=0.05, help="per-tensor B dequant scale"
+    )
     p.add_argument("--tol", type=float, default=2e-2, help="np.allclose rtol and atol")
     p.add_argument("--no-verify", action="store_true")
     args = p.parse_args()
@@ -63,10 +67,14 @@ def main() -> int:
 
     for d, name in ((args.m, "M"), (args.n, "N"), (args.k, "K")):
         if d % 16:
-            raise SystemExit(f"{name}={d} must be a multiple of 16 (WMMA 16x16x16 tile)")
+            raise SystemExit(
+                f"{name}={d} must be a multiple of 16 (WMMA 16x16x16 tile)"
+            )
 
     spec = WmmaGemmIu8DequantSpec(name=f"wmma_gemm_iu8_dequant_{args.arch}")
-    art = compile_kernel(build_wmma_gemm_iu8_dequant(spec, arch=args.arch), arch=args.arch)
+    art = compile_kernel(
+        build_wmma_gemm_iu8_dequant(spec, arch=args.arch), arch=args.arch
+    )
     print(
         f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa}) "
         f"total={art.timings.get('total', 0):.1f}ms"
@@ -109,19 +117,24 @@ def main() -> int:
     rt.sync()
     rt.memcpy_d2h(u8(C), cd, C.nbytes)
 
-    ref = (
-        (A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T
-    ).astype(np.float16)
+    ref = ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T).astype(
+        np.float16
+    )
 
     diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
     max_abs = float(diff.max())
-    bad = int(np.count_nonzero(diff > (args.tol + args.tol * np.abs(ref.astype(np.float32)))))
+    bad = int(
+        np.count_nonzero(diff > (args.tol + args.tol * np.abs(ref.astype(np.float32))))
+    )
     for ptr in (ad, bd, cd):
         rt.free(ptr)
     module.unload()
 
-    ok = bool(np.allclose(C.astype(np.float32), ref.astype(np.float32),
-                          rtol=args.tol, atol=args.tol))
+    ok = bool(
+        np.allclose(
+            C.astype(np.float32), ref.astype(np.float32), rtol=args.tol, atol=args.tol
+        )
+    )
     tag = "PASS (true-int8 dequant OK)" if ok else "FAIL"
     print(
         f"[{args.arch}] WMMA iu8->f16 GEMM {M}x{N}x{K} (scale_a={sa}, scale_b={sb}): "
@@ -133,8 +146,12 @@ def main() -> int:
             "kernel": "wmma_gemm_iu8_dequant (Path A: true int8 i32-acc, f16 dequant out)",
             "atom": "wmma_i32_16x16x16_iu8",
             "shape": {"M": M, "N": N, "K": K},
-            "scale_a": sa, "scale_b": sb, "tol": args.tol,
-            "max_abs_diff": max_abs, "bad": bad, "size": int(C.size),
+            "scale_a": sa,
+            "scale_b": sb,
+            "tol": args.tol,
+            "max_abs_diff": max_abs,
+            "bad": bad,
+            "size": int(C.size),
             "pass": ok,
         },
     )

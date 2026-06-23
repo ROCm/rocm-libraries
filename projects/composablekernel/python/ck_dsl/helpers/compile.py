@@ -50,7 +50,7 @@ from typing import Dict, List, Optional
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
-from ..core.lower_llvm import lower_kernel_to_llvm
+from ..core.lower_llvm import _lower_kernel_to_llvm_python
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
@@ -83,6 +83,8 @@ def compile_kernel(
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     capture_ir_text: bool = True,
     optimize_ir: bool = False,
+    backend: Optional[str] = None,
+    spec: Optional[object] = None,
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
@@ -97,6 +99,17 @@ def compile_kernel(
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
     discarded.
+
+    `backend` selects which engine produces the lowered AMDGPU ``.ll``:
+    ``"python"`` (the native lowerer, byte-identical to the historical
+    path), ``"cpp"`` (serialize the kernel and lower it through the C++
+    engine), or ``"both"`` (lower with both and assert byte-equality,
+    returning the Python result). When unset, the ``CK_DSL_BACKEND``
+    environment variable is consulted, else the package default (currently
+    the **C++** engine). The cpp/both paths are **family-agnostic**: they
+    lower from the built kernel's serialized ``ck.dsl.ir/v1`` IR, so no
+    per-family wiring is needed (the legacy ``spec`` argument is accepted
+    for backward compatibility but is no longer consulted).
     """
     if arch is not None:
         from ..core.arch import ArchTarget
@@ -119,7 +132,9 @@ def compile_kernel(
     t_pass = time.perf_counter()
     ir_text = print_ir(kernel) if capture_ir_text else ""
     t1 = time.perf_counter()
-    llvm_text = lower_kernel_to_llvm(kernel, arch=_lower_arch)
+    llvm_text = _lower_llvm_via_backend(
+        kernel, arch=_lower_arch, backend=backend, spec=spec
+    )
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
         llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
@@ -142,6 +157,60 @@ def compile_kernel(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+    )
+
+
+def _lower_llvm_via_backend(
+    kernel: KernelDef,
+    *,
+    arch: Optional[str],
+    backend: Optional[str],
+    spec: Optional[object],
+) -> str:
+    """Produce the AMDGPU ``.ll`` text through the selected backend.
+
+    The default (``backend`` unset and ``CK_DSL_BACKEND`` unset) resolves to
+    the package default backend. Lowering is family-agnostic: it goes through
+    the serialized ``ck.dsl.ir/v1`` artifact of the built ``kernel``, so the
+    instance-level ``spec`` is NOT required for any family.
+
+      - ``"python"`` calls the native lowerer (byte-identical historical path);
+      - ``"cpp"`` serializes ``kernel`` and lowers it through the C++ engine,
+        falling back to the native lowerer (recorded) on engine unavailability
+        or rejection;
+      - ``"both"`` lowers with both and asserts byte-equality.
+
+    ``backend`` overrides the env/default precedence when given. ``spec`` is
+    accepted for backward compatibility but is no longer consulted (the
+    serialized-IR hand-off makes it unnecessary).
+    """
+    from ..core.backend import lower_kernel_via_backend, resolve_backend
+
+    chosen = resolve_backend(backend)
+    if backend is not None and chosen != resolve_backend():
+        # An explicit backend= argument was passed that differs from the
+        # resolved default; honour it by lowering against that backend
+        # directly rather than the chokepoint's env-resolved default.
+        import os
+
+        prev = os.environ.get("CK_DSL_BACKEND")
+        os.environ["CK_DSL_BACKEND"] = chosen
+        try:
+            return lower_kernel_via_backend(
+                kernel,
+                arch=arch,
+                python_lower=_lower_kernel_to_llvm_python,
+            )
+        finally:
+            if prev is None:
+                os.environ.pop("CK_DSL_BACKEND", None)
+            else:
+                os.environ["CK_DSL_BACKEND"] = prev
+
+    return lower_kernel_via_backend(
+        kernel,
+        arch=arch,
+        python_lower=_lower_kernel_to_llvm_python,
     )
 
 

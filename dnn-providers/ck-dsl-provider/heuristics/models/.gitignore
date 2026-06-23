@@ -1,0 +1,6 @@
+# Decompressed model files — decompress locally with:
+#   gunzip -k <model_dir>/model_tflops.lgbm.gz
+*.lgbm
+
+# Transient CV artifacts from training runs
+*.parquet

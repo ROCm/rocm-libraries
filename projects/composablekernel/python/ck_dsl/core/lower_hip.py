@@ -645,6 +645,21 @@ class _Lowerer:
             f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
         )
 
+    # ---- WMMA iu4 (RDNA3/3.5, gfx11, wave32) — int4 matrix engine ----
+    #
+    # The int4 sibling of the iu8 handler. Per-lane A/B operands are ``i32x2``
+    # (16 signed int4 packed 8-per-i32); accumulator / result are ``i32x8``.
+    # Same flag convention as iu8: leading bools select signed operands, the
+    # trailing bool is the (off) clamp. Mirrors the LLVM emission
+    # ``llvm.amdgcn.wmma.i32.16x16x16.iu4(i1 1, A, i1 1, B, C, i1 0)``.
+    def _op_tile_wmma_i32_16x16x16_iu4(self, op: Op) -> None:
+        self._require_wmma_arch("wmma_i32_16x16x16_iu4")
+        a, b, c = op.operands
+        self._emit(
+            f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32("
+            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+        )
+
     def _require_wmma_arch(self, op_id: str) -> None:
         """Reject a WMMA op on a target whose ISA has no WMMA instruction.
 

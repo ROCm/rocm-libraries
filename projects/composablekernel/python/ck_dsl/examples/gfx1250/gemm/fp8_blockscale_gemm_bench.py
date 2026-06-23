@@ -20,7 +20,6 @@ matrix-bound rather than launch/latency-bound.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import struct
 import time
 
@@ -36,8 +35,15 @@ def _build(arch, M, N, K, block_k):
         )
 
         spec = BlockScaledGemmSpec(
-            name="bench", M=M, N=N, K=K, dtype_a="fp8e4m3", dtype_b="fp8e4m3",
-            dtype_c="bf16", scale_dtype="fp32", block_k=block_k,
+            name="bench",
+            M=M,
+            N=N,
+            K=K,
+            dtype_a="fp8e4m3",
+            dtype_b="fp8e4m3",
+            dtype_c="bf16",
+            scale_dtype="fp32",
+            block_k=block_k,
         )
         art = compile_kernel(build_block_scaled_gemm(spec, arch=arch), arch=arch)
         grid = block_scaled_gemm_grid(spec)
@@ -50,8 +56,13 @@ def _build(arch, M, N, K, block_k):
     )
 
     spec = BlockScaleGemmSpec(
-        M=M, N=N, K=K, quant_mode="abquant", mantissa_dtype="fp8e4m3",
-        group_size_mnk=(1, 1, block_k), name="bench",
+        M=M,
+        N=N,
+        K=K,
+        quant_mode="abquant",
+        mantissa_dtype="fp8e4m3",
+        group_size_mnk=(1, 1, block_k),
+        name="bench",
     )
     art = compile_kernel(build_block_scale_gemm(spec, arch=arch), arch=arch)
     grid = block_scale_gemm_grid(spec)
@@ -59,6 +70,9 @@ def _build(arch, M, N, K, block_k):
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--m", type=int, default=4096)
     p.add_argument("--n", type=int, default=2048)
@@ -83,7 +97,7 @@ def main() -> int:
         rt.memset(d, 0, nbytes)
         return d
 
-    dA, dB = z(M * K), z(N * K)            # fp8 bytes
+    dA, dB = z(M * K), z(N * K)  # fp8 bytes
     dAs, dBs = z(M * groups * 4), z(groups * N * 4)
     dC = z(M * N * c_bytes)
     packed = struct.pack("<QQQQQiii", dA, dB, dAs, dBs, dC, M, N, K)
