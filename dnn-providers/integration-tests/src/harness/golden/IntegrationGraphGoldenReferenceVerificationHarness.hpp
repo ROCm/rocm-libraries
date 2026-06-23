@@ -92,13 +92,7 @@ protected:
             GTEST_SKIP() << "No bundle set";
         }
 
-        {
-            const auto testName = currentTestName();
-            if(auto reason = lookupSkip(testName))
-            {
-                GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
-            }
-        }
+        skipIfTomlMatched(currentTestName());
 
         applyMetadataGuards();
     }
@@ -131,15 +125,6 @@ protected:
     // exercise hardware guards can override it — production reads from the
     // TestConfig singleton, which is only initialized by the real test main.
     virtual void applyMetadataGuards() const;
-
-    // TOML-driven skip check. Default reads TestConfig::get().findSkipForTest().
-    // Override in tests to avoid the singleton.
-    virtual std::optional<std::string> lookupSkip(const std::string& testName) const;
-
-    // TOML-driven tolerance override. Default reads TestConfig::get().findToleranceOverride().
-    // Override in tests to inject controlled values.
-    virtual std::optional<ToleranceOverride>
-        lookupToleranceOverride(const std::string& testName) const;
 
 private:
     bool _requiresDevice;

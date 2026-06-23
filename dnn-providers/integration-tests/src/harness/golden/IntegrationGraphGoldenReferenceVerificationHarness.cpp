@@ -506,14 +506,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
         float rtol = 0.0f;
         resolveTolerances(wrapper, dataType, atol, rtol);
 
-        const auto testName = currentTestName();
-        if(auto ovr = lookupToleranceOverride(testName))
-        {
-            atol = ovr->atol;
-            rtol = ovr->rtol;
-            HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for "
-                                   << testName << ": atol=" << atol << " rtol=" << rtol);
-        }
+        applyTomlToleranceOverride(currentTestName(), atol, rtol);
 
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
@@ -746,19 +739,6 @@ void IntegrationGraphGoldenReferenceVerificationHarness::applyMetadataGuards() c
     {
         GTEST_SKIP() << *reason;
     }
-}
-
-std::optional<std::string> IntegrationGraphGoldenReferenceVerificationHarness::lookupSkip(
-    const std::string& testName) const
-{
-    return TestConfig::get().findSkipForTest(testName);
-}
-
-std::optional<ToleranceOverride>
-    IntegrationGraphGoldenReferenceVerificationHarness::lookupToleranceOverride(
-        const std::string& testName) const
-{
-    return TestConfig::get().findToleranceOverride(testName);
 }
 
 } // namespace hipdnn_integration_tests::golden
