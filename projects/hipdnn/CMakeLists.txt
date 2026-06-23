@@ -10,7 +10,8 @@ if(NOT DEFINED ROCM_LIBRARIES_ROOT)
 endif()
 
 # hipDNN dependency versions to use
-set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/default_flatc_version.txt"
+     _HIPDNN_DEFAULT_FLATBUFFERS_VERSION LIMIT_COUNT 1)
 
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
@@ -37,9 +38,9 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
         CACHE FILEPATH "Toolchain file"
     )
 endif()
-set(HIPDNN_VERSION "0.0.1")
-
-project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+# Each component carries its own version (see <component>/version.json and
+# cmake/VersionUtils.cmake); the umbrella project is intentionally unversioned.
+project(hipdnn LANGUAGES CXX)
 
 # ----------------------------------------------------------------------------
 # TheRock Feature Flags
@@ -62,7 +63,7 @@ else()
 endif()
 
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
-# tests (RFC 0012; ALMIOPEN-2034). The shim sources always exist in the tree;
+# tests (RFC 0012). The shim sources always exist in the tree;
 # this option controls only whether they are installed and tested.
 option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
     "Enable the cuDNN compatibility shim (headers + tests)" OFF
