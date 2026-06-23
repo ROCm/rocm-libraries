@@ -1886,8 +1886,10 @@ void Real3DEvenNode::AssignParams_internal_TR_pairs()
  *****************************************************/
 size_t Real3DPPNode::GetPPOffDim() const
 {
-    auto key
-        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
+    auto length_ = direction == -1 ? length : outputLength;
+
+    auto key = PPFMKey(
+        length_[0], length_[1], length_[2], precision, GetRootPlanTransformType(), scheme);
     if(!pool.has_function(key, batch))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
