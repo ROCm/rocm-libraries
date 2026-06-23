@@ -175,7 +175,7 @@ jobs:
         cd $GITHUB_WORKSPACE
         lit -a -v --echo-all-commands -j 1 --param std=c++17 test/
 
-    - name: Run lit unit tests (C++20, jthread only)
+    - name: Run lit unit tests (C++20)
       id: lit-tests-cxx20
       continue-on-error: true
       run: |
@@ -185,9 +185,9 @@ jobs:
         export HIPTHREADS_SOURCE_DIR=$GITHUB_WORKSPACE
         export HIPTHREADS_BUILD_DIR=$GITHUB_WORKSPACE/build-debug
 
-        echo "Running lit unit tests (C++20, jthread only)..."
+        echo "Running lit unit tests (C++20)..."
         cd $GITHUB_WORKSPACE
-        lit -a -v --echo-all-commands -j 1 --param std=c++20 test/std/thread/thread.jthread/
+        lit -a -v --echo-all-commands -j 1 --param std=c++20 test/
         
     - name: "Benchmark: SAXPY (step3-simdize)"
       timeout-minutes: 4
