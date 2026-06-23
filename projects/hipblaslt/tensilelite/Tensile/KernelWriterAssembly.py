@@ -7400,10 +7400,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("s", "sgprGSUSync", self.sgprs["GSUSync"]))
 
     if self.states.useGateResidual:
+      # Gate Residual SRD: 4-dword buffer descriptor; reuses D's per-lane offset VGPR.
       self.defineSgpr("SrdGate", 4, 4)
       module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
-      self.defineSgpr("GateNullOne", 1)
-      module.add(RegSet("s", "sgprGateNullOne", self.sgprs["GateNullOne"]))
 
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
@@ -14367,11 +14366,6 @@ class KernelWriterAssembly(KernelWriter):
 
       if ssslist:
         module.add(self.computeStoreSrdStart(kernel, ssslist, useSize=useSize, noMultipleBuffer=True))
-
-      # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
-      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-        module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
-        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
 
       '''
       Post process for loop end
