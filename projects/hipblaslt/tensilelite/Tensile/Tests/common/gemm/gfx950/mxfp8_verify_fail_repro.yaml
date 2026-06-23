@@ -116,8 +116,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -134,7 +134,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -155,8 +155,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -173,7 +173,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -194,8 +194,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -212,7 +212,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -233,8 +233,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -251,7 +251,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -273,8 +273,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -291,7 +291,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -312,8 +312,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -330,7 +330,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -351,8 +351,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -369,7 +369,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -390,8 +390,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -408,7 +408,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -429,8 +429,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -447,7 +447,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -468,8 +468,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -486,7 +486,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - WorkGroupMapping: [16]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
