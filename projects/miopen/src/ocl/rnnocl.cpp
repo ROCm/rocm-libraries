@@ -4855,7 +4855,11 @@ void RNNDescriptor::RNNBackwardDataPackedTensors(
                                     static_cast<size_t>(ri) * wei_len,
                                 offset + 3 * static_cast<size_t>(hy_h) +
                                     static_cast<size_t>(ri) * wei_len,
-                                (li * batch_n + cur_batch) * bi * hy_h + ri * hy_h +
+                                (li * batch_n +
+                                 (ri == 0 ? cur_batch
+                                          : baccbi + in_n.at(seqLen - 1 - ti))) *
+                                        bi * hy_h +
+                                    ri * hy_h +
                                     static_cast<size_t>(nLayers) * batch_n * hy_stride,
                                 li * batch_n * hy_stride + pre_batch2 * hy_stride + bi * wei_len +
                                     ri * hy_h,
