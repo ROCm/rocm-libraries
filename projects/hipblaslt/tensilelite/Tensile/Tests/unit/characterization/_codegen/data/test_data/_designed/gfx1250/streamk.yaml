@@ -1,0 +1,115 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R3 designed StreamK config for gfx1250 codegen characterization.
+#
+# Goal: exercise the arch-specific and VGPR-constant paths in
+# Tensile/Components/StreamK.py that are only reached on gfx1250
+# (methodology-A missing ranges: 78-153, 202-291, 316-409).
+#
+# Coverage targets:
+#   Lines 141-153: StreamKMemoryOrdering.preVolatileVmem (RequiresXCntForVolatileVMEM)
+#   Lines 206-246: StreamKMemoryOrderingDevScopeFences (HasInvWbDevFences=True, gfx1250)
+#   Lines 276-287: StreamK.shiftSrd for gfx125x (version 12.5)
+#   Lines 315-318: computeTotalIters with isStreamKConstantsToVgprEnabled=True
+#   Lines 342-344: skTileIndex VReadfirstlane paths (isStreamKConstantsToVgprEnabled=True)
+#   Lines 392-409: skExtraIters with skConstsInVgprs=True
+#
+# gfx1250 specifics:
+#   - Uses MX-FP8 data (DataType=F8, MXBlockA=32, MXBlockB=32)
+#   - MatrixInstruction: [16, 16, 128, 1, 1, 1, 1, 2, 2] (MX WMMA)
+#   - TDMInst=3 + MXLoadInst=TDM + MXScaleFormat=InMemorySwizzle (required for gfx1250 MX)
+#   - WavefrontSize: 32
+#   - StreamK=[1, 2, 3] (mode 4 is dynamic; StreamKAtomic=1 requires SGEMM not MX)
+#   - StreamKXCCMapping=[0] (XCCMapping=3 overflows SGPRs on gfx1250)
+#   - isStreamKConstantsToVgprEnabled=True for gfx1250 (ISA=(12,5,0)), covers lines 315-409
+#
+# StreamK family sweep:
+#   StreamK=[1, 2, 3] x StreamKAtomic=[0] x StreamKXCCMapping=[0]
+#   => 3 valid combos
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP8 (F8 in, float32 out) TN, Batched
+  # gfx1250 StreamK requires MX data type (F4 or F8 with TDM+InMemorySwizzle).
+  # HHS + StreamK overflows SGPRs on gfx1250 because isStreamKConstantsToVgprEnabled
+  # moves SK constants from SGPRs to VGPRs (ISA=(12,5,0)), increasing pressure.
+  # MX-FP8 with TDMInst=3 is the validated working combination.
+  #
+  # Coverage of missing ranges through gfx1250 arch caps:
+  #   - HasInvWbDevFences=True -> StreamKMemoryOrderingDevScopeFences (lines 206-246)
+  #   - RequiresXCntForVolatileVMEM=True -> preVolatileVmem SWaitXCnt (lines 151-152)
+  #   - version[:2]==(12,5) -> shiftSrd gfx125x block (lines 276-287)
+  #   - ISA=(12,5,0), StreamK!=4 -> isStreamKConstantsToVgprEnabled=True (lines 315-409)
+  ########################################
+  -
+    - # ProblemType: MX-F8 TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [1, 2, 3]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

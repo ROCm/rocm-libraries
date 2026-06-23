@@ -19,6 +19,7 @@ from dnn_benchmarking.reporting.suite_results import (
     StatusCounts,
     SuiteMetadata,
     SuiteResult,
+    _format_cudnn_version,
     collect_environment_info,
 )
 
@@ -198,6 +199,22 @@ class TestProviderEngineResult:
         assert d["role"] == "reference"
         assert d["provider"] == "pytorch"
         assert "comparison_to_baseline" not in d
+
+    def test_warnings_serialize_for_reference_timing_rows(self):
+        pe = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            role="reference",
+            warnings=[
+                "RMSNormBackwardAttributes uses a manual formula; "
+                "PyTorch reference timing is not solely built-in PyTorch operator time."
+            ],
+        )
+
+        d = pe.to_dict()
+
+        assert d["warnings"] == pe.warnings
 
     def test_error_serializes_without_timing(self):
         """ProviderEngineResult with status='error' serializes with
@@ -519,3 +536,34 @@ class TestCollectEnvironmentInfo:
         monkeypatch.setattr(sr_mod, "detect_arch", lambda: "gfx942")
         info = collect_environment_info()
         assert info["gpu_arch"] == "gfx942"
+
+    def test_includes_cuda_and_cudnn_keys(self):
+        """collect_environment_info always exposes the CUDA version keys.
+
+        The values are platform-dependent (populated only on a CUDA
+        host), but the keys must always be present so the JSON schema is
+        stable across ROCm and CUDA runs."""
+        info = collect_environment_info()
+        assert "cuda_version" in info
+        assert "cudnn_version" in info
+
+
+class TestFormatCudnnVersion:
+    """Tests for the packed-int cuDNN version decoder."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            (92000, "9.20.0"),
+            (90000, "9.0.0"),
+            (91300, "9.13.0"),
+            (90201, "9.2.1"),
+            (8907, "8.9.7"),  # pre-9 packing scheme
+        ],
+    )
+    def test_decodes_packed_int(self, raw, expected):
+        assert _format_cudnn_version(raw) == expected
+
+    @pytest.mark.parametrize("raw", [None, 0])
+    def test_missing_version_returns_none(self, raw):
+        assert _format_cudnn_version(raw) is None

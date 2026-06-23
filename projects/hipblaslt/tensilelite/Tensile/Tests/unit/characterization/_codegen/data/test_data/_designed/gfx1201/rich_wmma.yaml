@@ -1,0 +1,97 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# gfx1201 (RDNA4 / WMMA V2) rich characterization config.
+#
+# Goal: widen arch-breadth coverage in KernelWriter.py / Components/* by
+# exercising RDNA4-specific WMMA V2 codegen arms that the baseline
+# test_emit_gfx1201_char.py does not fork across.
+#
+# gfx1201 ISA properties (HasWMMA_V2=True, HasWMMA_V1=False, HasEccHalf=False,
+# HasMFMA=False, WavefrontSize=32) drives:
+#   - else branch of "if HasEccHalf or not HasWMMA_V1" (instPerRegPack arms)
+#   - HHH_WMMA = False for HPA half kernels (DestDataType.isHalf + HPA => False)
+#   - bpeCinternal override for WMMA half/bf16 when ComputeDataType.numRegs==0.5
+#   - UseScaleAlphaVec path in GlobalWriteBatch epilogue
+#   - GSU>1 MultipleBuffer accumulation (gfx12 path)
+#
+# DataType families:
+#   - HHS: half/half/float32 HPA, NT orientation (TransposeA=1, TransposeB=0)
+#   - BBS: bf16/bf16/float32 HPA, NT orientation
+#
+# ForkParameters produce 8 kernels:
+#   MI shape: [16,16,16,1, 1, 1,1, 4,1] (MIWaveTile=[4,1]) vs
+#             [16,16,16,1, 1, 2,1, 2,2] (MIWaveTile=[2,2])
+#   GSU: [1, 4]    -- GSU=4 exercises GSU reduction path on gfx12
+#   Total: 2 x 2 = 4 per type; we run HHS only here (BBS is in B8B8S.yaml family)
+#   capped at limit=8 by harness.
+#
+# Bias + Activation widening:
+#   UseBias=1, BiasTypeArgs=['h'], ActivationType=all + ActivationFuncCall=1
+#   => exercises GlobalWriteBatch epilogue bias + activation store path
+#   UseScaleAlphaVec=1 in ProblemType => exercises UseScaleAlphaVec arm
+#   in globalStoreWait (GlobalWriteBatch lines 287-331).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (fp16 in / fp16 out / f32 compute) TN (TransposeA=1, TransposeB=0)
+  # HighPrecisionAccumulate: True (HPA), Batched
+  # UseBias + Activation + UseScaleAlphaVec widening fork
+  # WMMA V2 MatrixInstruction shapes valid for gfx1201:
+  #   [M, N, K, Batch, BM, BN, Bk, WTA, WTB] => MIWaveTile=[WTA,WTB]
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1]
+          - [16, 16, 16, 1,  1,   2, 1,  2, 2]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [True]
+        - ActivationFuncCall: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: relu]
