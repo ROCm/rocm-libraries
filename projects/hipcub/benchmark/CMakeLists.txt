@@ -64,10 +64,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
       PRIVATE
       $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     )
-    target_link_libraries(${BENCHMARK_TARGET}
-      PRIVATE
-      hipcub_cub
-    )
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE hipcub_cub nvidia-ml)
   else()
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
   endif()
