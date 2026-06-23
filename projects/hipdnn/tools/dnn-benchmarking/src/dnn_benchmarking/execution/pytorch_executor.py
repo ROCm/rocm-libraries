@@ -20,9 +20,7 @@ from . import pytorch_ops
 from .timing import (
     GpuTimerInterface,
     HipGpuTimer,
-    StalledRegionTimer,
     Timer,
-    _is_staged_hip_available,
     create_gpu_timer,
 )
 
@@ -176,20 +174,15 @@ class PyTorchCudaExecutor:
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
 
-        # Stalled-queue staging measures a gap-free GPU span and pure host
-        # submission cost; HIP-only (implies ROCm torch). Falls back to the
-        # non-staged loop on CUDA hosts or capability mismatch.
-        staged_timer: Optional[StalledRegionTimer] = None
-        with torch.cuda.device(self._device):
-            if self._collect_kernel_timing and _is_staged_hip_available():
-                try:
-                    staged_timer = StalledRegionTimer(self._timing_stream())
-                except RuntimeError:
-                    staged_timer = None
-            if staged_timer is not None:
-                kernel_timings = []
-                timing_backend_name = TimingBackendName.HIP.value
-            elif self._collect_kernel_timing:
+        # NOTE: the stalled-queue staged timer (used by the hipDNN Executor) is
+        # intentionally NOT used here. It stalls the work stream and releases it
+        # only after enqueue() returns, which requires the enqueued work to be
+        # purely asynchronous. PyTorch reference ops host-synchronize mid-graph
+        # (e.g. batchnorm/layernorm read epsilon via tensor.item()), which would
+        # block forever on the stalled stream. The parse-once compile (the
+        # dominant host-gap fix) still applies; timing uses HIP events directly.
+        if self._collect_kernel_timing:
+            with torch.cuda.device(self._device):
                 try:
                     gpu_timer = create_gpu_timer(
                         self._resolve_timing_backend(),
@@ -202,37 +195,24 @@ class PyTorchCudaExecutor:
                     kernel_timings = []
                     timing_backend_name = gpu_timer.backend_name
 
-        if staged_timer is not None:
+        for _ in range(self._config.benchmark_iters):
+            kernel_ms: Optional[float] = None
             with torch.cuda.device(self._device):
-                staged_timer.barrier()
-                for _ in range(self._config.benchmark_iters):
+                with Timer() as t:
+                    with torch.cuda.stream(self._get_stream()):
+                        if gpu_timer is not None:
+                            gpu_timer.start()
+                        self._execute_graph(tensors)
+                        if gpu_timer is not None:
+                            gpu_timer.stop()
+                            kernel_ms = gpu_timer.elapsed_ms()
+                        else:
+                            self._synchronize_stream()
 
-                    def enqueue() -> None:
-                        with torch.cuda.stream(self._get_stream()):
-                            self._execute_graph(tensors)
-
-                    cpu_ms, kernel_ms = staged_timer.measure(enqueue)
-                    e2e_timings.append(cpu_ms)
-                    kernel_timings.append(kernel_ms)
-        else:
-            for _ in range(self._config.benchmark_iters):
-                kernel_ms: Optional[float] = None
-                with torch.cuda.device(self._device):
-                    with Timer() as t:
-                        with torch.cuda.stream(self._get_stream()):
-                            if gpu_timer is not None:
-                                gpu_timer.start()
-                            self._execute_graph(tensors)
-                            if gpu_timer is not None:
-                                gpu_timer.stop()
-                                kernel_ms = gpu_timer.elapsed_ms()
-                            else:
-                                self._synchronize_stream()
-
-                if kernel_ms is not None:
-                    assert kernel_timings is not None
-                    kernel_timings.append(kernel_ms)
-                e2e_timings.append(t.elapsed_ms)
+            if kernel_ms is not None:
+                assert kernel_timings is not None
+                kernel_timings.append(kernel_ms)
+            e2e_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(
