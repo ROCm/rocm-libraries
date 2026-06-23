@@ -224,14 +224,13 @@ std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
 // Lower rocisa::SBarrierSignalIsFirst into s_barrier_signal_isfirst <code>.
 // Signal-only; pair with a separate SBarrier wait. <code> = -3 when the rocisa
 // object was constructed with clusterBarrier=True and HasClusterBarrier, else -1.
-std::vector<StinkyInstruction*> lowerRocisaSBarrierSignalIsFirst(
-    rocisa::Instruction& inst, AsmIRBuilder& irBuilder) {
+std::vector<StinkyInstruction*> lowerRocisaSBarrierSignalIsFirst(rocisa::Instruction& inst,
+                                                                 AsmIRBuilder& irBuilder) {
     auto* isFirst = dynamic_cast<rocisa::SBarrierSignalIsFirst*>(&inst);
-    assert(isFirst != nullptr
-           && "lowerRocisaSBarrierSignalIsFirst: expected rocisa::SBarrierSignalIsFirst");
+    assert(isFirst != nullptr &&
+           "lowerRocisaSBarrierSignalIsFirst: expected rocisa::SBarrierSignalIsFirst");
 
-    const int code =
-        (isFirst->getHasClusterBarrier() && isFirst->getClusterBarrier()) ? -3 : -1;
+    const int code = (isFirst->getHasClusterBarrier() && isFirst->getClusterBarrier()) ? -3 : -1;
 
     const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal_isfirst, irBuilder.arch);
     assert(desc != nullptr && "s_barrier_signal_isfirst not available on this arch");

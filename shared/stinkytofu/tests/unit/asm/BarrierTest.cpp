@@ -26,11 +26,11 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
-#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
