@@ -2679,14 +2679,22 @@ namespace
                 switch(params.mem_type.at(output_key))
                 {
                 case hipfftw_data_memory_type::device:
-#ifndef _WIN32
-                    [[fallthrough]];
-                case hipfftw_data_memory_type::managed:
-#endif
                     // a clean allocation is needed
                     execution_results_on_host[0].alloc(
                         params.plan_helper.get_data_byte_size(fft_io::fft_io_out));
                     break;
+#ifndef _WIN32
+                case hipfftw_data_memory_type::managed:
+                {
+                    // Actually verify that there is no need to copy data explicitly with
+                    // managed memory.
+                    // NOTE: the raw pointer to a *managed* allocation is encapsulated in
+                    // a non-owned hostbuffer in this case...
+                    execution_results_on_host[0] = hostbuf::make_nonowned(
+                        gpu_io_buffer.at(output_key).data(), gpu_io_buffer.at(output_key).size());
+                }
+                break;
+#endif
                 case hipfftw_data_memory_type::pinned_host:
                     [[fallthrough]];
                 case hipfftw_data_memory_type::pageable_host:
@@ -2888,14 +2896,7 @@ namespace
                 break;
 #ifndef _WIN32
                 case hipfftw_data_memory_type::managed:
-                {
-                    // supposedly no need to copy but `distance` requires std::vector<hostbuf> arguments...
-                    // use std::memcpy
-                    std::memcpy(execution_results_on_host[0].data(),
-                                test_io_ptr.at(exec_out_key),
-                                params.plan_helper.get_data_byte_size(fft_io::fft_io_out));
-                }
-                break;
+                    [[fallthrough]];
 #endif
                 case hipfftw_data_memory_type::pageable_host:
                     [[fallthrough]];
