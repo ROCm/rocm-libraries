@@ -175,6 +175,24 @@ if(BUILD_ADDRESS_SANITIZER)
     )
 endif()
 
+# Optional YAML-driven CTest categorization (RFC0010). Guarded so standalone /
+# sparse checkouts without shared/ctest still build (falls back to unlabeled
+# install). apply_ctest_category_labels() scans the add_test() names already
+# written into INSTALLED_CTEST_FILE and appends per-test
+# set_tests_properties(... LABELS ...) lines, so `ctest -L quick` works from
+# the installed bin/hipdnn_samples/ tree that TheRock CI consumes.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    apply_ctest_category_labels(
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${INSTALLED_CTEST_FILE}"
+    )
+endif()
+
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
