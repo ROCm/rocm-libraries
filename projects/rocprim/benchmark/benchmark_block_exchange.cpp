@@ -22,33 +22,33 @@
 
 #include "benchmark_block_exchange.hpp"
 
+#include "benchmark_utils.hpp"
 #include "primbench.hpp"
 
-#define CREATE_BENCHMARK(T, BS, IPT) \
-    executor.queue<block_exchange_benchmark<Benchmark, T, BS, IPT>>();
-
-#define BENCHMARK_TYPE(type, block)  \
-    CREATE_BENCHMARK(type, block, 1) \
-    CREATE_BENCHMARK(type, block, 2) \
-    CREATE_BENCHMARK(type, block, 3) \
-    CREATE_BENCHMARK(type, block, 4) \
-    CREATE_BENCHMARK(type, block, 7) \
-    CREATE_BENCHMARK(type, block, 8)
-
+#define QUEUE_BENCHMARK(BS, IPT)                                                                \
+    benchmark_types::queue_type<((benchmark_types::Type_Category::integer_signed                \
+                                  ^ benchmark_types::Type_Category::type_int16)                 \
+                                 | benchmark_types::Type_Category::integer_128                  \
+                                 | benchmark_types::Type_Category::type_half                    \
+                                 | benchmark_types::Type_Category::custom_floating_point        \
+                                 | benchmark_types::Type_Category::rocprim_vector)>(            \
+        executor,                                                                               \
+        [&](auto type_tag)                                                                      \
+        {                                                                                       \
+            executor.template queue<block_exchange_benchmark<Benchmark,                         \
+                                                             typename decltype(type_tag)::type, \
+                                                             BS,                                \
+                                                             IPT>>();                           \
+        });
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
-    BENCHMARK_TYPE(int32_t, 256)
-    BENCHMARK_TYPE(int8_t, 256)
-    BENCHMARK_TYPE(rocprim::half, 256)
-    BENCHMARK_TYPE(int64_t, 256)
-    BENCHMARK_TYPE(custom_f32_f32, 256)
-    BENCHMARK_TYPE(float2, 256)
-    BENCHMARK_TYPE(custom_f64_f64, 256)
-    BENCHMARK_TYPE(double2, 256)
-    BENCHMARK_TYPE(float4, 256)
-    BENCHMARK_TYPE(rocprim::int128_t, 256)
-    BENCHMARK_TYPE(rocprim::uint128_t, 256)
+    QUEUE_BENCHMARK(256, 1)
+    QUEUE_BENCHMARK(256, 2)
+    QUEUE_BENCHMARK(256, 3)
+    QUEUE_BENCHMARK(256, 4)
+    QUEUE_BENCHMARK(256, 7)
+    QUEUE_BENCHMARK(256, 8)
 }
 
 int main(int argc, char* argv[])
