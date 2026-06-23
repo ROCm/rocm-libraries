@@ -37,6 +37,7 @@ jobs:
         --group-add 992
         --group-add 110
         --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --cpus 14
     strategy:
       fail-fast: false
       matrix:
