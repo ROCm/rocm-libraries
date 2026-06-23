@@ -94,11 +94,7 @@ void testing_sy2sb_he2hb_bad_arg()
 
 //------------------------------------------------------------------------------
 template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th>
-void sy2sb_he2hb_initData(const rocblas_handle handle,
-                          const I n,
-                          Td& dA,
-                          const I lda,
-                          Th& hA)
+void sy2sb_he2hb_initData(const rocblas_handle handle, const I n, Td& dA, const I lda, Th& hA)
 {
     if(CPU)
     {
