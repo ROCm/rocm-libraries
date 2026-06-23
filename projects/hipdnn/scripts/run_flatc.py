@@ -14,21 +14,40 @@ _HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _read_required_version(cmake_file=None):
     """Read HIPDNN_FLATBUFFERS_VERSION from projects/hipdnn/CMakeLists.txt
     so the script stays in sync with the single source of truth.
+
+    The version may be defined indirectly, e.g.
+        set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
+        set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" ...)
+    so we collect every set(NAME "value") pair and expand ${VAR} references.
     """
     if cmake_file is None:
         cmake_file = os.path.join(_HIPDNN_DIR, "CMakeLists.txt")
-    pattern = re.compile(
-        r'set\s*\(\s*HIPDNN_FLATBUFFERS_VERSION\s+"([^"]+)"', re.IGNORECASE
-    )
+    set_pattern = re.compile(r'set\s*\(\s*(\w+)\s+"([^"]*)"', re.IGNORECASE)
+    var_ref = re.compile(r"\$\{(\w+)\}")
+    defs = {}
     with open(cmake_file, encoding="utf-8") as f:
         for line in f:
-            match = pattern.search(line)
+            match = set_pattern.search(line)
             if match:
-                return match.group(1)
-    raise RuntimeError(
-        f"Could not find HIPDNN_FLATBUFFERS_VERSION in {cmake_file}. "
-        "Update run_flatc.py if the cache variable was renamed or moved."
-    )
+                defs.setdefault(match.group(1), match.group(2))
+    if "HIPDNN_FLATBUFFERS_VERSION" not in defs:
+        raise RuntimeError(
+            f"Could not find HIPDNN_FLATBUFFERS_VERSION in {cmake_file}. "
+            "Update run_flatc.py if the cache variable was renamed or moved."
+        )
+    value = defs["HIPDNN_FLATBUFFERS_VERSION"]
+    # The version is defined with at most one ${VAR} indirection, e.g.
+    #   set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" ...)
+    ref = var_ref.search(value)
+    if not ref:
+        return value
+    name = ref.group(1)
+    if name not in defs:
+        raise RuntimeError(
+            f"Could not resolve ${{{name}}} referenced by "
+            f"HIPDNN_FLATBUFFERS_VERSION in {cmake_file}."
+        )
+    return value.replace(ref.group(0), defs[name])
 
 
 def _read_flatc_flags(flags_file=None):
