@@ -724,7 +724,8 @@ def expand_sweep(
     one GemmKernelConfig. Invalid combinations are dropped via the dispatcher's
     own validator, and duplicates (by .name) are collapsed.
 
-    For Phase 1 the signature is fixed to fp16 / rcr.
+    The signature is controlled by the `dtype` and `layout` arguments (defaults
+    to fp16 / rcr).
     """
     with open(config_path) as f:
         cfg = json.load(f)
