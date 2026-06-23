@@ -280,23 +280,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
       "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
       "${PROJECT_BINARY_DIR}/staging"
       "${HIPSPARSE_CTEST_INSTALL_FILE}"
-      "gpus"
-    )
-
-    # CTest resource-spec generator: lets test_runner.py emit a --resource-spec-file
-    # so CTest pins each hipsparse-test process to a distinct GPU slot (RESOURCE_GROUPS
-    # "1,gpus:1" above). This prevents multiple parallel hipsparse-test processes from
-    # oversubscribing a single GPU's VRAM (the cause of hipErrorOutOfMemory storms on
-    # memory-constrained runners), while still allowing parallelism across multiple GPUs.
-    add_executable(generate_resource_spec generate_resource_spec.cpp)
-    set_target_properties(generate_resource_spec PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
-    target_link_libraries(generate_resource_spec PRIVATE hip::host)
-    set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
-    install(
-        TARGETS generate_resource_spec
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/hipsparse"
-        COMPONENT tests
     )
   else()
     message(STATUS "hipSPARSE: shared/ctest not found (e.g. standalone checkout), skipping CTest categories")
