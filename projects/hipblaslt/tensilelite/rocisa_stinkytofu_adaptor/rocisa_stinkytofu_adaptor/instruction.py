@@ -4186,6 +4186,10 @@ class _True16Wrap:
     def toString(self) -> str:
         return _input_to_str(self._inner) + self._suffix
 
+    def to_stinky(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        return _st.Register(self.toString())
+
     def __str__(self) -> str:
         return self.toString()
 

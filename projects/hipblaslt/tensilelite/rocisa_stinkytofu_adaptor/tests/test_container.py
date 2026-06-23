@@ -720,17 +720,24 @@ class TestToStinky(unittest.TestCase):
         self.assertEqual(reg.count, 2)
 
     def test_named_includes_vgpr_prefix(self):
-        # Stinky emit expects ``vgprValuA+1+2`` so the symbolic name must
-        # carry the ``<regType>gpr`` prefix (else byte-diffs vs native).
-        rc = RegisterContainer("v", RegName("ValuA", [1, 2]), 0, 1)
+        # When regIdx is unresolved (-1), symbolic name is attached so
+        # stinkytofu can do its own scheduling/analysis.
+        rc = RegisterContainer("v", RegName("ValuA", [1, 2]), -1, 1)
         reg = rc.to_stinky()
-        self.assertTrue(reg.has_reg_name)
+        self.assertTrue(reg.has_reg_name())
         name, offsets = reg.get_reg_name()
         self.assertEqual(name, "vgprValuA")
         self.assertEqual(offsets, [1, 2])
 
+    def test_named_resolved_skips_symbolic(self):
+        # When regIdx is resolved (>= 0), symbolic name is NOT set —
+        # stinkytofu code generator must use numeric index directly.
+        rc = RegisterContainer("v", RegName("ValuA", [1, 2]), 0, 1)
+        reg = rc.to_stinky()
+        self.assertFalse(reg.has_reg_name())
+
     def test_named_sgpr_prefix(self):
-        rc = RegisterContainer("s", RegName("KArg"), 0, 1)
+        rc = RegisterContainer("s", RegName("KArg"), -1, 1)
         reg = rc.to_stinky()
         name, _ = reg.get_reg_name()
         self.assertEqual(name, "sgprKArg")
@@ -738,8 +745,7 @@ class TestToStinky(unittest.TestCase):
     def test_macro_injects_backslash_prefix(self):
         # Macro context renders as ``v[\vgprAddr+0]``; the ``\`` is
         # encoded into the symbolic name for byte-parity.
-        # TODO(T6): replace with proper TEXTBLOCK handling at Module layer.
-        rc = RegisterContainer("v", RegName("Addr", [0]), 0, 1, isMacro=True)
+        rc = RegisterContainer("v", RegName("Addr", [0]), -1, 1, isMacro=True)
         reg = rc.to_stinky()
         name, offsets = reg.get_reg_name()
         self.assertEqual(name, "\\vgprAddr")

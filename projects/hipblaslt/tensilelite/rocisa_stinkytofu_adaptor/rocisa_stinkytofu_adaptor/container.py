@@ -619,12 +619,12 @@ class RegisterContainer(Container):
         # MSB offset is left to InsertVgprMsbPass; binding has no
         # set_offset.
 
-        if self.regName is not None:
-            # Single-string encoding: "<regType>gpr" + name + "+off1+off2...".
+        if self.regName is not None and self.regIdx == -1:
+            # Only attach symbolic name when the register is still unresolved.
+            # After convert_text_variables_to_registers, regIdx holds the
+            # concrete index and stinkytofu should use that directly.
             symbolic = self.getCompleteRegNameWithType()
             if self.isMacro:
-                # TODO(T6): proper TEXTBLOCK handling for macro blocks;
-                # this backslash injection is a byte-parity stop-gap.
                 symbolic = "\\" + symbolic
             reg.set_reg_name(symbolic, [])
 
