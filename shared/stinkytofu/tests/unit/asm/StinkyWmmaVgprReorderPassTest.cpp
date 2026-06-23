@@ -39,7 +39,7 @@ using namespace stinkytofu::test;
 class WmmaVgprReorderPassTest : public ::testing::Test {
    protected:
     static constexpr GfxArchID kArch = GfxArchID::Gfx1250;
-    static constexpr uint16_t  kTileSize = 8; // VGPRs per wmma tile
+    static constexpr uint16_t kTileSize = 8;  // VGPRs per wmma tile
 
     void SetUp() override {
         func = std::make_unique<Function>("test");
@@ -52,8 +52,7 @@ class WmmaVgprReorderPassTest : public ::testing::Test {
     // dest=C[cBase:cBase+7], src0=A[aBase:aBase+7], src1=B[bBase:bBase+7], src2=C_in
     StinkyInstruction* addWmma(int aBase, int bBase, int cBase, uint32_t poolIdx) {
         AsmIRBuilder builder(*bb, kArch);
-        auto* inst = builder.create(
-            getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
+        auto* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
         inst->addDestReg(vgpr(cBase, kTileSize));
         inst->addSrcReg(vgpr(aBase, kTileSize));
         inst->addSrcReg(vgpr(bBase, kTileSize));
@@ -66,8 +65,7 @@ class WmmaVgprReorderPassTest : public ::testing::Test {
     // pass ignores untagged instructions.
     StinkyInstruction* addUntaggedWmma(int aBase, int bBase, int cBase) {
         AsmIRBuilder builder(*bb, kArch);
-        auto* inst = builder.create(
-            getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
+        auto* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
         inst->addDestReg(vgpr(cBase, kTileSize));
         inst->addSrcReg(vgpr(aBase, kTileSize));
         inst->addSrcReg(vgpr(bBase, kTileSize));
@@ -88,7 +86,7 @@ class WmmaVgprReorderPassTest : public ::testing::Test {
     }
 
     std::unique_ptr<Function> func;
-    BasicBlock*    bb = nullptr;
+    BasicBlock* bb = nullptr;
     AnalysisManager am;
 };
 
@@ -146,15 +144,15 @@ TEST_F(WmmaVgprReorderPassTest, SinglePool_NotApplicable) {
 class WmmaVgprReorderPass2x2Test : public WmmaVgprReorderPassTest {
    protected:
     // A_X0 bases, B bases, A_X1 bases, C bases (all non-overlapping)
-    static constexpr int A0 = 0,  A1 = 8;   // first-half A groups
-    static constexpr int B0 = 16, B1 = 24;  // B groups (shared across halves)
-    static constexpr int AX0 = 32, AX1 = 40; // second-half A groups (X1)
+    static constexpr int A0 = 0, A1 = 8;      // first-half A groups
+    static constexpr int B0 = 16, B1 = 24;    // B groups (shared across halves)
+    static constexpr int AX0 = 32, AX1 = 40;  // second-half A groups (X1)
     static constexpr int C_BASE = 48;         // C tiles start here
 
     void buildBMajorBlock() {
         // Pool 0 – B-major outer:  for B in {B0,B1}: for A in {A0,A1}: wmma
-        w00 = addWmma(A0, B0, C_BASE + 0,  /*poolIdx=*/0);
-        w10 = addWmma(A1, B0, C_BASE + 8,  /*poolIdx=*/0);
+        w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+        w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
         w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
         w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
         // Pool 1 – same B-major outer order, different A registers
@@ -300,15 +298,15 @@ TEST_F(WmmaVgprReorderPassTest, AMajorOuter_NotApplicable) {
 
 class WmmaVgprReorderPassBVariantTest : public WmmaVgprReorderPassTest {
    protected:
-    static constexpr int HA0 = 0,  HA8 = 8;    // hardware A (pool-shared, src0)
-    static constexpr int HB16 = 16, HB24 = 24; // hardware B pool 0 (pool-varying, src1)
-    static constexpr int HB32 = 32, HB40 = 40; // hardware B pool 1
+    static constexpr int HA0 = 0, HA8 = 8;      // hardware A (pool-shared, src0)
+    static constexpr int HB16 = 16, HB24 = 24;  // hardware B pool 0 (pool-varying, src1)
+    static constexpr int HB32 = 32, HB40 = 40;  // hardware B pool 1
     static constexpr int C_BASE = 64;
 
     void buildAMajorOuterBVariant() {
         // Pool 0: A-major outer (hardware A contiguous) → hardware B has inflated liveness
-        wA0B16 = addWmma(HA0, HB16, C_BASE +  0, /*poolIdx=*/0);
-        wA0B24 = addWmma(HA0, HB24, C_BASE +  8, /*poolIdx=*/0);
+        wA0B16 = addWmma(HA0, HB16, C_BASE + 0, /*poolIdx=*/0);
+        wA0B24 = addWmma(HA0, HB24, C_BASE + 8, /*poolIdx=*/0);
         wA8B16 = addWmma(HA8, HB16, C_BASE + 16, /*poolIdx=*/0);
         wA8B24 = addWmma(HA8, HB24, C_BASE + 24, /*poolIdx=*/0);
         // Pool 1: same A-major outer order, different B registers
@@ -362,8 +360,8 @@ TEST_F(WmmaVgprReorderPassBVariantTest, PoolVaryingB_DesiredOrderMakesBContiguou
 TEST_F(WmmaVgprReorderPassBVariantTest, AlreadyBContiguous_NotApplicable) {
     // Hardware B already contiguous (B-major outer for hardware):
     //   HB16 group first, then HB24 — so hardware B intervals are tight
-    addWmma(HA0, HB16, C_BASE +  0, /*poolIdx=*/0);
-    addWmma(HA8, HB16, C_BASE +  8, /*poolIdx=*/0);
+    addWmma(HA0, HB16, C_BASE + 0, /*poolIdx=*/0);
+    addWmma(HA8, HB16, C_BASE + 8, /*poolIdx=*/0);
     addWmma(HA0, HB24, C_BASE + 16, /*poolIdx=*/0);
     addWmma(HA8, HB24, C_BASE + 24, /*poolIdx=*/0);
     addWmma(HA0, HB32, C_BASE + 32, /*poolIdx=*/1);
@@ -375,6 +373,54 @@ TEST_F(WmmaVgprReorderPassBVariantTest, AlreadyBContiguous_NotApplicable) {
     const auto* res = runPass();
     ASSERT_NE(res, nullptr);
     EXPECT_FALSE(res->applicable);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit tests for individual ABI layers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dependency constraint: RAW hazard on C forces partial reorder
+//
+// A non-wmma instruction writes to C tile of w00 between w00 and w10 in the BB.
+// When the pass walks the BB, passedCount=1 at that point → minRank[w00]=1.
+// Ideal A-major order puts w00 at position 0, but the dep blocks that.
+// EDF scheduler produces: w01, w00, w10, w11 — A0 still contiguous (positions 0-1)
+// so the saving still occurs; only the first two slots are swapped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(WmmaVgprReorderPass2x2Test, RawDepOnC_ConstrainsFirstWmmaButStillApplicable) {
+    // Build pool 0 manually (in B-major order) with the dep inserted mid-pool.
+    // BB order: w00, [ds_load→C0], w10, w01, w11, wx00, wx10, wx01, wx11
+    w00 = addWmma(A0, B0, C_BASE + 0, /*poolIdx=*/0);
+    addDsLoad(C_BASE);  // writes to C0 (C tile of w00) — RAW: minRank[w00]=1
+    w10 = addWmma(A1, B0, C_BASE + 8, /*poolIdx=*/0);
+    w01 = addWmma(A0, B1, C_BASE + 16, /*poolIdx=*/0);
+    w11 = addWmma(A1, B1, C_BASE + 24, /*poolIdx=*/0);
+    wx00 = addWmma(AX0, B0, C_BASE + 32, /*poolIdx=*/1);
+    wx10 = addWmma(AX1, B0, C_BASE + 40, /*poolIdx=*/1);
+    wx01 = addWmma(AX0, B1, C_BASE + 48, /*poolIdx=*/1);
+    wx11 = addWmma(AX1, B1, C_BASE + 56, /*poolIdx=*/1);
+
+    const auto* res = runPass();
+    ASSERT_NE(res, nullptr);
+
+    // Dep must not kill the optimization entirely.
+    EXPECT_TRUE(res->applicable);
+    EXPECT_GT(res->totalVgprSaved, 0u);
+
+    // Pool 0 EDF result: w00 blocked at pos 0 (minRank=1), EDF picks w01 first.
+    //   pos 0: w01 (no dep)
+    //   pos 1: w00 (minRank=1 satisfied)
+    //   pos 2: w10
+    //   pos 3: w11
+    // A0 group (w01, w00) is at positions 0-1, A1 group (w10, w11) at 2-3 —
+    // intervals [0,1] and [2,3] are non-overlapping, so saving is preserved.
+    ASSERT_GE(res->desiredWmmaOrder.size(), 4u);
+    EXPECT_EQ(res->desiredWmmaOrder[0], w01) << "w01 must be first (no dep)";
+    EXPECT_EQ(res->desiredWmmaOrder[1], w00) << "w00 slides to pos 1 (RAW dep)";
+    EXPECT_EQ(res->desiredWmmaOrder[2], w10);
+    EXPECT_EQ(res->desiredWmmaOrder[3], w11);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -402,19 +448,19 @@ TEST_F(WmmaVgprReorderPassTest, WmmaIntervalLiveness_ComputesCorrectIntervals) {
     RegGroup g0{0u, kTileSize}, g8{8u, kTileSize}, g16{16u, kTileSize}, g24{24u, kTileSize};
     ASSERT_TRUE(intervals.count(g0));
     EXPECT_EQ(intervals[g0].first, 0u);
-    EXPECT_EQ(intervals[g0].last,  2u);
+    EXPECT_EQ(intervals[g0].last, 2u);
 
     ASSERT_TRUE(intervals.count(g8));
     EXPECT_EQ(intervals[g8].first, 1u);
-    EXPECT_EQ(intervals[g8].last,  3u);
+    EXPECT_EQ(intervals[g8].last, 3u);
 
     ASSERT_TRUE(intervals.count(g16));
     EXPECT_EQ(intervals[g16].first, 0u);
-    EXPECT_EQ(intervals[g16].last,  1u);
+    EXPECT_EQ(intervals[g16].last, 1u);
 
     ASSERT_TRUE(intervals.count(g24));
     EXPECT_EQ(intervals[g24].first, 2u);
-    EXPECT_EQ(intervals[g24].last,  3u);
+    EXPECT_EQ(intervals[g24].last, 3u);
 }
 
 TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_FindsAliasesForBMajorInput) {
@@ -438,7 +484,8 @@ TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_FindsAliasesForBMajo
 
     // Build flat seq for liveness
     std::vector<WmmaNode> seq;
-    for (const auto& p : pools) for (const auto& n : p) seq.push_back(n);
+    for (const auto& p : pools)
+        for (const auto& n : p) seq.push_back(n);
 
     WmmaIntervalLiveness liveness;
     const auto intervals = liveness.computeLiveness(*bb, seq);
@@ -459,22 +506,23 @@ TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_FindsAliasesForBMajo
 TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_TripleBufferFindsAliases) {
     // Triple buffer: 3 explicit pools, each 2A × 2B in B-major outer.
     std::vector<std::vector<WmmaNode>> pools = {
-        { {nullptr, {0u,  kTileSize}, {16u, kTileSize}, {96u,  kTileSize}},
-          {nullptr, {8u,  kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
-          {nullptr, {0u,  kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
-          {nullptr, {8u,  kTileSize}, {24u, kTileSize}, {120u, kTileSize}} },
-        { {nullptr, {32u, kTileSize}, {16u, kTileSize}, {96u,  kTileSize}},
-          {nullptr, {40u, kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
-          {nullptr, {32u, kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
-          {nullptr, {40u, kTileSize}, {24u, kTileSize}, {120u, kTileSize}} },
-        { {nullptr, {64u, kTileSize}, {16u, kTileSize}, {96u,  kTileSize}},
-          {nullptr, {72u, kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
-          {nullptr, {64u, kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
-          {nullptr, {72u, kTileSize}, {24u, kTileSize}, {120u, kTileSize}} },
+        {{nullptr, {0u, kTileSize}, {16u, kTileSize}, {96u, kTileSize}},
+         {nullptr, {8u, kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
+         {nullptr, {0u, kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
+         {nullptr, {8u, kTileSize}, {24u, kTileSize}, {120u, kTileSize}}},
+        {{nullptr, {32u, kTileSize}, {16u, kTileSize}, {96u, kTileSize}},
+         {nullptr, {40u, kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
+         {nullptr, {32u, kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
+         {nullptr, {40u, kTileSize}, {24u, kTileSize}, {120u, kTileSize}}},
+        {{nullptr, {64u, kTileSize}, {16u, kTileSize}, {96u, kTileSize}},
+         {nullptr, {72u, kTileSize}, {16u, kTileSize}, {104u, kTileSize}},
+         {nullptr, {64u, kTileSize}, {24u, kTileSize}, {112u, kTileSize}},
+         {nullptr, {72u, kTileSize}, {24u, kTileSize}, {120u, kTileSize}}},
     };
 
     std::vector<WmmaNode> seq;
-    for (const auto& p : pools) for (const auto& n : p) seq.push_back(n);
+    for (const auto& p : pools)
+        for (const auto& n : p) seq.push_back(n);
     WmmaIntervalLiveness liveness;
     const auto intervals = liveness.computeLiveness(*bb, seq);
 
@@ -494,18 +542,19 @@ TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_TripleBufferFindsAli
 TEST_F(WmmaVgprReorderPassTest, PoolVaryingReorderAlgorithm_NoAliasForAMajorInput) {
     // Already A-major outer — no saving expected
     std::vector<std::vector<WmmaNode>> pools = {
-        { {nullptr, {0u, kTileSize}, {16u, kTileSize}, {48u, kTileSize}},
-          {nullptr, {0u, kTileSize}, {24u, kTileSize}, {56u, kTileSize}},
-          {nullptr, {8u, kTileSize}, {16u, kTileSize}, {64u, kTileSize}},
-          {nullptr, {8u, kTileSize}, {24u, kTileSize}, {72u, kTileSize}} },
-        { {nullptr, {32u, kTileSize}, {16u, kTileSize}, {48u, kTileSize}},
-          {nullptr, {32u, kTileSize}, {24u, kTileSize}, {56u, kTileSize}},
-          {nullptr, {40u, kTileSize}, {16u, kTileSize}, {64u, kTileSize}},
-          {nullptr, {40u, kTileSize}, {24u, kTileSize}, {72u, kTileSize}} },
+        {{nullptr, {0u, kTileSize}, {16u, kTileSize}, {48u, kTileSize}},
+         {nullptr, {0u, kTileSize}, {24u, kTileSize}, {56u, kTileSize}},
+         {nullptr, {8u, kTileSize}, {16u, kTileSize}, {64u, kTileSize}},
+         {nullptr, {8u, kTileSize}, {24u, kTileSize}, {72u, kTileSize}}},
+        {{nullptr, {32u, kTileSize}, {16u, kTileSize}, {48u, kTileSize}},
+         {nullptr, {32u, kTileSize}, {24u, kTileSize}, {56u, kTileSize}},
+         {nullptr, {40u, kTileSize}, {16u, kTileSize}, {64u, kTileSize}},
+         {nullptr, {40u, kTileSize}, {24u, kTileSize}, {72u, kTileSize}}},
     };
 
     std::vector<WmmaNode> seq;
-    for (const auto& p : pools) for (const auto& n : p) seq.push_back(n);
+    for (const auto& p : pools)
+        for (const auto& n : p) seq.push_back(n);
     WmmaIntervalLiveness liveness;
     const auto intervals = liveness.computeLiveness(*bb, seq);
 
