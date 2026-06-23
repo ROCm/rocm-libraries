@@ -24,9 +24,10 @@ class _Run:
         self.stdout = out
 
 
-def test_detect_gpus_from_rocm_smi(monkeypatch):
+def test_detect_gpus_from_amd_smi(monkeypatch):
+    # `amd-smi list --json` returns one JSON object per GPU.
     monkeypatch.setattr(
-        M.subprocess, "run", lambda *a, **k: _Run(0, "GPU[0] x\nGPU[0] y\nGPU[1] z\n")
+        M.subprocess, "run", lambda *a, **k: _Run(0, '[{"gpu": 0}, {"gpu": 1}]')
     )
     assert M.detectAvailableGpus() == 2
 
@@ -36,13 +37,13 @@ def test_detect_gpus_fallback_hipinfo(monkeypatch):
 
     def fake_run(args, **k):
         calls.append(args[0])
-        if args[0] == "rocm-smi":
+        if args[0] == "amd-smi":
             return _Run(1, "")  # fail -> fallback
         return _Run(0, "Number of devices: 4\n")
 
     monkeypatch.setattr(M.subprocess, "run", fake_run)
     assert M.detectAvailableGpus() == 4
-    assert calls == ["rocm-smi", "hipInfo"]
+    assert calls == ["amd-smi", "hipInfo"]
 
 
 def test_detect_gpus_default_one(monkeypatch):
