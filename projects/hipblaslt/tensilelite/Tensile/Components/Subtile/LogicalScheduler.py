@@ -3370,10 +3370,14 @@ class LogicalScheduler:
         # Cluster barrier: splice the wait `gap` WMMAs after the signal, against
         # the final post-schedule order, to hide its cross-CU latency.
         if clusterBarrierWait is not None:
-            from Tensile.Components.Subtile.ClusterBarrier import (
-                spliceClusterBarrierWait, CLUSTER_BARRIER_WMMA_GAP)
-            gap = kernel.get("ClusterBarrierWmmaGap", CLUSTER_BARRIER_WMMA_GAP)
-            module = spliceClusterBarrierWait(module, clusterBarrierWait, gap)
+            # TESTING: max delay - append the cluster_barrier wait at the very end
+            # of the section instead of splicing it `gap` WMMAs after the signal.
+            for inst in clusterBarrierWait.flatitems():
+                module.add(inst)
+            # from Tensile.Components.Subtile.ClusterBarrier import (
+            #     spliceClusterBarrierWait, CLUSTER_BARRIER_WMMA_GAP)
+            # gap = kernel.get("ClusterBarrierWmmaGap", CLUSTER_BARRIER_WMMA_GAP)
+            # module = spliceClusterBarrierWait(module, clusterBarrierWait, gap)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):

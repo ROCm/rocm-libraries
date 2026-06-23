@@ -23,7 +23,7 @@ from rocisa.instruction import (
 
 # Number of WMMAs to issue between the cluster_barrier signal and its wait so the
 # barrier's cross-CU latency is hidden behind useful work rather than stalled on.
-CLUSTER_BARRIER_WMMA_GAP = 4
+CLUSTER_BARRIER_WMMA_GAP = 8
 
 _isMMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
 
