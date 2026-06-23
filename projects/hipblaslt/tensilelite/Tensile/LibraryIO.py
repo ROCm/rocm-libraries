@@ -675,13 +675,13 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["LibraryType"] = "FreeSize"
         rv["Library"] = {}
         rv["Library"]["indexOrder"] = None
-        rv["Library"]["table"] = [0, len(data[5])]
+        rv["Library"]["table"] = [0, len(rv["Solutions"])]
         rv["Library"]["distance"] = None
     elif libraryType == "Prediction":
         rv["LibraryType"] = "Prediction"
         rv["Library"] = {}
         rv["Library"]["indexOrder"] = None
-        rv["Library"]["table"] = [0, len(data[5])]
+        rv["Library"]["table"] = [0, len(rv["Solutions"])]
         rv["Library"]["distance"] = None
     else:
         rv["LibraryType"] = "Matching"
@@ -700,7 +700,7 @@ def rawLibraryLogic(data):
     architectureName = data[2]
     deviceNames = data[3]
     problemTypeState = data[4]
-    solutionStates = data[5]
+    solutionStates = _expandSolutionDefaults(data[5])
     indexOrder = data[6]
     exactLogic = data[7]
     rangeLogic = data[8]

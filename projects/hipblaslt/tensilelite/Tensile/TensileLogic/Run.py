@@ -36,7 +36,7 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters
-from Tensile.LibraryIO import readYAML
+from Tensile.LibraryIO import readYAML, _expandSolutionDefaults
 from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
@@ -104,10 +104,10 @@ def _runChecks(
         problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = _expandSolutionDefaults(data[5])
         elif check.All:
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = _expandSolutionDefaults(data[5])
 
         for list_idx, s in enumerate(solutions):
             s, isCustom = handleCustomKernel(s, isaInfoMap)

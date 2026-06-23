@@ -160,8 +160,16 @@ def removeDuplicatedSolutions(oriData, prefix=""):
 
 from .CustomYamlLoader import load_yaml_stream
 
+def _expandSolutionDefaults(element5):
+    if isinstance(element5, dict) and "SolutionDefaults" in element5:
+        defaults = element5["SolutionDefaults"]
+        return [dict(defaults, **ovr) for ovr in element5["Solutions"]]
+    return element5
+
 def loadData(filename):
     data = load_yaml_stream(filename, yaml.CSafeLoader)
+    if isinstance(data, list) and len(data) > 5:
+        data[5] = _expandSolutionDefaults(data[5])
     return [filename, data]
 
 def compareDestFolderToYaml(originalDir, incFile, incData):
