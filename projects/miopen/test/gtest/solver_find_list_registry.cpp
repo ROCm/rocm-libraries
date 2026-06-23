@@ -6,7 +6,7 @@
 #include <miopen/mlo_internal.hpp>
 #include <miopen/solver_id.hpp>
 
-// Regression guard for ROCM-26918.
+// Regression guard against Find-list/registry drift.
 //
 // Every convolution solver reachable through the Find solver lists in
 // mlo_dir_conv.cpp must also be registered in the solver Id registry
@@ -27,7 +27,7 @@ TEST(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
             << "Solver '" << db_id
             << "' is present in a Find solver list (mlo_dir_conv.cpp) but is not registered in the "
                "solver Id registry (solver.cpp). This drift makes Find throw "
-               "miopenStatusInternalError (ROCM-26918).";
+               "miopenStatusInternalError.";
 
         // A registered id must also resolve to an algorithm; GetAlgo() is the
         // exact call that throws in the field when the id is missing.

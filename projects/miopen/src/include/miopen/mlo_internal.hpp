@@ -250,7 +250,7 @@ FindAllFFTSolutions(const miopen::ExecutionContext& ctx,
 // Returns the SolverDbId of every convolution solver listed in the Find solver
 // containers defined in mlo_dir_conv.cpp. Used by a unit test to assert that
 // every solver reachable by Find is also present in the solver Id registry,
-// guarding against find-list/registry drift (see ROCM-26918).
+// guarding against find-list/registry drift.
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetAllFindSolverDbIds();
 
