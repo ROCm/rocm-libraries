@@ -3221,6 +3221,8 @@ public:
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");
+            // Index tensor needs to be a integer data type, default to int32
+            index->set_data_type(DataType::INT32);
             attributes.set_index(index);
         }
 
@@ -3233,12 +3235,51 @@ public:
         return {y, index};
     }
 
+    /** @brief Resample forward pass without index generation
+     *
+     * Applies a pooling-style resample operation over the spatial dimensions of the input tensor.
+     * Supported modes include max pooling and average pooling with either excluded or included
+     * padding.
+     *
+     * Example for 2D max pooling (using NCHW notation for illustration):
+     * @code
+     * y[n,c,oh,ow] = max_{r,s} x[n, c,
+     *                            oh*stride_h + r - pre_pad_h,
+     *                            ow*stride_w + s - pre_pad_w]
+     *
+     * output_dim = floor((input + pre_padding + post_padding - window) / stride) + 1
+     * @endcode
+     *
+     * @param x Input activation tensor (batch, channels, spatial dimensions)
+     * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
+     *        window size. Optional max-pool index generation parameter is ignored.
+     * @return  y: Resampled output tensor
+     *
+     * @see hipdnn_frontend::graph::ResampleFwdAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
                                                    ResampleFwdAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
-        return resample(std::move(x), std::move(attributes))[0];
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

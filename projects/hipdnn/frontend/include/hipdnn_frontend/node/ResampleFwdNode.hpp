@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
@@ -36,6 +37,12 @@ public:
                     "ResampleFwdNode missing output Y for pre-validation"};
         }
 
+        if(attributes.get_generate_index() && !attributes.get_index())
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "ResampleFwdNode missing output Index when index generation requested"};
+        }
+
         // Validate tensor ranks if dimensions are already set
         auto x = attributes.get_x();
         if(!x->get_dim().empty() && x->get_dim().size() < 3)
@@ -48,6 +55,19 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleFwdNode output Y must have at least rank 3 (N, C, spatial...)"};
+        }
+
+        if(auto index = attributes.get_index())
+        {
+            switch(index->get_data_type())
+            {
+            case DataType::INT8:
+            case DataType::INT32:
+                break;
+            default:
+                return {ErrorCode::INVALID_VALUE,
+                        "ResampleFwdNode output Index must be a signed integer data type"};
+            }
         }
 
         return {};
@@ -108,14 +128,7 @@ public:
             }
             else
             {
-                std::vector<int64_t> yStrides(yDims.size());
-                yStrides.back() = 1;
-                for(int64_t i = static_cast<int64_t>(yDims.size()) - 2; i >= 0; --i)
-                {
-                    yStrides[static_cast<size_t>(i)]
-                        = yStrides[static_cast<size_t>(i + 1)] * yDims[static_cast<size_t>(i + 1)];
-                }
-                y->set_stride(yStrides);
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims));
             }
         }
 
