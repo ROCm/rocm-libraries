@@ -1234,15 +1234,6 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;
 
   // Check default weight values
-  REQUIRE(defaults.weight_mem_l2 == 1.0);
-  REQUIRE(defaults.weight_mem_mall == 1.0);
-  REQUIRE(defaults.weight_mem_dram == 1.0);
-  REQUIRE(defaults.weight_compute == 1.0);
-  REQUIRE(defaults.weight_memory == 1.0);
-  REQUIRE(defaults.weight_wg_setup == 1.0);
-  REQUIRE(defaults.weight_prologue == 1.5);
-  REQUIRE(defaults.weight_epilogue == 2.0);
-  REQUIRE(defaults.weight_loop_overhead == 500.0);
   REQUIRE(defaults.weight_tile_total == 1.0);
 
   // Check default empirical constants
@@ -1256,18 +1247,15 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.l2_pollution_penalty == 0.7);
   REQUIRE(defaults.l2_amp_ceiling_batched == 0.9);
   REQUIRE(defaults.l2_amp_ceiling_k_split == 0.4);
-  REQUIRE(defaults.epilogue_cycles_per_acc_read == 8.0);
   REQUIRE(defaults.epilogue_acc_read_parallelism == 0.9);
   REQUIRE(defaults.epilogue_cycles_per_bounds_check == 5.0);
   REQUIRE(defaults.epilogue_scalar_store_penalty == 1.1);
-  REQUIRE(defaults.epilogue_threads_per_wave == 64);
   REQUIRE(defaults.epilogue_bytes_per_vectorized_store == 16);
   REQUIRE(defaults.epilogue_cache_line_bytes == 128);
   REQUIRE(defaults.epilogue_workspace_bytes_per_elem == 4);
   REQUIRE(defaults.epilogue_salu_overhead == 35.0);
   REQUIRE(defaults.epilogue_l_barrier == 100.0);
   REQUIRE(defaults.epilogue_l_smem == 1900.0);
-  REQUIRE(defaults.epilogue_k_padding_penalty == 50000.0);
   REQUIRE(defaults.postgsu_compute_bytes == 4);
   REQUIRE(defaults.postgsu_kernel_launch_overhead == 8000.0);
   REQUIRE(defaults.postgsu_threads_per_wg == 256);
@@ -1282,8 +1270,8 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   origami::heuristic_params_t override;
 
   // Set some non-default values in override
-  override.weight_compute           = 2.0;
-  override.weight_memory            = 3.0;
+  override.weight_tile_total        = 2.0;
+  override.tail_loop_overhead       = 3.0;
   override.main_memory_load_latency = 300.0;
   override.main_loop_efficiency     = 0.8;
 
@@ -1291,15 +1279,15 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   base.merge_with(override);
 
   // Check that overridden values changed
-  REQUIRE(base.weight_compute == 2.0);
-  REQUIRE(base.weight_memory == 3.0);
+  REQUIRE(base.weight_tile_total == 2.0);
+  REQUIRE(base.tail_loop_overhead == 3.0);
   REQUIRE(base.main_memory_load_latency == 300.0);
   REQUIRE(base.main_loop_efficiency == 0.8);
 
   // Check that non-overridden values remain default
-  REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
-  REQUIRE(base.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
-  REQUIRE(base.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
+  REQUIRE(base.tile_fixed_overhead == origami::heuristic_defaults_t::TILE_FIXED_OVERHEAD);
+  REQUIRE(base.l2_cold_floor == origami::heuristic_defaults_t::L2_COLD_FLOOR);
+  REQUIRE(base.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
 }
 
 TEST_CASE("Heuristics: Key matching - exact match", "[heuristics]") {
@@ -1578,7 +1566,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   key.mt_m     = 777;                         // Unique tile size
 
   origami::heuristic_params_t params;
-  params.weight_wg_setup = 7.77;  // Unique value
+  params.tail_loop_overhead = 7.77;  // Unique value
 
   db.add_entry(key, params);
 
@@ -1591,7 +1579,7 @@ TEST_CASE("Heuristics: Database add_entry and lookup", "[heuristics]") {
   auto result = db.lookup(problem, hardware, config);
 
   // Should find our custom entry
-  REQUIRE(result.weight_wg_setup == 7.77);
+  REQUIRE(result.tail_loop_overhead == 7.77);
 }
 
 TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]") {
@@ -1603,7 +1591,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   general_key.mi_dtype = origami::data_type_t::Float;  // Specific dtype to avoid conflicts
 
   origami::heuristic_params_t general_params;
-  general_params.weight_epilogue = 3.33;  // Use a weight that's less likely to conflict
+  general_params.tail_loop_overhead = 3.33;  // Use a value that's less likely to conflict
 
   db.add_entry(general_key, general_params);
 
@@ -1614,7 +1602,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   specific_key.mt_m     = 555;  // Unique value
 
   origami::heuristic_params_t specific_params;
-  specific_params.weight_epilogue = 5.55;  // More specific value
+  specific_params.tail_loop_overhead = 5.55;  // More specific value
 
   db.add_entry(specific_key, specific_params);
 
@@ -1627,7 +1615,7 @@ TEST_CASE("Heuristics: Hierarchical lookup (most specific wins)", "[heuristics]"
   auto result = db.lookup(problem, hardware, config);
 
   // Should use more specific rule
-  REQUIRE(result.weight_epilogue == 5.55);
+  REQUIRE(result.tail_loop_overhead == 5.55);
 }
 
 TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {

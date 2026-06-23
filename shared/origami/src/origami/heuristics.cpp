@@ -19,15 +19,6 @@ namespace origami {
 
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Latency component weights
-  weight_mem_l2        = other.weight_mem_l2;
-  weight_mem_mall      = other.weight_mem_mall;
-  weight_mem_dram      = other.weight_mem_dram;
-  weight_compute       = other.weight_compute;
-  weight_memory        = other.weight_memory;
-  weight_wg_setup      = other.weight_wg_setup;
-  weight_prologue      = other.weight_prologue;
-  weight_epilogue      = other.weight_epilogue;
-  weight_loop_overhead = other.weight_loop_overhead;
   weight_tile_total    = other.weight_tile_total;
   tail_loop_overhead   = other.tail_loop_overhead;
   tile_fixed_overhead  = other.tile_fixed_overhead;
@@ -45,18 +36,15 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
   l2_depth_penalty                    = other.l2_depth_penalty;
   l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
-  epilogue_cycles_per_acc_read        = other.epilogue_cycles_per_acc_read;
   epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
   epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;
   epilogue_scalar_store_penalty       = other.epilogue_scalar_store_penalty;
-  epilogue_threads_per_wave           = other.epilogue_threads_per_wave;
   epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
   epilogue_cache_line_bytes           = other.epilogue_cache_line_bytes;
   epilogue_workspace_bytes_per_elem   = other.epilogue_workspace_bytes_per_elem;
   epilogue_salu_overhead              = other.epilogue_salu_overhead;
   epilogue_l_barrier                  = other.epilogue_l_barrier;
   epilogue_l_smem                     = other.epilogue_l_smem;
-  epilogue_k_padding_penalty          = other.epilogue_k_padding_penalty;
   postgsu_compute_bytes               = other.postgsu_compute_bytes;
   postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
@@ -336,7 +324,6 @@ void heuristics_database_t::initialize_defaults() {
     std::vector<cms_config> bf16_nn_configs = {
         {160, 256, 64, 1.0 / 1.10},
         {208, 256, 64, 1.0 / 1.10},
-        {256, 192, 64, 1.0 / 1.00},
         {256, 256, 64, 1.0 / 1.20},
     };
 
