@@ -40,7 +40,7 @@ public:
     ///                         -1 is no mask to the right
     /// @param topLeftAlignment If true, diagonal is measured from top left
     ///                         If false, diagonal is measured from bottom right
-    /// @param lse              Optional log-sum-exp output [B, H, Sq] (always float type).
+    /// @param lse              Optional log-sum-exp output [B, H, Sq, 1] (always float type).
     ///                         Stores maxVal + log(sumExp) for each query position.
     ///                         Used for memory-efficient backward pass recomputation.
     ///                         Pass nullptr (default) to disable LSE output.
@@ -123,17 +123,18 @@ public:
         // Validate LSE tensor if provided
         if(lse != nullptr)
         {
-            if(lse->dims().size() != 3)
+            if(lse->dims().size() != 4)
             {
-                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-4 [B, H, Sq, 1]");
             }
-            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ)
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ
+               || lse->dims()[3] != 1)
             {
                 throw std::invalid_argument(
                     "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
-                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + "] but got ["
+                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + ", 1] but got ["
                     + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
-                    + std::to_string(lse->dims()[2]) + "]");
+                    + std::to_string(lse->dims()[2]) + ", " + std::to_string(lse->dims()[3]) + "]");
             }
         }
 
@@ -234,7 +235,7 @@ public:
             if(lse != nullptr)
             {
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
-                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq});
+                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq, 0});
             }
 
             // Step 5: Weighted sum over V to produce O
@@ -278,7 +279,7 @@ public:
     ///                       to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param causalMask     When true, applies a lower-triangular causal mask so each
     ///                       query position sq can only attend to kv positions skv <= sq
-    /// @param lse            Optional log-sum-exp output [B, H, Sq] (always float type).
+    /// @param lse            Optional log-sum-exp output [B, H, Sq, 1] (always float type).
     ///                       Stores maxVal + log(sumExp) for each query position.
     ///                       Used for memory-efficient backward pass recomputation.
     ///                       Pass nullptr (default) to disable LSE output.
@@ -319,7 +320,7 @@ public:
     /// @param dK             Output: gradient w.r.t. K [B, H_k, Skv, D]
     /// @param dV             Output: gradient w.r.t. V [B, H_v, Skv, Dv]
     /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
-    /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq] (FP32).
+    /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
     ///                       When provided, enables efficient softmax recomputation.
     ///                       When nullptr, recomputes softmax from scratch.
     /// @param attnMask       Optional additive attention mask (same as forward)
@@ -464,15 +465,16 @@ public:
         // Validate LSE tensor if provided
         if(lse != nullptr)
         {
-            if(lse->dims().size() != 3)
+            if(lse->dims().size() != 4)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse must be rank-3 [B, H_q, Sq]");
+                    "CpuFpReferenceSdpa::backward: lse must be rank-4 [B, H_q, Sq, 1]");
             }
-            if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ)
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ
+               || lse->dims()[3] != 1)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq]");
+                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq, 1]");
             }
         }
 
@@ -544,7 +546,7 @@ public:
                     if(lse != nullptr)
                     {
                         // Efficient recomputation using LSE from forward pass
-                        const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq});
+                        const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq, 0});
 
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
