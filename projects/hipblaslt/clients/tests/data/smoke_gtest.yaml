@@ -458,7 +458,9 @@ Tests:
   transB: N
   alpha: 1
   beta: [ 0.0, 2.0 ]
-  unit_check: 1
+  batch_count: [1, 16]
+  unit_check: 0
+  norm_check: 1
   gpu_arch: '1250'
 
 - name: matmul_gemm_tn_mxf8_dst_s_1250_smoke

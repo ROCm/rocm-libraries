@@ -52,6 +52,7 @@ void Run3dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenFloat: params = GPU_Conv3d_Test_FP32::GetParam(); break;
+
     case miopenInt8:
     case miopenHalf:
     case miopenBFloat16:
@@ -63,7 +64,8 @@ void Run3dDriver(miopenDataType_t prec)
                   "type not supported by "
                   "test_conv3d_extra test";
 
-    default: params = GPU_Conv3d_Test_FP32::GetParam();
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz: params = GPU_Conv3d_Test_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

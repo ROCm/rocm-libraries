@@ -1061,6 +1061,23 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::FlatAtomicCmpswapB32(self);
         });
 
+    nb::class_<rocisa::FlatAtomicDecU32, rocisa::FLATStoreInstruction>(m_mem,
+                                                                       "FlatAtomicDecU32")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      std::optional<rocisa::FLATModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("addr"),
+             nb::arg("data"),
+             nb::arg("modifier") = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__str__", &rocisa::FlatAtomicDecU32::toString)
+        .def("__deepcopy__", [](const rocisa::FlatAtomicDecU32& self, const nb::dict&) {
+            return new rocisa::FlatAtomicDecU32(self);
+        });
+
     nb::class_<rocisa::DSLoadU8, rocisa::DSLoadInstruction>(m_mem, "DSLoadU8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -1655,4 +1672,18 @@ void mem_inst(nb::module_ m_mem)
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);
         });
+
+    nb::class_<rocisa::GlobalPrefetchB8, rocisa::Instruction>(m_mem, "GlobalPrefetchB8")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      std::optional<rocisa::GLOBALModifiers>,
+                      const std::string&>(),
+             nb::arg("v_addr"),
+             nb::arg("s_addr").none(),
+             nb::arg("gm")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::GlobalPrefetchB8::getParams)
+        .def("__str__", &rocisa::GlobalPrefetchB8::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GlobalPrefetchB8& self, nb::dict&) { return new rocisa::GlobalPrefetchB8(self); });
 }

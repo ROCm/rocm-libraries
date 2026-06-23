@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_r5_streamk_fixup_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16zVFdfQaIFDONpzeT1tsNrmvifzZ1VwOQPJj3dMO0-4E=',
+      'err': 0,
+    }),
+  ])
+# ---

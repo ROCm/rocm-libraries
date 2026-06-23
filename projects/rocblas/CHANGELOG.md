@@ -8,6 +8,16 @@ rocBLAS documentation is available at
 ### Added
 
 * `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name/index and the source backend (`hipblaslt`, `tensile`, or `source`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels without parsing `TENSILE_DB`. Lines also carry `fallback_from=` and `parent_api=` for context.
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* support custom build with CMake arguments `GPU_TARGET=amdgcnspirv` when using `BUILD_WITH_TENSILE=OFF`
+
+### Resolved issues
+
+* Fix incorrect results on gfx12 in `trsv`, `asum`,  and `nrm2` with large `batch_count` exceeding 65536
+* Fix for `gemm` with very large `K` or inner product leading dimension for which element byte offset overflowed `int32`
+* Fixed `install.sh/rmake.py` builds when `CMAKE_GENERATOR=Ninja` is set
 
 ## rocBLAS 5.4.0
 

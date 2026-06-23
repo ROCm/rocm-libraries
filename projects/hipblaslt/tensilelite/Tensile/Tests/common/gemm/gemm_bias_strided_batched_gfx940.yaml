@@ -5,7 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -25,8 +25,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -50,7 +50,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -59,7 +59,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -90,8 +90,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -115,7 +115,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -124,7 +124,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -155,8 +155,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -180,7 +180,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -189,7 +189,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -220,8 +220,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -245,7 +245,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -254,7 +254,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -285,8 +285,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -310,7 +310,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -319,7 +319,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -350,8 +350,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -375,7 +375,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -384,7 +384,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -415,8 +415,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -440,7 +440,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -449,7 +449,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -480,8 +480,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -505,7 +505,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -514,7 +514,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -546,8 +546,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -572,7 +572,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -581,7 +581,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -612,8 +612,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 1
       Batched: True
@@ -638,7 +638,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -647,7 +647,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]

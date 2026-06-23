@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -59,17 +59,18 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
           - [16, 16, 128, 1,  1,  1, 4,  2, 1]
-          - [16, 16, 128, 1,  1,  1, 4,  4, 1]
+          - [16, 16, 128, 1,  1,  1, 8,  4, 1]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
-        - DepthU: [128, 256]
+        - DepthU: [128, 256, 512]
         - TDMInst: [3]
+        - TDMIterateMode: [0, 3]
         - LocalReadVectorWidth: [32]
         - ScheduleIterAlg: [0]
         - PrefetchGlobalRead: [2]
@@ -87,10 +88,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -131,7 +132,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
@@ -159,10 +160,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ] # no tail
       BenchmarkForkParameters:
@@ -203,7 +204,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
@@ -230,10 +231,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -274,7 +275,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
@@ -301,10 +302,10 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ]
       BenchmarkForkParameters:
@@ -345,7 +346,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
@@ -364,18 +365,18 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [32]
         - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -416,7 +417,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  1, 2,  2, 1]
@@ -435,18 +436,18 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [32]
         - GlobalReadVectorWidthB: [32]
         - InnerUnroll: [1]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - TransposeLDS: [1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - 1LDSBuffer: [0]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ]
       BenchmarkForkParameters:

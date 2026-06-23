@@ -129,6 +129,9 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
 
     constexpr unsigned int stop_recursion_size = params.stop_recursion_size;
 
+    constexpr unsigned int block_size       = params.kernel_config.block_size;
+    constexpr unsigned int items_per_thread = ceiling_div(stop_recursion_size, block_size);
+
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
     using block_load_key  = block_load<key_type,
@@ -138,7 +141,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                        1,
                                        1,
                                        TargetConfig::wavefront>;
-    using block_sort_key  = block_sort<key_type, stop_recursion_size>;
+    using block_sort_key  = block_sort<key_type, stop_recursion_size, items_per_thread>;
     using block_store_key = block_store<key_type,
                                         stop_recursion_size,
                                         1,
@@ -154,7 +157,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         typename block_store_key::storage_type store;
     } storage;
 
-    key_type sample_buffer[1];
+    key_type sample_buffer[items_per_thread];
 
     block_load_key().load(keys, sample_buffer, size, storage.load);
 

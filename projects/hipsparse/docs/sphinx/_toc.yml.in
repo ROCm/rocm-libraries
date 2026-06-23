@@ -36,7 +36,7 @@ subtrees:
         title: Exported functions
       - file: reference/types.rst
         title: hipSPARSE data types
-      - file: reference/precision.rst
+      - file: reference/data-type-support.rst
         title: hipSPARSE precision support
       - file: reference/auxiliary.rst
         title: Sparse auxiliary functions

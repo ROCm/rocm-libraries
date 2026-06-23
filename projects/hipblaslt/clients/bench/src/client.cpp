@@ -26,6 +26,7 @@
 
 #include "program_options.hpp"
 
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_parse_data.hpp"
@@ -631,6 +632,19 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("sm_count_target",
+         value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
+         "Target compute-unit (CU) count for the matmul kernel selection and "
+         "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
+         "Negative values are rejected by the library.")
+
+        ("streamk_tile_scheduling",
+         value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
+         "Select the StreamK=5 tile scheduling sub-path via the "
+         "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
+         "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
+         "leaves the attribute unset so the library default (auto) applies.")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");
@@ -735,6 +749,38 @@ try
         hipblaslt_cerr << "Currently workgroup mapping only supports api_method mix or cpp."
                        << std::endl;
         return 1;
+    }
+
+    if(hipblaslt_bench_options::sm_count_target() < 0)
+    {
+        hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
+        return 1;
+    }
+
+    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
+    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
+    // means "unset": leave the attribute untouched so the library default applies.
+    {
+        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        int32_t resolved = -1;
+        if(mode.empty())
+            resolved = -1;
+        else if(mode == "off" || mode == "0")
+            resolved = 0;
+        else if(mode == "on" || mode == "1")
+            resolved = 1;
+        else if(mode == "auto" || mode == "2")
+            resolved = 2;
+        else
+        {
+            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
+                           << std::endl;
+            return 1;
+        }
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
     }
 
     // transfer local variable state
