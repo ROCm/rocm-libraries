@@ -1303,7 +1303,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlabrd(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        Q = H(nb-1)H(n-2)\cdots H(1)
+        Q = H(nb-1)H(nb-2)\cdots H(1)
         \end{array}
     \f]
 

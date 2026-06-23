@@ -347,7 +347,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
         F[i] *= -t;
     }
 
-    if(tid == j)
+    if(i == j)
     {
         F[i] = t;
     }
