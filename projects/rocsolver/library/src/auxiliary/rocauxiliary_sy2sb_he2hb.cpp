@@ -29,6 +29,25 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+//------------------------------------------------------------------------------
+// Reduces Hermitian/symmetric matrix A to Hermitian/symmetric band form
+// by a unitary similarity transformation:
+//      Q^H A Q = A_band.
+//
+//  handle      rocblas_handle.
+//  n           Matrix dimension. n >= 0.
+//  kd          Matrix bandwidth. kd >= 1.
+//  nb          Block size. nb >= kd and nb is a multiple of kd.
+//  A           n-by-n Hermitian matrix, with both lower and upper entries set.
+//              On output, Householder vectors V overwrite lower portion of A,
+//              below diagonal kd. Rest of A is destroyed.
+//  Aband       n-by-n band matrix, with space for kd - 1 super-diagonals and
+//              2*kd - 1 sub-diagonals. On output, main diagonal and kd - 1
+//              sub-diagonals are set.
+//              todo: verify what must be set/zero.
+//  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
+//  tau         Householder tau values.
+//
 template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
                                           const I n,

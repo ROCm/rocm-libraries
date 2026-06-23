@@ -120,12 +120,9 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
 }
 
 //------------------------------------------------------------------------------
-// Reduces matrix A to Aband with bandwidth kd (inner block size), using outer
-// block size nb. We require kd to evenly divide nb. For comparison, LAPACK uses
-// single-level blocking with nb == kd.
-// Matrix A must be explicitly symmetrized before calling this.
-// Householder vectors overwrite A below bandwidth, with associated tau.
-// D, V, W, X, Z are workspaces.
+// Implements he2hb. See rocsolver_sy2sb_he2hb_impl.
+// scalars, D, V, W, X, Z, work, workArr are workspaces.
+//
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                                               const I n,
