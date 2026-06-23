@@ -14,9 +14,11 @@ from __future__ import annotations
 import argparse
 import copy
 import glob
+import multiprocessing
 import os
 import sys
 from collections import Counter
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -122,13 +124,19 @@ def dump_yaml(data: list, path: str) -> None:
 
 def apply_file(path: str, dry_run: bool = False) -> dict:
     """Convert a single file. Returns stats dict."""
-    original_size = os.path.getsize(path)
-    data = load_yaml(path)
+    try:
+        original_size = os.path.getsize(path)
+        data = load_yaml(path)
+    except Exception as e:
+        return {"path": path, "skipped": True, "reason": f"load error: {e}"}
 
-    if len(data) < SOLUTIONS_INDEX + 1:
-        return {"path": path, "skipped": True, "reason": "too few elements"}
+    if not isinstance(data, list) or len(data) < SOLUTIONS_INDEX + 1:
+        return {"path": path, "skipped": True, "reason": "too few elements or not a list"}
 
-    element5 = data[SOLUTIONS_INDEX]
+    try:
+        element5 = data[SOLUTIONS_INDEX]
+    except (KeyError, IndexError, TypeError):
+        return {"path": path, "skipped": True, "reason": "cannot access element[5]"}
 
     if _is_converted(element5):
         return {"path": path, "skipped": True, "reason": "already converted"}
@@ -177,13 +185,19 @@ def apply_file(path: str, dry_run: bool = False) -> dict:
 
 def revert_file(path: str) -> dict:
     """Revert a single file from defaults+overrides back to flat solutions."""
-    original_size = os.path.getsize(path)
-    data = load_yaml(path)
+    try:
+        original_size = os.path.getsize(path)
+        data = load_yaml(path)
+    except Exception as e:
+        return {"path": path, "skipped": True, "reason": f"load error: {e}"}
 
-    if len(data) < SOLUTIONS_INDEX + 1:
-        return {"path": path, "skipped": True, "reason": "too few elements"}
+    if not isinstance(data, list) or len(data) < SOLUTIONS_INDEX + 1:
+        return {"path": path, "skipped": True, "reason": "too few elements or not a list"}
 
-    element5 = data[SOLUTIONS_INDEX]
+    try:
+        element5 = data[SOLUTIONS_INDEX]
+    except (KeyError, IndexError, TypeError):
+        return {"path": path, "skipped": True, "reason": "cannot access element[5]"}
 
     if not _is_converted(element5):
         return {"path": path, "skipped": True, "reason": "not in converted format"}
@@ -315,7 +329,8 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print("No files found.")
         return
 
-    print(f"Analyzing {len(paths)} file(s)...\n")
+    workers = getattr(args, "jobs", None) or min(multiprocessing.cpu_count(), len(paths))
+    print(f"Analyzing {len(paths)} file(s) with {workers} workers...\n")
     print(f"{'File':<70} {'Orig':>10} {'New':>10} {'Savings':>8} "
           f"{'#Sol':>5} {'Def/Tot':>8} {'KV Reduc':>9}")
     print("-" * 125)
@@ -325,29 +340,29 @@ def cmd_stats(args: argparse.Namespace) -> None:
     total_solutions = 0
     analyzed = 0
 
-    for p in paths:
-        result = stats_file(p)
-        fname = os.path.basename(p)
+    with multiprocessing.Pool(workers) as pool:
+        for result in pool.imap_unordered(stats_file, paths):
+            fname = os.path.basename(result["path"])
 
-        if result.get("skipped"):
-            print(f"  SKIP  {fname}: {result['reason']}")
-            continue
+            if result.get("skipped"):
+                print(f"  SKIP  {fname}: {result['reason']}")
+                continue
 
-        analyzed += 1
-        orig = result["original_size"]
-        new = result["new_size"]
-        total_orig += orig
-        total_new += new
-        total_solutions += result["num_solutions"]
+            analyzed += 1
+            orig = result["original_size"]
+            new = result["new_size"]
+            total_orig += orig
+            total_new += new
+            total_solutions += result["num_solutions"]
 
-        kv_reduc = _pct(result["total_kv_pairs"], result["override_kv_pairs"])
+            kv_reduc = _pct(result["total_kv_pairs"], result["override_kv_pairs"])
 
-        print(
-            f"  {fname:<68} {_fmt_size(orig):>10} {_fmt_size(new):>10} "
-            f"{_pct(orig, new):>8} {result['num_solutions']:>5} "
-            f"{result['default_keys']:>3}/{result['total_keys']:<4} "
-            f"{kv_reduc:>9}"
-        )
+            print(
+                f"  {fname:<68} {_fmt_size(orig):>10} {_fmt_size(new):>10} "
+                f"{_pct(orig, new):>8} {result['num_solutions']:>5} "
+                f"{result['default_keys']:>3}/{result['total_keys']:<4} "
+                f"{kv_reduc:>9}"
+            )
 
     if analyzed:
         print("-" * 125)
@@ -421,6 +436,8 @@ def main() -> None:
     p_stats.add_argument("path", help="File, directory, or glob pattern")
     p_stats.add_argument("--category", choices=["StreamK", "Equality", "GridBased", "all"],
                          default=None, help="Filter by category subdirectory")
+    p_stats.add_argument("-j", "--jobs", type=int, default=None,
+                         help="Number of parallel workers (default: CPU count)")
 
     # revert
     p_revert = subparsers.add_parser("revert", help="Revert to flat solution format")

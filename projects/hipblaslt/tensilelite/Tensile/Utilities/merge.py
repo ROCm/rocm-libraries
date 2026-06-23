@@ -130,6 +130,12 @@ def removeUnusedKernels(oriData, prefix=""):
     numInvalidRemoved = origNumSolutions - len(oriData[5])
     return oriData, numInvalidRemoved
 
+def _expandSolutionDefaults(element5):
+    if isinstance(element5, dict) and "SolutionDefaults" in element5:
+        defaults = element5["SolutionDefaults"]
+        return [dict(defaults, **ovr) for ovr in element5["Solutions"]]
+    return element5
+
 def loadData(filename):
     try:
         stream = open(filename, "r")
@@ -138,6 +144,8 @@ def loadData(filename):
         sys.stdout.flush()
         sys.exit(-1)
     data = yaml.load(stream, yaml.SafeLoader)
+    if isinstance(data, list) and len(data) > 5:
+        data[5] = _expandSolutionDefaults(data[5])
     return data
 
 def compareDestFolderToYaml(originalDir, incFile, incData):
