@@ -12,7 +12,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   KernelTime: True
@@ -55,7 +55,7 @@ BenchmarkProblems:
           - [8, 8, 1 ]
         - DepthU: [32]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [True]
+        - PrefetchGlobalRead: [1]
         - WorkGroupMapping: [8]
         - GlobalSplitU: [1]
         - InnerUnroll: [2]
@@ -100,7 +100,7 @@ BenchmarkProblems:
           - [8, 8, 1 ]
         - DepthU: [32]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [True]
+        - PrefetchGlobalRead: [1]
         - WorkGroupMapping: [8]
         - GlobalSplitU: [1]
         - InnerUnroll: [2]
@@ -145,7 +145,7 @@ BenchmarkProblems:
           - [8, 8, 1 ]
         - DepthU: [32]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [True]
+        - PrefetchGlobalRead: [1]
         - WorkGroupMapping: [8]
         - GlobalSplitU: [1]
         - InnerUnroll: [2]
@@ -190,7 +190,7 @@ BenchmarkProblems:
           - [8, 8, 1 ]
         - DepthU: [32]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [True]
+        - PrefetchGlobalRead: [1]
         - WorkGroupMapping: [8]
         - GlobalSplitU: [1]
         - InnerUnroll: [2]

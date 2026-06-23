@@ -5,7 +5,6 @@ target_sources(stinkytofu_objs PRIVATE
     InstructionSizeCosting.cpp
     AccumulateInstructionSizePass.cpp
     SwPrefetchInsertionPass.cpp
-    PassOrderSnapshotJson.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp

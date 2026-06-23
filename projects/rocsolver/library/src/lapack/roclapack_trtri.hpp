@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -90,7 +90,8 @@ rocblas_int trtri_get_blksize(const rocblas_int dim)
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
+void rocsolver_trtri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_diagonal diag,
                                    const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
@@ -136,7 +137,10 @@ void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
     // requirements for TRTI2
     rocblas_int nn = (blk == 1) ? n : blk;
 #ifdef OPTIMAL
-    if(nn <= TRTRI_MAX_COLS)
+    // the optimized small-size kernel is warp-synchronous, so it is only valid for
+    // n <= wavefront size
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(nn <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         // if very small size, no workspace needed
         w1a = 0;
@@ -232,8 +236,9 @@ void trti2(rocblas_handle handle,
            T* alphas)
 {
 #ifdef OPTIMAL
-    // if very small size, use optimized kernel
-    if(n <= TRTRI_MAX_COLS)
+    // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront)
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(n <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         trti2_run_small<T>(handle, uplo, diag, n, A, shiftA, lda, strideA, batch_count);
         return;

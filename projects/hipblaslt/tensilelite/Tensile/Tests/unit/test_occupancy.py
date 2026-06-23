@@ -366,7 +366,7 @@ def test_max_waves_per_simd_prevents_overclaim_on_gfx950(isa, should_be_capped):
 
 
 # ---------------------------------------------------------------------------
-# updateOccupancyFromScan – corrects CUOccupancy after rocIsaPass optimization
+# updateOccupancyFromMaxVgpr – corrects CUOccupancy after rocIsaPass optimization
 # ---------------------------------------------------------------------------
 
 class _MockBody:
@@ -378,7 +378,7 @@ class _MockBody:
 
 
 class _MockMkb:
-    """Minimal KernelBody-like mock for updateOccupancyFromScan tests."""
+    """Minimal KernelBody-like mock for updateOccupancyFromMaxVgpr tests."""
     def __init__(self, body_text, initial_next_free_vgpr=264):
         self.body = _MockBody(body_text)
         self._next_free_vgpr = initial_next_free_vgpr
@@ -394,13 +394,14 @@ class _MockMkb:
         return self._next_free_vgpr
 
 
-class TestUpdateOccupancyFromScan:
-    """Validate the post-rocIsaPass assembly scan that corrects CUOccupancy.
+class TestUpdateOccupancyFromMaxVgpr:
+    """Validate the post-rocIsaPass CUOccupancy correction path.
 
-    updateOccupancyFromScan() runs after rocIsaPass (ArchAccUnifiedRegs only).
-    When removeDuplicateAssignment eliminates high-indexed VGPR copies, the
-    instruction-level count can fall below the checkResources pool estimate.
-    The scan detects this and corrects both the kernel descriptor and CUOccupancy.
+    updateOccupancyFromMaxVgpr() runs after rocIsaPass (ArchAccUnifiedRegs only).
+    The O(1) fast path receives the pre-computed maxVgpr from rocIsaPassResult
+    (= max VGPR index + 1, derived from the register graph the pass already
+    built).  When that count is lower than the checkResources pool estimate,
+    the kernel descriptor and CUOccupancy are corrected.
     """
 
     @pytest.fixture(autouse=True)
@@ -417,42 +418,37 @@ class TestUpdateOccupancyFromScan:
         self.kw.states.doubleVgpr = True
         self.kw.getLdsSize = lambda k: k.get("LdsNumBytes", 68864)
 
-    def _run_scan(self, body_text, kernel=None):
+    def _run_with_max_vgpr(self, kernel=None, max_vgpr=-1):
+        """Invoke updateOccupancyFromMaxVgpr using max_vgpr from rocIsaPass."""
         if kernel is None:
             kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
-        mkb = _MockMkb(body_text, initial_next_free_vgpr=264)
-        self.kw.updateOccupancyFromScan(kernel, mkb)
+        mkb = _MockMkb("", initial_next_free_vgpr=264)
+        self.kw.updateOccupancyFromMaxVgpr(kernel, mkb, max_vgpr)
         return kernel, mkb
 
-    def test_no_update_when_scan_equals_pool(self):
-        """If instructions reference the same registers as the pool, no update."""
+    def test_no_update_when_max_vgpr_equals_pool(self):
+        """max_vgpr == pool size: no update (already at pool estimate)."""
         # Pool: 21 vgpr → ceil(21/8)*8=24 + 240 = 264
-        # Body references v0-v20: max=20, scanned=21, same as pool → no update
-        body = " ".join(f"v_mov_b32 v{i}, s0" for i in range(21))
-        body += " v_mfma_f32_16x16x16_bf16 a[0:239], v[0:1], v[0:1], a[0:239]"
-        kernel, mkb = self._run_scan(body)
-        assert kernel["CUOccupancy"] == 1, "Should not update when scan == pool"
+        kernel, mkb = self._run_with_max_vgpr(max_vgpr=21)
+        assert kernel["CUOccupancy"] == 1, "Should not update when max_vgpr == pool"
         assert mkb._set_gprs_calls == [], "setGprs should not be called"
 
-    def test_update_when_scan_finds_fewer_vgprs(self):
-        """If rocIsaPass eliminated high-indexed VGPRs, scan finds fewer and updates."""
-        # Simulate: pool grew to 21 but only v0-v15 (16 VGPRs) appear in instructions
-        # after removeDuplicateAssignment.
+    def test_update_when_max_vgpr_lower_than_pool(self):
+        """max_vgpr < pool: descriptor and CUOccupancy are corrected."""
+        # Pool grew to 21 but rocIsaPass found only 16 VGPRs used.
         # ceil(16/8)*8 + 240 = 256 → occ = 512//256 = 2
-        body = " ".join(f"v_mov_b32 v{i}, s0" for i in range(16))
-        body += " v_mfma_f32_16x16x16_bf16 a[0:239], v[0:1], v[0:1], a[0:239]"
-        kernel, mkb = self._run_scan(body)
+        kernel, mkb = self._run_with_max_vgpr(max_vgpr=16)
         assert kernel["CUOccupancy"] == 2, (
-            f"After scan: v0-v15 only → 256 unified VGPRs → occ=2, got {kernel['CUOccupancy']}"
+            f"max_vgpr=16 → 256 unified VGPRs → occ=2, got {kernel['CUOccupancy']}"
         )
         assert mkb._set_gprs_calls, "setGprs must be called to update kernel descriptor"
         vgprs, agprs, _ = mkb._set_gprs_calls[-1]
-        assert vgprs == 16, f"scanned vgprs should be 16, got {vgprs}"
-        assert agprs == 240, f"agprs should be 240, got {agprs}"
+        assert vgprs == 16, f"max_vgpr should be 16, got {vgprs}"
+        assert agprs == 240, f"agprs should be 240 (pool size), got {agprs}"
         assert mkb.getNextFreeVgpr() == 256  # ceil(16/8)*8 + 240
 
     def test_no_update_for_non_arch_acc_unified(self):
-        """Non-ArchAccUnifiedRegs ISA: scan is skipped entirely."""
+        """Non-ArchAccUnifiedRegs ISA: max-VGPR update is skipped entirely."""
         ri_gfx908 = _init_rocisa((9, 0, 8))  # gfx908: not ArchAccUnifiedRegs
         kw_908 = _make_writer(ri_gfx908)
         import types
@@ -463,26 +459,36 @@ class TestUpdateOccupancyFromScan:
         kw_908.getLdsSize = lambda k: k.get("LdsNumBytes", 68864)
 
         kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
-        mkb = _MockMkb("v_mov_b32 v0, s0", initial_next_free_vgpr=264)
-        kw_908.updateOccupancyFromScan(kernel, mkb)
+        mkb = _MockMkb("", initial_next_free_vgpr=264)
+        kw_908.updateOccupancyFromMaxVgpr(kernel, mkb, 16)
         assert mkb._set_gprs_calls == [], "Non-unified arch: setGprs must not be called"
         assert kernel["CUOccupancy"] == 1, "Non-unified arch: occupancy must be unchanged"
 
-    def test_range_references_expanded_correctly(self):
-        """v[0:15] range references count as v0 through v15."""
-        body = "v_mfma_f32_16x16x16_bf16 a[0:239], v[0:15], v[0:15], a[0:239]"
-        kernel, mkb = self._run_scan(body)
+    def test_vgpr_count_16_gives_occ2(self):
+        """16 VGPRs (matching v[0:15]) → 256 unified VGPRs → occ=2."""
+        kernel, mkb = self._run_with_max_vgpr(max_vgpr=16)
         assert kernel["CUOccupancy"] == 2, (
-            f"v[0:15] → 16 VGPRs → 256 unified → occ=2, got {kernel['CUOccupancy']}"
+            f"max_vgpr=16 → 256 unified → occ=2, got {kernel['CUOccupancy']}"
         )
 
-    def test_agpr_count_clamped_to_pool(self):
-        """Even if scan finds fewer acc VGPRs than pool, keep pool count for acc."""
-        # Body only uses a[0:3] but pool has 240 acc VGPRs
-        body = "v_mfma_f32_16x16x16_bf16 a[0:3], v[0:1], v[0:1], a[0:3]"
-        kernel, mkb = self._run_scan(body)
-        # vgprs=2 → ceil(2/8)*8=8; agprs=min(4, 240)=4 → total=12 → occ=2
-        # BUT: scanned agprs is clamped to pool (240), so total=8+240=248 → occ=2
+    def test_agpr_always_uses_pool_size(self):
+        """AGPR count is always taken from agprPool.size(), not from rocIsaPass."""
+        kernel, mkb = self._run_with_max_vgpr(max_vgpr=2)
         if mkb._set_gprs_calls:
             _, agprs, _ = mkb._set_gprs_calls[-1]
-            assert agprs <= 240, "Scanned agprs must not exceed pool size"
+            assert agprs == 240, f"agprs must equal agprPool.size()=240, got {agprs}"
+
+    def test_mt320x192x64_gfx950_gives_occ2(self):
+        """Motivating case: MT320x192x64/gfx950 with max_vgpr=16 → occ=2."""
+        kernel = {"NumThreads": 256, "LdsNumBytes": 68864, "CUOccupancy": 1}
+        mkb = _MockMkb("", initial_next_free_vgpr=264)
+        self.kw.updateOccupancyFromMaxVgpr(kernel, mkb, 16)
+        assert kernel["CUOccupancy"] == 2, (
+            f"MT320x192x64/gfx950: expected CUOccupancy=2, got {kernel['CUOccupancy']}"
+        )
+
+    def test_missing_max_vgpr_skips_update(self):
+        """When rocIsaPass does not supply maxVgpr (<=0), skip the update."""
+        kernel, mkb = self._run_with_max_vgpr(max_vgpr=-1)
+        assert kernel["CUOccupancy"] == 1
+        assert mkb._set_gprs_calls == []

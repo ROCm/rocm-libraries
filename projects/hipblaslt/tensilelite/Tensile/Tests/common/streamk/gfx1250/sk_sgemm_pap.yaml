@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   CpuThreads: 32
   DataInitTypeAlpha: 1
@@ -32,7 +32,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - StreamK: [3]
         - StreamKForceDPOnly: [0, 1]
@@ -47,7 +47,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
@@ -74,7 +74,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - StreamK: [3]
         - StreamKForceDPOnly: [0, 1]
@@ -89,7 +89,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]

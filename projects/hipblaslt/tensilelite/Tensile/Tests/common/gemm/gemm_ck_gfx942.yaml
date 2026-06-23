@@ -13,8 +13,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBias: 0
   DataInitTypeScaleAlphaVec: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
 
