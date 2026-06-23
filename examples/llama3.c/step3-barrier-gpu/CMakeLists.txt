@@ -66,7 +66,7 @@ if(WIN32)
   target_link_options(llama3 PRIVATE "-nostdlib++" "-Xlinker" "/NODEFAULTLIB:c++.lib")
 endif()
 
-find_package(hipthreads)
+find_package(hipthreads REQUIRED)
 find_package(rocprim REQUIRED CONFIG)
 find_package(rocthrust REQUIRED CONFIG)
 
