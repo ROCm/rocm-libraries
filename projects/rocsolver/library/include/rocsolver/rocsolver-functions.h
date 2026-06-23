@@ -1342,7 +1342,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlabrd(rocblas_handle handle,
     k           rocblas_int. 1 <= k < n.
                 The offset (1-based column index) at which the reduction begins.
     @param[in]
-    nb          rocblas_int. 1 <= nb <= n - k + 1.
+    nb          rocblas_int. 1 <= nb < n - k + 1.
                 The number of columns to reduce.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
