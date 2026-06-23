@@ -98,6 +98,9 @@ DEF_BATCH(.format = SOPP_IMM32,
 // Control Flow — Barrier signal (SOP1 format)
 DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier},
     .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
+DEF_T(SBarrierSignalIsFirstInst, "s_barrier_signal_isfirst", .format = SOP1,
+    .flags = {Barrier, ImplicitWriteSCC},
+    .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
 
 // Flat Memory
 DEF_BATCH(.format = FLAT_LOAD,

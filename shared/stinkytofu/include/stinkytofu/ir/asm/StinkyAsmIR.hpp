@@ -422,8 +422,13 @@ inline bool isBarrier(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Barrier);
 }
 
+inline bool isBarrierSignalIsFirst(const StinkyInstruction& inst) {
+    return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal_isfirst;
+}
+
 inline bool isBarrierSignal(const StinkyInstruction& inst) {
-    return inst.getHwInstDesc()->unifiedOpcode == GFX::s_barrier_signal;
+    const auto uOp = inst.getHwInstDesc()->unifiedOpcode;
+    return uOp == GFX::s_barrier_signal || uOp == GFX::s_barrier_signal_isfirst;
 }
 
 inline bool isBarrierWait(const StinkyInstruction& inst) {

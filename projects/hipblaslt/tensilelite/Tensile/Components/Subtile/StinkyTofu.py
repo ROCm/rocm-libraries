@@ -57,18 +57,12 @@ def subtileKernelIsWaitInsertionSafe(kernel):
 def subtileRoutesThroughStinkyTofu(kernel):
     """True when a subtile kernel body may be converted through StinkyTofu.
 
-    ClusterBarrier subtile kernels pre-emit their cluster-scope barrier
-    handshake (``s_barrier_signal_isfirst`` / ``s_barrier`` ...) in Python via
-    ``ClusterBarrier.py``, because StinkyTofu's ``InsertClusterBarrierPass`` does
-    not run at the basic level (OptLevel 0 / ScheduleIterAlg=3) and the subtile
-    options always pass ``ClusterBarrier=False`` (subtile owns barrier
-    emission). StinkyTofu's gfx1250 backend has no conversion entry for those
-    pre-emitted barrier instructions, so converting such a body aborts with
-    ``No conversion entry for rocisa ...SBarrierSignalIsFirst... in arch
-    gfx1250``. Keep these kernels on the Python emission path, exactly as before
-    the always-route-subtile-through-StinkyTofu change.
+    All gfx1250 subtile kernels route through StinkyTofu, including
+    ClusterBarrier kernels that pre-emit ``s_barrier_signal_isfirst`` via
+    ``ClusterBarrier.py`` (subtile owns barrier emission; module options keep
+    ``ClusterBarrier=False`` so InsertClusterBarrierPass does not duplicate).
     """
-    return not bool(kernel.get("ClusterBarrier", False))
+    return True
 
 
 def buildSubtileStinkyTofuOptions(kernel, writer):

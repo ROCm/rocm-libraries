@@ -408,6 +408,48 @@ class TestSubtileStinkyTofu:
         assert asm is not None
         assert 'amdgcn-amd-amdhsa--gfx1250' in asm
 
+    # -- ClusterBarrier kernels route through StinkyTofu (s_barrier_signal_isfirst) --
+
+    def test_cluster_barrier_routes_through_stinky(self):
+        from Tensile.Components.Subtile.StinkyTofu import subtileRoutesThroughStinkyTofu
+        kernel = _stinky_kernel()
+        kernel["ClusterBarrier"] = True
+        assert subtileRoutesThroughStinkyTofu(kernel) is True
+
+    def test_cluster_barrier_body_converts_through_stinky(self):
+        _init_rocisa_gfx1250()
+        from Tensile.KernelWriter import KernelWriter
+        from Tensile.Components.Subtile.StinkyTofu import buildSubtileStinkyTofuOptions
+        from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
+        from rocisa.code import Module, KernelBody, SignatureBase, Label
+        from rocisa.instruction import SEndpgm
+
+        kernel = _stinky_kernel()
+        kernel["ClusterBarrier"] = True
+        writer = _stinky_mock_writer()
+        writer.labels = SimpleNamespace(getUniqueNamePrefix=lambda p: p)
+
+        body = Module("body")
+        body.add(Label("ASM_Start", "start"))
+        for inst in subtileClusterBarrier(writer, kernel, label="MAINLOOP_C0").flatitems():
+            body.add(inst)
+        body.add(SEndpgm(comment="end"))
+
+        sig = SignatureBase("kernel_name", 1, "V5", 0, [0, 1, 2], 0, 256,
+                            totalVgprs=32, totalSgprs=32)
+        kb = KernelBody("kernelBody")
+        kb.addSignature(sig)
+        kb.addBody(body)
+
+        opts = buildSubtileStinkyTofuOptions(kernel, writer)
+        asm = KernelWriter._maybeRunStinkyTofu(writer, kernel, kb, sig,
+                                               stinky_module_options=opts)
+        assert asm is not None
+        assert 'amdgcn-amd-amdhsa--gfx1250' in asm
+        assert 's_barrier_signal_isfirst' in asm
+        assert 's_barrier_signal' in asm
+        assert 's_barrier_wait' in asm
+
     # -- classic path (no options) still gates on _StinkyTofuOptLevel --
 
     def test_helper_returns_none_when_disabled(self):

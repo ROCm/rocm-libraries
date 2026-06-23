@@ -30,6 +30,7 @@
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -93,6 +94,16 @@ class BarrierTest : public ::testing::Test {
         StinkyInstruction* inst = builder.create(desc);
         inst->addSrcReg(StinkyRegister(literal));
         if (!memTokens.empty()) inst->addModifier<MemTokenData>(MemTokenData{memTokens});
+        return inst;
+    }
+
+    /// Create an s_barrier_signal_isfirst instruction with the given literal operand.
+    StinkyInstruction* createSBarrierSignalIsFirst(int literal) {
+        AsmIRBuilder builder(*bb, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier_signal_isfirst, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addSrcReg(StinkyRegister(literal));
         return inst;
     }
 
@@ -285,4 +296,20 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
     EXPECT_LT(getPos(g2_wait), getPos(g2_dsLoad1)) << "g2: s_barrier_wait must precede ds_load1";
     EXPECT_LT(getPos(g2_wait), getPos(g2_tensorLoad1))
         << "g2: s_barrier_wait must precede tensor_load1";
+}
+
+// s_barrier_signal_isfirst is a barrier signal with ImplicitWriteSCC on gfx1250.
+TEST_F(BarrierTest, BarrierSignalIsFirst_IsRecognizedBarrierSignal) {
+    StinkyInstruction* isFirst = createSBarrierSignalIsFirst(-1);
+    ASSERT_NE(isFirst, nullptr);
+
+    EXPECT_TRUE(isBarrierSignal(*isFirst));
+    EXPECT_TRUE(isBarrierSignalIsFirst(*isFirst));
+    EXPECT_TRUE(isSplitBarrierAllWave(*isFirst));
+    EXPECT_TRUE(isFirst->is(InstFlag::IF_Barrier));
+    EXPECT_TRUE(isFirst->is(InstFlag::IF_ImplicitWriteSCC));
+
+    const std::string asmLine = toAssembly(*isFirst);
+    EXPECT_NE(asmLine.find("s_barrier_signal_isfirst"), std::string::npos);
+    EXPECT_NE(asmLine.find("-1"), std::string::npos);
 }
