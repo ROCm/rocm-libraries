@@ -11,9 +11,17 @@ from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import (
     BenchmarkConfig,
     ExecutionBackendName,
+    TimingBackendName,
 )
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
-from .timing import GpuTimerInterface, HipGpuTimer, Timer, create_gpu_timer
+from .timing import (
+    GpuTimerInterface,
+    HipGpuTimer,
+    StalledRegionTimer,
+    Timer,
+    _is_staged_hip_available,
+    create_gpu_timer,
+)
 
 # Map graph JSON data type strings to hipdnn DataType enum names.
 # The hipdnn.DataType enum is only available when hipdnn_frontend is imported,
@@ -365,38 +373,69 @@ class Executor:
         stream_sync_timer = None
         stream = self._get_execution_stream(handle)
 
-        # Create GPU timer when kernel timing is requested and available.
-        if self._collect_kernel_timing:
+        # Stalled-queue staging measures a gap-free GPU span and pure host
+        # submission cost; available only on HIP devices supporting
+        # stream-wait-value. Falls back to the non-staged loop otherwise.
+        staged_timer: Optional[StalledRegionTimer] = None
+        if self._collect_kernel_timing and _is_staged_hip_available():
             try:
-                gpu_timer = create_gpu_timer(stream=stream)
-            except RuntimeError as e:
-                raise ExecutionError(str(e)) from e
-            if gpu_timer is not None:
-                kernel_timings = []
-                timing_backend_name = gpu_timer.backend_name
+                staged_timer = StalledRegionTimer(stream)
+            except RuntimeError:
+                staged_timer = None
 
-        for _ in range(self._config.benchmark_iters):
-            kernel_ms: Optional[float] = None
-            with Timer() as t:
-                if gpu_timer:
-                    gpu_timer.start()
-                result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
-                if result.is_bad():
-                    raise ExecutionError(
-                        f"Benchmark execution failed: {result.get_message()}"
+        if staged_timer is not None:
+            kernel_timings = []
+            timing_backend_name = TimingBackendName.HIP.value
+            staged_timer.barrier()
+            for _ in range(self._config.benchmark_iters):
+
+                def enqueue() -> None:
+                    result = self._graph.execute(
+                        handle, variant_pack, self._workspace_ptr
                     )
-                if gpu_timer:
-                    gpu_timer.stop()
-                    kernel_ms = gpu_timer.elapsed_ms()
-                else:
-                    if stream_sync_timer is None:
-                        stream_sync_timer = self._get_stream_sync_timer(stream)
-                    stream_sync_timer.synchronize_stream()
+                    if result.is_bad():
+                        raise ExecutionError(
+                            f"Benchmark execution failed: {result.get_message()}"
+                        )
 
-            if kernel_ms is not None:
-                assert kernel_timings is not None
+                cpu_ms, kernel_ms = staged_timer.measure(enqueue)
+                e2e_timings.append(cpu_ms)
                 kernel_timings.append(kernel_ms)
-            e2e_timings.append(t.elapsed_ms)
+        else:
+            # Create GPU timer when kernel timing is requested and available.
+            if self._collect_kernel_timing:
+                try:
+                    gpu_timer = create_gpu_timer(stream=stream)
+                except RuntimeError as e:
+                    raise ExecutionError(str(e)) from e
+                if gpu_timer is not None:
+                    kernel_timings = []
+                    timing_backend_name = gpu_timer.backend_name
+
+            for _ in range(self._config.benchmark_iters):
+                kernel_ms = None
+                with Timer() as t:
+                    if gpu_timer:
+                        gpu_timer.start()
+                    result = self._graph.execute(
+                        handle, variant_pack, self._workspace_ptr
+                    )
+                    if result.is_bad():
+                        raise ExecutionError(
+                            f"Benchmark execution failed: {result.get_message()}"
+                        )
+                    if gpu_timer:
+                        gpu_timer.stop()
+                        kernel_ms = gpu_timer.elapsed_ms()
+                    else:
+                        if stream_sync_timer is None:
+                            stream_sync_timer = self._get_stream_sync_timer(stream)
+                        stream_sync_timer.synchronize_stream()
+
+                if kernel_ms is not None:
+                    assert kernel_timings is not None
+                    kernel_timings.append(kernel_ms)
+                e2e_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(

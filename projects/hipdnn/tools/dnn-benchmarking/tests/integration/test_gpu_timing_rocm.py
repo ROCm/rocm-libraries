@@ -69,10 +69,5 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     assert len(result.e2e_timings) == 3
     assert all(t > 0.0 for t in result.kernel_timings)
     assert all(t > 0.0 for t in result.e2e_timings)
-
-    tolerance_ms = 0.1
-    for e2e_ms, kernel_ms in zip(result.e2e_timings, result.kernel_timings):
-        assert e2e_ms + tolerance_ms >= kernel_ms
-
     assert result.metadata is not None
     assert result.metadata.timing_backend == "hip"

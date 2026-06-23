@@ -20,7 +20,9 @@ from . import pytorch_ops
 from .timing import (
     GpuTimerInterface,
     HipGpuTimer,
+    StalledRegionTimer,
     Timer,
+    _is_staged_hip_available,
     create_gpu_timer,
 )
 
@@ -75,6 +77,7 @@ class PyTorchCudaExecutor:
         self._prepared = False
         self._stream: Optional[Any] = None
         self._stream_sync_timer: Optional[HipGpuTimer] = None
+        self._compiled: Optional[pytorch_ops.CompiledGraph] = None
 
     def prepare(self) -> None:
         """Validate graph and prepare for execution.
@@ -90,6 +93,10 @@ class PyTorchCudaExecutor:
                     f"Graph contains unsupported operations: {unsupported}. "
                     f"Supported: {list(pytorch_ops.get_supported_operations())}"
                 )
+
+            # Compile the graph once into replayable closures so each timed
+            # iteration replays the plan instead of re-parsing the JSON.
+            self._compiled = pytorch_ops.compile_graph(self._graph_json)
 
             # Pin all PyTorch graph execution to one stream. On ROCm the
             # stream is synchronized through HIP events instead of torch.cuda
@@ -168,8 +175,21 @@ class PyTorchCudaExecutor:
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
+
+        # Stalled-queue staging measures a gap-free GPU span and pure host
+        # submission cost; HIP-only (implies ROCm torch). Falls back to the
+        # non-staged loop on CUDA hosts or capability mismatch.
+        staged_timer: Optional[StalledRegionTimer] = None
         with torch.cuda.device(self._device):
-            if self._collect_kernel_timing:
+            if self._collect_kernel_timing and _is_staged_hip_available():
+                try:
+                    staged_timer = StalledRegionTimer(self._timing_stream())
+                except RuntimeError:
+                    staged_timer = None
+            if staged_timer is not None:
+                kernel_timings = []
+                timing_backend_name = TimingBackendName.HIP.value
+            elif self._collect_kernel_timing:
                 try:
                     gpu_timer = create_gpu_timer(
                         self._resolve_timing_backend(),
@@ -182,24 +202,37 @@ class PyTorchCudaExecutor:
                     kernel_timings = []
                     timing_backend_name = gpu_timer.backend_name
 
-        for _ in range(self._config.benchmark_iters):
-            kernel_ms: Optional[float] = None
+        if staged_timer is not None:
             with torch.cuda.device(self._device):
-                with Timer() as t:
-                    with torch.cuda.stream(self._get_stream()):
-                        if gpu_timer is not None:
-                            gpu_timer.start()
-                        self._execute_graph(tensors)
-                        if gpu_timer is not None:
-                            gpu_timer.stop()
-                            kernel_ms = gpu_timer.elapsed_ms()
-                        else:
-                            self._synchronize_stream()
+                staged_timer.barrier()
+                for _ in range(self._config.benchmark_iters):
 
-            if kernel_ms is not None:
-                assert kernel_timings is not None
-                kernel_timings.append(kernel_ms)
-            e2e_timings.append(t.elapsed_ms)
+                    def enqueue() -> None:
+                        with torch.cuda.stream(self._get_stream()):
+                            self._execute_graph(tensors)
+
+                    cpu_ms, kernel_ms = staged_timer.measure(enqueue)
+                    e2e_timings.append(cpu_ms)
+                    kernel_timings.append(kernel_ms)
+        else:
+            for _ in range(self._config.benchmark_iters):
+                kernel_ms: Optional[float] = None
+                with torch.cuda.device(self._device):
+                    with Timer() as t:
+                        with torch.cuda.stream(self._get_stream()):
+                            if gpu_timer is not None:
+                                gpu_timer.start()
+                            self._execute_graph(tensors)
+                            if gpu_timer is not None:
+                                gpu_timer.stop()
+                                kernel_ms = gpu_timer.elapsed_ms()
+                            else:
+                                self._synchronize_stream()
+
+                if kernel_ms is not None:
+                    assert kernel_timings is not None
+                    kernel_timings.append(kernel_ms)
+                e2e_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(
@@ -276,7 +309,8 @@ class PyTorchCudaExecutor:
             PyTorchExecutionError: If execution fails.
         """
         try:
-            pytorch_ops.execute_graph(self._graph_json, tensors)
+            assert self._compiled is not None
+            self._compiled.execute(tensors)
         except UnsupportedGraphError:
             raise
         except Exception as e:

@@ -124,6 +124,9 @@ __all__ = [
     "set_stream",
     "get_stream",
     "HipEvent",
+    "HipStallGate",
     "hip_stream_synchronize",
     "hip_get_device_count",
+    "hip_device_synchronize",
+    "hip_can_use_stream_wait_value",
 ]

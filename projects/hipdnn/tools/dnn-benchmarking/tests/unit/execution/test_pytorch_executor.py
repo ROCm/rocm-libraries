@@ -94,6 +94,16 @@ class FakeHipTimer:
         self.__class__.sync_calls += 1
 
 
+class _RecordingCompiled:
+    """Fake CompiledGraph that records each replay so tests can count executions."""
+
+    def __init__(self, executed: List[str]) -> None:
+        self._executed = executed
+
+    def execute(self, tensors: Any) -> None:
+        self._executed.append("execute")
+
+
 def _load_executor_module(
     monkeypatch: pytest.MonkeyPatch, fake_cuda: FakeCuda, is_rocm: bool = True
 ):
@@ -186,8 +196,8 @@ def test_no_kernel_timing_uses_stream_sync_only(
     executed = []
     monkeypatch.setattr(
         module.pytorch_ops,
-        "execute_graph",
-        lambda graph, tensors: executed.append("execute"),
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled(executed),
     )
     executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
@@ -209,7 +219,9 @@ def test_collect_kernel_timing_collects_kernel_timings(
 ) -> None:
     module = pytorch_executor_module
     monkeypatch.setattr(
-        module.pytorch_ops, "execute_graph", lambda graph, tensors: None
+        module.pytorch_ops,
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled([]),
     )
     executor = _make_executor(module, collect_kernel_timing=True)
     executor.prepare()
@@ -232,8 +244,8 @@ def test_warmup_and_execute_once_use_stream_sync(
     executed = []
     monkeypatch.setattr(
         module.pytorch_ops,
-        "execute_graph",
-        lambda graph, tensors: executed.append("execute"),
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled(executed),
     )
     executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
@@ -277,8 +289,8 @@ def test_no_hip_synchronizes_through_torch_stream(
     executed = []
     monkeypatch.setattr(
         module.pytorch_ops,
-        "execute_graph",
-        lambda graph, tensors: executed.append("execute"),
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled(executed),
     )
     executor = _make_executor(module, collect_kernel_timing=False)
     executor.prepare()
