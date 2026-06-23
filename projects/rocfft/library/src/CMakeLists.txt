@@ -94,6 +94,8 @@ include( GenerateExportHeader )
 
 find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
+find_package(OpenMP REQUIRED)
+
 add_subdirectory( device )
 
 #
@@ -445,6 +447,8 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     continue()
   endif()
 
+  target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
+  
   # RTC uses dladdr to find the RTC helper program
   if( NOT WIN32 )
     target_link_libraries( ${target} PUBLIC -ldl pthread )
