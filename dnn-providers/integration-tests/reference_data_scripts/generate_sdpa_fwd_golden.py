@@ -34,14 +34,15 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-
 # Bump when generator logic changes in a way that affects output data.
 # (e.g., different reference backend, precision handling, tensor layout)
-GENERATOR_VERSION = "1.0.0"
+# 1.0.0 — Initial forward generator (Q, K, V, O tensors)
+# 1.0.1 — Added optional LSE output tensor (uid=4) via --stats flag
+GENERATOR_VERSION = "1.0.1"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
-    "fp16": {"torch": torch.float16, "json": "float16", "bytes": 2},
+    "fp16": {"torch": torch.float16, "json": "half", "bytes": 2},
 }
 
 
@@ -68,6 +69,23 @@ def compute_forward(Q, K, V, scale, H_q, H_kv):
     return O
 
 
+def compute_lse(Q, K, scale, H_q, H_kv):
+    """Compute Log-Sum-Exp reference: logsumexp(Q @ K^T * scale, dim=-1).
+
+    Returns shape [B, H_q, S_q, 1] in FP32.
+    """
+    Q_f = Q.float()
+    K_f = K.float()
+
+    if H_q != H_kv:
+        gqa_ratio = H_q // H_kv
+        K_f = K_f.repeat_interleave(gqa_ratio, dim=1)
+
+    scores = torch.matmul(Q_f, K_f.transpose(-2, -1)) * scale
+    lse = torch.logsumexp(scores, dim=-1, keepdim=True)  # [B, H_q, S_q, 1]
+    return lse
+
+
 def save_tensor_bin(tensor, path):
     t = tensor.contiguous().cpu()
     if t.dtype in (torch.bfloat16, torch.float16):
@@ -78,7 +96,10 @@ def save_tensor_bin(tensor, path):
         f.write(raw)
 
 
-def build_graph_json(q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16"):
+def build_graph_json(
+    q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16", stats=False
+):
+    B, H_q, S_q = q_dims[0], q_dims[1], q_dims[2]
     tensors = []
     for uid, name, dims in [
         (0, "Q", q_dims),
@@ -93,6 +114,19 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16"
                 "dims": dims,
                 "strides": compute_contiguous_strides(dims),
                 "data_type": dtype_str,
+                "virtual": False,
+            }
+        )
+
+    if stats:
+        lse_dims = [B, H_q, S_q, 1]
+        tensors.append(
+            {
+                "uid": 4,
+                "name": "LSE",
+                "dims": lse_dims,
+                "strides": compute_contiguous_strides(lse_dims),
+                "data_type": "float",
                 "virtual": False,
             }
         )
@@ -128,7 +162,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16"
                 },
                 "outputs": {
                     "o_tensor_uid": 3,
-                    "stats_tensor_uid": None,
+                    "stats_tensor_uid": 4 if stats else None,
                     "max_tensor_uid": None,
                     "sum_exp_tensor_uid": None,
                     "rng_dump_tensor_uid": None,
@@ -136,7 +170,7 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16"
                     "amax_o_tensor_uid": None,
                 },
                 "attributes": {
-                    "generate_stats": None,
+                    "generate_stats": True if stats else None,
                     "alibi_mask": False,
                     "padding_mask": False,
                     "causal_mask": False,
@@ -285,7 +319,12 @@ def validate_against_aiter(
         import aiter
         from aiter import fmha_v3_fwd
 
-        aiter_ver = getattr(aiter, "__version__", "unknown")
+        try:
+            from importlib.metadata import version as pkg_version
+
+            aiter_ver = pkg_version("amd-aiter")
+        except Exception:
+            aiter_ver = getattr(aiter, "__version__", "unknown")
         print(f"  AITER version: {aiter_ver}")
         print(
             f"  Args: is_causal={causal}, window=({window_left},{window_right}), "
@@ -395,12 +434,21 @@ def generate_forward_bundle(
         print(f"ERROR: PyTorch SDPA failed: {e}", file=sys.stderr)
         sys.exit(1)
 
+    lse = None
+    if stats:
+        lse = compute_lse(Q, K, attn_scale, H_q, H_kv)
+
     for name, tensor in [("Q", Q), ("K", K), ("V", V), ("O", O)]:
         assert not torch.isnan(tensor).any(), f"NaN in {name}"
         assert not torch.isinf(tensor).any(), f"Inf in {name}"
+    if lse is not None:
+        assert not torch.isnan(lse).any(), "NaN in LSE"
+        assert not torch.isinf(lse).any(), "Inf in LSE"
 
     # Write raw tensor data as .bin files (one per tensor UID)
     tensor_list = [("Q", Q, 0), ("K", K, 1), ("V", V, 2), ("O", O, 3)]
+    if lse is not None:
+        tensor_list.append(("LSE", lse, 4))
     for name, tensor, uid in tensor_list:
         bin_path = f"{base_filename}.tensor{uid}.bin"
         save_tensor_bin(tensor, bin_path)
@@ -411,7 +459,13 @@ def generate_forward_bundle(
 
     # Write graph JSON (operation definition: node type, tensor metadata, attributes)
     graph_json = build_graph_json(
-        q_dims, k_dims, v_dims, o_dims, attn_scale, dtype_str=dtype_info["json"]
+        q_dims,
+        k_dims,
+        v_dims,
+        o_dims,
+        attn_scale,
+        dtype_str=dtype_info["json"],
+        stats=stats,
     )
     json_path = f"{base_filename}.json"
     with open(json_path, "w") as f:
@@ -428,6 +482,7 @@ def generate_forward_bundle(
         "min_val": min_val,
         "max_val": max_val,
         "scale": attn_scale,
+        "stats": stats,
     }
     meta_json = build_meta_json(config, torch.__version__)
     meta_path = f"{base_filename}.meta.json"

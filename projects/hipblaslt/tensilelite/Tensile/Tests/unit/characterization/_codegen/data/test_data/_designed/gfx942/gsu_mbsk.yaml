@@ -1,0 +1,67 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P6 — GSU MultipleBufferSingleKernel (MBSK) arm characterization for gfx942.
+#
+# The existing gsu_on.yaml uses MultipleBuffer/SingleBuffer but does NOT reach
+# the MultipleBufferSingleKernel-gated arms:
+#
+#   GSUOn.globalWriteBatchProlog   line 725-728  (_GlobalAccumulation == MBSK)
+#   GSUOn.defineAndResources       line 734-745  (_GlobalAccumulation == MBSK)
+#   GSUOn.writeBiasToGlobal        line 750-787  (GSU>1 + MultipleBuffer branch)
+#   GSUOn.reductionBranches        line 789-803  (entry point for reductionProcedure)
+#   GSUOn.reductionProcedure       line 805-1052 (workspace/reduction arms)
+#
+# Key design choices (constraints from Solution.py):
+#   - DataType h/h/s (half): MBSK rejects doubles (line 5154), works with half
+#   - HighPrecisionAccumulate: True (needed for h->s compute type)
+#   - No UseScaleCD, no UseE, BiasSrc=D (MBSK constraints)
+#   - GlobalSplitU: [2, 4]  — GSU>1 to activate MBSK workspace
+#   - GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+#   - StoreVectorWidth: [-1]  — auto (avoids too-many-store-at-MBSK reject)
+#   - MinKForGSU: 1 — allow small K
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  MinKForGSU: 1
+
+BenchmarkProblems:
+  ########################################
+  # NN half (h->h, compute=s) MBSK — activates MBSK-gated GSU arms
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+        - DepthU: [16]
+        - GlobalSplitU: [2, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0]
+        - TransposeLDS: [0]
+        - StoreVectorWidth: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

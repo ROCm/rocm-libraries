@@ -30,6 +30,7 @@
 #include "../functional.hpp"
 
 #include "detail/warp_sort_shuffle.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 /// \addtogroup warpmodule
 /// @{
@@ -562,6 +563,35 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<class Key, unsigned int VirtualWaveSize, class Value>
+class warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_sort_32
+        = warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::size32>;
+
+    using warp_sort_64
+        = warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = ::rocprim::detail::dispatch_wave_size<warp_sort_32, warp_sort_64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.sort(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+};
+
+#endif
 
 END_ROCPRIM_NAMESPACE
 

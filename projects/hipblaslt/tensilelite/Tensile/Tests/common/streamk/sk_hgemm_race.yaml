@@ -17,7 +17,7 @@ GlobalParameters:
   # DataInitSeed: 1
   # CSVExportWinner: 1
   # CSVMergeSameProblemID: 1
-  PreciseKernelTime: 0
+  PreciseKernelTime: false
   # Device: 0
   MaxFileName: 256
   #RotatingBufferSize: 1024
@@ -45,7 +45,7 @@ BenchmarkProblems:
     - DepthU: [64]
     - PrefetchGlobalRead: [2]
     - PrefetchLocalRead: [1]
-    - SourceSwap: [1]
+    - SourceSwap: [true]
     - StaggerU: [0]
     - GlobalSplitU: [0]
     - StreamK: [3]

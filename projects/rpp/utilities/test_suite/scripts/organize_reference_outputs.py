@@ -15,6 +15,7 @@ import argparse
 import re
 from pathlib import Path
 
+
 def extract_function_name(filename):
     """
     Extract the function name from a .bin filename.
@@ -26,24 +27,27 @@ def extract_function_name(filename):
         tensor_add_tensor_f32.bin -> tensor_add_tensor
     """
     # Remove .bin extension
-    base = filename.replace('.bin', '')
+    base = filename.replace(".bin", "")
 
     # Match pattern: {function_name}_{datatype}_{optional_details}
     # Datatypes: u8, f32, f16, i8
-    pattern = r'^(.+?)_(u8|f32|f16|i8)(?:_.*)?$'
+    pattern = r"^(.+?)_(u8|f32|f16|i8)(?:_.*)?$"
     match = re.match(pattern, base)
 
     if match:
         return match.group(1)
 
     # Fallback: assume everything before first datatype match is the function name
-    for datatype in ['_u8_', '_f32_', '_f16_', '_i8_']:
+    for datatype in ["_u8_", "_f32_", "_f16_", "_i8_"]:
         if datatype in base:
             return base.split(datatype)[0]
 
     # If no datatype found, return base name
-    print(f"Warning: Could not extract function name from '{filename}', using full base name")
+    print(
+        f"Warning: Could not extract function name from '{filename}', using full base name"
+    )
     return base
+
 
 def organize_files(source_dir, dest_dir, copy_mode=False, force_overwrite=False):
     """
@@ -62,7 +66,7 @@ def organize_files(source_dir, dest_dir, copy_mode=False, force_overwrite=False)
     dest_path.mkdir(parents=True, exist_ok=True)
 
     # Find all .bin files in source directory
-    bin_files = list(source_path.glob('*.bin'))
+    bin_files = list(source_path.glob("*.bin"))
 
     if not bin_files:
         print(f"No .bin files found in {source_dir}")
@@ -105,7 +109,9 @@ def organize_files(source_dir, dest_dir, copy_mode=False, force_overwrite=False)
                 action = "Moved"
 
             if existed_before:
-                print(f"  ✓ {action} (overwritten): {filename} → {func_name}/{filename}")
+                print(
+                    f"  ✓ {action} (overwritten): {filename} → {func_name}/{filename}"
+                )
             else:
                 print(f"  ✓ {action}: {filename} → {func_name}/{filename}")
             organized_count += 1
@@ -118,6 +124,7 @@ def organize_files(source_dir, dest_dir, copy_mode=False, force_overwrite=False)
     print(f"  Skipped:   {skipped_count} files (already exist)")
     print(f"  Total:     {len(bin_files)} files")
     print(f"{'=' * 60}")
+
 
 def list_organized_structure(dest_dir):
     """Display the organized directory structure."""
@@ -134,7 +141,7 @@ def list_organized_structure(dest_dir):
     subdirs = sorted([d for d in dest_path.iterdir() if d.is_dir()])
 
     for subdir in subdirs:
-        bin_files = list(subdir.glob('*.bin'))
+        bin_files = list(subdir.glob("*.bin"))
         print(f"\n{subdir.name}/ ({len(bin_files)} files)")
         for bin_file in sorted(bin_files)[:5]:  # Show first 5 files
             size_mb = bin_file.stat().st_size / (1024 * 1024)
@@ -144,9 +151,10 @@ def list_organized_structure(dest_dir):
 
     print("\n" + "=" * 60)
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Organize .bin reference output files into directory structure',
+        description="Organize .bin reference output files into directory structure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -164,39 +172,35 @@ Examples:
 
   # Preview the organized structure
   python3 organize_reference_outputs.py --list-only
-        """
+        """,
     )
 
     parser.add_argument(
-        '--source',
+        "--source",
         type=str,
-        default='./build',
-        help='Source directory containing .bin files (default: ./build)'
+        default="./build",
+        help="Source directory containing .bin files (default: ./build)",
     )
 
     parser.add_argument(
-        '--dest',
+        "--dest",
         type=str,
-        default='../REFERENCE_OUTPUT',
-        help='Destination REFERENCE_OUTPUT directory (default: ../REFERENCE_OUTPUT)'
+        default="../REFERENCE_OUTPUT",
+        help="Destination REFERENCE_OUTPUT directory (default: ../REFERENCE_OUTPUT)",
     )
 
     parser.add_argument(
-        '--copy',
-        action='store_true',
-        help='Copy files instead of moving them'
+        "--copy", action="store_true", help="Copy files instead of moving them"
     )
 
     parser.add_argument(
-        '--force',
-        action='store_true',
-        help='Overwrite existing files in destination'
+        "--force", action="store_true", help="Overwrite existing files in destination"
     )
 
     parser.add_argument(
-        '--list-only',
-        action='store_true',
-        help='Only list the organized structure, do not move files'
+        "--list-only",
+        action="store_true",
+        help="Only list the organized structure, do not move files",
     )
 
     args = parser.parse_args()
@@ -214,12 +218,15 @@ Examples:
             return 1
 
         # Organize the files
-        organize_files(source_dir, dest_dir, copy_mode=args.copy, force_overwrite=args.force)
+        organize_files(
+            source_dir, dest_dir, copy_mode=args.copy, force_overwrite=args.force
+        )
 
         # Show the resulting structure
         list_organized_structure(dest_dir)
 
     return 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     exit(main())

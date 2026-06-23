@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y \
     gh \
     linux-tools-common \
     linux-tools-generic \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # linux-tools-{common,generic} provide the `perf` binary required by
