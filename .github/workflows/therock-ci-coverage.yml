@@ -164,7 +164,7 @@ jobs:
           # Relative path resolves against the container workspace, matching the staging step.
           path: coverage-objects
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -348,6 +348,8 @@ jobs:
           name: ${{ env.REPORT_ARTIFACT }}
           path: coverage-report
           if-no-files-found: warn
+          # Keep the shareable report around well beyond the build inputs.
+          retention-days: 90
 
       - name: Upload coverage to Codecov
         if: ${{ always() }}

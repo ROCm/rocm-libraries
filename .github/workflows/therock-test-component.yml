@@ -167,7 +167,7 @@ jobs:
           # Relative path resolves against the container workspace, matching the prepare step.
           path: coverage-profraw/*.profraw
           if-no-files-found: warn
-          retention-days: 1
+          retention-days: 7
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
