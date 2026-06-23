@@ -167,15 +167,11 @@ namespace TensileLite
 
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            // skMaxCUs == 0 (env unset): use shared analytical hardware unchanged.
-            origami::hardware_t const& ranking_hardware = *(pAMDGPU->analyticalHardware);
-            origami::hardware_t        capped_hardware;
+            origami::hardware_t ranking_hardware = *(pAMDGPU->analyticalHardware);
             if(pAMDGPU->skMaxCUs > 0)
             {
-                capped_hardware = ranking_hardware;
-                // Clamp to the env cap and never above the device CU count.
-                capped_hardware.N_CU
-                    = std::min({capped_hardware.N_CU,
+                ranking_hardware.N_CU
+                    = std::min({ranking_hardware.N_CU,
                                 static_cast<size_t>(pAMDGPU->skMaxCUs),
                                 static_cast<size_t>(pAMDGPU->computeUnitCount)});
             }
@@ -199,10 +195,7 @@ namespace TensileLite
             };
 
             auto prediction_result = origami::rank_configs(
-                origami_problem,
-                (pAMDGPU->skMaxCUs > 0) ? static_cast<origami::hardware_t const&>(capped_hardware)
-                                        : ranking_hardware,
-                origami_config_list);
+                origami_problem, ranking_hardware, origami_config_list);
 
             for(const auto& r : prediction_result)
             {
