@@ -1,5 +1,6 @@
 packaging
 pyyaml
+zstandard
 msgpack
 joblib>=1.4.0
 simplejson
