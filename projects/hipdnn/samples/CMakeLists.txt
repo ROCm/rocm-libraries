@@ -175,7 +175,7 @@ if(BUILD_ADDRESS_SANITIZER)
     )
 endif()
 
-# Optional YAML-driven CTest categorization (RFC0010). Guarded so standalone /
+# Optional YAML-driven CTest categorization. Guarded so standalone /
 # sparse checkouts without shared/ctest still build (falls back to unlabeled
 # install). apply_ctest_category_labels() scans the add_test() names already
 # written into INSTALLED_CTEST_FILE and appends per-test

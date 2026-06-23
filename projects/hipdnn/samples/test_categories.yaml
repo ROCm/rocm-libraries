@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hipdnn-samples Test Categories Configuration (RFC0010).
+# hipdnn-samples Test Categories Configuration.
 #
 # The samples register their tests as pre-registered CTest entries (via
 # add_hipdnn_sample_test()), not as a single GTest binary, so categorization
