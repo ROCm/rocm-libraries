@@ -14,22 +14,27 @@
 # Per kernel: PASS (recorded faithfully), SKIP (emitter not in the reusable
 # spec+build shape), or FAIL (recorder gap -> needs attention).
 #
-#   python3 -m ck_dsl.portable_ir.record_coverage [--verbose]
+#   python3 -m ck_dsl.portable_ir.drivers.record_coverage [--verbose]
 
 import argparse
 import importlib.util
 import inspect
 import os
+import sys
 import traceback
 
-from ck_dsl.portable_ir.recording_builder import kernel_to_recipe, record_kernel
+from ck_dsl.portable_ir.src.recording_builder import kernel_to_recipe, record_kernel
 
 _PARITY_DIR = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "ck_dsl_c", "tests", "parity"))
+    os.path.dirname(__file__), "..", "..", "..", "ck_dsl_c", "tests", "parity"))
 
 
 def _load_module(path):
     name = "ckdsl_parity_" + os.path.splitext(os.path.basename(path))[0]
+    # Parity emitters import their shared helper as `from _emit_common import ...`
+    # so the parity dir must be importable (mirrors export_parity.py).
+    if _PARITY_DIR not in sys.path:
+        sys.path.insert(0, _PARITY_DIR)
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

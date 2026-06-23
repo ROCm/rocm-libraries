@@ -28,7 +28,7 @@ from ck_dsl.instances.common.gemm_universal import (
     UniversalGemmSpec,
     build_universal_gemm,
 )
-from ck_dsl.portable_ir.roll import roll
+from ck_dsl.portable_ir.src.roll import roll
 
 
 def build(tn: int, arch: str = "gfx950"):

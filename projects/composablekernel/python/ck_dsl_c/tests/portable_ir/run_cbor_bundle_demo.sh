@@ -34,9 +34,9 @@ HAVE_COMGR=1
 cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lamd_comgr -o "$OUT/comgr" 2>/dev/null || HAVE_COMGR=0
 
 echo ">> emitting recipe (JSON) and packing CBOR + bundle"
-python3 -m ck_dsl.portable_ir.recipe_toy --emit recipe > "$OUT/toy.recipe.json"
-python3 -m ck_dsl.portable_ir.recipe_bundle encode "$OUT/toy.recipe.json" "$OUT/toy.recipe.cbor"
-python3 -m ck_dsl.portable_ir.recipe_bundle bundle "$OUT/bundle.cbor" "$OUT/toy.recipe.json:toy:$ARCH"
+python3 -m ck_dsl.portable_ir.examples.recipe_toy --emit recipe > "$OUT/toy.recipe.json"
+python3 -m ck_dsl.portable_ir.src.recipe_bundle encode "$OUT/toy.recipe.json" "$OUT/toy.recipe.cbor"
+python3 -m ck_dsl.portable_ir.src.recipe_bundle bundle "$OUT/bundle.cbor" "$OUT/toy.recipe.json:toy:$ARCH"
 js=$(wc -c < "$OUT/toy.recipe.json"); cb=$(wc -c < "$OUT/toy.recipe.cbor"); bn=$(wc -c < "$OUT/bundle.cbor")
 echo "   recipe: JSON=${js}B  CBOR=${cb}B  bundle=${bn}B"
 echo ""
@@ -51,7 +51,7 @@ for D in 64 128 256; do
     if diff -q "$OUT/j_$D.ll" "$OUT/c_$D.ll" >/dev/null && diff -q "$OUT/j_$D.ll" "$OUT/b_$D.ll" >/dev/null; then ll_match="IDENTICAL"; else rc=1; fi
 
     if [ "$HAVE_COMGR" = "1" ]; then
-        python3 -m ck_dsl.portable_ir.recipe_toy --emit ll --D "$D" --dtype f32 --arch "$ARCH" > "$OUT/ref_$D.ll" 2> "$OUT/ref_$D.err" || { echo "REF FAIL D=$D"; rc=1; continue; }
+        python3 -m ck_dsl.portable_ir.examples.recipe_toy --emit ll --D "$D" --dtype f32 --arch "$ARCH" > "$OUT/ref_$D.ll" 2> "$OUT/ref_$D.err" || { echo "REF FAIL D=$D"; rc=1; continue; }
         vmsz=$("$OUT/comgr" "$OUT/b_$D.ll" "$OUT/b_$D.hsaco" "$ARCH") || { echo "comgr VM FAIL D=$D"; rc=1; continue; }
         refsz=$("$OUT/comgr" "$OUT/ref_$D.ll" "$OUT/ref_$D.hsaco" "$ARCH") || { echo "comgr REF FAIL D=$D"; rc=1; continue; }
         vmsha=$(sha256sum "$OUT/b_$D.hsaco" | cut -d' ' -f1)
@@ -71,7 +71,7 @@ echo ""
 # ground truth: each served kernel must match its Python reference byte-for-byte.
 # --------------------------------------------------------------------------
 echo ">> concrete-record bundle (record many kernels -> one CBOR bundle, serve by key)"
-python3 -m ck_dsl.portable_ir.recipe_bundle record-demo "$OUT/concrete.bundle.cbor" --arch "$ARCH"
+python3 -m ck_dsl.portable_ir.src.recipe_bundle record-demo "$OUT/concrete.bundle.cbor" --arch "$ARCH"
 echo ""
 printf "%-32s  %-12s  %-12s  %s\n" "key (kernel)" "vm_hsaco" "ref_hsaco" "match"
 # key                              python-reference emitter + args
@@ -91,9 +91,9 @@ run_concrete() {
         printf "%-32s  %-12s  %-12s  %s\n" "$key" "(no comgr)" "(no comgr)" "lowered-ok"
     fi
 }
-run_concrete ckdsl_mini_attn_norm0_f32 ck_dsl.portable_ir.mini_attn --emit ll --use-norm 0 --dtype f32
-run_concrete ckdsl_mini_attn_norm1_f32 ck_dsl.portable_ir.mini_attn --emit ll --use-norm 1 --dtype f32
-run_concrete ckdsl_multi_result_i32    ck_dsl.portable_ir.recipe_multi_result --emit ll --dtype i32
+run_concrete ckdsl_mini_attn_norm0_f32 ck_dsl.portable_ir.examples.mini_attn --emit ll --use-norm 0 --dtype f32
+run_concrete ckdsl_mini_attn_norm1_f32 ck_dsl.portable_ir.examples.mini_attn --emit ll --use-norm 1 --dtype f32
+run_concrete ckdsl_multi_result_i32    ck_dsl.portable_ir.examples.recipe_multi_result --emit ll --dtype i32
 echo ""
 [ $rc -eq 0 ] && echo "PASS: CBOR + bundle (rolled and concrete-record) reproduce the Python build exactly (byte-identical)." || echo "FAIL"
 exit $rc

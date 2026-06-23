@@ -183,6 +183,9 @@ class RecordingIRBuilder(IRBuilder):
         return {
             "schema": "ck.dsl.recipe/v1",
             "kernel_name_fmt": self.kernel.name,
+            # Concrete recipe (empty spec): the binds are the production builder's
+            # unique SSA names, so the C VM names values verbatim and reproduces
+            # the Python .ll byte-for-byte (not just an equivalent HSACO).
             "spec": [],
             "attrs": _attrs_to_json(self.kernel.attrs),
             "program": self._rec_params + self._rec_body,

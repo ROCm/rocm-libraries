@@ -863,11 +863,29 @@ static void import_scf_if(importer_t* im, const jval_t* op)
     vmap_truncate(im, mark);
 }
 
+/* Resolve an opcode name, applying portable-IR aliases. The Python builder names
+ * some vectorized fp16 buffer ops without the dtype suffix the engine's opcode
+ * registry uses ("tile.buffer_load_vN" vs "tile.buffer_load_vN_f16"); the op is
+ * otherwise identical, so normalize on the round-trip. Engine core unchanged. */
+static ckc_opcode_t import_opcode_from_name(const char* name)
+{
+    if (!name)
+        return CKC_OP_INVALID;
+    ckc_opcode_t op = ckc_opcode_from_name(name);
+    if (op != CKC_OP_INVALID)
+        return op;
+    if (strcmp(name, "tile.buffer_load_vN") == 0)
+        return ckc_opcode_from_name("tile.buffer_load_vN_f16");
+    if (strcmp(name, "tile.buffer_store_vN") == 0)
+        return ckc_opcode_from_name("tile.buffer_store_vN_f16");
+    return CKC_OP_INVALID;
+}
+
 /* Generic op: resolve operands, build attrs + result types, call ckc_b_op,
  * register results by their exported ids. */
 static void import_generic_op(importer_t* im, const jval_t* op, const char* opcode_name)
 {
-    ckc_opcode_t opcode = ckc_opcode_from_name(opcode_name);
+    ckc_opcode_t opcode = import_opcode_from_name(opcode_name);
     if (opcode == CKC_OP_INVALID) {
         imp_fail(im, "unknown opcode '%s'", opcode_name);
         return;

@@ -26,7 +26,7 @@ import sys
 from ck_dsl.core.ir_export import _attrs_to_json, _type_to_json
 from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
 
-from ck_dsl.portable_ir import export_mha
+from ck_dsl.portable_ir.examples import export_mha
 
 
 def _reg(v):

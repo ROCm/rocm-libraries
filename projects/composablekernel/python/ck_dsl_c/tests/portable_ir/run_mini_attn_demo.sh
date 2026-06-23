@@ -30,7 +30,7 @@ cc -std=c99 -O2 -I "$CKC/include" "$HERE/recipe_run.c" "$OUT/libckc.a" -lm -o "$
 cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lamd_comgr -o "$OUT/comgr" || {
     echo "comgr tool build FAILED"; exit 1; }
 
-python3 -m ck_dsl.portable_ir.mini_attn --emit recipe > "$OUT/mini_attn.recipe.json"
+python3 -m ck_dsl.portable_ir.examples.mini_attn --emit recipe > "$OUT/mini_attn.recipe.json"
 echo ""
 echo "ONE recipe artifact: $(wc -c < "$OUT/mini_attn.recipe.json") bytes (covers use_norm=0 and 1)"
 echo "  features exercised: runtime scf.for (3 iter-args) + runtime scf.if + compile-time static_if + exp2/fmax/rcp"
@@ -40,7 +40,7 @@ rc=0
 for U in 0 1; do
     "$OUT/recipe_run" "$OUT/mini_attn.recipe.json" --arch "$ARCH" --int "use_norm=$U" --str dtype=f32 \
         > "$OUT/vm_$U.ll" 2> "$OUT/vm_$U.err" || { echo "VM FAIL use_norm=$U: $(cat "$OUT/vm_$U.err")"; rc=1; continue; }
-    python3 -m ck_dsl.portable_ir.mini_attn --emit ll --use-norm "$U" --dtype f32 --arch "$ARCH" \
+    python3 -m ck_dsl.portable_ir.examples.mini_attn --emit ll --use-norm "$U" --dtype f32 --arch "$ARCH" \
         > "$OUT/ref_$U.ll" 2> "$OUT/ref_$U.err" || { echo "REF FAIL use_norm=$U"; rc=1; continue; }
     vmsz=$("$OUT/comgr" "$OUT/vm_$U.ll" "$OUT/vm_$U.hsaco" "$ARCH") || { echo "comgr VM FAIL"; rc=1; continue; }
     refsz=$("$OUT/comgr" "$OUT/ref_$U.ll" "$OUT/ref_$U.hsaco" "$ARCH") || { echo "comgr REF FAIL"; rc=1; continue; }

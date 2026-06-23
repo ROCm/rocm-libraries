@@ -29,7 +29,7 @@ cc -std=c99 -O2 -I "$CKC/include" "$HERE/recipe_run.c" "$OUT/libckc.a" -lm -o "$
 cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lamd_comgr -o "$OUT/comgr" || {
     echo "comgr tool build FAILED"; exit 1; }
 
-python3 -m ck_dsl.portable_ir.export_gemm_cshuffle --emit recipe > "$OUT/gemm.recipe.json"
+python3 -m ck_dsl.portable_ir.examples.export_gemm_cshuffle --emit recipe > "$OUT/gemm.recipe.json"
 echo ""
 echo "ONE recipe artifact: $(wc -c < "$OUT/gemm.recipe.json") bytes (covers all tile_n)"
 echo ""
@@ -38,7 +38,7 @@ rc=0
 for TN in 32 64 128 256; do
     "$OUT/recipe_run" "$OUT/gemm.recipe.json" --arch "$ARCH" --int "TN=$TN" \
         > "$OUT/vm_$TN.ll" 2> "$OUT/vm_$TN.err" || { echo "VM FAIL TN=$TN: $(cat "$OUT/vm_$TN.err")"; rc=1; continue; }
-    python3 -m ck_dsl.portable_ir.export_gemm_cshuffle --emit ll --TN "$TN" --arch "$ARCH" \
+    python3 -m ck_dsl.portable_ir.examples.export_gemm_cshuffle --emit ll --TN "$TN" --arch "$ARCH" \
         > "$OUT/ref_$TN.ll" 2> "$OUT/ref_$TN.err" || { echo "REF FAIL TN=$TN"; rc=1; continue; }
     "$OUT/comgr" "$OUT/vm_$TN.ll" "$OUT/vm_$TN.hsaco" "$ARCH" >/dev/null || { echo "comgr VM FAIL"; rc=1; continue; }
     "$OUT/comgr" "$OUT/ref_$TN.ll" "$OUT/ref_$TN.hsaco" "$ARCH" >/dev/null || { echo "comgr REF FAIL"; rc=1; continue; }

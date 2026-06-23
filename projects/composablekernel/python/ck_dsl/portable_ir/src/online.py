@@ -49,21 +49,39 @@ def _default_lib_paths() -> List[str]:
         paths.append(env)
     here = os.path.dirname(os.path.abspath(__file__))
     cache = os.path.join(os.environ.get("TMPDIR", "/tmp"), "ckc_online", "libckc.so")
-    paths += [cache, os.path.join(here, "..", "..", "ck_dsl_c", "build", "libckc.so")]
+    paths += [cache, os.path.join(here, "..", "..", "..", "ck_dsl_c", "build", "libckc.so")]
     return paths
 
 
 def build_lib(out_path: Optional[str] = None) -> str:
-    """Compile a shared libckc.so from the ckc sources (cc -shared)."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    ckc = os.path.normpath(os.path.join(here, "..", "..", "ck_dsl_c"))
-    out_path = out_path or os.path.join(os.environ.get("TMPDIR", "/tmp"), "ckc_online", "libckc.so")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    """Build a shared libckc.so: the C++ engine core (libckc_core.a, via CMake)
+    plus the flat-C portable-IR tooling (json/cbor DOM, importer, recipe VM,
+    online wrappers) linked together. The engine core moved to src/core/**/*.cpp,
+    so the tooling can no longer self-link from src/*.c alone."""
     import glob
+    here = os.path.dirname(os.path.abspath(__file__))
+    ckc = os.path.normpath(os.path.join(here, "..", "..", "..", "ck_dsl_c"))
+    out_path = out_path or os.path.join(os.environ.get("TMPDIR", "/tmp"), "ckc_online", "libckc.so")
+    base = os.path.dirname(out_path)
+    coredir, objdir = os.path.join(base, "core"), os.path.join(base, "obj")
+    os.makedirs(objdir, exist_ok=True)
+    inc = os.path.join(ckc, "include")
+    # 1) C++ engine core archive
+    subprocess.run(["cmake", "-S", ckc, "-B", coredir, "-DCMAKE_BUILD_TYPE=Debug"],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    subprocess.run(["cmake", "--build", coredir, "--target", "ckc_core",
+                    "-j", str(os.cpu_count() or 8)],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    core = os.path.join(coredir, "libckc_core.a")
+    # 2) flat-C portable-IR tooling
     srcs = sorted(glob.glob(os.path.join(ckc, "src", "*.c")))
-    cmd = ["cc", "-std=c99", "-O2", "-fPIC", "-shared", "-I", os.path.join(ckc, "include"),
-           *srcs, "-lm", "-o", out_path]
-    subprocess.run(cmd, check=True)
+    subprocess.run(["cc", "-std=c99", "-O2", "-fPIC", "-I", inc, "-c", *srcs],
+                   cwd=objdir, check=True)
+    objs = sorted(glob.glob(os.path.join(objdir, "*.o")))
+    # 3) link into one shared lib (whole-archive so all engine symbols export)
+    subprocess.run(["c++", "-shared", "-fPIC", *objs,
+                    "-Wl,--whole-archive", core, "-Wl,--no-whole-archive", "-lm",
+                    "-o", out_path], check=True)
     return out_path
 
 
@@ -174,7 +192,8 @@ def ir_json_to_llvm(text: str, *, arch: str = "gfx950") -> Tuple[str, Dict[str, 
 
 if __name__ == "__main__":
     # smoke test: build lib, expand the toy recipe at D=128, print a few lines.
-    from ck_dsl.portable_ir import recipe_bundle, recipe_toy
+    from ck_dsl.portable_ir.src import recipe_bundle
+    from ck_dsl.portable_ir.examples import recipe_toy
     import json as _json
     cbor = recipe_bundle.cbor_encode(recipe_toy.make_recipe())
     ll, t = recipe_cbor_to_llvm(cbor, arch="gfx950", ints={"D": 128}, strs={"dtype": "f32"})

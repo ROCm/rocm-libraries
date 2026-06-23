@@ -13,7 +13,7 @@
 # concrete recipe (universal, byte-identical, no rolling needed) and bundle them.
 # Rolled recipes can be bundled the same way (one entry covers a whole family).
 #
-#   python3 -m ck_dsl.portable_ir.recipe_bundle --demo
+#   python3 -m ck_dsl.portable_ir.src.recipe_bundle --demo
 import struct
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
@@ -152,7 +152,7 @@ def bundle_lookup(bundle: Dict[str, Any], key: str,
 def record_concrete_bundle(cases: List[Tuple[Any, str]]) -> List[Dict[str, Any]]:
     """cases: list of (build_callable, arch). Records each kernel's emitted IR
     into a concrete recipe (universal, byte-identical), keyed by kernel name."""
-    from ck_dsl.portable_ir.recording_builder import record_kernel
+    from ck_dsl.portable_ir.src.recording_builder import record_kernel
     entries = []
     for build, arch in cases:
         kernel, recipe = record_kernel(build)
@@ -165,7 +165,7 @@ def record_concrete_bundle(cases: List[Tuple[Any, str]]) -> List[Dict[str, Any]]
 def _demo() -> int:
     import json
 
-    from ck_dsl.portable_ir import export_mha
+    from ck_dsl.portable_ir.examples import export_mha
 
     cases = [(lambda D=D: export_mha.build("fp16", D, 2048, 1, 32, 1), "gfx950")
              for D in (64, 128, 256)]
@@ -207,7 +207,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     if args.cmd == "record-demo":
-        from ck_dsl.portable_ir import mini_attn, recipe_multi_result
+        from ck_dsl.portable_ir.examples import mini_attn, recipe_multi_result
         cases = [
             (lambda: mini_attn.build_mini_attn(0, "f32"), args.arch),
             (lambda: mini_attn.build_mini_attn(1, "f32"), args.arch),

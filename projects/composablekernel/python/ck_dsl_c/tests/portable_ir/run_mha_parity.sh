@@ -34,9 +34,9 @@ echo "== Part A: Python-lowered .ll  vs  C-from-portable-IR .ll =="
 for dt in fp16 bf16; do
   for hd in 64 128 256; do
     tag="${dt}_d${hd}"
-    python3 -m ck_dsl.portable_ir.export_mha --dtype "$dt" --head-size "$hd" --arch "$ARCH" \
+    python3 -m ck_dsl.portable_ir.examples.export_mha --dtype "$dt" --head-size "$hd" --arch "$ARCH" \
         > "$OUT/$tag.ir.json" 2> "$OUT/$tag.exp.err" || { echo "EXPORT FAIL $tag"; cat "$OUT/$tag.exp.err"; rc=1; continue; }
-    python3 -m ck_dsl.portable_ir.export_mha --dtype "$dt" --head-size "$hd" --arch "$ARCH" --ll \
+    python3 -m ck_dsl.portable_ir.examples.export_mha --dtype "$dt" --head-size "$hd" --arch "$ARCH" --ll \
         > "$OUT/py_$tag.ll" 2>> "$OUT/$tag.exp.err" || { echo "LL FAIL $tag"; rc=1; continue; }
     "$BIN" "$OUT/$tag.ir.json" "$ARCH" > "$OUT/cjson_$tag.ll" 2> "$OUT/$tag.rt.err" || { echo "RT FAIL $tag"; cat "$OUT/$tag.rt.err"; rc=1; continue; }
     ps=$(sha256sum "$OUT/py_$tag.ll"|cut -d' ' -f1); cs=$(sha256sum "$OUT/cjson_$tag.ll"|cut -d' ' -f1)
@@ -50,15 +50,15 @@ echo ""
 echo "== Part B: shape-polymorphism (one IR per family covers all S / MHA+GQA) =="
 base=""
 for s in 2048 4096 8192; do
-  python3 -m ck_dsl.portable_ir.export_mha --dtype fp16 --head-size 128 --seqlen "$s" --arch "$ARCH" > "$OUT/poly_s$s.json" 2>/dev/null
+  python3 -m ck_dsl.portable_ir.examples.export_mha --dtype fp16 --head-size 128 --seqlen "$s" --arch "$ARCH" > "$OUT/poly_s$s.json" 2>/dev/null
   h=$(sha256sum "$OUT/poly_s$s.json"|cut -d' ' -f1)
   printf "  fp16 D128 S%-5s  ir-sha=%s\n" "$s" "${h:0:16}"
   [ -z "$base" ] && base="$h"
   [ "$h" != "$base" ] && { echo "  -> DIFF: S$s IR differs from S2048!"; rc=1; }
 done
 # MHA vs GQA-8 (same head_size/dtype): bodies must match too.
-python3 -m ck_dsl.portable_ir.export_mha --dtype fp16 --head-size 128 --seqlen 2048 --num-heads 32 --gqa 1 --arch "$ARCH" > "$OUT/poly_mha.json" 2>/dev/null
-python3 -m ck_dsl.portable_ir.export_mha --dtype fp16 --head-size 128 --seqlen 2048 --num-heads 32 --gqa 8 --arch "$ARCH" > "$OUT/poly_gqa.json" 2>/dev/null
+python3 -m ck_dsl.portable_ir.examples.export_mha --dtype fp16 --head-size 128 --seqlen 2048 --num-heads 32 --gqa 1 --arch "$ARCH" > "$OUT/poly_mha.json" 2>/dev/null
+python3 -m ck_dsl.portable_ir.examples.export_mha --dtype fp16 --head-size 128 --seqlen 2048 --num-heads 32 --gqa 8 --arch "$ARCH" > "$OUT/poly_gqa.json" 2>/dev/null
 hm=$(sha256sum "$OUT/poly_mha.json"|cut -d' ' -f1); hg=$(sha256sum "$OUT/poly_gqa.json"|cut -d' ' -f1)
 printf "  fp16 D128 MHA    ir-sha=%s\n  fp16 D128 GQA8   ir-sha=%s\n" "${hm:0:16}" "${hg:0:16}"
 if [ "$base" = "$hm" ] && [ "$hm" = "$hg" ]; then

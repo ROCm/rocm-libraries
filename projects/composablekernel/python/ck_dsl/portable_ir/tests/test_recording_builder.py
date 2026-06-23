@@ -22,7 +22,7 @@ import unittest
 
 from ck_dsl.core.ir import F16, F32, I32, IRBuilder, PtrType
 from ck_dsl.core.ir_print import print_ir
-from ck_dsl.portable_ir.recording_builder import (
+from ck_dsl.portable_ir.src.recording_builder import (
     RecordingIRBuilder,
     kernel_to_recipe,
 )
@@ -230,7 +230,7 @@ def _production_cases():
     """Unmodified production builders + their defining module."""
     from ck_dsl.instances.common import attention_unified, elementwise
     from ck_dsl.instances.common import reduce as reduce_mod
-    from ck_dsl.portable_ir import export_mha
+    from ck_dsl.portable_ir.examples import export_mha
     return [
         ("attn2d_fp16_d128", attention_unified,
          lambda: export_mha.build("fp16", 128, 2048, 1, 32, 1)),
@@ -249,7 +249,7 @@ class TestRecordingProductionKernels(unittest.TestCase):
     assert the live recording matches the built KernelDef."""
 
     def test_records_production_kernels(self):
-        from ck_dsl.portable_ir.recording_builder import kernel_to_recipe, record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import kernel_to_recipe, record_kernel
         for name, module, build in _production_cases():
             with self.subTest(kernel=name):
                 kernel, recorded = record_kernel(build, module)
@@ -259,8 +259,8 @@ class TestRecordingProductionKernels(unittest.TestCase):
     def test_matches_legacy_recipe(self):
         """Recorder agrees with the byte-identity-proven kerneldef_to_recipe walk
         (for kernels without N-result ops -> identical JSON, hence identical HSACO)."""
-        from ck_dsl.portable_ir.kerneldef_to_recipe import kerneldef_to_recipe
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         for name, module, build in _production_cases():
             with self.subTest(kernel=name):
                 kernel, recorded = record_kernel(build, module)
@@ -275,7 +275,7 @@ class TestRecordCoverage(unittest.TestCase):
     def test_no_recorder_failures_across_surface(self):
         import os
 
-        from ck_dsl.portable_ir import record_coverage
+        from ck_dsl.portable_ir.drivers import record_coverage
 
         if not os.path.isdir(record_coverage._PARITY_DIR):
             self.skipTest("parity emitter dir not present")

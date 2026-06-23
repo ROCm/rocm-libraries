@@ -43,7 +43,7 @@ def build_multi_result(dtype: str = "i32"):
 
 
 def make_recipe() -> dict:
-    from ck_dsl.portable_ir.recording_builder import record_kernel
+    from ck_dsl.portable_ir.src.recording_builder import record_kernel
     _, recipe = record_kernel(lambda: build_multi_result("i32"))
     return recipe
 

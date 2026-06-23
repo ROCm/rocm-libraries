@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # run_online_bench.sh -- build a shared libckc + the comgr tool, then run the
-# online portable-IR compile-timeline benchmark (ck_dsl.portable_ir.bench_online).
+# online portable-IR compile-timeline benchmark (ck_dsl.portable_ir.drivers.bench_online).
 # Splits each compile into build / serialize / py_lower / c_build / c_lower /
 # comgr so the handoff cost is attributed against the (dominant) backend compile.
 set -u
@@ -27,4 +27,4 @@ else
 fi
 export CKC_LIB="$OUT/libckc.so" ARCH
 echo ""
-python3 -m ck_dsl.portable_ir.bench_online
+python3 -m ck_dsl.portable_ir.drivers.bench_online

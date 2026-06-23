@@ -56,7 +56,7 @@ for v in "${VARIANTS[@]}"; do
   label="$1"; dt="$2"; hd="$3"; gqa="$4"; s="$5"; b="$6"
   nkv=$(( 32 / gqa ))
   json="$OUT/${label}.ir.json"
-  python3 -m ck_dsl.portable_ir.export_mha --dtype "$dt" --head-size "$hd" --num-heads 32 --gqa "$gqa" \
+  python3 -m ck_dsl.portable_ir.examples.export_mha --dtype "$dt" --head-size "$hd" --num-heads 32 --gqa "$gqa" \
       --seqlen "$s" --batch "$b" --arch "$ARCH" > "$json" 2>"$OUT/${label}.err" || { echo "export FAIL $label"; cat "$OUT/${label}.err"; continue; }
   echo ""
   echo "== $label  ($dt D$hd  qh32/kv$nkv  B$b S$s) =="

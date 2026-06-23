@@ -24,8 +24,8 @@ import copy
 import json
 import sys
 
-from ck_dsl.portable_ir import export_mha
-from ck_dsl.portable_ir import kerneldef_to_recipe as k2r
+from ck_dsl.portable_ir.examples import export_mha
+from ck_dsl.portable_ir.src import kerneldef_to_recipe as k2r
 
 VEC = 8
 

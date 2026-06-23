@@ -31,8 +31,8 @@ cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lam
 
 # Recorder auto-emits the recipe from idiomatic authoring; compare size to the
 # hand-written recipe.
-python3 -m ck_dsl.portable_ir.recipe_recorder --emit recipe > "$OUT/recorded.recipe.json"
-python3 -m ck_dsl.portable_ir.mini_attn       --emit recipe > "$OUT/handwritten.recipe.json"
+python3 -m ck_dsl.portable_ir.src.recipe_recorder --emit recipe > "$OUT/recorded.recipe.json"
+python3 -m ck_dsl.portable_ir.examples.mini_attn       --emit recipe > "$OUT/handwritten.recipe.json"
 echo ""
 echo "recorded recipe:    $(wc -c < "$OUT/recorded.recipe.json") bytes  (auto-emitted from idiomatic authoring)"
 echo "hand-written recipe:$(wc -c < "$OUT/handwritten.recipe.json") bytes"
@@ -42,7 +42,7 @@ rc=0
 for U in 0 1; do
     "$OUT/recipe_run" "$OUT/recorded.recipe.json" --arch "$ARCH" --int "use_norm=$U" --str dtype=f32 \
         > "$OUT/vm_$U.ll" 2> "$OUT/vm_$U.err" || { echo "VM FAIL use_norm=$U: $(cat "$OUT/vm_$U.err")"; rc=1; continue; }
-    python3 -m ck_dsl.portable_ir.mini_attn --emit ll --use-norm "$U" --dtype f32 --arch "$ARCH" \
+    python3 -m ck_dsl.portable_ir.examples.mini_attn --emit ll --use-norm "$U" --dtype f32 --arch "$ARCH" \
         > "$OUT/ref_$U.ll" 2> "$OUT/ref_$U.err" || { echo "REF FAIL"; rc=1; continue; }
     "$OUT/comgr" "$OUT/vm_$U.ll" "$OUT/vm_$U.hsaco" "$ARCH" >/dev/null || { echo "comgr VM FAIL"; rc=1; continue; }
     "$OUT/comgr" "$OUT/ref_$U.ll" "$OUT/ref_$U.hsaco" "$ARCH" >/dev/null || { echo "comgr REF FAIL"; rc=1; continue; }

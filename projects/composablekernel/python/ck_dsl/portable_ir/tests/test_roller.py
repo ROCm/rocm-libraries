@@ -11,10 +11,10 @@
 import unittest
 
 from ck_dsl.core.ir import F32, IRBuilder, PtrType
-from ck_dsl.portable_ir import export_mha, qk_block
-from ck_dsl.portable_ir.kerneldef_to_recipe import kerneldef_to_recipe
-from ck_dsl.portable_ir.recipe_expand import equiv_reason, expand_recipe, recipes_equiv
-from ck_dsl.portable_ir.roll import roll
+from ck_dsl.portable_ir.examples import export_mha, qk_block
+from ck_dsl.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+from ck_dsl.portable_ir.utils.recipe_expand import equiv_reason, expand_recipe, recipes_equiv
+from ck_dsl.portable_ir.src.roll import roll
 
 
 # --------------------------------------------------------------------------
@@ -145,7 +145,7 @@ class TestRollGeneralization(unittest.TestCase):
                  holdout_points=[1, 5, 8, 16])
         self.assertTrue(r.ok, r.reason)
         # spot-check a held-out N expands correctly
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, con = record_kernel(lambda: build_multi(7))
         exp = expand_recipe(r.recipe, {"N": 7})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
@@ -155,7 +155,7 @@ class TestRollGeneralization(unittest.TestCase):
         r = roll(build_two_runs, axis="N", sample_points=[2, 3],
                  holdout_points=[1, 4, 7, 11])
         self.assertTrue(r.ok, r.reason)
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, con = record_kernel(lambda: build_two_runs(9))
         exp = expand_recipe(r.recipe, {"N": 9})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
@@ -167,7 +167,7 @@ class TestRollGeneralization(unittest.TestCase):
         r = roll(build_phased, axis="N", sample_points=[2, 3],
                  holdout_points=[1, 4, 5, 8])
         self.assertTrue(r.ok, r.reason)
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, con = record_kernel(lambda: build_phased(7))
         exp = expand_recipe(r.recipe, {"N": 7})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
@@ -260,7 +260,7 @@ class TestParametricFanExpander(unittest.TestCase):
     the representation the T4 auto-roller targets."""
 
     def test_fan_expands_across_lane_counts(self):
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, c2 = record_kernel(lambda: build_fan(2))
         pre = c2["program"][:6]
         param = _parametric_fan_recipe(
@@ -278,7 +278,7 @@ class TestParametricFanExpander(unittest.TestCase):
         r = roll(build_fan, axis="L", sample_points=[2, 3],
                  holdout_points=[1, 4, 5, 8, 16])
         self.assertTrue(r.ok, r.reason)
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, con = record_kernel(lambda: build_fan(9))
         exp = expand_recipe(r.recipe, {"L": 9})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
@@ -290,7 +290,7 @@ class TestParametricFanExpander(unittest.TestCase):
         r = roll(build_fan_simple, axis="L", sample_points=[2, 3],
                  holdout_points=[1, 4, 5, 8, 16])
         self.assertTrue(r.ok, r.reason)
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, con = record_kernel(lambda: build_fan_simple(11))
         exp = expand_recipe(r.recipe, {"L": 11})
         self.assertTrue(recipes_equiv(exp, con), equiv_reason(exp, con))
@@ -315,7 +315,7 @@ class TestRollGemmCShuffle(unittest.TestCase):
         r = roll(self._gemm, axis="TN", sample_points=[32, 64],
                  holdout_points=[128, 256], spec_decl=[{"name": "TN", "kind": "int"}])
         self.assertTrue(r.ok, r.reason)
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         for tn in (96, 192):                      # unsampled multiples
             _, con = record_kernel(lambda tn=tn: self._gemm(tn))
             exp = expand_recipe(r.recipe, {"TN": tn})
@@ -328,8 +328,8 @@ class TestLaneAnalysis(unittest.TestCase):
     matching bridges the store->LDS->load memory hop."""
 
     def test_gemm_lane_labels(self):
-        from ck_dsl.portable_ir import roller
-        from ck_dsl.portable_ir.recording_builder import record_kernel
+        from ck_dsl.portable_ir.src import roller
+        from ck_dsl.portable_ir.src.recording_builder import record_kernel
         _, rb = record_kernel(lambda: TestRollGemmCShuffle._gemm(64))
         sf = next(i for i in rb["program"] if i["op"] == "scf_for")
         body = sf["body"]
@@ -358,7 +358,7 @@ class TestRollCoverageTiers(unittest.TestCase):
     ok result is byte-equivalent and fallbacks are 'not compressed', never wrong."""
 
     def test_coverage_runs_and_t3_rolls(self):
-        from ck_dsl.portable_ir.roll_coverage import run_coverage
+        from ck_dsl.portable_ir.drivers.roll_coverage import run_coverage
         rows = {r["tier"]: r for r in run_coverage()}
         for tier in ("T1", "T2", "T3", "T4"):
             self.assertIn(tier, rows)

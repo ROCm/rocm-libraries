@@ -30,8 +30,8 @@ import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-from ck_dsl.portable_ir import online, recipe_bundle
-from ck_dsl.portable_ir.recording_builder import record_kernel
+from ck_dsl.portable_ir.src import online, recipe_bundle
+from ck_dsl.portable_ir.src.recording_builder import record_kernel
 
 ARCH = os.environ.get("ARCH", "gfx950")
 COMGR = os.environ.get("COMGR")
@@ -154,9 +154,9 @@ def _summary(rows: List[Dict[str, float]]) -> None:
 
 
 def main() -> int:
-    from ck_dsl.portable_ir import mini_attn, recipe_multi_result, recipe_toy
+    from ck_dsl.portable_ir.examples import mini_attn, recipe_multi_result, recipe_toy
     try:
-        from ck_dsl.portable_ir import export_mha
+        from ck_dsl.portable_ir.examples import export_mha
         big = [("attention_fp16_d128",
                 lambda: export_mha.build("fp16", 128, 2048, 1, 32, 1))]
     except Exception:  # noqa: BLE001

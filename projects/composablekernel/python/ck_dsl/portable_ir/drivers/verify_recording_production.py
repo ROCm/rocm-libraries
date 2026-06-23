@@ -17,12 +17,12 @@
 #
 # No device / comgr needed -- building production kernels is pure Python.
 #
-#   python3 -m ck_dsl.portable_ir.verify_recording_production
+#   python3 -m ck_dsl.portable_ir.drivers.verify_recording_production
 
 import sys
 
-from ck_dsl.portable_ir.kerneldef_to_recipe import kerneldef_to_recipe
-from ck_dsl.portable_ir.recording_builder import kernel_to_recipe, record_kernel
+from ck_dsl.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+from ck_dsl.portable_ir.src.recording_builder import kernel_to_recipe, record_kernel
 
 
 def _count(prog):
@@ -55,7 +55,7 @@ def _cases():
         reduce as reduce_mod,
         transpose,
     )
-    from ck_dsl.portable_ir import export_mha
+    from ck_dsl.portable_ir.examples import export_mha
 
     yield ("attn2d fp16 D128",
            attention_unified,

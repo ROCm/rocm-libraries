@@ -48,7 +48,7 @@ for v in "${VARIANTS[@]}"; do
   set -- $v
   dt="$1"; hd="$2"; gqa="$3"; label="$4"
   json="$OUT/${label}.ir.json"
-  python3 -m ck_dsl.portable_ir.export_mha --dtype "$dt" --head-size "$hd" --gqa "$gqa" --num-heads 32 \
+  python3 -m ck_dsl.portable_ir.examples.export_mha --dtype "$dt" --head-size "$hd" --gqa "$gqa" --num-heads 32 \
       --arch "$ARCH" > "$json" 2>"$OUT/${label}.err" || { echo "export FAIL $label"; cat "$OUT/${label}.err"; continue; }
   printf "%-22s " "$label"
   "$OUT/bench" "$json" "$ARCH" "$ITERS"

@@ -16,11 +16,11 @@
 #   T3 attention      : unified-attention 2D (the Section-3 kernel) over head_size
 #   T4 deep fused conv: deep_fused_conv_pool (conv0->conv1->pool) over pool tile
 #
-#   python3 -m ck_dsl.portable_ir.roll_coverage
+#   python3 -m ck_dsl.portable_ir.drivers.roll_coverage
 
 from typing import Any, Dict, List
 
-from ck_dsl.portable_ir.roll import roll, roll_report
+from ck_dsl.portable_ir.src.roll import roll, roll_report
 
 
 def _tiers():
@@ -28,7 +28,7 @@ def _tiers():
         build_deep_fused_conv_pool, make_deep_fused_conv_pool_spec)
     from ck_dsl.instances.common.gemm_universal import (
         DataSpec, TileSpec, TraitSpec, UniversalGemmSpec, build_universal_gemm)
-    from ck_dsl.portable_ir import export_mha, qk_block
+    from ck_dsl.portable_ir.examples import export_mha, qk_block
 
     def gemm_tn(tn):
         # CShuffle GEMM over tile_n: the mfma accumulator fan + CShuffle epilogue

@@ -13,7 +13,7 @@
 import math
 import unittest
 
-from ck_dsl.portable_ir.recipe_bundle import (
+from ck_dsl.portable_ir.src.recipe_bundle import (
     BUNDLE_SCHEMA,
     bundle_lookup,
     build_bundle,
@@ -91,8 +91,8 @@ class TestBundle(unittest.TestCase):
 
 class TestConcreteRecordBundle(unittest.TestCase):
     def test_record_concrete_bundle_roundtrip(self):
-        from ck_dsl.portable_ir import mini_attn
-        from ck_dsl.portable_ir.recipe_bundle import record_concrete_bundle
+        from ck_dsl.portable_ir.examples import mini_attn
+        from ck_dsl.portable_ir.src.recipe_bundle import record_concrete_bundle
         entries = record_concrete_bundle([
             (lambda: mini_attn.build_mini_attn(0, "f32"), "gfx950"),
             (lambda: mini_attn.build_mini_attn(1, "f32"), "gfx950"),

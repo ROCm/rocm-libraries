@@ -83,9 +83,46 @@ typedef struct
     char** owned; /* interned resolved register names (format-name substitution) */
     int n_owned, cap_owned;
 
+    /* Concrete recipes (recorder-produced, no rolling: every bind is a unique
+     * Python SSA name) opt into exact SSA naming: each created value is named
+     * "%<bind>" verbatim, so the lowerer (which emits value names verbatim)
+     * reproduces the Python .ll byte-for-byte -- not just an equivalent HSACO.
+     * Disabled for rolled/parametric recipes, where binds repeat across unrolled
+     * iterations and must stay fresh to avoid SSA name collisions. */
+    bool exact_names;
+
     char err[CKC_ERR_MSG_CAP];
     bool failed;
 } rvm_t;
+
+/* Under exact_names, give `v` the SSA name "%<bind>" (arena-owned), mirroring the
+ * portable-IR importer so the lowerer emits it verbatim. No-op otherwise. */
+static void rv_name(rvm_t* vm, ckc_value_t* v, const char* bind)
+{
+    if (!vm->exact_names || !v || !bind)
+        return;
+    char* nm = ckc_arena_printf(&vm->b->arena, "%%%s", bind);
+    if (nm)
+        v->name = nm;
+}
+
+/* Resolve an opcode name, applying portable-IR aliases. The Python builder names
+ * some vectorized fp16 buffer ops without the dtype suffix the engine's opcode
+ * registry uses ("tile.buffer_load_vN" vs "tile.buffer_load_vN_f16"); the op is
+ * otherwise identical, so normalize on the round-trip. Engine core unchanged. */
+static ckc_opcode_t rv_opcode_from_name(const char* name)
+{
+    if (!name)
+        return CKC_OP_INVALID;
+    ckc_opcode_t op = ckc_opcode_from_name(name);
+    if (op != CKC_OP_INVALID)
+        return op;
+    if (strcmp(name, "tile.buffer_load_vN") == 0)
+        return ckc_opcode_from_name("tile.buffer_load_vN_f16");
+    if (strcmp(name, "tile.buffer_store_vN") == 0)
+        return ckc_opcode_from_name("tile.buffer_store_vN_f16");
+    return CKC_OP_INVALID;
+}
 
 static void rv_fail(rvm_t* vm, const char* fmt, ...)
 {
@@ -514,17 +551,25 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     }
     if (strcmp(op, "const_i32") == 0) {
         ckc_value_t* v = ckc_b_const_i32(vm->b, rv_int(vm, ckc_jget(instr, "val")));
-        rv_reg_set(vm, rv_bind_name(vm, instr, "c"), v);
+        const char* b = rv_bind_name(vm, instr, "c");
+        rv_name(vm, v, b);
+        rv_reg_set(vm, b, v);
         return;
     }
     if (strcmp(op, "const_f32") == 0) {
         double d = 0;
         ckc_jnum(ckc_jget(instr, "fval"), &d);
-        rv_reg_set(vm, rv_bind_name(vm, instr, "c"), ckc_b_const_f32(vm->b, d));
+        ckc_value_t* v = ckc_b_const_f32(vm->b, d);
+        const char* b = rv_bind_name(vm, instr, "c");
+        rv_name(vm, v, b);
+        rv_reg_set(vm, b, v);
         return;
     }
     if (strcmp(op, "thread_id_x") == 0) {
-        rv_reg_set(vm, rv_bind_name(vm, instr, "tid"), ckc_b_thread_id_x(vm->b));
+        ckc_value_t* v = ckc_b_thread_id_x(vm->b);
+        const char* b = rv_bind_name(vm, instr, "tid");
+        rv_name(vm, v, b);
+        rv_reg_set(vm, b, v);
         return;
     }
     if (strcmp(op, "alias") == 0) {
@@ -614,15 +659,20 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
             free(results.a);
             return;
         }
+        rv_name(vm, f.iv, iv);
         rv_reg_set(vm, iv, f.iv);
-        for (int i = 0; i < n_iter; i++)
+        for (int i = 0; i < n_iter; i++) {
+            rv_name(vm, f.iter_vars[i], inames.a[i]);
             rv_reg_set(vm, inames.a[i], f.iter_vars[i]);
+        }
         ckc_b_region_enter(vm->b, f.body);
         rv_exec_list(vm, ckc_jget(instr, "body"));
         ckc_b_region_leave(vm->b);
         if (!vm->failed)
-            for (int i = 0; i < results.n && i < f.op->num_results; i++)
+            for (int i = 0; i < results.n && i < f.op->num_results; i++) {
+                rv_name(vm, f.op->results[i], results.a[i]);
                 rv_reg_set(vm, results.a[i], f.op->results[i]);
+            }
         free(ia);
         free(inames.a);
         free(iinits.a);
@@ -646,7 +696,7 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
     }
     if (strcmp(op, "emit") == 0) {
         const char* opcode_name = ckc_jstr(ckc_jget(instr, "opcode"));
-        ckc_opcode_t opcode = opcode_name ? ckc_opcode_from_name(opcode_name) : CKC_OP_INVALID;
+        ckc_opcode_t opcode = rv_opcode_from_name(opcode_name);
         if (opcode == CKC_OP_INVALID) {
             rv_fail(vm, "unknown opcode '%s'", opcode_name ? opcode_name : "?");
             return;
@@ -705,8 +755,10 @@ static void rv_exec_instr(rvm_t* vm, const jd_val_t* instr)
         if (n_res == 1 && built->num_results > 0
                 && strcmp(opcode_name, "tile.smem_alloc") == 0)
             built->results[0]->name = ckc_arena_printf(&vm->b->arena, "%%%s", binds[0]);
-        for (int i = 0; i < n_res && i < built->num_results; i++)
+        for (int i = 0; i < n_res && i < built->num_results; i++) {
+            rv_name(vm, built->results[i], binds[i]);
             rv_reg_set(vm, binds[i], built->results[i]);
+        }
         free(ops);
         free(innames.a);
         return;
@@ -790,6 +842,14 @@ static ckc_status_t rv_run_root(jd_val_t* root,
     vm.n_ints = n_ints;
     vm.strs = strs;
     vm.n_strs = n_strs;
+
+    /* Exact SSA naming for CONCRETE recipes only, detected by an empty "spec":
+     * with no spec there is no static_for/rolled-list expansion, so every bind is
+     * a unique (Python) SSA name and can be applied verbatim -> byte-identical
+     * .ll. Parametric recipes (non-empty spec) unroll and reuse binds across
+     * iterations, so they must keep fresh names to avoid SSA collisions. */
+    const jd_val_t* spec = ckc_jget(root, "spec");
+    vm.exact_names = !spec || spec->kind != JD_ARR || spec->arr_len == 0;
 
     char kname[256];
     const char* fmt = ckc_jstr(ckc_jget(root, "kernel_name_fmt"));

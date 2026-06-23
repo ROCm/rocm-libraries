@@ -33,10 +33,10 @@ fused prototype with per-arch variants under `instances/{common,gfx950,gfx1151,g
 for Python-authored kernels to be imported and lowered by the pure-C backend in
 CPython-free runtimes.
 
-`architecture/portable_ir_scaling_plan.md` plans scaling the portable-IR
-record+roll approach (record a built KernelDef, roll compile-time unrolls into a
-parametric recipe) across all 78 instance builders and the supported gfx
-architectures.
+`../../portable_ir/portable_ir_scaling_plan.md` (lives next to the code, in
+`ck_dsl/portable_ir/`) plans scaling the portable-IR record+roll approach (record
+a built KernelDef, roll compile-time unrolls into a parametric recipe) across all
+78 instance builders and the supported gfx architectures.
 
 ## Convolution Family
 

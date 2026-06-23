@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ck_dsl.portable_ir.recipe_expand import equiv_reason, expand_recipe, recipes_equiv
-from ck_dsl.portable_ir.recording_builder import kernel_to_recipe, record_kernel
-from ck_dsl.portable_ir.roller import roll_two
+from ck_dsl.portable_ir.utils.recipe_expand import equiv_reason, expand_recipe, recipes_equiv
+from ck_dsl.portable_ir.src.recording_builder import kernel_to_recipe, record_kernel
+from ck_dsl.portable_ir.src.roller import roll_two
 
 
 class RollResult:
@@ -100,7 +100,7 @@ def roll_report(result: RollResult) -> str:
 def _demo() -> int:
     """Roll two real kernels over head_size and report compression. Each roll
     is verified by the recipe_expand oracle at sampled AND held-out shapes."""
-    from ck_dsl.portable_ir import export_mha, qk_block
+    from ck_dsl.portable_ir.examples import export_mha, qk_block
 
     cases = [
         ("unified-attention-2d fp16",
