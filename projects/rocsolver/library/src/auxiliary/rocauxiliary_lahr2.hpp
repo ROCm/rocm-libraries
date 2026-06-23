@@ -49,11 +49,11 @@ template <int NB_X, typename T, typename U>
 ROCSOLVER_KERNEL void lahr2_computeW_kernel(const rocblas_int mm,
                                             const rocblas_int k,
                                             const rocblas_int c,
-                                            U AA,
+                                            U __restrict__ AA,
                                             const rocblas_int shiftA,
                                             const rocblas_int lda,
                                             const rocblas_stride strideA,
-                                            T* workA,
+                                            T* __restrict__ workA,
                                             const rocblas_stride strideblk)
 {
     rocblas_int bid = blockIdx.z;
@@ -134,19 +134,19 @@ template <typename T, typename U>
 ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
                                             const rocblas_int k,
                                             const rocblas_int c,
-                                            U AA,
+                                            U __restrict__ AA,
                                             const rocblas_int shiftA,
                                             const rocblas_int lda,
                                             const rocblas_stride strideA,
-                                            T* YA,
+                                            T* __restrict__ YA,
                                             const rocblas_int shiftY,
                                             const rocblas_int ldy,
                                             const rocblas_stride strideY,
-                                            T* FA,
+                                            T* __restrict__ FA,
                                             const rocblas_int shiftF,
                                             const rocblas_int ldf,
                                             const rocblas_stride strideF,
-                                            T* tauA,
+                                            T* __restrict__ tauA,
                                             const rocblas_stride strideT)
 {
     int bid = hipBlockIdx_z;
@@ -255,17 +255,17 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
 template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
 ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
     lahr2_trmv_oop_kernel(rocblas_int n,
-                          V alpha,
-                          U1 AA,
+                          V __restrict__ alpha,
+                          U1 __restrict__ AA,
                           const rocblas_int shiftA,
                           const rocblas_int lda,
                           const rocblas_stride strideA,
-                          U2 xx,
+                          U2 __restrict__ xx,
                           const rocblas_stride shiftX,
                           const rocblas_int incx,
                           const rocblas_stride strideX,
-                          V beta,
-                          U3 yy,
+                          V __restrict__ beta,
+                          U3 __restrict__ yy,
                           const rocblas_stride shiftY,
                           const rocblas_int incy,
                           const rocblas_stride strideY)
@@ -326,10 +326,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
 /*************************************************/
 template <int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
-                                                                      U FA,
+                                                                      U __restrict__ FA,
                                                                       const rocblas_stride shiftF,
                                                                       const rocblas_stride strideF,
-                                                                      T* tauA,
+                                                                      T* __restrict__ tauA,
                                                                       const rocblas_stride strideT)
 {
     const auto bid = blockIdx.z;
