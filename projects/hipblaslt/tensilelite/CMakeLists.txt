@@ -1,6 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+
+if(ENABLE_ASAN AND ENABLE_TSAN)
+    message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
+endif()
+
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
@@ -26,6 +33,29 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:TENSILE_USE_HIP>
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
+
+    if(ENABLE_ASAN)
+        # Apply sanitizer only to host code, not device code
+        # Use SHELL: to pass flags that should not be applied to device offload
+        target_compile_options(tensilelite-host PUBLIC
+            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=address>
+            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fno-omit-frame-pointer>
+        )
+        target_link_options(tensilelite-host PUBLIC
+            SHELL:-Xarch_host -fsanitize=address
+        )
+    endif()
+
+    if(ENABLE_TSAN)
+        # Apply sanitizer only to host code, not device code
+        # Use SHELL: to pass flags that should not be applied to device offload
+        target_compile_options(tensilelite-host PUBLIC
+            $<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fsanitize=thread>
+        )
+        target_link_options(tensilelite-host PUBLIC
+            SHELL:-Xarch_host -fsanitize=thread
+        )
+    endif()
 
     if(HIPBLASLT_ENABLE_YAML)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
