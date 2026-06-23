@@ -208,7 +208,6 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
     extern __shared__ double smem[]; //min size should be threadsr x threadsc
     T* acs = reinterpret_cast<T*>(smem);
     T ac;
-    T sx1, sx2;
 
     for(int ii = 0; ii < rpgr; ++ii)
     {
@@ -421,8 +420,8 @@ rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
 
     // 2. invalid size
     // n=0 or n=1: quick return, not an error
-    if(n < 0 || k < 1 || nb < 1 || (n > 1 && (k >= n || nb > n - k)) || lda < std::max(1, n)
-       || ldf < nb || ldy < std::max(1, n) || batch_count < 0)
+    if(n < 0 || k < 1 || nb < 0 || (n > 1 && (nb < 1 || k >= n || nb > n - k))
+       || lda < std::max(1, n) || ldf < nb || ldy < std::max(1, n) || batch_count < 0)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size

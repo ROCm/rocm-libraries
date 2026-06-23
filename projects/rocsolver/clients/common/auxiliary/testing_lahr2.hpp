@@ -303,7 +303,7 @@ void testing_lahr2(Arguments& argus)
     size_t size_YRes = (argus.unit_check || argus.norm_check) ? size_Y : 0;
 
     // check invalid sizes (n<=1 is quick return, not invalid)
-    bool invalid_size = (n < 0 || k < 1 || nb < 1 || (n > 1 && (k >= n || nb > n - k))
+    bool invalid_size = (n < 0 || k < 1 || nb < 0 || (n > 1 && (nb < 1 || k >= n || nb > n - k))
                          || lda < std::max(1, n) || ldt < nb || ldy < std::max(1, n));
     if(invalid_size)
     {
