@@ -144,11 +144,14 @@ TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
     EXPECT_EQ(result.front().testName, "Small");
 }
 
-TEST_F(TestBundleDiscoveryFixture, JsonAtRootThrows)
+TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
-    // A .json directly at the data root has no folder to form a suite -> throw.
+    // A .json directly at the data root uses the root folder name as suite.
     std::ofstream(_tempDir / "graph.json") << R"({"tensors": []})";
-    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0].suiteName, sanitizeForGtest(_tempDir.filename().string()));
+    EXPECT_EQ(result[0].testName, "graph");
 }
 
 TEST_F(TestBundleDiscoveryFixture, EmptyLeafFolderWarnsAndSkips)
