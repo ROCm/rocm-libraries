@@ -52,6 +52,7 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRaggedTensorDescriptorLowering.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp

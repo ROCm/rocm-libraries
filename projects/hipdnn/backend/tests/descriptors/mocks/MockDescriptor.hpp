@@ -121,6 +121,18 @@ public:
 class MockGraphDescriptor : public GraphDescriptor
 {
 public:
+    MockGraphDescriptor()
+    {
+        // By default, delegate isRaggedTensorEnabled() to the real base-class
+        // accessor so tests that inject the flag through setAttribute (i.e. the
+        // genuine GraphDescriptor storage) observe the value they set without
+        // programming an expectation. Tests that want to exercise the flag in
+        // isolation can still override this with EXPECT_CALL / ON_CALL.
+        ON_CALL(*this, isRaggedTensorEnabled()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::isRaggedTensorEnabled();
+        }));
+    }
+
     MOCK_METHOD(void, finalize, (), (override));
     MOCK_METHOD(bool, isFinalized, (), (const, override));
     MOCK_METHOD(void,
@@ -142,8 +154,7 @@ public:
     MOCK_METHOD(hipdnnHandle_t, getHandle, (), (const, override));
     MOCK_METHOD(hipdnnPluginConstData_t, getSerializedGraph, (), (const, override));
     MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
-    // isRaggedTensorEnabled() is NOT mocked — the base class returns _isRaggedTensorEnabled
-    // (default false), so existing tests get false without any expectation setup.
+    MOCK_METHOD(bool, isRaggedTensorEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()
     {

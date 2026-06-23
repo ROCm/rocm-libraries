@@ -28,7 +28,9 @@
 #include "plugins/mocks/MockEnginePlugin.hpp"
 #include "plugins/mocks/MockEnginePluginManager.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/engine_api_version.h>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
@@ -2595,3 +2597,99 @@ TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionCon
     ASSERT_EQ(engineIds.size(), 1u);
     EXPECT_EQ(engineIds[0], 100);
 }
+
+// =============================================================================
+// Ragged-tensor applicability filter (mock-based matrix).
+//
+// Mirrors the override-dispatch matrix (RoutesOrRejectsOverrideDispatch): drives
+// the version-gating logic in getApplicableEngineIds() in isolation by mocking
+// GraphDescriptor::isRaggedTensorEnabled() directly, rather than injecting the
+// flag through the real setAttribute storage (covered by the standalone tests
+// above and by TestGraphDescriptor). A graph reporting ragged tensors requires a
+// plugin advertising at least K_RAGGED_TENSOR_MIN_API_VERSION; otherwise the
+// baseline applies.
+// =============================================================================
+namespace
+{
+
+struct RaggedApplicabilityCase
+{
+    const char* name;
+    bool raggedEnabled;
+    std::string_view apiVersion;
+    std::vector<int64_t> expectedEngineIds; // empty => plugin excluded
+};
+
+} // namespace
+
+class TestEnginePluginResourceManagerRaggedApplicabilityMatrix
+    : public ::testing::TestWithParam<RaggedApplicabilityCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerRaggedApplicabilityMatrix, RoutesOrRejectsRaggedApplicability)
+{
+    const auto& testCase = GetParam();
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MockPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(testCase.apiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    // The override-shape flag is read first (via getAttribute); keep it off so
+    // only the ragged-tensor gate decides applicability.
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, isRaggedTensorEnabled())
+        .WillRepeatedly(::testing::Return(testCase.raggedEnabled));
+
+    if(!testCase.expectedEngineIds.empty())
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+            .WillOnce(::testing::Return(testCase.expectedEngineIds));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+    }
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_EQ(engineIds, testCase.expectedEngineIds);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RaggedApplicability,
+    TestEnginePluginResourceManagerRaggedApplicabilityMatrix,
+    ::testing::Values(
+        RaggedApplicabilityCase{"BaselineExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {}},
+        RaggedApplicabilityCase{"OverrideMinExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {}},
+        RaggedApplicabilityCase{"RaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100}},
+        RaggedApplicabilityCase{"AboveRaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                std::string_view{"1.3.0"},
+                                {100}},
+        RaggedApplicabilityCase{"BaselineIncludedForNonRaggedGraph",
+                                /*raggedEnabled=*/false,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {100}}),
+    [](const auto& info) { return std::string(info.param.name); });

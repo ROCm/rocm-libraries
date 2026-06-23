@@ -89,8 +89,11 @@ public:
 }
 
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
-// fixture methods and by standalone helper functions.
-static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
+// fixture methods and by standalone helper functions. When @p withRaggedOffset is
+// true, the primary input tensor is given a ragged-offset aux tensor so the graph
+// auto-detects as ragged-tensor enabled.
+static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
+                                                                   bool withRaggedOffset = false)
 {
     graph.set_name("TestGraph")
         .set_compute_data_type(DataType::FLOAT)
@@ -103,6 +106,17 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8})
         .set_data_type(DataType::FLOAT);
+
+    if(withRaggedOffset)
+    {
+        auto raggedOffset = std::make_shared<TensorAttributes>();
+        raggedOffset->set_uid(10)
+            .set_name("RaggedOffset")
+            .set_dim({2, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_data_type(DataType::INT64);
+        x->set_ragged_offset(raggedOffset);
+    }
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
@@ -181,6 +195,55 @@ protected:
         _mockBackend.reset();
     }
 };
+
+// Frontend -> schema propagation of the ragged-tensor flag (RFC 0014). When a
+// tensor carries a ragged offset, build_operation_graph() must auto-detect this
+// and set HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT to true on the
+// backend graph descriptor.
+TEST_F(TestGraph, BuildPropagatesRaggedTensorFlagTrueToBackend)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph, /*withRaggedOffset=*/true);
+
+    // Catch-all so the many unrelated setAttribute calls (tensors, ops, other
+    // graph attributes) remain satisfied; the specific expectation below is
+    // matched first (gMock evaluates expectations in reverse order of creation).
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_,
+                                    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    pointsToScalar(true)))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+}
+
+// A graph with no ragged tensors must propagate the flag as false, so engine
+// plugins are not spuriously gated on ragged-tensor support.
+TEST_F(TestGraph, BuildPropagatesRaggedTensorFlagFalseForNonRaggedGraph)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph, /*withRaggedOffset=*/false);
+
+    // Catch-all so unrelated setAttribute calls remain satisfied; the specific
+    // expectation below is matched first (gMock evaluates in reverse order).
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_,
+                                    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    pointsToScalar(false)))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+}
 
 TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
 {

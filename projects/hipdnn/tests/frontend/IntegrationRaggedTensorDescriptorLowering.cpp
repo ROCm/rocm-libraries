@@ -1,0 +1,107 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <memory>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
+using hipdnn_tests::toVec;
+using namespace hipdnn_tests::constants;
+
+namespace
+{
+
+// UID for the auxiliary ragged-offset tensor; distinct from the primary
+// pointwise tensor UIDs.
+constexpr int64_t K_RAGGED_OFFSET_UID = 1399;
+
+// End-to-end lowering of the ragged-tensor flag (RFC 0014): builds a frontend
+// graph, lowers it through the REAL backend via
+// build_operation_graph_via_descriptors(), retrieves the serialized binary
+// graph, and deserializes the flatbuffer schema to assert
+// `is_ragged_tensor_enabled` was actually written into the wire image — not just
+// that the frontend issued the corresponding backend setAttribute call.
+class IntegrationRaggedTensorDescriptorLowering : public IntegrationTestFixture
+{
+protected:
+    // Builds a minimal unary pointwise (RELU) graph. When @p withRaggedOffset is
+    // true, the input tensor is given a ragged-offset aux tensor so the graph
+    // auto-detects as ragged-tensor enabled.
+    static std::shared_ptr<TestableGraphLowering> makePointwiseGraph(bool withRaggedOffset)
+    {
+        auto graph = std::make_shared<TestableGraphLowering>();
+        graph->set_name("RaggedLoweringGraph")
+            .set_io_data_type(DataType::FLOAT)
+            .set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT);
+
+        auto in0 = std::make_shared<TensorAttributes>();
+        in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+        in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
+
+        if(withRaggedOffset)
+        {
+            auto raggedOffset = std::make_shared<TensorAttributes>();
+            raggedOffset->set_uid(K_RAGGED_OFFSET_UID)
+                .set_name("RaggedOffset")
+                .set_data_type(DataType::INT64)
+                .set_dim({2, 1, 1, 1})
+                .set_stride({1, 1, 1, 1});
+            in0->set_ragged_offset(raggedOffset);
+        }
+
+        PointwiseAttributes pwAttrs;
+        pwAttrs.set_name("relu_op");
+        pwAttrs.set_mode(PointwiseMode::RELU_FWD);
+
+        auto out0 = graph->pointwise(in0, pwAttrs);
+        out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+
+        return graph;
+    }
+};
+
+} // namespace
+
+// A graph whose input carries a ragged offset must serialize with
+// is_ragged_tensor_enabled = true in the flatbuffer schema.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsSchemaFlagTrue)
+{
+    auto graph = makePointwiseGraph(/*withRaggedOffset=*/true);
+
+    auto graphT = lowerAndDeserialize(*graph, _handle);
+
+    // Sanity: lowering produced a well-formed graph (in0, out0).
+    ASSERT_EQ(graphT.tensors.size(), 2u);
+    EXPECT_TRUE(graphT.is_ragged_tensor_enabled)
+        << "is_ragged_tensor_enabled must be true in the serialized schema when a "
+           "tensor carries a ragged offset.";
+}
+
+// A graph with no ragged offsets must serialize with
+// is_ragged_tensor_enabled = false (the wire default), so engine plugins are not
+// spuriously gated on ragged-tensor support.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphSetsSchemaFlagFalse)
+{
+    auto graph = makePointwiseGraph(/*withRaggedOffset=*/false);
+
+    auto graphT = lowerAndDeserialize(*graph, _handle);
+
+    ASSERT_EQ(graphT.tensors.size(), 2u);
+    EXPECT_FALSE(graphT.is_ragged_tensor_enabled)
+        << "is_ragged_tensor_enabled must be false in the serialized schema for a "
+           "graph without ragged tensors.";
+}
