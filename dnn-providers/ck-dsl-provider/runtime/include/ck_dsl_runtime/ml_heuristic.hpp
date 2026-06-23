@@ -8,13 +8,15 @@
 //   GEMM     — 72 features (byte-identical to CK Tile feature_spec.json;
 //               the CK Tile gemm_universal_fp16_gfx950 model is reusable)
 //   FMHA     — 68 features
-//   Conv-fwd — 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950})
+//   Conv-fwd — full superset extracted; model subset selected via feature_spec.json
 #pragma once
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -382,7 +384,6 @@ inline std::array<double, CKDSL_FMHA_NUM_FEATURES> ml_extract_fmha_features(
 }
 
 // ---- Conv ML features, mirroring ConvImplicitGemmScorer.cpp ----
-// 101 features (grouped_conv_forward_fp16_{gfx90a,gfx942,gfx950}).
 
 struct ConvHwProfile {
     int num_cus = 304, simds_per_cu = 4, shader_engines = 38, max_clock_mhz = 2400,
@@ -432,8 +433,6 @@ struct ConvHwProfile {
     }
 };
 
-static constexpr int CKDSL_CONV_NUM_FEATURES = 101;
-
 inline int conv_encode_pipeline(const std::string& p) {
     if (p == "compv3") return 0;
     if (p == "compv4") return 1;
@@ -451,13 +450,13 @@ inline double conv_dtype_bytes(const std::string& dt) {
     return 2.0;
 }
 
-// Direct C++ mirror of GroupedConvFeatureEngine.extract() (2D conv, 101 features).
-// Feature order matches feature_spec.json for grouped_conv_forward_fp16_gfx90a,
-// grouped_conv_forward_fp16_gfx942, and grouped_conv_forward_2d3d_suffix_bf16_gfx950.
+// Direct C++ mirror of GroupedConvFeatureEngine.extract(). Computes the full superset
+// of derived features from raw problem and kernel knobs. The caller projects down to
+// the model-specific subset using indices from feature_spec.json.
 // k.tile_k (== manifest block_k) is gemm_k_per_block — the tile size along the K
 // reduction dimension (32/64/128). k.threads_per_block is the thread block size (~256)
 // and is used only for num_warps; it must NOT be used as a tile_k proxy.
-inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
+inline std::vector<double> ml_extract_conv_features(
     const Problem& prob, const MlKernelConfig& k, const ConvHwProfile& hw) {
     const int N = (int)prob.conv_N;
     const int C = (int)prob.conv_C;
@@ -570,8 +569,15 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
                  psk = (gemm_k < tile_k) ? 1.0 : 0.0;
     const double log_gemm_m_n_ratio = std::log(std::max(gemm_m, 1.0) / std::max(gemm_n, 1.0));
     const double log_total_output_tiles = std::log(std::max(tot_tiles, 1.0));
+    const double log_num_tiles_m = std::log(std::max(ntm, 1.0));
+    const double is_mem_x_log_num_tiles_m = is_mem * log_num_tiles_m;
 
-    return {{
+    const double log_gemm_m_raw = std::log(std::max(gemm_m, 1.0));
+    const double gemm_m_lt_num_cus = (gemm_m < hw.num_cus) ? 1.0 : 0.0;
+    const double log_gemm_m_over_num_cus = std::log(std::max(gemm_m, 1.0) / std::max((double)hw.num_cus, 1.0));
+    const double is_mem_x_log_gemm_m_raw = is_mem * log_gemm_m_raw;
+
+    return {
         // Problem (30)
         (double)N, (double)C, (double)K, (double)G,
         (double)Hi, (double)Wi, (double)Y, (double)X,
@@ -601,14 +607,35 @@ inline std::array<double, CKDSL_CONV_NUM_FEATURES> ml_extract_conv_features(
         ntm, ntn, ntk, tot_tiles,
         te_m, te_n, te_k, overall_eff, cu_util,
         rm, rn, rk, psm, psn, psk,
-        log_gemm_m_n_ratio, log_total_output_tiles,
+        log_gemm_m_n_ratio, log_total_output_tiles, log_num_tiles_m, is_mem_x_log_num_tiles_m,
+        log_gemm_m_raw, gemm_m_lt_num_cus, log_gemm_m_over_num_cus, is_mem_x_log_gemm_m_raw,
         // Hardware (12)
         (double)hw.num_cus, (double)hw.simds_per_cu, (double)hw.total_simds(),
         (double)hw.shader_engines, (double)hw.max_clock_mhz, (double)hw.max_waves_per_cu,
         (double)hw.wavefront_size, (double)hw.lds_capacity,
         (double)hw.l1_cache_kb, (double)hw.l2_cache_kb, (double)hw.l3_cache_kb,
         (double)hw.num_xcd,
-    }};
+    };
+}
+
+// Read feature_indices from feature_spec.json — the positions of each model feature
+// in the ml_extract_conv_features() superset array.
+// Returns an empty vector if the file is missing or lacks the feature_indices key.
+inline std::vector<int> load_conv_feature_indices(const std::string& spec_path) {
+    std::ifstream f(spec_path);
+    if (!f.is_open()) return {};
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    try {
+        auto doc = json::parse(ss.str());
+        if (!doc.has("feature_indices")) return {};
+        std::vector<int> idx;
+        for (const auto& v : doc.at("feature_indices").as_array())
+            idx.push_back((int)v.as_int());
+        return idx;
+    } catch (...) {
+        return {};
+    }
 }
 
 // Trained-model heuristic: a Dispatcher::HeuristicFn that reorders the supported
@@ -620,7 +647,9 @@ class DslMlHeuristic {
     DslMlHeuristic(const std::string& model_dir, const ArtifactStore* store) : store_(store) {
         gemm_booster_ = load(model_dir + "/gemm/model_tflops.lgbm");
         fmha_booster_ = load(model_dir + "/fmha/model_tflops.lgbm");
-        conv_booster_ = load(model_dir + "/conv/model_tflops.lgbm");
+        const std::string conv_dir = model_dir + "/conv";
+        conv_booster_ = load(conv_dir + "/model_tflops.lgbm");
+        conv_booster_indices_ = load_conv_feature_indices(conv_dir + "/feature_spec.json");
     }
     ~DslMlHeuristic() {
         if (gemm_booster_) LGBM_BoosterFree(gemm_booster_);
@@ -643,7 +672,8 @@ class DslMlHeuristic {
     }
 
     // Predict TFLOPS for one candidate, dispatching by op.
-    // Conv: dedicated 101-feature conv model when loaded, else GEMM approximation.
+    // Conv: dedicated conv model projected to its feature_spec.json subset when loaded,
+    // else GEMM approximation.
     double predict_tflops(const Problem& prob, const Manifest& m) const {
         if (prob.op == "attention") {
             if (!fmha_booster_) return 0;
@@ -652,8 +682,11 @@ class DslMlHeuristic {
         }
         if (prob.op == "conv" && conv_booster_) {
             const ConvHwProfile chw = ConvHwProfile::for_arch(prob.arch);
-            auto f = ml_extract_conv_features(prob, MlKernelConfig::from_manifest(m), chw);
-            return predict(conv_booster_, f.data(), CKDSL_CONV_NUM_FEATURES);
+            auto all = ml_extract_conv_features(prob, MlKernelConfig::from_manifest(m), chw);
+            std::vector<double> f(conv_booster_indices_.size());
+            for (size_t i = 0; i < conv_booster_indices_.size(); ++i)
+                f[i] = all[conv_booster_indices_[i]];
+            return predict(conv_booster_, f.data(), (int)f.size());
         }
         if (!gemm_booster_) return 0;
         // GEMM approximation for conv when no conv model is loaded.
@@ -708,6 +741,7 @@ class DslMlHeuristic {
     void* gemm_booster_ = nullptr;
     void* fmha_booster_ = nullptr;
     void* conv_booster_ = nullptr;
+    std::vector<int> conv_booster_indices_;
     HardwareProfile ghw_;
     FmhaHardwareProfile fhw_;
 };
