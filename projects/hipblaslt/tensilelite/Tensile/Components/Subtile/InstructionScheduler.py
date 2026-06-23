@@ -187,7 +187,9 @@ class _SlotPlacer:
 # ── Scheduling rules ──
 
 # Hardcoded gap to hide ds_read latency. TODO: compute this more accurately.
-_MIN_MFMA_GAP_DS_READ_TO_WAIT = 4
+# gfx1250 needs a larger gap (8); other archs use 4.
+_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT = 4
+_MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250 = 8
 
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
@@ -206,12 +208,13 @@ class _SchedulingRules:
     Bound methods are passed as callbacks to _SlotPlacer.
     """
 
-    def __init__(self, totalSlots: int):
+    def __init__(self, totalSlots: int, minGapDsReadToWait: int = _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
         # Cross-path state
         self.lastDsReadPos = -1
         self.earliestWaitCntPos = totalSlots
         self.waitGrBarrierPos: Optional[int] = None
         self.maxDsReadAfterWaitGr = -1
+        self.minGap = minGapDsReadToWait
         # Per-path state
         self._resetPath()
 
@@ -235,14 +238,14 @@ class _SchedulingRules:
         """Reject ds_read too close to an already-placed waitcnt ahead."""
         if not _isDsRead(inst):
             return True
-        gap = _MIN_MFMA_GAP_DS_READ_TO_WAIT * 2
+        gap = self.minGap * 2
         return self.earliestWaitCntPos - pos >= gap
 
     def minGapDsReadToWait(self, placer, pos, inst):
         """Reject waitcnt too close to the last placed ds_read."""
         if not _isWaitCnt(inst) or self.lastDsReadPos < 0:
             return True
-        gap = _MIN_MFMA_GAP_DS_READ_TO_WAIT * 2
+        gap = self.minGap * 2
         return pos - self.lastDsReadPos >= gap
 
     def noM0WithBufferLoad(self, placer, pos, inst):
@@ -449,7 +452,8 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
     return mfmaIdx, regularPaths, preMfmaPaths
 
 
-def instructionSchedule(emittedModules, multiDU: bool = False):
+def instructionSchedule(emittedModules, multiDU: bool = False,
+                      minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -499,7 +503,8 @@ def instructionSchedule(emittedModules, multiDU: bool = False):
         return result
 
     paths = _classifyPaths(pathOrders, emittedModules)
-    rules = _SchedulingRules(totalSlots=(len(mfmas) - 1) * 2)
+    rules = _SchedulingRules(totalSlots=(len(mfmas) - 1) * 2,
+                             minGapDsReadToWait=minGapDsReadToWait)
     base_validators = [rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait,
                        rules.minGapDsReadToWait, rules.noM0WithBufferLoad]
     base_adjusters = [rules.spreadBufferLoads]

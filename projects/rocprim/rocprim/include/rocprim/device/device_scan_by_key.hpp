@@ -41,12 +41,7 @@
 #include <iostream>
 #include <iterator>
 
-/// \addtogroup devicemodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -360,7 +355,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
 } // namespace detail
 
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+/// \addtogroup devicemodule
+/// @{
 
 /// \brief Parallel inclusive scan-by-key primitive for device level.
 ///
@@ -764,9 +760,9 @@ inline hipError_t deterministic_exclusive_scan_by_key(void* const               
                                              debug_synchronous);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group devicemodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_

@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -58,7 +58,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
@@ -123,7 +123,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0,1]
+        - DirectToVgprSparseMetadata: [false, true]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
@@ -193,7 +193,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0,1]
+        - DirectToVgprSparseMetadata: [false, true]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
@@ -264,7 +264,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
@@ -334,7 +334,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]

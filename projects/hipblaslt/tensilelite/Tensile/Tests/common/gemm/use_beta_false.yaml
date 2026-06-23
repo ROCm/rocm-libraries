@@ -20,7 +20,7 @@ GlobalParameters:
   NumBenchmarks: 1
   PrintSolutionRejectionReason: True
   LibraryFormat: yaml
-  BoundsCheck: True
+  BoundsCheck: 1
 
 BenchmarkProblems:
   ########################################

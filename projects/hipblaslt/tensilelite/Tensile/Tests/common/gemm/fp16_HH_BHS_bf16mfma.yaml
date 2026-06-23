@@ -9,8 +9,8 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
 
 BenchmarkProblems:
@@ -173,7 +173,7 @@ BenchmarkProblems:
         - DepthU: [32,64]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -181,9 +181,9 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - PreloadKernArgs: [0, 1]
+        - PreloadKernArgs: [false, true]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
