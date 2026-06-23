@@ -52,14 +52,16 @@ static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
 // status enum is available without the C entry points — this lets
 // `detail/status_translation.h` be self-contained.
 
-// NOTE: This stub intentionally declares only the C-API types the *implemented*
-// entry points use — `cudnnHandle_t` and `cudnnStatus_t`. The remaining v9
-// C-API enums named in RFC 0012 §4.7 (`cudnnDataType_t`, `cudnnTensorFormat_t`,
+// NOTE: This stub intentionally declares only the C-API types the v9 graph API
+// actually references — `cudnnHandle_t` and `cudnnStatus_t`. The other C-API
+// enums named in RFC 0012 §4.7 (`cudnnDataType_t`, `cudnnTensorFormat_t`,
 // `cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
 // `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
-// `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`) land with the
-// type-mapping work, where their values/aliasing are verified against upstream
-// rather than stubbed here.
+// `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`) are deliberately
+// NOT declared: no public v9 graph signature names them. The v9 surface uses the
+// FE-namespace enums (`cudnn_frontend::DataType_t`, …) — which the shim *aliases*
+// to the hipDNN types (see `cudnn_frontend_utils.h`), not these C-API enums.
+// They will be added only if a future consumer surface actually references one.
 
 // Status translation between the cuDNN and hipDNN enum families. Included after
 // the C-API types above (it needs cudnnStatus_t) and before the entry points
