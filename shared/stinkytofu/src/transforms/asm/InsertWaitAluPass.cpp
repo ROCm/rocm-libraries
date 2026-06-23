@@ -816,8 +816,8 @@ class InsertWaitAluPassImpl : public Pass {
             if (!bb.getSuccessors().empty()) continue;
             StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
-                const bool tailExits =
-                    isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                const bool tailExits = isBranch(*tail) || isCall(*tail) ||
+                                       tail->getUnifiedOpcode() == GFX::s_setpc_b64;
                 work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
                 bbsWithExitDisable.insert(&bb);
                 continue;
@@ -867,7 +867,7 @@ class InsertWaitAluPassImpl : public Pass {
             if (!exitSucc) continue;
             if (coveredAtLabel.count(exitSucc)) continue;
             const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                isBranch(*tail) || isCall(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
             work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
             bbsWithExitDisable.insert(&bb);
         }

@@ -457,9 +457,14 @@ inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
-// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+/// True for register-target branches and terminators (IF_Branch), not for calls.
 inline bool isCall(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
+    return inst.is(InstFlag::IF_Call);
+}
+
+/// Any intra-function control effect that is not ordinary dataflow: branches or calls.
+inline bool isControlTransfer(const StinkyInstruction& inst) {
+    return isBranch(inst) || isCall(inst);
 }
 
 /// Possible callee entry labels for a call site (`s_swappc_b64` with optional
@@ -482,8 +487,7 @@ inline std::vector<std::string> getCallTargets(const StinkyInstruction& inst) {
 //   - Not a branch → {}
 //   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
 //   - IF_IndirectBranch without LabelData → {}
-//   - `CallTargetData` on `s_swappc_b64` is intentionally ignored here; those
-//     names are possible callees, not definite CFG successors. Use getCallTargets().
+//   - Calls (`IF_Call`, e.g. `s_swappc_b64`) are not branches; use getCallTargets().
 //   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
 //   - Otherwise → {}
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
@@ -569,6 +573,8 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     // Control flow
     if (isBranch(inst)) return true;
 
+    if (isCall(inst)) return true;
+
     // Barriers and synchronization
     if (isBarrier(inst)) return true;
 
@@ -595,7 +601,8 @@ inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
 /// scheduler has no dependency edges to prove reordering is safe.
 inline bool hasSideEffect(const StinkyInstruction& inst) {
     if (!inst.getHwInstDesc()) return false;
-    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
+    if (isGlobalMemStore(inst) || isBranch(inst) || isCall(inst) || isWaitCnt(inst) ||
+        isHasSideEffect(inst))
         return true;
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
         !hasLdsPseudoRegs(inst))

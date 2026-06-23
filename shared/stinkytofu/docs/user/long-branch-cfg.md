@@ -1,6 +1,6 @@
 # Long-Branch CFG Construction
 
-This document describes how StinkyTofu builds correct Control-Flow Graphs (CFGs) for AMDGPU kernels that use the **`s_setpc_b64` long-branch idiom** (runtime PC fixup to a distant label). **`s_swappc_b64`** shares `IF_IndirectBranch` but is used for function-style dispatch.
+This document describes how StinkyTofu builds correct Control-Flow Graphs (CFGs) for AMDGPU kernels that use the **`s_setpc_b64` long-branch idiom** (runtime PC fixup to a distant label). **`s_swappc_b64`** is a **call** (`IF_Call`): it does not use `IF_Branch` / `IF_IndirectBranch` for CFG purposes; use `getCallTargets()` / `CallTargetData` for callee metadata, and expect normal **fall-through** in the caller CFG after the call site.
 
 ## Why this matters
 
@@ -67,11 +67,11 @@ adds a successor edge `bb_before → label_PrefetchEnd`. Without `mod.label`, th
 
 ## Branch vocabulary
 
-"Branch vocabulary" is the small set of flags, modifiers, and helper predicates that the CFG builder and every branch-aware pass agree to speak in. Adding it does not, by itself, change any CFG: it gives producers (the converter, `LongBranchLoweringPass`) a uniform place to record **`LabelData` on `s_setpc_b64`** for long branches, and gives consumers a single API (`isBranch` / `isIndirectBranch` / `getBranchTargets`) to read it back.
+"Branch vocabulary" is the small set of flags, modifiers, and helper predicates that the CFG builder and every branch-aware pass agree to speak in. Adding it does not, by itself, change any CFG: it gives producers (the converter, `LongBranchLoweringPass`) a uniform place to record **`LabelData` on `s_setpc_b64`** for long branches, and gives consumers a single API (`isBranch` / `isIndirectBranch` / `getBranchTargets`) to read it back. **Calls** (`IF_Call`, e.g. `s_swappc_b64`) use `isCall()` / `getCallTargets()` instead and are not wired as CFG branch edges.
 
 ### Instruction flags (`InstFlag`)
 
-`IF_IndirectBranch` in `include/stinkytofu/hardware/Flags.def` marks branches whose target PC comes from a register (`s_setpc_b64`, `s_swappc_b64`). It is always set together with `IF_Branch`.
+`IF_IndirectBranch` in `include/stinkytofu/hardware/Flags.def` marks **branches** whose target PC comes from a register (today: `s_setpc_b64`). It is always set together with `IF_Branch`. **`IF_Call`** marks call-like sites such as `s_swappc_b64` (LLVM AMDGPU `isCall`); it is not combined with `IF_Branch` for CFG.
 
 ### Branch helpers (`StinkyAsmIR.hpp`)
 
@@ -79,10 +79,11 @@ adds a successor edge `bb_before → label_PrefetchEnd`. Without `mod.label`, th
 
 | Helper | Returns true for |
 |--------|------------------|
-| `isBranch(inst)` | Any branch (direct, conditional, indirect). |
+| `isBranch(inst)` | Any branch (direct, conditional, indirect). **Not** `s_swappc_b64` (`IF_Call`). |
+| `isCall(inst)` | `IF_Call` (e.g. `s_swappc_b64`). |
 | `isConditionalBranch(inst)` | `s_cbranch_*` family. |
 | `isUnconditionalBranch(inst)` | `isBranch && !isConditionalBranch`. |
-| `isIndirectBranch(inst)` | `IF_IndirectBranch` set (e.g. `s_setpc_b64`, `s_swappc_b64`). |
+| `isIndirectBranch(inst)` | `IF_IndirectBranch` set (e.g. `s_setpc_b64`). |
 
 The CFG-relevant query is `getBranchTargets(inst) -> std::vector<std::string>`. It returns label names that `CFGBuilderPass` may wire as successor edges within the current `Function`, in source order:
 
@@ -98,20 +99,21 @@ The Gfx1250 instruction table (`hardware/src/gfx/Gfx1250/Gfx1250Instructions.def
 now reflects the actual hardware semantics:
 
 ```
-SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, ...
+SSwappcB64Inst, "s_swappc_b64", .flags = {Call, HasSideEffect}, ...
 SSetpcB64Inst,  "s_setpc_b64",  .flags = {Branch, IndirectBranch, HasSideEffect}, ...
 ```
 
 `CFGBuilderPass` (in `src/transforms/asm/CFGBuilderPass.cpp`) adds successor edges
 from `getBranchTargets` and fall-through only for **conditional** branches.
-**Unconditional** branches (including `s_setpc_b64` and `s_swappc_b64`) do not
-fall through.
+**Unconditional** branches (including `s_setpc_b64` without `LabelData`) do not
+fall through. **`s_swappc_b64`** is not `IF_Branch`, so the CFG adds a normal
+fall-through edge to the following block; `CallTargetData` never becomes a CFG successor list.
 
 | Instruction | Successor edges (`getBranchTargets`) | Fall-through |
 |-------------|--------------------------------------|--------------|
 | `s_setpc_b64` (no `LabelData`) | none | no — block after is unreachable |
 | `s_setpc_b64` with `LabelData{X}` | block labelled `X` | no |
-| `s_swappc_b64` | none | no — not modeled |
+| `s_swappc_b64` | none (`getCallTargets` / `CallTargetData` only) | **yes** — next block in source order |
 
 `tests/unit/asm/SetpcSwappcCfgTest.cpp` exercises `s_setpc_b64` and `s_swappc_b64` CFG behaviour.
 
@@ -185,7 +187,11 @@ manipulation nor Python-level `deepcopy` drops the long-branch hint.
 
 ### Converter integration
 
-`src/conversion/rocisa/ToStinkyTofuUtils.cpp::legalizeInstruction()` reads `longBranchLabel` when lowering rocisa branches:
+`src/conversion/rocisa/ToStinkyTofuUtils.cpp::legalizeInstruction()` attaches
+`CallTargetData` from `SSwapPCB64::calleeFuncs` **before** the `isBranch(*inst)`
+block, because `s_swappc_b64` is lowered as **`IF_Call`**, not `IF_Branch`.
+
+For rocisa branches (including `SSetPCB64` long-branch metadata), it uses:
 
 ```cpp
 if (isBranch(*inst)) {

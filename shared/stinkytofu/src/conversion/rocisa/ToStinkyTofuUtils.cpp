@@ -310,6 +310,14 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
 
+    if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
+        assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
+        if (!swappc->calleeFuncs.empty()) {
+            inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
+        }
+        return {nullptr, nullptr};
+    }
+
     if (isBranch(*inst)) {
         // Handle branch instructions
         rocisa::BranchInstruction* branchInst =
@@ -321,13 +329,6 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
         if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
             if (!setpc->longBranchLabel.empty()) {
                 inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
-            }
-            return {nullptr, nullptr};
-        }
-
-        if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
-            if (!swappc->calleeFuncs.empty()) {
-                inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
             }
             return {nullptr, nullptr};
         }
@@ -927,9 +928,8 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
 using ItemVisitor =
     std::function<void(rocisa::Item*, const std::vector<const std::string*>& moduleNames)>;
 enum class ModuleSubtreeAction { Recurse, SkipSubtree };
-using ModuleEnter =
-    std::function<ModuleSubtreeAction(const rocisa::Module&,
-                                      const std::vector<const std::string*>& moduleNames)>;
+using ModuleEnter = std::function<ModuleSubtreeAction(
+    const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
 using ModuleLeave =
     std::function<void(const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
 

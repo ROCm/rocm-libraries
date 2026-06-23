@@ -185,11 +185,13 @@ TEST_F(SetpcSwappcCfgTest, SwappcCallTargetDataDoesNotCreateCfgEdges) {
     ASSERT_NE(blockA, nullptr);
     ASSERT_NE(blockB, nullptr);
 
-    EXPECT_TRUE(swappcBlock->getSuccessors().empty())
-        << "s_swappc_b64 must not gain CFG successors from CallTargetData.";
+    ASSERT_EQ(swappcBlock->getSuccessors().size(), 1u);
+    EXPECT_EQ(swappcBlock->getSuccessors().front(), fallBlock)
+        << "CallTargetData must not add CFG edges to callees; only fall-through applies.";
 
-    EXPECT_TRUE(fallBlock->getPredecessors().empty())
-        << "s_swappc_b64 must not fall through to the next block.";
+    const auto& predsFall = fallBlock->getPredecessors();
+    ASSERT_EQ(predsFall.size(), 1u);
+    EXPECT_EQ(predsFall.front(), swappcBlock);
     const auto& predsA = blockA->getPredecessors();
     EXPECT_EQ(std::find(predsA.begin(), predsA.end(), swappcBlock), predsA.end());
     const auto& predsB = blockB->getPredecessors();
