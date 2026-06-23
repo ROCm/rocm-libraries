@@ -218,6 +218,21 @@ inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
 }
 
+// s_wait_dscnt 0 retires all in-flight DS (LDS) source reads on VM_VSRC.
+// Read dlcnt from SWaitCntData (StinkyWaitCntInsertionPass / gfx1250) with
+// dscnt and literal-operand fallbacks for rocisa- and STIR-parsed IR.
+std::optional<int> getWaitDscntCount(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() != GFX::s_wait_dscnt) return std::nullopt;
+    if (const auto* data = inst.getModifier<SWaitCntData>()) {
+        if (data->dlcnt != -1) return data->dlcnt;
+        if (data->dscnt != -1) return data->dscnt;
+    }
+    if (!inst.getSrcRegs().empty() &&
+        inst.getSrcReg(0).dataType == StinkyRegister::Type::LiteralInt)
+        return inst.getSrcReg(0).literalInt;
+    return std::nullopt;
+}
+
 // isReturn = kernel exit (s_endpgm). Used to drop mode2 before the wave exits.
 // Note: function-call returns (s_setpc_b64 s[26:27]) are intentionally NOT
 // handled here — mode2 is confined to the loop region.
@@ -622,6 +637,19 @@ class InsertWaitAluPassImpl : public Pass {
                         sb.applyWaitcnt(CT_VA_VDST, data->getField(SWaitAluData::VA_VDST));
                     if (data->hasField(SWaitAluData::VM_VSRC))
                         sb.applyWaitcnt(CT_VM_VSRC, data->getField(SWaitAluData::VM_VSRC));
+                }
+                ++it;
+                continue;
+            }
+
+            // s_wait_dscnt 0 drains in-flight LDS address reads (EV_VGPR_LDS_READ /
+            // VM_VSRC), so a subsequent VALU write to the same offset VGPR does
+            // not need a synthetic s_wait_alu vm_vsrc wait.
+            if (auto dsWait = getWaitDscntCount(*inst)) {
+                if (*dsWait == 0) {
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]   absorb s_wait_dscnt 0 (drain "
+                                            "VM_VSRC / LDS address reads)\n");
+                    sb.applyWaitcnt(CT_VM_VSRC, 0);
                 }
                 ++it;
                 continue;

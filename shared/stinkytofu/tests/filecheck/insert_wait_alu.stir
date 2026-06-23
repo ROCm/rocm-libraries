@@ -184,3 +184,33 @@ st.func @merge_hold_cnt_with_va_vdst() {
   "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { hold_cnt = 1 } }
   v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
 }
+
+#--- ds_load address read → s_wait_dscnt 0 → VALU overwrites the same VGPR:
+#--- s_wait_dscnt 0 retires the in-flight LDS address read on VM_VSRC, so no
+#--- synthetic s_wait_alu vm_vsrc wait is needed before the xor.
+# CHECK-LABEL: @dscnt_zero_drains_lds_vsrc_no_wait
+# CHECK: ds_load_b32
+# CHECK: s_wait_dscnt
+# CHECK-NOT: s_wait_alu
+# CHECK: v_xor_b32
+
+st.func @dscnt_zero_drains_lds_vsrc_no_wait() {
+^entry:
+  v0 = "st.ds_load_b32"(v15) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1 }
+  v15 = "st.v_xor_b32"(v16, v17) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Same WAR hazard without an intervening s_wait_dscnt 0: must insert
+#--- s_wait_alu vm_vsrc before the VALU clobbers the address register.
+# CHECK-LABEL: @lds_vsrc_war_needs_wait_without_dscnt
+# CHECK: ds_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc
+# CHECK: v_xor_b32
+
+st.func @lds_vsrc_war_needs_wait_without_dscnt() {
+^entry:
+  v0 = "st.ds_load_b32"(v15) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v15 = "st.v_xor_b32"(v16, v17) { issueCycles = 1, latencyCycles = 5 }
+}
