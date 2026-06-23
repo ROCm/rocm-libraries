@@ -140,6 +140,8 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     {
         struct Impl
         {
+            static constexpr index_t kAMBlock = 1;
+            static constexpr index_t kBNBlock = 1;
             static constexpr index_t kM = MmaOp::kM;
             static constexpr index_t kN = MmaOp::kN;
             static constexpr index_t kK = MmaOp::kK;
