@@ -302,8 +302,6 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
         Graph graphObj;
@@ -385,8 +383,6 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
 
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
@@ -469,8 +465,6 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-        SKIP_IF_ASAN();
 
         const auto& [convTestCase, doBias, activTestCase]
             = DeterministicTestBase<FusedConvTestCase>::GetParam();
