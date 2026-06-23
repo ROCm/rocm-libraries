@@ -29,12 +29,12 @@ TEST(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
                "solver Id registry (solver.cpp). This drift makes Find throw "
                "miopenStatusInternalError.";
 
-        // A registered id must also resolve to an algorithm; GetAlgo() is the
-        // exact call that throws in the field when the id is missing.
-        if(id.IsValid())
-        {
-            EXPECT_NO_THROW((void)id.GetAlgo())
-                << "Solver '" << db_id << "': solver::Id::GetAlgo() threw.";
-        }
+        // GetAlgo() is the exact call that throws in the field when the id is
+        // unregistered. The production Find paths (ShrinkToFind10Results,
+        // EvaluateConvSolutions, FillFindReturnParameters in convolutionocl.cpp)
+        // call it on found solver ids with no IsValid() guard, so call it
+        // unguarded here too to exercise that real failure mode.
+        EXPECT_NO_THROW((void)id.GetAlgo())
+            << "Solver '" << db_id << "': solver::Id::GetAlgo() threw.";
     }
 }
