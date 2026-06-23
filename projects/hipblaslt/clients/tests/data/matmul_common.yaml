@@ -79,20 +79,17 @@ Definitions:
 
 
   ###########################################################################
-  # 32-bit / size_t overflow coverage (AIHPBLAS-3806, defect ROCM-25793).
+  # 32-bit / size_t overflow coverage (AIHPBLAS-3806).
   #
   # Modeled after rocBLAS's gemm_size_t tests: keep the compute region
   # (M x N x K) moderate but inflate a leading dimension or a batch stride so
-  # that the element index and the byte offset (index * bytes-per-element)
-  # cross 2^31. This exercises the TensileLite global-write address path
-  # (AddrCalculation.incrementToNextRow, where StrideD is scaled by bpe with a
-  # 32-bit shift before being added into the 64-bit output SRD) without
-  # requiring a full large-matrix allocation.
+  # that the output element index exceeds INT32_MAX (2^31 - 1), without
+  # requiring a full large-matrix allocation. This is the silent output-store
+  # correctness defect ROCM-26455.
   #
   # With ld = 1049100 and M = N = 2048 the maximum output element index is
   #   (N-1)*ld + (M-1) = 2047*1049100 + 2047 = 2,147,509,747 > INT32_MAX,
-  # so the element index overflows int32 for every precision, and the byte
-  # offset overflows 2^31 by a larger margin still.
+  # so the element index overflows int32 for every precision.
   ###########################################################################
 
   # Rotate the oversized leading dimension across A, B and the output C/D.

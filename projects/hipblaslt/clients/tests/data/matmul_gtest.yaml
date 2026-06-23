@@ -2877,12 +2877,12 @@ Tests:
 ###############################################################################
 # 32-bit / size_t overflow coverage (AIHPBLAS-3806).
 #
-# These cases catch the class of >2^31 element-index / byte-offset overflows in
-# the TensileLite addressing path (defect ROCM-25793: a 32-bit row-stride
-# byte-offset overflow in the global-write path). They are modeled after
+# These cases catch INT32 element-index overflow (element index > 2^31 - 1) in
+# the TensileLite addressing path -- the silent output-store correctness defect
+# ROCM-26455, reproduced by the bf16 gate below. They are modeled after
 # rocBLAS's gemm_size_t tests: M/N/K stay moderate while a leading dimension or
-# batch stride is inflated so the output (or input) offset crosses 2^31. Full
-# unit_check is used so both memory faults AND silent corruption are caught.
+# batch stride is inflated so the output (or input) element index crosses 2^31.
+# Full unit_check is used so both memory faults AND silent corruption are caught.
 #
 # Memory note: these allocate several GiB. On GPUs without enough memory the
 # harness reports the allocation failure as a skip (CHECK_DEVICE_ALLOCATION),
@@ -2890,7 +2890,7 @@ Tests:
 # parts. Gated to the gfx9 data-center arches where the defect manifests.
 ###############################################################################
 
-# Systematic element-index / byte-offset overflow sweep (f32), rotating the
+# Systematic element-index overflow sweep (f32), rotating the
 # oversized leading dimension across A, B and the output C/D.
 - name: matmul_size_t_index_overflow
   category: stress
@@ -2905,7 +2905,7 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|42|50)'
 
-# Same sweep in f16 and bf16 (the ROCM-25793 input precision is bf16). This sweep
+# Same sweep in f16 and bf16 (bf16 is the precision of the ROCM-26455 defect). This sweep
 # stays on rand_int rather than integer_exact: an input-side leading-dimension
 # overflow needs the oversized ld multiplied by K (transA=N / transB=T), which
 # requires K=2048, but integer_exact deliberately caps 16-bit at K<=512 for exact
@@ -2929,8 +2929,8 @@ Tests:
 # Concrete ROCM-26455 reproducer: bf16, transA=N / transB=T, with bias and
 # a scaleAlpha vector (the Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV kernel family),
 # driven onto an oversized output leading dimension so the output buffer index
-# crosses 2^31 -> silent wrong results (a correctness defect distinct from the
-# per-row SRD path of ROCM-25793; #8480 does not fix this case). When the
+# crosses 2^31 -> silent wrong results (a correctness defect in the output-store
+# address path). When the
 # output-store fix lands this case FAILs pre-fix / PASSes post-fix; until then it
 # is registered in known_bugs.yaml (skipped on the affected gfx942/gfx950 arches)
 # so the reproducer can land ahead of the fix -- remove that known_bugs entry to

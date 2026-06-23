@@ -12,24 +12,12 @@ Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
 
-  # AIHPBLAS-3806: 32-bit / size_t overflow coverage for large-size kernels.
-  #
-  # As the size_t overflow sweep (matmul_size_t_* in matmul_gtest.yaml) is run on
-  # each platform, any kernel that cannot yet handle a >2^31 element-index /
-  # byte-offset should be registered here (scoped via known_bug_platforms) so the
-  # coverage gap is tracked rather than silently failing CI. Remove the entry once
-  # the underlying kernel is fixed.
-  #
-  # Template (uncomment and scope once a failing kernel/platform is confirmed):
-  # - { name: matmul_size_t_index_overflow, function: matmul, known_bug_platforms: "gfx942" }
-
   # ROCM-26455: bf16 matmul output-store address overflow -- an output element
   # offset > 2^31 (from an oversized output leading dimension ldc/ldd) wraps in the
   # 32-bit global-write address path and produces silent wrong results. The gate
   # matmul_size_t_output_overflow_bf16_ROCM26455 is the bit-exact reproducer
   # (FAIL-pre-fix / PASS-post-fix). It is registered here as a known failure on the
   # affected data-center arches so the reproducer can land ahead of the kernel fix.
-  # This is a distinct defect from ROCM-25793 (verified: PR #8480 does not fix it).
   # REMOVE this entry once the output-store path is fixed so the case re-activates
   # as an enforced bit-exact regression gate.
   #
