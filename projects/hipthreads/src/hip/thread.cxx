@@ -19,6 +19,7 @@
 
 #include "hip/thread"
 
+#include <cstdlib>
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
 #include <hip/std/atomic>
@@ -33,8 +34,8 @@
     #include <thread>
 #endif
 
-#ifndef HIPTHREADS_VCORES_PER_WGP
-#define HIPTHREADS_VCORES_PER_WGP 16
+#ifndef HIPTHREADS_DEFAULT_VCORES_PER_WGP
+#define HIPTHREADS_DEFAULT_VCORES_PER_WGP 16
 #endif
 
 namespace cuda {
@@ -718,7 +719,20 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
             // __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&physicalMultiProcessorCount, hipDeviceAttributePhysicalMultiProcessorCount, 0));
             return temp;
         }();
-        return multiprocessorCount * HIPTHREADS_VCORES_PER_WGP;
+        // Number of scheduler vcores launched per WGP/multiprocessor. Overridable at runtime via the
+        // HIPTHREADS_VCORES_PER_WGP environment variable; defaults to 16 if unset or unparseable.
+        static uint32_t vcoresPerWgp = [](){
+            const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
+            if (env != nullptr) {
+                char *end;
+                unsigned long val = ::std::strtoul(env, &end, 10);
+                if (end != env && *end == '\0' && val > 0) {
+                    return static_cast<uint32_t>(val);
+                }
+            }
+            return static_cast<uint32_t>(HIPTHREADS_DEFAULT_VCORES_PER_WGP);
+        }();
+        return multiprocessorCount * vcoresPerWgp;
     }
     catch (...) {
         ::std::cerr << "Exception while fetching multiprocessorCount\n";
