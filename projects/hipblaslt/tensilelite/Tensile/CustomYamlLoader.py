@@ -143,6 +143,18 @@ def load_yaml_dict_item(yaml_path: Path, loader_type: yaml.Loader, key: str):
         return v
 
 def load_logic_gfx_arch(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML_LOADER):
+    path = Path(yaml_path)
+    if path.suffix == ".json":
+        import json
+        with open(path, "r") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            arch = data[2]
+            return arch['Architecture'] if isinstance(arch, dict) else arch
+        if isinstance(data, dict):
+            return data.get('ArchitectureName')
+        return None
+
     try:
         GFX_ARCH_IDX = 2
         arch = load_yaml_sequence_item(yaml_path, loader_type, GFX_ARCH_IDX)

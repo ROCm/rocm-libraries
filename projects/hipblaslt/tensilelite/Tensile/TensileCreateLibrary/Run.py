@@ -974,29 +974,26 @@ def run():
     if not os.path.exists(arguments["LogicPath"]):
         printExit(f"LogicPath {arguments['LogicPath']} doesn't exist")
 
-    logicExtFormat = ".yaml"
-    if arguments["LogicFormat"] == "yaml":
-        pass
-    elif arguments["LogicFormat"] == "json":
-        logicExtFormat = ".json"
-    else:
+    if arguments["LogicFormat"] not in ("yaml", "json", "msgpack"):
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
+
+    _validLogicExts = frozenset({".yaml", ".json"})
 
     def archMatch(arch: str, archs: List[str]):
         return (arch in archs) or any(a.startswith(arch) for a in archs)
 
     def validLogicFile(p: Path):
-        return p.suffix == logicExtFormat and (
+        return p.suffix in _validLogicExts and (
             "all" in archs or archMatch(load_logic_gfx_arch(p), archs)
         )
 
-    globPattern = os.path.join(
-        arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
-    )
-    print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = [
-        file for file in glob.iglob(globPattern, recursive=True)
-    ]
+    logicFiles = []
+    for ext in (".yaml", ".json"):
+        globPattern = os.path.join(
+            arguments["LogicPath"], f"**/{arguments['LogicFilter']}{ext}"
+        )
+        print1(f"# LogicFilter:       {globPattern}")
+        logicFiles.extend(glob.iglob(globPattern, recursive=True))
 
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 

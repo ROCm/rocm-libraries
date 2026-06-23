@@ -304,11 +304,16 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
     """
     Extracts architecture predicate information from a given logic file.
 
-    The file is expected to have the following format:
+    For YAML files, the file is expected to have the following format:
     - Line 0: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
     - Line 1: Code name of the architecture (e.g., "- aquavanjaram")
     - Line 2: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
     - Line 3: Device IDs (e.g., "- [Device 1234, Device 5678]")
+
+    For JSON files, the same data is extracted from the parsed list structure:
+    - element[1]: schedule/code name
+    - element[2]: architecture string or dict
+    - element[3]: device names list
 
     Args:
         file: Path to a logic file.
@@ -319,6 +324,10 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
     Raises:
         LogicFileError: If the file does not match the expected format.
     """
+    file = Path(file)
+
+    if file.suffix == ".json":
+        return _extractArchInfoJson(file, validateDeviceIds)
 
     def l0(line: str):
         if not re.match(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)", line):
@@ -357,6 +366,45 @@ def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> 
         name = l1(f.readline())
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
+
+    if validateDeviceIds:
+        try:
+            for id in deviceIds:
+                _verifyPredicate(id, gfx)
+        except ValueError as e:
+            raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+
+    return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+
+
+def _extractArchInfoJson(file: Path, validateDeviceIds: bool = True) -> ArchInfo:
+    """Extract architecture info from a JSON logic file."""
+    import json
+
+    with open(file, "r") as f:
+        data = json.load(f)
+
+    if not isinstance(data, list) or len(data) < 4:
+        raise LogicFileError(f"JSON logic file {file} must be a list with at least 4 elements")
+
+    name = data[1]
+    arch_field = data[2]
+    if isinstance(arch_field, dict):
+        gfx = arch_field["Architecture"]
+        cu = f"cu={arch_field['CUCount']}" if "CUCount" in arch_field else None
+    else:
+        gfx = str(arch_field)
+        cu = None
+
+    device_names = data[3]
+    if not isinstance(device_names, list):
+        raise LogicFileError(f"Expected device names list at element[3] in {file}")
+    deviceIds = set()
+    for d in device_names:
+        if isinstance(d, str):
+            match = re.search(r"Device\s+(\w+)", d)
+            if match:
+                deviceIds.add(f"id={match.group(1).lower()}")
 
     if validateDeviceIds:
         try:
