@@ -47,7 +47,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
     }
-    virtual ~StockhamPartialPassKernel() { };
+    virtual ~StockhamPartialPassKernel(){};
 
     StockhamPartialPassParams params;
 
