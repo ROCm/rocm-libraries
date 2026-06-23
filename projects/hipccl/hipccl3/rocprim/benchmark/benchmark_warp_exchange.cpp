@@ -27,120 +27,58 @@
 #define CREATE_BENCHMARK(T, BS, IT, WS, OP) \
     executor.queue<warp_exchange_benchmark<T, BS, IT, WS, OP>>();
 
+#define QUEUE_BENCHMARK(BS, IT, WS, OP)                                           \
+    benchmark_types::queue_type<(benchmark_types::Type_Category::type_int32       \
+                                 | benchmark_types::Type_Category::integer_128)>( \
+        executor,                                                                 \
+        [&](auto type_tag)                                                        \
+        { CREATE_BENCHMARK(typename decltype(type_tag)::type, BS, IT, WS, OP) });
+
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
     settings.size = 128 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
-    CREATE_BENCHMARK(int32_t, 256, 1, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 1, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 32, common::BlockedToStripedOp)
     CREATE_BENCHMARK(int32_t, 256, 32, 32, common::BlockedToStripedOp)
-
-    CREATE_BENCHMARK(int32_t, 256, 1, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(int32_t, 256, 1, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 32, common::StripedToBlockedOp)
     CREATE_BENCHMARK(int32_t, 256, 32, 32, common::StripedToBlockedOp)
-
-    CREATE_BENCHMARK(int32_t, 256, 1, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 1, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 32, common::BlockedToStripedShuffleOp)
     CREATE_BENCHMARK(int32_t, 256, 32, 32, common::BlockedToStripedShuffleOp)
-
-    CREATE_BENCHMARK(int32_t, 256, 1, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 1, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 32, common::StripedToBlockedShuffleOp)
     CREATE_BENCHMARK(int32_t, 256, 32, 32, common::StripedToBlockedShuffleOp)
 
-    CREATE_BENCHMARK(int32_t, 256, 1, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 1, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 4, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(int32_t, 256, 16, 32, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 1, 16, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 1, 32, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 4, 16, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 4, 32, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 16, 16, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 16, 32, common::BlockedToStripedOp)
 
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::BlockedToStripedOp)
+    QUEUE_BENCHMARK(256, 1, 16, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 1, 32, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 4, 16, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 4, 32, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 16, 16, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 16, 32, common::StripedToBlockedOp)
 
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::StripedToBlockedOp)
+    QUEUE_BENCHMARK(256, 1, 16, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 1, 32, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 4, 16, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 4, 32, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 16, 16, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 16, 32, common::BlockedToStripedShuffleOp)
 
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::BlockedToStripedShuffleOp)
+    QUEUE_BENCHMARK(256, 1, 16, common::StripedToBlockedShuffleOp)
+    QUEUE_BENCHMARK(256, 1, 32, common::StripedToBlockedShuffleOp)
+    QUEUE_BENCHMARK(256, 4, 16, common::StripedToBlockedShuffleOp)
+    QUEUE_BENCHMARK(256, 4, 32, common::StripedToBlockedShuffleOp)
+    QUEUE_BENCHMARK(256, 16, 16, common::StripedToBlockedShuffleOp)
+    QUEUE_BENCHMARK(256, 16, 32, common::StripedToBlockedShuffleOp)
 
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::StripedToBlockedShuffleOp)
-
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, ScatterToStripedOp)
-
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::BlockedToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::BlockedToStripedOp)
-
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::StripedToBlockedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::StripedToBlockedOp)
-
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::BlockedToStripedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::BlockedToStripedShuffleOp)
-
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::StripedToBlockedShuffleOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::StripedToBlockedShuffleOp)
-
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, ScatterToStripedOp)
-    CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 1, 16, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 1, 32, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 4, 16, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 4, 32, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 16, 16, ScatterToStripedOp)
+    QUEUE_BENCHMARK(256, 16, 32, ScatterToStripedOp)
 
     int hip_device = 0;
     HIP_CHECK(::rocprim::detail::get_device_from_stream(hipStreamDefault, hip_device));
@@ -150,69 +88,30 @@ int main(int argc, char* argv[])
 
     if(warp_size >= 64)
     {
-        CREATE_BENCHMARK(int32_t, 256, 1, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(int32_t, 256, 4, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(int32_t, 256, 16, 64, common::BlockedToStripedOp)
+        CREATE_BENCHMARK(int32_t, 256, 64, 64, common::StripedToBlockedShuffleOp)
         CREATE_BENCHMARK(int32_t, 256, 64, 64, common::BlockedToStripedOp)
-
-        CREATE_BENCHMARK(int32_t, 256, 1, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(int32_t, 256, 4, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(int32_t, 256, 16, 64, common::StripedToBlockedOp)
         CREATE_BENCHMARK(int32_t, 256, 64, 64, common::StripedToBlockedOp)
-
-        CREATE_BENCHMARK(int32_t, 256, 1, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(int32_t, 256, 4, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(int32_t, 256, 16, 64, common::BlockedToStripedShuffleOp)
         CREATE_BENCHMARK(int32_t, 256, 64, 64, common::BlockedToStripedShuffleOp)
 
-        CREATE_BENCHMARK(int32_t, 256, 1, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(int32_t, 256, 4, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(int32_t, 256, 16, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(int32_t, 256, 64, 64, common::StripedToBlockedShuffleOp)
+        QUEUE_BENCHMARK(256, 1, 64, common::BlockedToStripedOp)
+        QUEUE_BENCHMARK(256, 4, 64, common::BlockedToStripedOp)
+        QUEUE_BENCHMARK(256, 16, 64, common::BlockedToStripedOp)
 
-        CREATE_BENCHMARK(int32_t, 256, 1, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(int32_t, 256, 4, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(int32_t, 256, 16, 64, ScatterToStripedOp)
+        QUEUE_BENCHMARK(256, 1, 64, common::StripedToBlockedOp)
+        QUEUE_BENCHMARK(256, 4, 64, common::StripedToBlockedOp)
+        QUEUE_BENCHMARK(256, 16, 64, common::StripedToBlockedOp)
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::BlockedToStripedOp)
+        QUEUE_BENCHMARK(256, 1, 64, common::BlockedToStripedShuffleOp)
+        QUEUE_BENCHMARK(256, 4, 64, common::BlockedToStripedShuffleOp)
+        QUEUE_BENCHMARK(256, 16, 64, common::BlockedToStripedShuffleOp)
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::StripedToBlockedOp)
+        QUEUE_BENCHMARK(256, 1, 64, common::StripedToBlockedShuffleOp)
+        QUEUE_BENCHMARK(256, 4, 64, common::StripedToBlockedShuffleOp)
+        QUEUE_BENCHMARK(256, 16, 64, common::StripedToBlockedShuffleOp)
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::BlockedToStripedShuffleOp)
-
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::StripedToBlockedShuffleOp)
-
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, ScatterToStripedOp)
-
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::BlockedToStripedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::BlockedToStripedOp)
-
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::StripedToBlockedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::StripedToBlockedOp)
-
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::BlockedToStripedShuffleOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::BlockedToStripedShuffleOp)
-
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::StripedToBlockedShuffleOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::StripedToBlockedShuffleOp)
-
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, ScatterToStripedOp)
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, ScatterToStripedOp)
+        QUEUE_BENCHMARK(256, 1, 64, ScatterToStripedOp)
+        QUEUE_BENCHMARK(256, 4, 64, ScatterToStripedOp)
+        QUEUE_BENCHMARK(256, 16, 64, ScatterToStripedOp)
     }
 
     executor.run();
