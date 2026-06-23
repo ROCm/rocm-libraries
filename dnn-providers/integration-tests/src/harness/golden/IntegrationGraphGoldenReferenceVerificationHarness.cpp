@@ -20,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
+#include "harness/EngineNotApplicableError.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
@@ -58,8 +59,9 @@ void IntegrationGraphGoldenReferenceVerificationHarness::executeGraphThroughEngi
         if(status.is_bad()
            || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
         {
-            throw std::runtime_error("Engine " + std::string(TestConfig::get().getEngineName())
-                                     + " does not support this graph (" + graphSummary() + ")");
+            throw EngineNotApplicableError(
+                "Engine " + std::string(TestConfig::get().getEngineName())
+                + " does not support this graph (" + graphSummary() + ")");
         }
         graph.set_preferred_engine_id_ext(targetEngineId);
     }
@@ -67,7 +69,8 @@ void IntegrationGraphGoldenReferenceVerificationHarness::executeGraphThroughEngi
     {
         if(status.is_bad() || engineIds.empty())
         {
-            throw std::runtime_error("No engine supports this graph (" + graphSummary() + ")");
+            throw EngineNotApplicableError("No engine supports this graph (" + graphSummary()
+                                           + ")");
         }
     }
 
@@ -397,22 +400,17 @@ std::optional<OutputTensors>
     OutputTensors engineOutputs = allocateSentinelOutputs();
     auto variantPack = buildVariantPack(engineOutputs, /*useDevice=*/_requiresDevice);
 
-    bool threw = false;
     try
     {
         executeGraphThroughEngine(variantPack);
     }
-    catch(const std::exception& e)
+    catch(const EngineNotApplicableError& e)
     {
-        threw = true;
         error = e.what();
+        return std::nullopt;
     }
 
     if(::testing::Test::HasFatalFailure())
-    {
-        return std::nullopt;
-    }
-    if(threw)
     {
         return std::nullopt;
     }

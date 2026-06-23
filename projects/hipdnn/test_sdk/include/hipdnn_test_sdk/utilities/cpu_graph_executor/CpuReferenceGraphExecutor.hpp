@@ -6,6 +6,7 @@
 #include <cstring>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizeSignatureKey.hpp>
@@ -92,8 +93,8 @@ private:
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
             const std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
-            throw std::runtime_error("Plan builder is not applicable for the given node: "
-                                     + nodeName);
+            throw CpuReferenceNotApplicableError(
+                "Plan builder is not applicable for the given node: " + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
@@ -142,7 +143,8 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes:
             return detail::ReductionSignatureKey(node, tensorMap, computeType);
         default:
-            throw std::runtime_error("Unsupported node type for signature key generation");
+            throw CpuReferenceNotApplicableError(
+                "Unsupported node type for signature key generation");
         }
     }
 
