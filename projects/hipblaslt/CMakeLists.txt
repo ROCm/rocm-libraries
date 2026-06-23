@@ -655,8 +655,8 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    if(TARGET tensilelite-client)
-        install(
+    if(TENSILELITE_ENABLE_CLIENT)
+        rocm_install(
             TARGETS tensilelite-client
             DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
             COMPONENT tests
