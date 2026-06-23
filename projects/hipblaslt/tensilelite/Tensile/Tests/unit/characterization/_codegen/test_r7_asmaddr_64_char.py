@@ -173,3 +173,66 @@ def test_r7_incrementSrdMultipleRows_negative():
     # numRows < 0 → SSubU32 + SSubBU32 (lines 808-815)
     assert "s_sub_u32" in asm, f"Expected s_sub_u32 for negative numRows, got:\n{asm}"
     assert "s_subb_u32" in asm, f"Expected s_subb_u32 for negative numRows, got:\n{asm}"
+
+
+# ---------------------------------------------------------------------------
+# Regression test: ROCM-25793 -- 32-bit overflow in SRD base address increment
+# ---------------------------------------------------------------------------
+
+
+def test_rocm25793_incrementSrd_must_handle_64bit_stride_product():
+    """ROCM-25793: incrementSrdMultipleRows must compute a full 64-bit
+    stride*bpe product so the SRD high word gets the upper 32 bits,
+    not just the carry from the low-word add.
+
+    The bug: s_lshl_b32 (or s_mul_i32) computes stride*bpe in 32 bits,
+    then s_addc_u32 adds only the carry flag (src1=0) to SRD+1. When
+    stride*bpe >= 2^32 the shift/mul silently wraps, corrupting the SRD
+    base address. The next buffer_store writes to a wrong address and
+    the GPU faults:
+
+        s_lshl_b32  s12, s28, 2          ; s12 = stride << 2 (TRUNCATED)
+        s_add_u32   s24, s24, s12        ; SRD_lo += truncated product
+        s_addc_u32  s25, s25, 0          ; SRD_hi += carry only (WRONG)
+
+    The fix must emit s_mul_hi_u32 (or equivalent) so s_addc_u32 adds
+    the real high-word product instead of literal 0. This test FAILS on
+    the buggy codegen and PASSES after the fix.
+    """
+    import re
+    from Tensile.AsmAddressCalculation import AddrCalculation
+
+    test_cases = [
+        (1, 4, "numRows=1, bpe=4 (fp32 store, shift path)"),
+        (1, 2, "numRows=1, bpe=2 (fp16/bf16 store, shift path)"),
+        (3, 4, "numRows=3, bpe=4 (multi-row, mul path)"),
+        (1, 1, "numRows=1, bpe=1 (int8/fp8 store, shift path)"),
+    ]
+
+    bugs_found = []
+    for numRows, bpe, label in test_cases:
+        mod = AddrCalculation.incrementSrdMultipleRows(
+            srcDstBaseSgpr="SrdD",
+            strideSgpr="StrideD1",
+            tmpSgpr="tmp0",
+            numRows=numRows,
+            bpe=bpe,
+        )
+        asm = str(mod)
+
+        # Bug pattern: s_addc_u32 with literal 0 as src1 means the high
+        # word of the 64-bit SRD only gets the carry bit, not the actual
+        # upper 32 bits of stride*numRows*bpe.
+        if re.search(r's_addc_u32\s+\S+,\s*\S+,\s*0\b', asm):
+            bugs_found.append((label, asm))
+
+    assert not bugs_found, (
+        "ROCM-25793 BUG DETECTED: SRD high-word increment uses literal 0 "
+        "instead of the upper 32 bits of stride*bpe. This causes GPU memory "
+        "faults when stride*bpe >= 2^32.\n\n"
+        + "\n".join(
+            f"--- {label} ---\n{asm}" for label, asm in bugs_found
+        )
+        + "\n\nExpected: s_mul_hi_u32 (or equivalent) to compute the high "
+        "word, then s_addc_u32 using that result instead of 0."
+    )

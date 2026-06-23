@@ -23,7 +23,7 @@
 from rocisa.code import Module
 from rocisa.container import EXEC, VCC, vgpr, sgpr
 from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
-    SAndB64, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SSubBU32, SSubU32, \
+    SAndB64, SLShiftLeftB32, SMovB32, SMovB64, SMulHIU32, SMulI32, SSubBU32, SSubU32, \
     VAddCCOU32, VAddCOU32, VAddI32, VAddU32, VAndB32, VBfiB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
@@ -893,6 +893,7 @@ class AddrCalculation:
                                       src=sgpr(strideSgpr), \
                                       shiftHex=log2(bpe), \
                                       comment="incToNextRow: Scale by BPE"))
+        factor = abs(numRows) * bpe
         dstLow = f"{srcDstBaseSgpr}+0"
         dstHigh = f"{srcDstBaseSgpr}+1"
 
@@ -901,19 +902,27 @@ class AddrCalculation:
                                         src0=sgpr(dstLow), \
                                         src1=sgpr(tmpSgpr), \
                                         comment="incToNextRow: gra SRD += inc(lower)" ))
+            module.add(SMulHIU32(dst=sgpr(tmpSgpr), \
+                                        src0=sgpr(strideSgpr), \
+                                        src1=factor, \
+                                        comment="incToNextRow: stride*bpe hi32 (SCC unmodified)" ))
             module.add(SAddCU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
-                                        comment="incToNextRow: gra SRD += inc(upper)" ))
+                                        src1=sgpr(tmpSgpr), \
+                                        comment="incToNextRow: gra SRD += inc(upper) + carry" ))
         else:
             module.add(SSubU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
                                         src1=sgpr(tmpSgpr), \
                                         comment="incToNextRow: gra SRD -= inc(lower)" ))
+            module.add(SMulHIU32(dst=sgpr(tmpSgpr), \
+                                        src0=sgpr(strideSgpr), \
+                                        src1=factor, \
+                                        comment="incToNextRow: stride*bpe hi32 (SCC unmodified)" ))
             module.add(SSubBU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
-                                        comment="incToNextRow: gra SRD -= inc(upper)" ))
+                                        src1=sgpr(tmpSgpr), \
+                                        comment="incToNextRow: gra SRD -= inc(upper) - borrow" ))
         return module
 
     def incrementToNextRow(self, kernel, tc, ss, stmp, forceinitrow0=0,
@@ -989,6 +998,18 @@ class AddrCalculation:
                                     comment="incToNextRow: Scale by BPE"))
                     return sc
 
+                def _buildStrideComputeHi(nr):
+                    """Compute the upper 32 bits of stride * |nr| * bpe into stmp.
+                    s_mul_hi_u32 does NOT modify SCC, so the carry/borrow flag
+                    from the preceding s_add_u32/s_sub_u32 is preserved."""
+                    sc = Module("strideComputeHi")
+                    factor = abs(nr) * tmpBpe
+                    sc.add(SMulHIU32(dst=sgpr(stmp), \
+                                src0=sgpr(strideCD1), \
+                                src1=factor, \
+                                comment="incToNextRow: stride*bpe hi32 (SCC unmodified)"))
+                    return sc
+
                 # Legacy (non-CompactLoopStore): stride compute BEFORE s_add,
                 # using the call's own numRows.
                 if not kernel["CompactLoopStore"]:
@@ -1006,19 +1027,21 @@ class AddrCalculation:
                                         src0=sgpr(dstLow), \
                                         src1=sgpr(stmp), \
                                         comment="incToNextRow: gra SRD += inc(lower)" ))
+                    module.add(_buildStrideComputeHi(numRows))
                     module.add(SAddCU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
-                                        comment="incToNextRow: gra SRD += inc(upper)" ))
+                                        src1=sgpr(stmp), \
+                                        comment="incToNextRow: gra SRD += inc(upper) + carry" ))
                 else: # numRows < 0
                     module.add(SSubU32(dst=sgpr(dstLow), \
                                         src0=sgpr(dstLow), \
                                         src1=sgpr(stmp), \
                                         comment="incToNextRow: gra SRD -= inc(lower)" ))
+                    module.add(_buildStrideComputeHi(numRows))
                     module.add(SSubBU32(dst=sgpr(dstHigh), \
                                         src0=sgpr(dstHigh), \
-                                        src1=0, \
-                                        comment="incToNextRow: gra SRD -= inc(upper)" ))
+                                        src1=sgpr(stmp), \
+                                        comment="incToNextRow: gra SRD -= inc(upper) - borrow" ))
 
                 # CompactLoopStore: stride compute AFTER s_add (primes s[stmp]
                 # for the NEXT call's s_add). When caller passes
