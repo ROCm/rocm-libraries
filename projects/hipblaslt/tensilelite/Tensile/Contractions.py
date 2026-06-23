@@ -237,11 +237,10 @@ class ProblemType:
         if 'UseE' in d:
             rv.useE = d['UseE']
 
-        rv.useGateResidual = False
+        rv.useGateResidual = bool(d.get('UseGateResidual', True))
         rv.gateResidualDataTypeWhiteList = []
         rv.setConstStrideGate = []
-        if 'UseGateResidual' in d:
-            rv.useGateResidual = bool(d['UseGateResidual'])
+        if rv.useGateResidual:
             if 'GateResidualDataTypeList' in d:
                 d["GateResidualDataTypeList"].sort()  # Sort to make sure names are unique
                 rv.gateResidualDataTypeWhiteList = d['GateResidualDataTypeList']
