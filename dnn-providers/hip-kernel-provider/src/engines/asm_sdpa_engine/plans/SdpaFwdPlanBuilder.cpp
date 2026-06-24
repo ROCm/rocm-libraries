@@ -9,6 +9,8 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <optional>
+
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
@@ -20,6 +22,22 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
+
+// Query the HIP device string for the stream, logging on failure.
+// Returns std::nullopt when the HIP runtime throws.
+static std::optional<std::string> tryGetDeviceString(hipStream_t stream)
+{
+    try
+    {
+        return hip_kernel_provider_common::getDeviceString(stream);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: " << e.what());
+        return std::nullopt;
+    }
+}
 
 static RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
@@ -317,20 +335,15 @@ void SdpaFwdPlanBuilder::buildPlan(
 {
 
     // Get device properties
-    std::string deviceString;
-    bool isMi308;
-    try
-    {
-        deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
-        isMi308 = isMi308Device(handle.getStream());
-    }
-    catch(const std::exception& e)
+    auto deviceStringOpt = tryGetDeviceString(handle.getStream());
+    if(!deviceStringOpt)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: "
-                + std::string(e.what()));
+            "SdpaFwdPlanBuilder::buildPlan: failed to query device string");
     }
+    const std::string& deviceString = *deviceStringOpt;
+    bool isMi308 = isMi308Device(handle.getStream());
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
