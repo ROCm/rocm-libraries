@@ -124,6 +124,52 @@ def failed_test_files(tl_root: Path) -> list[str]:
     return sorted({str(nodeid).split("::", 1)[0] for nodeid in data})
 
 
+def classify_staged(tl_staged: list[Path]):
+    """Bucket tensilelite-relative staged paths into broad/test/source/ignored."""
+    broad_reasons: list[str] = []
+    changed_tests: set[Path] = set()
+    changed_sources: list[Path] = []
+    ignored: list[Path] = []
+    for p in tl_staged:
+        rel = p.relative_to(TL_REL)
+        rel_str = str(rel)
+        if any(part in rel_str for part in BROAD_TRIGGER_PARTS) or rel_str.startswith("scripts/"):
+            broad_reasons.append(rel_str)
+        elif rel.parts[:1] == ("rocisa",):
+            broad_reasons.append(rel_str + " (native ext)")
+        elif rel.suffix != ".py":
+            ignored.append(rel)
+        elif rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
+            changed_tests.add(rel)
+        elif rel.parts[:2] == ("Tensile", "Tests"):
+            ignored.append(rel)
+        elif rel.parts[:1] == ("Tensile",):
+            changed_sources.append(rel)
+        else:
+            ignored.append(rel)
+    return broad_reasons, changed_tests, changed_sources, ignored
+
+
+def select_tests(changed_sources: list[Path], index: dict[Path, set[str]]):
+    """Map changed sources to tests; escalate when unmappable or matching too many."""
+    selected: set[Path] = set()
+    escalations: list[str] = []
+    total = len(index) or 1
+    for src in changed_sources:
+        module = module_dotted(src)
+        if not module:
+            escalations.append(f"{src} (unmappable path)")
+            continue
+        hits = tests_for_module(module, index)
+        if not hits:
+            escalations.append(f"{src} -> {module} (no referencing tests)")
+        elif len(hits) > MATCH_TOO_MANY_FRACTION * total:
+            escalations.append(f"{src} -> {module} ({len(hits)}/{total} tests, too broad)")
+        else:
+            selected.update(hits)
+    return selected, escalations
+
+
 def main() -> int:
     root = repo_root()
     tl_root = root / TL_REL
@@ -134,50 +180,14 @@ def main() -> int:
     if not tl_staged:
         return 0
 
-    broad_reasons: list[str] = []
-    changed_tests: set[Path] = set()
-    changed_sources: list[Path] = []
-    ignored: list[Path] = []
-
-    for p in tl_staged:
-        rel = p.relative_to(TL_REL)
-        rel_str = str(rel)
-        if any(part in rel_str for part in BROAD_TRIGGER_PARTS) or rel_str.startswith("scripts/"):
-            broad_reasons.append(rel_str)
-            continue
-        if rel.parts[:1] == ("rocisa",):
-            broad_reasons.append(rel_str + " (native ext)")
-            continue
-        if rel.suffix != ".py":
-            ignored.append(rel)
-            continue
-        if rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
-            changed_tests.add(rel)
-        elif rel.parts[:2] == ("Tensile", "Tests"):
-            ignored.append(rel)
-        elif rel.parts[:1] == ("Tensile",):
-            changed_sources.append(rel)
-        else:
-            ignored.append(rel)
+    broad_reasons, changed_tests, changed_sources, ignored = classify_staged(tl_staged)
 
     selected: set[Path] = set(changed_tests)
     escalations: list[str] = []
-
     if not broad_reasons:
         index = build_test_index(tests_root)
-        total = len(index) or 1
-        for src in changed_sources:
-            module = module_dotted(src)
-            if not module:
-                escalations.append(f"{src} (unmappable path)")
-                continue
-            hits = tests_for_module(module, index)
-            if not hits:
-                escalations.append(f"{src} -> {module} (no referencing tests)")
-            elif len(hits) > MATCH_TOO_MANY_FRACTION * total:
-                escalations.append(f"{src} -> {module} ({len(hits)}/{total} tests, too broad)")
-            else:
-                selected.update(hits)
+        sel, escalations = select_tests(changed_sources, index)
+        selected.update(sel)
 
     run_full = bool(broad_reasons) or bool(escalations)
 
