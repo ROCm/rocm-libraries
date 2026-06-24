@@ -414,11 +414,6 @@ std::optional<OutputTensors>
         return std::nullopt;
     }
 
-    if(::testing::Test::HasFatalFailure())
-    {
-        return std::nullopt;
-    }
-
     markOutputsModified(engineOutputs);
     return engineOutputs;
 }
