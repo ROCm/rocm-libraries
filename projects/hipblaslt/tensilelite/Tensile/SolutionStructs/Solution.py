@@ -482,6 +482,8 @@ class Solution(collections.abc.Mapping):
     assembler: Assembler,
     isaInfoMap: Dict[IsaVersion, IsaInfo],
     srcName: str = "",
+    *,
+    raiseProblemTypeOnTypeMismatch: bool = True,
   ):
     """Construct a Solution."""
 
@@ -496,7 +498,12 @@ class Solution(collections.abc.Mapping):
     self._state = {}
     # problem type
     if "ProblemType" in config:
-      self["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
+      self["ProblemType"] = ProblemType(
+          config["ProblemType"],
+          printIndexAssignmentInfo,
+          srcFile=srcName,
+          raiseOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+      )
     else:
       self["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
 
@@ -950,11 +957,7 @@ class Solution(collections.abc.Mapping):
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
-      # Subtile supports the cluster barrier/signal handshake but not the
-      # multicast TDM data path, so keep Multicast off there while still
-      # enabling the cluster barrier.
-      if not state["UseSubtileImpl"]:
-        state["Multicast"] = True
+      state["Multicast"] = True
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
@@ -2740,13 +2743,35 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      state["_DepthU"] = state["DepthU"]# internal
-      state["_DepthUA"] = depthUA# internal
+      if state["MXScaleFormat"] == "HostPreSwizzle":
+        mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+        # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
+        # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        enableMultiDu = (
+          state.get("UseSubtileImpl")
+          and state.get("_ABTilePairA") == "AB_B8"
+          and state.get("_ABTilePairB") == "AB_B8"
+        )
+        if mxBlock and enableMultiDu:
+          swizzleSize1 = 256
+          dataDU = depthU * state["MatrixInstK"] // swizzleSize1
+          if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
+            depthUA = dataDU
+            depthUB = dataDU
+            if state["PrefetchGlobalRead"] > 1:
+              reject(state, printRejectionReason,
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
+                     f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
+
+      state["_DepthU"] = depthU
+      state["DepthU"] = depthU
+
+      state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
-      state["_DepthUB"] = depthUB# internal
+        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
+      state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # fp6 doesn't support LDS padding yet.
@@ -4997,10 +5022,9 @@ class Solution(collections.abc.Mapping):
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
-      divisor = state["SubGroup0"] * state["SubGroup1"]
-      # d will be a list containing 0 or 1
       maxTurn = 0
-      for d in range(len(factorDims)):
+      divisor = state["SubGroup0"] * state["SubGroup1"]
+      for d in factorDims:
         turn = math.ceil(state["MacroTile%d"%d] / divisor)
         maxTurn = max(maxTurn, turn)
       return maxTurn

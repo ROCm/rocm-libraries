@@ -15,7 +15,8 @@
 from rocisa.code import Module
 from rocisa.container import RegisterContainer
 from rocisa.instruction import (
-    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SWaitAlu, VXorB32,
+    LocalReadInstruction, MFMAInstruction, MXMFMAInstruction, SWaitAlu,
+    SWaitCnt, VXorB32,
 )
 
 # Number of WMMAs that must issue between a swap XOR and its dependent ds_read
@@ -48,7 +49,7 @@ def setMatrixAReuse(module, writer, kernel):
   return module
 
 
-def insertLRSwapWaitAlu(module, writer, kernel):
+def insertLRSwapRawWaitAlu(module, writer, kernel):
   """Guard the LR offset-swap -> ds_read RAW hazard.
 
   For each swap window, if fewer than MIN_MMA_BEFORE_LR_READ WMMAs separate the
@@ -89,4 +90,46 @@ def insertLRSwapWaitAlu(module, writer, kernel):
 
     result.add(inst)
 
+  return result
+
+
+def insertLRSwapWarWaitAlu(module, writer, kernel):
+  """Guard the ds_read -> LR offset-swap WAR hazard (gfx1250 SCHED_MODE 2).
+
+  A ds_read reads an LR offset VGPR (address, tracked by VM_VSRC); the swap
+  v_xor then overwrites it.  Without the hardware interlock the xor can race
+  ahead of that read, so wait before it.  We emit one SWaitAlu(vm_vsrc=0) at
+  the first xor whose offset still has an undrained read; the full drain
+  covers the rest of the block.  No-op off SCHED_MODE 2.
+  """
+  if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    return module
+
+  # VGPR indices with an in-flight ds_read address use, not yet drained.
+  pending = set()
+  result = Module(module.name)
+  for inst in module.flatitems():
+    # Producer: a ds_read puts its address VGPR's read in flight on VM_VSRC.
+    if isinstance(inst, LocalReadInstruction):
+      params = inst.getParams()
+      addr = params[1] if len(params) > 1 else None
+      pending.update(_vgprIndices(addr))
+      result.add(inst)
+      continue
+
+    # Drain: s_wait_dscnt 0 retires all in-flight DS (LDS) source reads, so the
+    # offset reads are guaranteed complete and can no longer be clobbered.
+    if isinstance(inst, SWaitCnt) and inst.dscnt == 0:
+      pending.clear()
+      result.add(inst)
+      continue
+
+    # Consumer: a swap v_xor that overwrites an offset VGPR with a pending read
+    # is the WAR.  Drain once (covers every pending offset), then clear.
+    if isinstance(inst, VXorB32) and any(idx in pending for idx in _vgprIndices(inst.dst)):
+      result.add(SWaitAlu(vm_vsrc=0,
+                          comment="wait for LR offset read before swap (WAR)"))
+      pending.clear()
+
+    result.add(inst)
   return result

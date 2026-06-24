@@ -4,11 +4,13 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher_unification.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
 
 namespace ck_tile {
 
+#if !USE_NEW_UNIFIED_FRAMEWORK
 namespace impl {
 namespace warp_gemm_dispatcher {
 
@@ -195,6 +197,8 @@ static constexpr bool is_mfma_scale_f8f6f4_type_v =
 // scale mfma based f8f6f4
 template<typename A, typename B, WGAttrNumAccessEnum I, WGAttrNumAccessEnum J, bool IsScale16>
 struct Dispatcher<A, B, float, 16, 16, 128, false, false, false, I, J, IsScale16, std::enable_if_t<I != J>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4<A, B, I, J>; };
+template<typename A, typename B, WGAttrNumAccessEnum I, WGAttrNumAccessEnum J, bool IsScale16>
+struct Dispatcher<A, B, float, 32, 32, 64, false, false, false, I, J, IsScale16, std::enable_if_t<I != J>> { using Type = WarpGemmMfma_f32_32x32x64_f8f6f4<A, B, I, J>; };
 template<typename A, typename B, WGAttrNumAccessEnum I, bool IsScale16>
 struct Dispatcher<A, B, float, 16, 16, 128, false, false, false, I, I, IsScale16, std::enable_if_t<I != EDefault>> { using Type = WarpGemmMfma_f32_16x16x128_f8f6f4<A, B, I>; };
 template<typename A, typename B, WGAttrNumAccessEnum I, bool IsScale16>
@@ -333,6 +337,7 @@ struct Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS,
 // clang-format on
 } // namespace warp_gemm_dispatcher
 } // namespace impl
+#endif // if !USE_NEW_UNIFIED_FRAMEWORK
 
 template <typename AType,
           typename BType,
@@ -346,7 +351,11 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false>
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
+#if USE_NEW_UNIFIED_FRAMEWORK
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::UnificationDispatcher<
+#else
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<
+#endif
     AType,
     BType,
     AccType,

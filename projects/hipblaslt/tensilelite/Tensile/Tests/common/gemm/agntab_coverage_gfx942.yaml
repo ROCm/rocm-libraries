@@ -11,8 +11,8 @@ GlobalParameters:
   DataInitTypeB: 24
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   MaxWorkspaceSize: 134217728
   KernelTime: True
@@ -28,7 +28,7 @@ GlobalParameters:
       - [16, 16, 16, 1, 1, 4, 4, 2, 2] # MT128x128, 4 waves; MFMA bf16 16x16x16
     - DepthU: [64]
     - 1LDSBuffer: [-1]
-    - ExpandPointerSwap: [0]
+    - ExpandPointerSwap: [false]
     - StaggerU: [16]
     - TransposeLDS: [0]
     - WorkGroupMapping: [1]
