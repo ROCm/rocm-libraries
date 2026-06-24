@@ -32,4 +32,5 @@ target_sources(stinkytofu_objs PRIVATE
     InsertWaitAluPass.cpp
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
+    StinkyWmmaVgprReorderPass.cpp
 )
