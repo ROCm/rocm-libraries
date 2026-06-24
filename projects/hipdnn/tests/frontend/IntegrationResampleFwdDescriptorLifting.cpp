@@ -303,6 +303,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_stride(),
               toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_data_type(), DataType::INT8);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_name(), "index");
 }
 
 // Creates tensors without explicit set_uid(), verifies that auto-assigned UIDs
