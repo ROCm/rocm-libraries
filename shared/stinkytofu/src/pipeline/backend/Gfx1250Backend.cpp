@@ -264,6 +264,17 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         }
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+
+        // Full-kernel waitcnt insertion, last so the dataflow runs on the final CFG.
+        if (moduleOptions.EnableWaitCntInsertion) {
+            WaitCntInsertionOptions waitCntOptions;
+            waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
+
+            pm.addPass(createStinkyBuildImplicitDependencyPass());
+            pm.addPass(createStinkyRemoveWaitCntPass());
+            pm.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
+        }
+
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
