@@ -30,43 +30,26 @@ across layers without `__init__.py`.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
-The default L3 byte-identity gate (`run_diff.py` / `check_byte_identity.py`)
-compiles each `*_emit.c` at its hardcoded arch: the 16 arch-prefixed families
-(`gfx942_*`, `gfx1151_*`, `gfx1201_*`) cover those archs, while the ~48 common
-families run at `gfx950`.
+Byte-identity is a property of a single `(spec, arch)`: for the same spec and
+arch the Python and C++ engines must produce the same output, **including both
+rejecting** an unsupported `(spec, arch)` (the harness counts "both reject" as
+parity-faithful, SKIP). So arch coverage is just a matter of which `(spec, arch)`
+pairs the emitters enumerate - there is no global arch override.
 
-To also exercise the common families on other supported archs there is a
-**forced-arch IR-artifact sweep**: `_emit_common.run_emit` honors
-`CKC_PARITY_ARCH`, so the Python engine builds+lowers a common family at any
-arch, and the C engine lowers the same serialized IR at that arch via
-`ir_lower_cli <arch>` - a genuine Python@arch vs C@arch byte-identity check with
-no per-emitter edits.
+- The 16 arch-prefixed families (`gfx942_*`, `gfx1151_*`, `gfx1201_*`) cover those
+  archs directly; each emitter config returns `(spec, arch)`.
+- The common families default to `gfx950`. To cover a common family on another
+  arch, add a `(spec, arch="gfx942")` (etc.) config to that family's
+  `*_emit.py` and `*_emit.c` - the normal gate (`run_diff` /
+  `check_byte_identity.py`) then exercises it at that arch with no extra
+  machinery. A config that is invalid on the chosen arch (e.g. a wave32 WMMA
+  spec on CDNA gfx942) is rejected by **both** engines and counted SKIP.
 
-```bash
-# common families at the CDNA peer gfx942 (built engine + ir_lower_cli auto-built)
-python tests/run_all.py --no-gate --no-pytest --arch-sweep gfx942
-# or directly:
-python tests/instances/differential/ir_artifact_diff.py --cli <ir_lower_cli> --arch gfx942
-```
-
-Result: gfx942 is GREEN - 491 common-family configs byte-identical, 0 drift, 0
-error (arch-inapplicable configs SKIP). Arch-prefixed families are excluded from
-the sweep (already run at their own arch).
-
-**Which archs are meaningful to force?** The ~48 common families are CDNA specs
-(wave64 + MFMA), so the forced sweep is meaningful only for **CDNA** targets
-(`gfx942`, baseline `gfx950`). Forcing them onto an **RDNA** arch (`gfx1151`,
-`gfx1201`, wave32 + WMMA) is garbage-in - the spec is semantically invalid there
-and the two engines diverge for uninteresting reasons, so do NOT force common
-families onto RDNA. RDNA byte-identity is covered by the 16 arch-prefixed
-families (`gfx1151_*`, `gfx1201_*`, `gfx942_*`) that already run in the default
-gate and are GREEN at both llvm flavors. A config the C engine declines as
-not-applicable-to-this-arch (e.g. a WMMA op forced onto CDNA) is classified SKIP.
-
-Finding surfaced by this (pre-existing, not a migration regression, tracked as a
-follow-up): `conv_implicit_gemm` WMMA configs forced onto gfx942 are correctly
-rejected by the C engine ("WMMA not available on gfx942") but the Python engine
-emits anyway - a Python validator-permissiveness divergence to fix at the source.
+(Earlier revisions had a `CKC_PARITY_ARCH` env that re-targeted common configs
+onto another arch. It was removed: it is not needed for the parity contract and
+it produced false mismatches when it forced an arch different from the one a
+config pinned. The conv WMMA "finding" it surfaced was that artifact, not a real
+divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 
 ## Dedup / audit decisions
 

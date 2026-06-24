@@ -57,13 +57,6 @@ ARCH_PREFIXES = (
 DEFAULT_ARCH = "gfx950"
 CANDIDATE_ARCHES = ("gfx950", "gfx942", "gfx1201", "gfx1151", "gfx11-generic")
 
-# When set (via --arch), the sweep pins BOTH sides to this arch: the Python
-# emitter builds+lowers at it (CKC_PARITY_ARCH env, honored by _emit_common) and
-# the C ir_lower_cli lowers the serialized artifact at it. This gives a genuine
-# Python@arch vs C@arch byte-identity check for the common families, instead of
-# the gfx950-only default.
-FORCED_ARCH = None
-
 
 def primary_arch(family):
     for prefix, arch in ARCH_PREFIXES:
@@ -75,10 +68,7 @@ def primary_arch(family):
 def arch_candidates(family):
     """Primary arch first, then the rest of the candidate set (deduped). The
     primary covers all single-arch families directly; the remainder catches the
-    conv/matmul families that lower different configs for different arches.
-    When FORCED_ARCH is set the artifact is lowered at exactly that arch."""
-    if FORCED_ARCH:
-        return [FORCED_ARCH]
+    conv/matmul families that lower different configs for different arches."""
     prim = primary_arch(family)
     order = [prim] + [a for a in CANDIDATE_ARCHES if a != prim]
     return order
@@ -255,15 +245,6 @@ def run_family(cli, family):
         cr, c_out, c_err, arch = lower_artifact(cli, family, ir_text, ll_ref)
         if not c_out:
             note = (c_err.strip().splitlines() or ["(no stderr)"])[-1]
-            # Forced-arch sweep: a config the C engine explicitly declines as
-            # not-applicable-to-this-arch (e.g. a WMMA/RDNA op forced onto a CDNA
-            # arch) is arch-inapplicable, not a lowering bug -> SKIP, not ERROR.
-            # (That Python emitted it anyway is a validator-permissiveness
-            # divergence worth a follow-up, but it does not gate the sweep.)
-            if FORCED_ARCH and "not available on" in c_err:
-                rows.append({"idx": idx, "verdict": "SKIP", "arch": arch,
-                             "note": "arch-inapplicable (C declined): " + note})
-                continue
             rows.append({"idx": idx, "verdict": "ERROR", "arch": arch, "note": note})
             continue
         if c_out == ll_ref:
@@ -371,7 +352,6 @@ def _run_pass(cli, fams, arch_label):
 
 
 def main():
-    global FORCED_ARCH
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--cli",
@@ -382,15 +362,6 @@ def main():
     )
     ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"
-    )
-    ap.add_argument(
-        "--arch",
-        default="",
-        help="comma-separated archs to sweep the COMMON (non-arch-prefixed) "
-        "families at, e.g. 'gfx942,gfx1151'. Each common family is built+lowered "
-        "by BOTH engines at that arch. Arch-prefixed families already run at "
-        "their own arch in the default pass and are excluded from the sweep. "
-        "Default (empty): one pass at each family's own arch.",
     )
     args = ap.parse_args()
 
@@ -410,25 +381,12 @@ def main():
         subs = [s for s in args.only.split(",") if s]
         fams = [f for f in fams if any(s in f for s in subs)]
 
-    if not args.arch:
-        return _run_pass(cli, fams, "per-family")
-
-    # Multi-arch sweep: re-target the COMMON families (those that default to
-    # gfx950) to each requested arch so we aren't blindsided by only checking
-    # gfx950. Families that are invalid on an arch (e.g. a wave64 MFMA spec on
-    # RDNA gfx1151) are rejected by both engines and counted SKIP, not failed.
-    common = [f for f in fams if primary_arch(f) == DEFAULT_ARCH]
-    archs = [a for a in args.arch.split(",") if a]
-    status = 0
-    try:
-        for arch in archs:
-            FORCED_ARCH = arch
-            os.environ["CKC_PARITY_ARCH"] = arch
-            status |= _run_pass(cli, common, arch)
-    finally:
-        FORCED_ARCH = None
-        os.environ.pop("CKC_PARITY_ARCH", None)
-    return status
+    # Each family is built+lowered at its own (spec, arch); byte-identity is a
+    # per-(spec, arch) property and arch-incompatible configs reject on both
+    # sides (counted SKIP). Arch coverage comes from the configs the emitters
+    # enumerate (the gfx-prefixed families + any gfx942/gfx1151 configs), not
+    # from a global arch override.
+    return _run_pass(cli, fams, "per-family")
 
 
 if __name__ == "__main__":

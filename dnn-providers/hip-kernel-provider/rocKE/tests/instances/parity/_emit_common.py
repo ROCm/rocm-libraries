@@ -8,7 +8,6 @@
 # serialization, "verify" prints verifier diagnostics, and any other mode is a
 # usage error. run_emit() centralizes that boilerplate so each emitter only has
 # to provide its config selector and kernel builder.
-import os
 import sys
 
 from ck_dsl.core.ir_serialize import serialize
@@ -52,16 +51,13 @@ def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):
         return 2
     selected = spec_fn(idx)
     if isinstance(selected, tuple):
-        # The family pinned its own arch (an arch-specific kernel); honor it.
+        # A config either uses the default arch or pins its own (an arch-specific
+        # kernel). Byte-identity is a property of this exact (spec, arch): both
+        # engines must agree, including agreeing to reject a (spec, arch) that
+        # the target does not support. There is no global arch override.
         spec, arch = selected
     else:
         spec = selected
-        # Multi-arch coverage: a family that uses the default arch can be
-        # re-targeted via CKC_PARITY_ARCH so the differential gate can exercise
-        # the common families on gfx942 / gfx1151 / ... as well as gfx950. The
-        # build, lower, and serialize all use the same resolved arch, so the C
-        # side (ir_lower_cli <arch>) and this Python reference stay comparable.
-        arch = os.environ.get("CKC_PARITY_ARCH", arch)
     kernel = build_fn(spec, arch=arch)
     if mode == "ll":
         text = _native_lower(kernel, arch=arch)

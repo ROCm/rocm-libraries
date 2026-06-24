@@ -155,6 +155,22 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t *spec) {
         spec->block_size = 256;
         spec->batched = false;
         break;
+    case 9: /* test1 shape, lowered for gfx942 (CDNA coverage of common GEMM) */
+        spec->name = "test1_gfx942";
+        spec->tile = (ckc_gemm_tile_spec_t){
+            .tile_m = 128, .tile_n = 128, .tile_k = 32,
+            .warp_m = 2, .warp_n = 2, .warp_k = 1,
+            .warp_tile_m = 16, .warp_tile_n = 16, .warp_tile_k = 16};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "default";
+        spec->data.dtype_a = "fp16";
+        spec->data.dtype_b = "fp16";
+        spec->data.dtype_c = "fp16";
+        spec->data.dtype_acc = "fp32";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -162,13 +178,17 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t *spec) {
     return 0;
 }
 
+/* Config 9 exercises gfx942; all others use the gfx950 baseline. */
+static const char *arch_for(int idx) { return idx == 9 ? "gfx942" : "gfx950"; }
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <config_index 0..8>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..9>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
     const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char *arch = arch_for(idx);
 
     ckc_gemm_universal_spec_t spec;
     if (make_spec(idx, &spec) != 0) {
@@ -181,7 +201,7 @@ int main(int argc, char **argv) {
         char err[CKC_ERR_MSG_CAP];
         err[0] = 0;
         ckc_status_t st = ckc_gemm_universal_lower_to_llvm(
-            &spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+            &spec, arch, CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
         if (st != CKC_OK || !llvm_text) {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
             return 1;
@@ -193,7 +213,7 @@ int main(int argc, char **argv) {
 
     /* ir / verify modes need the kernel object */
     ckc_ir_builder_t b;
-    ckc_kernel_def_t *kernel = ckc_build_universal_gemm_new(&b, &spec, "gfx950");
+    ckc_kernel_def_t *kernel = ckc_build_universal_gemm_new(&b, &spec, arch);
     if (!kernel || !ckc_ir_builder_ok(&b)) {
         fprintf(stderr, "build failed: %s\n", ckc_ir_builder_error(&b));
         ckc_ir_builder_free(&b);

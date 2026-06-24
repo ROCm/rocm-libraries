@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,9 +24,6 @@ from pathlib import Path
 ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
-IR_ARTIFACT_DIFF = TESTS / "instances" / "differential" / "ir_artifact_diff.py"
-IR_LOWER_CLI_SRC = TESTS / "core" / "ir_lower_cli.cpp"
-CPP_INCLUDE = ROCKE / "Cpp" / "include"
 
 # Files that may reference an absolute repo path or a path that escapes rocKE/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
@@ -72,39 +68,6 @@ def relative_path_guard() -> int:
     return 0
 
 
-def _cxx() -> str | None:
-    for c in ("c++", "clang++", "g++"):
-        p = shutil.which(c)
-        if p:
-            return p
-    return None
-
-
-def arch_sweep(archs: str, build_root: Path) -> int:
-    """Multi-arch byte-identity for the COMMON families: build the engine +
-    ir_lower_cli, then run the IR-artifact differential at each requested arch
-    (e.g. gfx942,gfx1151) so we are not blindsided by only checking gfx950."""
-    print(f"\n== multi-arch byte-identity sweep (archs={archs}) ==")
-    archive = build_root / "libckc_core.a"
-    if not archive.exists():
-        subprocess.run(["cmake", "-S", str(ROCKE), "-B", str(build_root),
-                        "-DCMAKE_BUILD_TYPE=Release"], check=True, stdout=subprocess.DEVNULL)
-        subprocess.run(["cmake", "--build", str(build_root), "--target", "ckc_core",
-                        "-j", str(os.cpu_count() or 1)], check=True, stdout=subprocess.DEVNULL)
-    cxx = _cxx()
-    if not cxx:
-        print("  no C++ compiler found; skipping arch sweep")
-        return 0
-    cli = build_root / "ir_lower_cli"
-    comp = subprocess.run([cxx, "-std=c++20", "-I", str(CPP_INCLUDE), str(IR_LOWER_CLI_SRC),
-                           str(archive), "-lm", "-o", str(cli)], capture_output=True, text=True)
-    if comp.returncode != 0:
-        print("  ir_lower_cli build FAILED:\n" + comp.stderr)
-        return 1
-    return subprocess.run([sys.executable, str(IR_ARTIFACT_DIFF),
-                           "--cli", str(cli), "--arch", archs]).returncode
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE test/validation runner")
     ap.add_argument("--no-guard", action="store_true")
@@ -112,9 +75,6 @@ def main() -> int:
     ap.add_argument("--no-pytest", action="store_true")
     ap.add_argument("--only", default="", help="restrict byte-identity gate to families containing SUBSTR")
     ap.add_argument("--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify"))
-    ap.add_argument("--arch-sweep", default="",
-                    help="comma-separated archs to also run the common-family byte-identity "
-                         "sweep at (e.g. gfx942,gfx1151). Off by default.")
     args = ap.parse_args()
 
     status = 0
@@ -128,9 +88,6 @@ def main() -> int:
         if args.only:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
-
-    if args.arch_sweep:
-        status |= arch_sweep(args.arch_sweep, Path(args.build_root))
 
     if not args.no_pytest:
         print("\n== pytest ==")

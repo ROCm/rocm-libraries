@@ -209,6 +209,35 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=256,
             batched=False,
         )
+    if idx == 9:
+        # gfx942 (CDNA) coverage of the universal-GEMM common family: the test1
+        # shape, but built+lowered for gfx942 so the gate exercises gfx942's
+        # datalayout / waitcnt / MFMA-catalog lowering, not only gfx950. Same
+        # wave64 MFMA spec is valid on both CDNA archs; both engines must agree.
+        return (
+            UniversalGemmSpec(
+                name="test1_gfx942",
+                tile=TileSpec(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                trait=TraitSpec(pipeline="compv3", epilogue="default"),
+                data=DataSpec(
+                    dtype_a="fp16", dtype_b="fp16", dtype_c="fp16", dtype_acc="fp32"
+                ),
+                wave_size=64,
+                block_size=256,
+                batched=False,
+            ),
+            "gfx942",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -216,7 +245,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..8>\n",
+        usage="usage: gemm_emit.py <config_index 0..9>\n",
     )
 
 
