@@ -4485,6 +4485,24 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     int duplicated_counts = 0;
     for(auto solution : solutions)
     {
+        // Custom kernels don't support general batched mode (pointer arrays)
+        // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
+        if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGemm>::value)
+        {
+            if(prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+               && !solution->sizeMapping.customKernelName.empty())
+            {
+                if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                {
+                    std::ostringstream msg;
+                    msg << "Skipping custom kernel " << solution->sizeMapping.customKernelName
+                        << " - does not support batch_mode=POINTER_ARRAY" << std::endl;
+                    log_info(__func__, msg.str());
+                }
+                continue;
+            }
+        }
+
         //workaround: findAllSolutions should get all solutions without duplications
         bool duplicated_sol = false;
         for(int j = 0; j < i; j++)
