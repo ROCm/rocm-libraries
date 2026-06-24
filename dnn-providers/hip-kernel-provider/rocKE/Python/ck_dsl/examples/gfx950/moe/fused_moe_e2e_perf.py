@@ -38,9 +38,9 @@ Usage
 -----
 ::
 
-    AITER_PATH=/path/to/aiter PYTHONPATH=python:$AITER_PATH \\
+    AITER_PATH=/path/to/aiter PYTHONPATH=Python:$AITER_PATH \\
         /path/to/venv/bin/python \\
-        python/ck_dsl/examples/moe/fused_moe_e2e_perf.py \\
+        Python/ck_dsl/examples/moe/fused_moe_e2e_perf.py \\
         [--scenario name] [--attempts N] [--warmup N] \\
         [--skip-aiter] [--skip-cktile] [--skip-torch]
 
@@ -77,7 +77,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[5]  # .../composablekernel
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

@@ -36,7 +36,7 @@ and the hipDNN provider's Fast / JIT / IR-artifact / C-JIT modes):
 The implementation tree is:
 
 ```text
-python/ck_dsl/
+Python/ck_dsl/
 ├── core/ # SSA IR, IR printer, conservative passes, LLVM/HIP/CK Tile lowering
 ├── runtime/ # libamd_comgr + libamdhip64 ctypes; launcher, workspace, timing
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
@@ -127,14 +127,12 @@ Hard facts:
 ## Validation Status
 
 The docs in this folder are written against the current code. Run commands
-from the Composable Kernel repository root with the Python interpreter for
-your ROCm environment:
+from the `rocKE/` root with the Python interpreter for your ROCm environment:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=Python
 
-PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl.py
-PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl_examples.py
+PYTHONDONTWRITEBYTECODE=1 python tests/test_ck_dsl.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
@@ -150,19 +148,19 @@ These docs are written against the current code. When this file and code disagre
 
 Conventional anchors:
 
-- Package re-exports: `python/ck_dsl/__init__.py`, `python/ck_dsl/helpers/__init__.py`.
-- IR + builder: `python/ck_dsl/core/ir.py`.
-- Production lowering: `python/ck_dsl/core/lower_llvm.py`.
-- HIP debug lowering: `python/ck_dsl/core/lower_hip.py`.
-- CK Tile parity emission: `python/ck_dsl/core/lower_cktile.py`.
-- Conservative passes: `python/ck_dsl/core/passes.py`.
-- COMGR: `python/ck_dsl/runtime/comgr.py`.
-- HIP runtime: `python/ck_dsl/runtime/hip_module.py`.
-- Launcher / workspace / timing: `python/ck_dsl/runtime/launcher.py`.
-- Torch arg packing: `python/ck_dsl/runtime/torch_module.py`.
-- High-level compile: `python/ck_dsl/helpers/compile.py`.
-- Manifest schema: `python/ck_dsl/helpers/manifest.py`.
+- Package re-exports: `Python/ck_dsl/__init__.py`, `Python/ck_dsl/helpers/__init__.py`.
+- IR + builder: `Python/ck_dsl/core/ir.py`.
+- Production lowering: `Python/ck_dsl/core/lower_llvm.py`.
+- HIP debug lowering: `Python/ck_dsl/core/lower_hip.py`.
+- CK Tile parity emission: `Python/ck_dsl/core/lower_cktile.py`.
+- Conservative passes: `Python/ck_dsl/core/passes.py`.
+- COMGR: `Python/ck_dsl/runtime/comgr.py`.
+- HIP runtime: `Python/ck_dsl/runtime/hip_module.py`.
+- Launcher / workspace / timing: `Python/ck_dsl/runtime/launcher.py`.
+- Torch arg packing: `Python/ck_dsl/runtime/torch_module.py`.
+- High-level compile: `Python/ck_dsl/helpers/compile.py`.
+- Manifest schema: `Python/ck_dsl/helpers/manifest.py`.
 - Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
-- DSL runbook compliance table: `python/ck_dsl/dsl_docs/optimization/runbook_compliance.md`.
-- Coordinate-transform DAG walkthrough: `python/ck_dsl/TRANSFORM_DAG.md`.
-- Helpers reference: `python/ck_dsl/helpers/README.md`.
+- DSL runbook compliance table: `dsl_docs/optimization/runbook_compliance.md`.
+- Coordinate-transform DAG walkthrough: `Python/ck_dsl/TRANSFORM_DAG.md`.
+- Helpers reference: `Python/ck_dsl/helpers/README.md`.

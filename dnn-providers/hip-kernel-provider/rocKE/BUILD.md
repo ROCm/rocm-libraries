@@ -39,12 +39,16 @@ Common options:
 > pathologically slow.
 
 To run the full validation suite (relative-path guard + byte-identity gate +
-pytest, plus the optional multi-arch sweep), use the test runner:
+pytest + ctest when a build dir exists), use the test runner:
 
 ```bash
-python <rocKE>/tests/run_all.py                       # guard + gate + pytest
-python <rocKE>/tests/run_all.py --arch-sweep gfx942   # also sweep common families at gfx942
+python <rocKE>/tests/run_all.py                  # guard + gate + pytest (+ ctest)
+python <rocKE>/tests/run_all.py --only gemm      # restrict the gate to one family
 ```
+
+Multi-arch coverage (gfx950 baseline plus gfx942/gfx1151/gfx1201) is intrinsic to
+the gate: the parity emitters enumerate the architectures per `(spec, arch)`
+config, so the standard run above already exercises every supported arch.
 
 ## Building the engine archive by hand
 
@@ -104,8 +108,8 @@ silently shadows a fresh build and produces failures that look like code bugs.
 
 This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 `CMakeCache.txt`, `_deps/`, `__pycache__/`, `*.a`, `*.o`, `*.so`, `*.dylib`,
-`*.dll`, `*.lib`, `*.cpython-*.so`. A pre-commit guard rejects committing such
-artifacts under the engine tree (`files: ^...rocKE/Cpp/`).
+`*.dll`, `*.lib`, `*.cpython-*.so`. Always build into an out-of-tree directory
+(`-B /tmp/rocke`, never inside `rocKE/`) so these never land in a commit.
 
 ## Freshness stamps
 

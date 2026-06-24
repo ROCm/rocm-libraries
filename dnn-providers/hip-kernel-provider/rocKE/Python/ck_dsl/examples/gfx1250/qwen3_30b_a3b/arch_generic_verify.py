@@ -14,7 +14,7 @@ compares against a numpy fp32 reference. Covers:
 
 Must run on a gfx1250 device:
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.arch_generic_verify
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.arch_generic_verify
 """
 
 from __future__ import annotations

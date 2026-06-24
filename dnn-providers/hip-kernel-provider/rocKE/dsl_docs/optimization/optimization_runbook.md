@@ -246,20 +246,20 @@ from cheapest to most expensive:
    transform DAG, helpers, instance smoke). The IR/lowering subset needs
    no GPU; ~20 harness/validation/launch-timer tests require a GPU
    (torch+HIP).
-2. `python python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` —
+2. `python dsl_docs/development/verify_dsl_docs.py` —
    imports every symbol, exercises every IR builder method, lowers
    every spec to LLVM/HIP/CK Tile, builds HSACO, launches small
    kernels (50 checks, ~2 s).
 3. `python -m ck_dsl.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python python/ck_dsl/examples/common/ck_tile_parity.py --op all` — small
+4. `python Python/ck_dsl/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python python/ck_dsl/examples/common/parity_extended_kernels.py --op all`
+5. `python Python/ck_dsl/examples/common/parity_extended_kernels.py --op all`
    — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
-6. `python python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
+6. `python Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python python/ck_dsl/examples/common/hip_lowering_parity.py` — production
+7. `python Python/ck_dsl/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit across every shipped
    spec.
 
@@ -3159,29 +3159,29 @@ importable — the conventional layout is to set it to the
 From the `composablekernel` checkout root:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=Python
 ```
 
 ### 19.2 The single validation block
 
 ```bash
 cd <composablekernel-checkout>
-export PYTHONPATH=python
+export PYTHONPATH=Python
 
-PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 python tests/test_ck_dsl.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl_examples.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-python python/ck_dsl/examples/common/ck_tile_parity.py --op all
+python Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python Python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="Python:${AITER_PATH}" python \
+  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 
@@ -3189,7 +3189,7 @@ PYTHONPATH="python:${AITER_PATH}" python \
 
 ```bash
 cd <composablekernel-checkout>/python
-PROBES=ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes
+PROBES=dsl_docs/optimization/utilities/tools/dsl_probes
 
 python "$PROBES/probe_occupancy.py"        --demo attention_tiled_2d --arch gfx950
 python "$PROBES/probe_intrinsic_counts.py" --demo attention_tiled_2d
@@ -3220,7 +3220,7 @@ pmc: LDS_BANK_CONFLICT
 EOF
 
 rocprofv3 -i metrics.txt -o run.csv --stats --kernel-trace -- \
-  python ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes/probe_rocprof_single.py \
+  python dsl_docs/optimization/utilities/tools/dsl_probes/probe_rocprof_single.py \
   --builder mypkg.mymod:make_runner \
   --problem-json /tmp/problem.json \
   --iters 50 --warmup 10
@@ -3229,10 +3229,10 @@ rocprofv3 -i metrics.txt -o run.csv --stats --kernel-trace -- \
 ### 19.5 LDS / occupancy follow-up tools
 
 ```bash
-python ck_dsl/dsl_docs/optimization/utilities/tools/stage4_analyze/analyze_lds_conflicts.py \
+python dsl_docs/optimization/utilities/tools/stage4_analyze/analyze_lds_conflicts.py \
   --rocprof run_kernel_stats.csv --isa kernel.s --arch gfx950
 
-python ck_dsl/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py
+python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py
 ```
 
 ---

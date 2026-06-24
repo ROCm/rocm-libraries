@@ -7,7 +7,7 @@ harness: pins ``--arch gfx942`` and lets the catalog pick the gfx942-legal MFMA
 atom (16x16x16 / 32x32x8 — never the gfx950-only wide atoms). Demonstrates the
 hybrid-layout pattern: arch showcases add intent, not duplicated plumbing.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx942.gemm_demo
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx942.gemm_demo
 """
 
 from __future__ import annotations

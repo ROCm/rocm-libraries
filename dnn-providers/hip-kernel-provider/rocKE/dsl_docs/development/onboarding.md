@@ -18,7 +18,7 @@
 > **Validation note**: Every code example, exercise, and command in this guide
 > has been run and verified on an AMD Instinct MI355X (gfx950, ROCm 7.0). All
 > custom kernels are bit-exact against their torch reference. Run commands from
-> the `projects/composablekernel/` directory with `export PYTHONPATH=python`.
+> the `rocKE/` directory with `export PYTHONPATH=Python`.
 
 ---
 
@@ -47,9 +47,9 @@ By the end of Week 1, you will:
 **Hands-on Tasks:**
 1. Set up your environment:
 ```bash
-# Run all commands from the composablekernel project root:
-cd <rocm-libraries-checkout>/projects/composablekernel
-export PYTHONPATH=python
+# Run all commands from the rocKE root:
+cd <rocm-libraries-checkout>/dnn-providers/hip-kernel-provider/rocKE
+export PYTHONPATH=Python
 export PYTHONDONTWRITEBYTECODE=1
 
 # Verify ROCm sees your GPU (look for your gfx target, e.g. gfx950)
@@ -63,11 +63,11 @@ python3 -c "from ck_dsl import *; print('CK DSL ready!')"
 > reports `CUDA: False`, your shell is missing the GPU device groups. Confirm
 > with `python3 -c "import torch; print(torch.cuda.is_available())"`. If the
 > import itself fails with `No module named 'ck_dsl'`, you are not in
-> `projects/composablekernel/` or `PYTHONPATH=python` is unset.
+> `rocKE/` or `PYTHONPATH=Python` is unset.
 
 2. Run the validation suite to confirm everything works:
 ```bash
-python python/test/test_ck_dsl.py
+python tests/test_ck_dsl.py
 ```
 This runs ~245 static unit tests in a couple of seconds. A handful of
 convolution-lowering tests may error in some checkouts (pre-existing, unrelated
@@ -104,12 +104,12 @@ resource descriptors, and (5) why Value.__bool__ raises an error."
 **Study the example:**
 ```bash
 # Read the 2D add demo - simpler than full vector add
-cat python/ck_dsl/examples/common/distribution_2d_add_demo.py
+cat Python/ck_dsl/examples/common/distribution_2d_add_demo.py
 ```
 
 **Exercise 1: Build and run the demo**
 ```bash
-python python/ck_dsl/examples/common/distribution_2d_add_demo.py \
+python Python/ck_dsl/examples/common/distribution_2d_add_demo.py \
     --H 128 --W 256 --tile-m 32 --tile-n 64 --vec 8
 ```
 Expected output (bit-exact):
@@ -305,7 +305,7 @@ for atom in ATOMS:
             "--warp-tile", atom,
         ],
         capture_output=True, text=True,
-        env={"PYTHONPATH": "python", **os.environ},
+        env={"PYTHONPATH": "Python", **os.environ},
     )
     out = proc.stdout + proc.stderr
     perf = re.search(r"Perf:\s*[\d.]+\s*ms,\s*([\d.]+)\s*TFlops", out)
@@ -407,8 +407,8 @@ reusable, dispatchable kernel":
 Study the canonical small-op instance first — it's the simplest end-to-end
 example of all four parts:
 ```bash
-sed -n '1,120p' python/ck_dsl/instances/common/reduce.py   # docstring + spec
-cat python/ck_dsl/dsl_docs/instances/small_ops.md          # the family doc
+sed -n '1,120p' Python/ck_dsl/instances/common/reduce.py   # docstring + spec
+cat dsl_docs/instances/small_ops.md          # the family doc
 ```
 
 ## Exercise: build a `row-sum` instance from scratch
@@ -595,7 +595,7 @@ if __name__ == "__main__":
 - Study the reference implementation:
 ```bash
 # The cshuffle epilogue lives in the universal-GEMM builder. Grep for it:
-grep -n "cshuffle" python/ck_dsl/instances/common/gemm_universal.py
+grep -n "cshuffle" Python/ck_dsl/instances/common/gemm_universal.py
 ```
 
 **Key Concept:** C-shuffle optimizes the GEMM epilogue by:
@@ -699,8 +699,8 @@ Each D operand is `(param_name, op)` with `op` in `{"add", "mul"}`.
 
 **Study reference implementation:**
 ```bash
-sed -n '1,40p' python/ck_dsl/instances/common/gemm_multi_d.py   # docstring
-grep -n "GemmMultiDSpec\|d_operands" python/ck_dsl/instances/common/gemm_multi_d.py
+sed -n '1,40p' Python/ck_dsl/instances/common/gemm_multi_d.py   # docstring
+grep -n "GemmMultiDSpec\|d_operands" Python/ck_dsl/instances/common/gemm_multi_d.py
 ```
 
 > **Kernarg ABI gotcha** (called out in the source): the kernel param order is
@@ -794,8 +794,8 @@ Extend Exercise 6 to `E = (A*B + D0) * D1` by passing
 **Study the elementwise / quantization ops:**
 ```bash
 # Activation + quant ops available as standalone elementwise kernels:
-python python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
-cat python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
+python Python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
+cat Python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
 ```
 
 **AI-Assisted Design:**
@@ -819,8 +819,8 @@ Design the extension:
 - `dsl_docs/instances/attention.md`
 - Study example implementations:
 ```bash
-ls python/ck_dsl/examples/gfx1151/attention/
-cat python/ck_dsl/examples/gfx1151/attention/fmha_singlewave.py
+ls Python/ck_dsl/examples/gfx1151/attention/
+cat Python/ck_dsl/examples/gfx1151/attention/fmha_singlewave.py
 ```
 
 **Key Attention Patterns:**
@@ -1005,7 +1005,7 @@ Week 3 and beyond follows an **optimization sprint** model:
 ## Day 15-16: Setup Optimization Infrastructure
 
 The optimization tooling lives under
-`python/ck_dsl/dsl_docs/optimization/`. Two things to anchor on:
+`dsl_docs/optimization/`. Two things to anchor on:
 
 1. **The runbook** — `optimization/optimization_runbook.md`. Read "The Loop
    (one-page summary)" first; it's the discipline the rest of Week 3 follows.
@@ -1023,7 +1023,7 @@ it *compiled to* (ISA mix) — before touching counters.
 run them immediately):
 
 ```bash
-cd python/ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes
+cd dsl_docs/optimization/utilities/tools/dsl_probes
 
 # Resource/occupancy limiters for the implicit-GEMM conv demo.
 python probe_occupancy.py --demo implicit_gemm --arch gfx950
@@ -1056,7 +1056,7 @@ The `optimization/utilities/skills/` folder holds focused, code-adjacent
 playbooks. Read the ones matching your kernel:
 
 ```bash
-cd python/ck_dsl/dsl_docs/optimization
+cd dsl_docs/optimization
 sed -n '1,60p' optimization_runbook.md          # The Loop + lever catalog intro
 cat utilities/skills/gemm-optimization-ckdsl.md  # GEMM-specific levers
 cat utilities/skills/lds-optimization-ckdsl.md   # LDS layout / bank conflicts
@@ -1133,7 +1133,7 @@ def run(cfg):
          "--warp-tile", cfg["warp_tile"], "--pipeline", cfg["pipeline"],
          "--epilogue", cfg["epilogue"]],
         capture_output=True, text=True,
-        env={"PYTHONPATH": "python", **os.environ})
+        env={"PYTHONPATH": "Python", **os.environ})
     out = proc.stdout + proc.stderr
     m = re.search(r"Perf:\s*[\d.]+\s*ms,\s*([\d.]+)\s*TFlops", out)
     return (float(m.group(1)) if m else 0.0), ("-> PASS" in out)
@@ -1169,7 +1169,7 @@ Bigger swings show up at other shapes and on memory-bound problems.
 Don't trust a number you can't explain. Use the probes from Day 15 to see what
 actually changed between two variants:
 ```bash
-cd python/ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes
+cd dsl_docs/optimization/utilities/tools/dsl_probes
 # Occupancy/resource limiter for each variant (drive with a small custom
 # script per the probe's --help "Programmatic use" block), or for the shipped
 # demos directly:
@@ -1352,9 +1352,9 @@ After completing Week 3, choose your specialization path:
 
 **Reference:**
 ```bash
-cat python/ck_dsl/dsl_docs/instances/index.md          # how instances are organized
-cat python/ck_dsl/dsl_docs/development/extending.md     # adding a new instance
-ls  python/ck_dsl/instances/common/                     # the shipped instance set
+cat dsl_docs/instances/index.md          # how instances are organized
+cat dsl_docs/development/extending.md     # adding a new instance
+ls  Python/ck_dsl/instances/common/                     # the shipped instance set
 ```
 
 ### Path B: Architecture Specialization
@@ -1367,9 +1367,9 @@ ls  python/ck_dsl/instances/common/                     # the shipped instance s
 **Reference:**
 ```bash
 # Deep-dive on your architecture (arch docs live under optimization/arch/)
-cat python/ck_dsl/dsl_docs/optimization/arch/gfx950.md
-cat python/ck_dsl/dsl_docs/optimization/arch/gfx942.md
-cat python/ck_dsl/dsl_docs/optimization/utilities/skills/isa-inspection-ckdsl.md
+cat dsl_docs/optimization/arch/gfx950.md
+cat dsl_docs/optimization/arch/gfx942.md
+cat dsl_docs/optimization/utilities/skills/isa-inspection-ckdsl.md
 ```
 
 ### Path C: Fusion & Custom Ops
@@ -1381,11 +1381,11 @@ cat python/ck_dsl/dsl_docs/optimization/utilities/skills/isa-inspection-ckdsl.md
 
 **Reference:**
 ```bash
-cat python/ck_dsl/dsl_docs/fusion/overview.md
+cat dsl_docs/fusion/overview.md
 # Real fused instances to study (epilogue fusion, fused norm+quant, fused conv):
-cat python/ck_dsl/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
-cat python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
-ls  python/ck_dsl/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
+cat Python/ck_dsl/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
+cat Python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
+ls  Python/ck_dsl/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
 ```
 
 ### Path D: Tooling & Infrastructure
@@ -1470,7 +1470,7 @@ Provide:
 **Week 1:**
 - *"HSACO compilation fails"* → Check ROCm version, verify `rocminfo`
 - *"Wrong results in vector add"* → Check index calculations, bounds checking
-- *"Import errors"* → Verify `PYTHONPATH=python`
+- *"Import errors"* → Verify `PYTHONPATH=Python`
 
 **Week 2:**
 - *"C-shuffle crashes"* → Check warp count, tile size alignment
@@ -1488,7 +1488,7 @@ Provide:
 
 1. **Check documentation first:**
    ```bash
-   grep -r "your error" python/ck_dsl/dsl_docs/
+   grep -r "your error" dsl_docs/
    ```
 
 2. **Use AI for error diagnosis:**
@@ -1510,21 +1510,21 @@ Provide:
 
 ### Essential Commands
 ```bash
-# All commands run from projects/composablekernel/ with PYTHONPATH=python
-export PYTHONPATH=python
+# All commands run from rocKE/ with PYTHONPATH=Python
+export PYTHONPATH=Python
 
 # Verify setup
 python -c "from ck_dsl import *; print('Ready')"
 
 # Run the static unit suite
-python python/test/test_ck_dsl.py
+python tests/test_ck_dsl.py
 
 # Build + verify a GEMM (prints TFLOPS + PASS/FAIL)
 python -m ck_dsl.examples.common.universal_gemm_verify \
     --arch gfx950 --m 2048 --n 2048 --k 2048
 
 # Inspect resources / ISA of a kernel (shipped demos)
-cd python/ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes
+cd dsl_docs/optimization/utilities/tools/dsl_probes
 python probe_occupancy.py   --demo implicit_gemm     --arch gfx950
 python probe_isa_inspect.py --demo attention_tiled_2d --mcpu gfx950
 
@@ -1534,7 +1534,7 @@ rocprof --stats python my_kernel.py
 
 ### Key File Locations
 ```
-python/ck_dsl/
+Python/ck_dsl/
 ├── core/ir.py                              # SSA IR and IRBuilder
 ├── core/lower_llvm.py                      # production LLVM lowering
 ├── core/ir_print.py                        # print_ir() (returns MLIR-style text)

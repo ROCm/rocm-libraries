@@ -33,7 +33,7 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
   a numpy reference, so they need the hardware. Use `--no-verify` (probe and
   `matmul_nbits`) to **build + write the artifact only**, with no device.
 - The repo's `ck_dsl` Python package on `PYTHONPATH` (run from
-  `projects/composablekernel/python`, i.e. `PYTHONPATH=python`).
+  `dnn-providers/hip-kernel-provider/rocKE/Python`, i.e. `PYTHONPATH=Python`).
 - A working `ck_dsl` build toolchain (LLVM/comgr) to compile the HSACO.
 
 ## File map
@@ -54,15 +54,15 @@ The kernel sources these drivers build live outside this directory:
 
 ## Run
 
-Run from `projects/composablekernel/python`. All three are Python modules
+Run from `dnn-providers/hip-kernel-provider/rocKE/Python`. All three are Python modules
 (`python3 -m …`).
 
 ### 1. WMMA lane-map probe
 
 ```bash
 # confirm the lane map on a single 16x16x16 tile and a 64x64x64 multi-tile grid
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64
 ```
 
 `--m/--n/--k` must each be a multiple of 16 (the WMMA tile). Other flags:
@@ -79,20 +79,20 @@ Pick the family with `--family` and the real Qwen3.5-9B shapes with `--n/--k`:
 
 ```bash
 # large_n: WMMA body, N a multiple of tile_n=128 (attn / FFN proj)
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
     --m 128 --n 4096 --k 4096
 
 # skinny_n: same WMMA body, tile_n=32 (the N=32 linear-attn in_proj)
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
     --family skinny_n --m 128 --n 32 --k 4096
 
 # decode_gemv: scalar one-thread-per-column body for lm_head (N=248320, M=1), no WMMA
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
     --family decode_gemv --m 1 --n 248320 --k 4096
 
 # the combined-optimization large_n body (LDS-staged A + tile_k=group scale-on-acc
 # + LDS epilogue transpose); --opt is large_n-only
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
     --m 128 --n 4096 --k 4096 --opt
 ```
 
@@ -110,7 +110,7 @@ Flags: `--arch` (default `gfx1201`; `gfx1151` also supported), `--group-size`
 ### 3. Deep-fused conv + maxpool (experimental)
 
 ```bash
-PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.deep_fused_conv_pool_verify \
+PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.deep_fused_conv_pool_verify \
     --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
 ```
 

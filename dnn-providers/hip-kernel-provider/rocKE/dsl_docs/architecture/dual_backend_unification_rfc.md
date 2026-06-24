@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Proposed (enactable plan) |
-| **Scope** | `python/ck_dsl` (Python), `python/Cpp` (C → C++20), `dnn-providers/ck-dsl-provider` (C++ hipDNN plugin) |
+| **Scope** | `Python/ck_dsl` (Python), `python/Cpp` (C → C++20), `dnn-providers/ck-dsl-provider` (C++ hipDNN plugin) |
 | **Type** | Architecture + Test Infrastructure + Migration |
 | **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `Cpp` |
 | **Owner** | CK DSL team |
@@ -332,7 +332,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | #8609 **gfx1250** (RDNA4) new arch | `instances/gfx1250/*` ~6k + examples + tests | **new** ckc gfx1250 backend + instances (large) |
 | attention/moe deltas | `attention_unified.py` +349, `moe_*`, `fused_moe_e2e.py` +124 | mirror in C++ |
 
-**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/projects/composablekernel/python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
+**Method.** Point the differential harness's **Python side at the target tree** (`PYTHONPATH=<target-worktree>/dnn-providers/hip-kernel-provider/rocKE/Python`) against the current C++ engine → `run_diff` enumerates the **exact per-family C++ drift** = the authoritative work-list. Mirror each codegen change in C++; gate `run_diff` GREEN vs target-Python.
 
 **Tasks.** T11.1 core backend fixes (#8313/#8293) → C++ `lower_llvm`/`isa`. T11.2 conv (#8624/#8355) → C++ conv. T11.3 atoms fp32/bf16 (#8348) → C++ atoms/mma/catalog. T11.4 gemm/schedule (#8320). T11.5 attention/moe deltas. T11.6 **gfx1250** new arch (assess: new ckc backend + instances; prioritize after existing-family drift). T11.7 **capture-here** — ensure this branch's Python reflects target changes; **flag conflicts** with WS1/WS6 additions (`core/__init__.py`, `dispatch/gemm/*` both diverged from the #8237 base).
 

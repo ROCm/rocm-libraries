@@ -16,8 +16,8 @@ input cannot distinguish row from col — random input can).
 
 Must run on a gfx1201 device (Navi 48):
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 16 --n 16 --k 16
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.wmma_probe --m 64 --n 64 --k 64
 """
 
 from __future__ import annotations

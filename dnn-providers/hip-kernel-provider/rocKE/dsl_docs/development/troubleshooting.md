@@ -113,8 +113,8 @@ your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
 ### `No module named 'ck_dsl'` / `Cpp`
-`PYTHONPATH` isn't pointing at `projects/composablekernel/python`. Set it
-(`PYTHONPATH=<…>/projects/composablekernel/python`) and run from there.
+`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocKE/Python`. Set it
+(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocKE/Python`) and run from there.
 
 ### A probe can't find `llvm-readelf` / `objdump`
 The ROCm `bin/` directory isn't on `PATH`. Add it.

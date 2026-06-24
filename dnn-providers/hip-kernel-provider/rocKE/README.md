@@ -38,7 +38,8 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 - **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
   (7.2 recommended → `CK_DSL_LLVM_FLAVOR=llvm22`; older → `llvm20`). ROCm is a
   system dependency, not a pip package.
-- **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.18+.
+- **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
+  (3.18+ for the `Cpp/bindings` pybind module).
 - Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
   `pybind11` in the `dev` extra). **torch** must be the ROCm build for your
   system, installed from the ROCm wheel index (not via this repo).
@@ -104,13 +105,18 @@ is `gfx950`; on-GPU paths can target the local device via
 
 ## Test
 
-One cross-platform entrypoint runs everything (relative-path guard →
-byte-identity gate → pytest → ctest):
+One cross-platform entrypoint runs the relative-path guard → byte-identity gate
+→ pytest. It **also** runs `ctest`, but only when the `--build-root` already
+contains the built C++ test binaries — the gate itself builds just `ckc_core`,
+so a default run (fresh temp build-root) does the guard + gate + pytest and
+skips ctest. To include the C++ unit tests, point `--build-root` at a full
+build (see step 3 below):
 
 ```bash
-python "$ROCKE/tests/run_all.py"
-python "$ROCKE/tests/run_all.py" --only gemm        # scope the gate to some families
-python "$ROCKE/tests/run_all.py" --no-gate          # skip the engine build/gate
+python "$ROCKE/tests/run_all.py"                       # guard + gate + pytest
+python "$ROCKE/tests/run_all.py" --only gemm           # scope the gate to some families
+python "$ROCKE/tests/run_all.py" --no-gate             # skip the engine build/gate
+python "$ROCKE/tests/run_all.py" --build-root /tmp/rocke  # also run ctest from this build
 ```
 
 Or run the pieces individually:

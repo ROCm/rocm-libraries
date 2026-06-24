@@ -23,8 +23,8 @@ Usage::
 
     python -m ck_dsl.examples.common.hip_lowering_parity
     python -m ck_dsl.examples.common.hip_lowering_parity --compile-hip --case gemm
-    PYTHONPATH=python python \\
-        python/ck_dsl/examples/hip_lowering_parity.py --bench-smoke
+    PYTHONPATH=Python python \\
+        Python/ck_dsl/examples/hip_lowering_parity.py --bench-smoke
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 from ck_dsl.core.arch import ArchTarget  # noqa: E402
 from ck_dsl.core.lower_hip import lower_kernel_to_hip  # noqa: E402
@@ -1167,7 +1167,7 @@ import subprocess, sys, tempfile
 from pathlib import Path
 import torch
 torch.cuda.init()
-sys.path.insert(0, {str(ROOT / "python")!r})
+sys.path.insert(0, {str(ROOT / "Python")!r})
 from ck_dsl.core.lower_hip import lower_kernel_to_hip
 from ck_dsl.helpers.compile import compile_kernel
 from ck_dsl.instances.common.elementwise import ElementwiseSpec, build_elementwise, elementwise_grid, elementwise_signature

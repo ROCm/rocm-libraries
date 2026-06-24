@@ -4,15 +4,21 @@ This page covers how to run the `ck_dsl` test suites, how to build and validate 
 
 ## Repo Layout For Testing
 
+All paths below are relative to the `rocKE/` root (with `PYTHONPATH=Python`).
+
 ```text
-python/test/test_ck_dsl.py            # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
-python/test/test_ck_dsl_examples.py   # end-to-end example harness (HIP required)
-example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected.json (when shipped)
-python/ck_dsl/examples/               # Python-owned example generators
-python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
-python/ck_dsl/examples/common/ck_tile_parity.py               # small-op parity harness
+tests/test_ck_dsl.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
+tests/run_all.py                      # the cross-platform entrypoint (guard + byte-identity gate + pytest + ctest)
+Python/ck_dsl/examples/               # Python-owned example generators
+Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
+Python/ck_dsl/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
+
+> The upstream `python/test/test_ck_dsl_examples.py` end-to-end harness and the
+> `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they
+> drive the external composablekernel example tree); use `tests/run_all.py` and
+> the example modules under `Python/ck_dsl/examples/` instead.
 
 ## Environment
 
@@ -44,8 +50,8 @@ PY
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+  python tests/test_ck_dsl.py
 ```
 
 In-process. Tests:
@@ -60,33 +66,33 @@ Expected runtime: ~2 seconds. The validation pass for this doc tree had `245 tes
 
 These tests do not require a GPU. They prove IR builds, LLVM text shape, and helpers' static contracts.
 
-## Generated Example Harness
+## Byte-identity gate (cross-engine)
+
+The rocKE-native cross-engine test is the byte-identity gate: it builds the C++
+engine fresh and proves the C and Python engines emit identical `.ll` for every
+kernel family, at both LLVM flavors.
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  python python/test/test_ck_dsl_examples.py
+python tools/check_byte_identity.py                                  # llvm20
+CK_DSL_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py        # llvm22
 ```
 
-Discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an `expected.json`. For each:
+No GPU is required. For a one-shot run of the guard + gate + pytest (and ctest
+when the C++ test binaries are built), use `python tests/run_all.py`.
 
-1. Subprocess: `gen.py --output-dir <tmp>` builds HSACO + manifest.
-2. Asserts one HSACO file with non-zero size.
-3. Subprocess: `python -m ck_dsl.run_manifest <hsaco> <manifest> --shape ... --verify`.
-4. Asserts `max_abs_diff = 0` for bit-exact kernels or `bad = 0` for tolerance kernels.
-5. Asserts measured TFLOPS / GB/s pass any declared lower bound in `expected.json`.
-
-Skips runtime stages cleanly when HIP is not available.
-
-Expected runtime: ~3-4 minutes.
+The example generators that build HSACO + manifest and verify against a
+reference live under `Python/ck_dsl/examples/` (run them as modules, e.g.
+`python -m ck_dsl.examples.common.bake_off_implicit_gemm`); see the next
+section.
 
 ## Manual Build + Verify One Instance
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocKE>
 
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=python python \
+PYTHONPATH=Python python \
     -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
@@ -96,7 +102,7 @@ ls "$OUT_DIR"
 # (and .ir.txt / .ll if write_ir_text / write_llvm_text are on)
 
 # Run + verify.
-PYTHONPATH=python python \
+PYTHONPATH=Python python \
     -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -105,11 +111,11 @@ The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <
 ## Distribution Demos
 
 ```bash
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 ```
 
 These exercise the distribution-driven `load_tile` / `store_tile` path end-to-end (build HSACO + launch + verify vs torch reference).
@@ -117,8 +123,8 @@ These exercise the distribution-driven `load_tile` / `store_tile` path end-to-en
 ## Small-Op Parity
 
 ```bash
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/ck_tile_parity.py --op all
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/ck_tile_parity.py --op all
 ```
 
 Runs every shipped small-op against a torch reference with per-op tolerance gates. Exit non-zero if any kernel exceeds its tolerance.
@@ -127,9 +133,9 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 
 ```bash
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" \
+PYTHONPATH="Python:${AITER_PATH}" \
   python \
-  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
@@ -169,7 +175,7 @@ write_sweep_manifest(
 Benchmark each with median + spread:
 
 ```bash
-PYTHONPATH=python python \
+PYTHONPATH=Python python \
   -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
   --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
@@ -266,17 +272,17 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 A two-minute smoke for a clean clone:
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocKE>
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=python
+export PYTHONPATH=Python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python python/test/test_ck_dsl.py                       # unit (most no-GPU; ~20 need a GPU)
+python tests/test_ck_dsl.py                             # unit (most no-GPU; ~20 need a GPU)
 python -m ck_dsl.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
-python python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
+python Python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
 ```
 
 If all four pass, the build, COMGR, HIP module, launcher, manifest, and at least one production instance work end-to-end.

@@ -13,7 +13,7 @@ This is a compute-throughput micro-bench (random bytes, no correctness check;
 correctness is covered by the *_verify examples). Use a large M to be
 matrix-bound rather than launch/latency-bound.
 
-  PYTHONPATH=python HIP_VISIBLE_DEVICES=<idx> python3 -m \
+  PYTHONPATH=Python HIP_VISIBLE_DEVICES=<idx> python3 -m \
       ck_dsl.examples.gfx1250.gemm.fp8_blockscale_gemm_bench --m 4096 --n 2048 --k 2048
 """
 

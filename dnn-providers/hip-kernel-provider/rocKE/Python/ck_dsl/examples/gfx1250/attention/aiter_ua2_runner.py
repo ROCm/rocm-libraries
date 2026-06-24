@@ -22,8 +22,8 @@ Two modes:
 
 Usage (no GPU, runs anywhere with ck_dsl importable):
 
-    PYTHONPATH=python python -m ck_dsl.examples.gfx1250.attention.aiter_ua2_runner \\
-        --build-only --shapes python/ck_dsl/examples/gfx950/attention/aiter_ua_2_shapes.json
+    PYTHONPATH=Python python -m ck_dsl.examples.gfx1250.attention.aiter_ua2_runner \\
+        --build-only --shapes Python/ck_dsl/examples/gfx950/attention/aiter_ua_2_shapes.json
 
 Usage (on the gfx1250 box, venv python + ROCm on LD_LIBRARY_PATH):
 
@@ -43,12 +43,12 @@ from typing import Dict, List, Optional, Tuple
 # composablekernel/python on the path so ``ck_dsl`` imports cleanly when the
 # file is run as a module from the repo root.
 _ROOT = Path(__file__).resolve().parents[5]
-if str(_ROOT / "python") not in sys.path:
-    sys.path.insert(0, str(_ROOT / "python"))
+if str(_ROOT / "Python") not in sys.path:
+    sys.path.insert(0, str(_ROOT / "Python"))
 
 _DEFAULT_SHAPES = (
     _ROOT
-    / "python"
+    / "Python"
     / "ck_dsl"
     / "examples"
     / "gfx950"

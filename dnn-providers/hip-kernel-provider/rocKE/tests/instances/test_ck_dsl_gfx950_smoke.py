@@ -7,8 +7,8 @@ actual workloads remain the existing example/benchmark modules for attention,
 GEMM, and fused-MoE.
 
 Run on a gfx950 ROCm runner:
-  HIP_VISIBLE_DEVICES=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-    python python/test/test_ck_dsl_gfx950_smoke.py
+  HIP_VISIBLE_DEVICES=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+    python tests/instances/test_ck_dsl_gfx950_smoke.py
 """
 
 from __future__ import annotations

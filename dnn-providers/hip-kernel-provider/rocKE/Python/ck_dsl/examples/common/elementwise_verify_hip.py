@@ -7,7 +7,7 @@ hipcc backend (``compile_kernel_via_hipcc``), runs it on the GPU, and compares
 to numpy. Confirms the non-MMA portion of the HIP lowering path (loads, vec
 pack/store, f32 promote, store) is numerically correct on the target arch.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.common.elementwise_verify_hip --arch gfx942
+  PYTHONPATH=Python python3 -m ck_dsl.examples.common.elementwise_verify_hip --arch gfx942
 """
 
 from __future__ import annotations

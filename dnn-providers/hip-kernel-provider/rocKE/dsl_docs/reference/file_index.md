@@ -186,10 +186,10 @@ Each `gen.py` wraps a generator from `ck_dsl.examples` or `ck_dsl.instances`. Th
 
 | Path | Purpose |
 |-----------------------------------------|----------------------------------------------------------------------|
-| `python/ck_dsl/README.md` | Package README. |
-| `python/ck_dsl/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
-| `python/ck_dsl/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
-| `python/ck_dsl/dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
-| `python/ck_dsl/dsl_docs/` | This documentation tree. |
-| `python/ck_dsl/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
+| `Python/ck_dsl/README.md` | Package README. |
+| `Python/ck_dsl/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
+| `Python/ck_dsl/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
+| `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
+| `dsl_docs/` | This documentation tree. |
+| `Python/ck_dsl/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

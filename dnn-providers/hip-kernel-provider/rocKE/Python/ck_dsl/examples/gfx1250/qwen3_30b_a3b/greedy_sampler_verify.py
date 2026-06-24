@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """GPU verify for the gfx1250 greedy (argmax) token sampler.
 
-  PYTHONPATH=python python3 -m \
+  PYTHONPATH=Python python3 -m \
       ck_dsl.examples.gfx1250.qwen3_30b_a3b.greedy_sampler_verify --tokens 8 --vocab 151936
 """
 

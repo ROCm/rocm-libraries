@@ -10,8 +10,8 @@ Triton CSV by ``shape_signature``.
 
 Example:
 
-    PYTHONPATH=python python \\
-      python/ck_dsl/examples/attention/benchmark_prefill2d_traces.py
+    PYTHONPATH=Python python \\
+      Python/ck_dsl/examples/attention/benchmark_prefill2d_traces.py
 
 The default paths point at the local MLSE benchmark checkout used to collect
 the traces. Override ``--shapes`` / ``--triton-csv`` for a different machine.
@@ -373,7 +373,7 @@ def main() -> int:
         "--combined-csv",
         type=Path,
         default=Path(
-            "python/ck_dsl/examples/attention/prefill2d_bf16_triton_ckdsl_perf.csv"
+            "Python/ck_dsl/examples/attention/prefill2d_bf16_triton_ckdsl_perf.csv"
         ),
         help="optional Triton+CK joined CSV; relative paths are rooted at composablekernel/",
     )

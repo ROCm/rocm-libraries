@@ -7,7 +7,7 @@ the GEMM family policy, the gfx950 byte-identical guarantee, the hybrid-layout
 back-compat shim, and the architectural isolation rules from
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("Review Rules").
 
-Run:  PYTHONPATH=python python3 python/test/test_ck_dsl_multiarch.py
+Run:  PYTHONPATH=Python python3 tests/instances/test_ck_dsl_multiarch.py
 These tests need no GPU.
 """
 

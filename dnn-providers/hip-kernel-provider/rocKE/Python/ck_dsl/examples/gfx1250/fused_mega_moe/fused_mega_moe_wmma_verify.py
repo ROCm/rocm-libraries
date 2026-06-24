@@ -11,7 +11,7 @@ the LDS-resident-A down WMMA k-loop, and the token-masked weighted reduce.
 
 Must run on a gfx1250 device:
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.fused_mega_moe.fused_mega_moe_wmma_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.fused_mega_moe.fused_mega_moe_wmma_verify \
       --tokens 16 --experts 1 --hidden 64 --inter 64 --hout 64
 """
 

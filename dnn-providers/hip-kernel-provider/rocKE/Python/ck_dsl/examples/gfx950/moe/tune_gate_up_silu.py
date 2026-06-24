@@ -19,8 +19,8 @@ which activation-barrier strategy is worth promoting for a shape.
 
 Usage::
 
-    PYTHONPATH=python /path/to/venv/bin/python \\
-        python/ck_dsl/examples/moe/tune_gate_up_silu.py \\
+    PYTHONPATH=Python /path/to/venv/bin/python \\
+        Python/ck_dsl/examples/moe/tune_gate_up_silu.py \\
         --scenario small --attempts 10 --warmup 3
 """
 
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

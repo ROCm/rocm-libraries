@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DSL = str(Path(__file__).resolve().parents[5])
 PROBES = (
     str(Path(__file__).resolve().parents[6]) + "/"
-    "python/ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes"
+    "dsl_docs/optimization/utilities/tools/dsl_probes"
 )
 sys.path.insert(0, DSL)
 sys.path.insert(0, PROBES)

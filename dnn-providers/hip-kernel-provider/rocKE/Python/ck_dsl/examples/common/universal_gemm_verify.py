@@ -9,8 +9,8 @@ manifest, and run ``ck_dsl.run_manifest --verify`` (numpy reference,
 ``ref = A @ B.T`` for RCR fp16/bf16).
 
 Usage (from the composablekernel dir, on a node of the matching arch):
-  PYTHONPATH=python python3 -m ck_dsl.examples.common.universal_gemm_verify --arch gfx942
-  PYTHONPATH=python python3 -m ck_dsl.examples.common.universal_gemm_verify --arch gfx950 --m 512 --n 512 --k 512
+  PYTHONPATH=Python python3 -m ck_dsl.examples.common.universal_gemm_verify --arch gfx942
+  PYTHONPATH=Python python3 -m ck_dsl.examples.common.universal_gemm_verify --arch gfx950 --m 512 --n 512 --k 512
 
 If ``--warp-tile`` is omitted the harness asks the target's MMA catalog for the
 largest-K legal atom for the chosen dtype, so the same command produces a

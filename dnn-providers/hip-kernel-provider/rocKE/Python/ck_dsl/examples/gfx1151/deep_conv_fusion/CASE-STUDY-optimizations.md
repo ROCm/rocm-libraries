@@ -347,7 +347,7 @@ this fixed-shape fused op:
 
 ## 7. Reproduce
 
-From the `ck_dsl` Python root, `projects/composablekernel/python` (dev host =
+From the `ck_dsl` Python root, `dnn-providers/hip-kernel-provider/rocKE/Python` (dev host =
 gfx950, builds gfx11 ELFs but can't run them; full-shape timing happens on the
 gfx1151 board). `export PYTHONPATH=$(pwd)` and set `VENV` to your interpreter.
 

@@ -18,8 +18,8 @@ It is the canonical workbench for closing the prefill-2D gap.
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="python:${AITER_PATH}" \
-      python python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
+    PYTHONPATH="Python:${AITER_PATH}" \
+      python Python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
         --limit 20
@@ -35,11 +35,11 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[5]  # projects/composablekernel
-sys.path.insert(0, str(ROOT / "python"))
+ROOT = Path(__file__).resolve().parents[5]  # rocKE root
+sys.path.insert(0, str(ROOT / "Python"))
 
 DEFAULT_SHAPE_UTILS = (
-    ROOT / "python/ck_dsl/dsl_docs/optimization/utilities/tools/stage1_benchmark"
+    ROOT / "dsl_docs/optimization/utilities/tools/stage1_benchmark"
 )
 
 

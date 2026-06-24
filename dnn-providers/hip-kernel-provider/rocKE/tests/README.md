@@ -20,7 +20,7 @@ across layers without `__init__.py`.
 
 | Layer | Python | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier), `test_ck_dsl_c_interface.py` (ckc_engine binding) | `smoke.cpp`, `ir_serialize_roundtrip.cpp`, `ir_lower_cli.cpp` |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier), `test_ck_dsl_c_interface.py` (ckc_engine binding) | `smoke.cpp`, `ir_serialize_roundtrip.cpp` (both CTest-registered); `ir_lower_cli.cpp` (manual CLI tool, not in CTest) |
 | `helpers/` | (covered today via `test_ck_dsl.py` TestHelpers; dedicated split is a follow-up) | - |
 | `instances/` | `test_ck_dsl_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_ck_dsl_gfx950_smoke.py`, `ck_dsl_ir_parity_harness.py` | `parity/` (65 `*_emit.py`/`*_emit.c` pairs + `run_parity.py`), `differential/` (`run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`), `tiled_attention_2d_reentrancy.cpp`, `jit_demo.cpp`, `gemm_jit_demo.cpp` |
 | `runtime/` | (covered via `test_ck_dsl.py`; dedicated split is a follow-up) | - |

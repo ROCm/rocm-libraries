@@ -17,8 +17,8 @@ reference implementations and reports::
 
 Usage::
 
-    PYTHONPATH=python python \\
-        python/ck_dsl/examples/ck_tile_parity.py [--op all]
+    PYTHONPATH=Python python \\
+        Python/ck_dsl/examples/ck_tile_parity.py [--op all]
 
 The harness exits non-zero if any op's ``max_abs`` exceeds the per-op
 tolerance, so it doubles as a smoke gate for CI.
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

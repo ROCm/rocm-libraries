@@ -17,8 +17,8 @@ This script:
 
 Run (GPU):
   CK_DSL_LLVM_FLAVOR=llvm22 sudo -n -E env HIP_VISIBLE_DEVICES=0 \
-    PYTHONPATH=python <venv>/bin/python \
-    python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/23_splitk_universal.py
+    PYTHONPATH=Python <venv>/bin/python \
+    Python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/23_splitk_universal.py
 """
 
 from __future__ import annotations

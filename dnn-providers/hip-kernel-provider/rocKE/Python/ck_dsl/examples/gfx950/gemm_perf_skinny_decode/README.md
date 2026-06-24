@@ -63,7 +63,7 @@ name: split-K, which fills the idle CUs the decode grid leaves behind.
 | GPU | MI355X / gfx950 |
 | ROCm | 7.0.2 |
 | torch | 2.12.0+rocm7.2 |
-| CK DSL | this repo (`projects/composablekernel/python/ck_dsl`) |
+| CK DSL | this repo (`dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl`) |
 | HBM peak | 8.0 TB/s |
 | BF16 MFMA peak | 2.5 PFLOPS |
 

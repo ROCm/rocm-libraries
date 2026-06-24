@@ -49,7 +49,7 @@ def _bootstrap_ck_dsl() -> None:
         pass
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "python"
+        candidate = parent / "Python"
         if (candidate / "ck_dsl" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return

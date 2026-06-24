@@ -39,12 +39,12 @@ recommended stack pins a recent, consistent ROCm:
 
 ```bash
 git clone <your-rocm-libraries-remote> rocm-libraries
-cd rocm-libraries/projects/composablekernel
-export PYTHONPATH=python          # the DSL lives under python/ck_dsl
+cd rocm-libraries/dnn-providers/hip-kernel-provider/rocKE
+export PYTHONPATH=Python          # the DSL lives under Python/ck_dsl
 ```
 
-All commands below assume you are in `projects/composablekernel` with
-`PYTHONPATH=python` unless noted.
+All commands below assume you are in the `rocKE/` directory with
+`PYTHONPATH=Python` unless noted.
 
 ---
 
@@ -102,12 +102,12 @@ and records why — so this step is optional, but build it to exercise the C
 engine:
 
 ```bash
-# 1. engine archive (no GPU needed):
-cmake -S python/Cpp -B /tmp/ckc_build -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/ckc_build -j"$(nproc)"
-# 2. the pybind module (see python/Cpp/bindings/ for its CMake):
+# 1. engine archive (no GPU needed); the top-level CMakeLists builds ckc_core:
+cmake -S . -B /tmp/ckc_build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/ckc_build --target ckc_core -j"$(nproc)"
+# 2. the pybind module (see Cpp/bindings/ for its CMake):
 #    build it into a dir, then put that dir on PYTHONPATH:
-export PYTHONPATH=python:/path/to/ckc_engine_build_dir
+export PYTHONPATH=Python:/path/to/ckc_engine_build_dir
 python -c "import ckc_engine; print('engine build_id:', ckc_engine.build_id())"
 ```
 
@@ -156,7 +156,7 @@ directory is on `PATH` (or copy the DLL beside your interpreter):
 
 ```bat
 set PATH=C:\Program Files\AMD\ROCm\<version>\bin;%PATH%
-set PYTHONPATH=python
+set PYTHONPATH=Python
 python -c "from ck_dsl.runtime import comgr; print('comgr:', comgr._resolve_lib()._name)"
 ```
 
@@ -165,8 +165,8 @@ python -c "from ck_dsl.runtime import comgr; print('comgr:', comgr._resolve_lib(
 Use CMake with the Visual Studio or Clang toolchain:
 
 ```bat
-cmake -S python\Cpp -B build_win -DCMAKE_BUILD_TYPE=Release
-cmake --build build_win --config Release -j
+cmake -S . -B build_win -DCMAKE_BUILD_TYPE=Release
+cmake --build build_win --target ckc_core --config Release -j
 ```
 
 If the `ckc_engine` pybind module isn't built, the DSL falls back to the Python
@@ -175,7 +175,7 @@ lowerer automatically (byte-identical), so the engine is optional on Windows too
 ### 4.5 Verify (Windows)
 
 ```bat
-set PYTHONPATH=python
+set PYTHONPATH=Python
 :: lowering only (no GPU): generate .ll for a kernel
 python -c "from ck_dsl.instances.common.gemm_universal import *; from ck_dsl.core.lower_llvm import lower_kernel_to_llvm; print('lowered ok')"
 ```
@@ -229,7 +229,7 @@ are working on that specific kernel path.
 | Symptom | Cause / fix |
 |---|---|
 | `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `CK_DSL_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
-| `No module named 'ck_dsl'` | `PYTHONPATH` not pointing at `projects/composablekernel/python`. |
+| `No module named 'ck_dsl'` | `PYTHONPATH` not pointing at `rocKE/Python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | `ckc_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `CK_DSL_CPP_STRICT=1` to surface it. |
 | A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 7.2. |

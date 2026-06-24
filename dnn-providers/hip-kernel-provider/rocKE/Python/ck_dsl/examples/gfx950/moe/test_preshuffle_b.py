@@ -21,7 +21,7 @@ This script:
 
 Run with::
 
-    cd <repo>/projects/composablekernel/python
+    cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
     python ck_dsl/examples/moe/test_preshuffle_b.py
 """
 

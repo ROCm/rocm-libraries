@@ -11,9 +11,9 @@ shapes, on whichever arch it runs on, and emits a machine-readable
 
 Run the SAME invocation on each arch (gfx950 local, gfx1250 remote):
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.a3b_parity_scoreboard \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.a3b_parity_scoreboard \
       --arch gfx950  --op moe --preset decode
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.a3b_parity_scoreboard \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.qwen3_30b_a3b.a3b_parity_scoreboard \
       --arch gfx1250 --op moe --preset decode
 
 Ops are an extensible registry; ``moe`` is implemented first because it is the

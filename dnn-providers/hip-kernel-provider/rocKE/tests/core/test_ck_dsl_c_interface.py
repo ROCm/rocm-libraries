@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """CI harness for the ck_dsl C interface.
 
-The C interface lives in ``python/ck_dsl_c`` and ships C parity emitters that
+The C interface lives in ``Python/ck_dsl_c`` and ships C parity emitters that
 mirror Python emitters. These tests keep all orchestration in ``python/test``:
 
 * non-GPU: build ``ckc_core`` and compare selected C/Python LLVM emitters;

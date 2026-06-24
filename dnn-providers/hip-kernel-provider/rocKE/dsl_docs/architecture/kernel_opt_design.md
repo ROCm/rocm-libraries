@@ -1,7 +1,7 @@
 # Design: R1+R4 combined kernel for CK DSL unified_attention tiled-2D
 
 **Status**: design proposal — implementation lives in CK DSL repo, not here.
-**Target repo**: `rocm-libraries/projects/composablekernel/python/ck_dsl/`
+**Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/`
 **Target shape (benchmark)**: `d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16`
 **Target hardware**: gfx950 (MI350X), gfx942 (MI300X) as secondary.
 
@@ -321,5 +321,5 @@ without R1.
 - `tests/test_ckdsl_ua_mfma_32x32_sinks.py` — R4 validator
 - `tests/test_ckdsl_ua_register_pv_sinks.py` — R1 validator
 - `experiments/bench_ckdsl_ua_r4_cohort.py` — R4 cohort driver
-- CK DSL: `rocm-libraries/projects/composablekernel/python/ck_dsl/instances/attention_unified.py`
-- CK DSL: `rocm-libraries/projects/composablekernel/python/ck_dsl/instances/attention_tiled_2d.py`
+- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/attention_unified.py`
+- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/attention_tiled_2d.py`

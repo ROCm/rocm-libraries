@@ -52,12 +52,14 @@ A change is done only when the gate is GREEN for every family at both flavors.
 # PYTHONPATH for the Python package
 export PYTHONPATH=<rocKE>/Python                 # then: import ck_dsl
 
-# build the C++ engine archive
+# build the C++ engine + the C++ unit-test binaries (so ctest has something to run)
 cmake -S <rocKE> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/rocke --target ckc_core -j
+cmake --build /tmp/rocke -j
 
-# everything (relative-path guard + byte-identity gate + pytest + ctest)
-python tests/run_all.py
+# relative-path guard + byte-identity gate + pytest; also runs ctest only when
+# --build-root already holds the built C++ test binaries (default temp run skips it)
+python tests/run_all.py                          # guard + gate + pytest
+python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
 python -m pytest tests/instances/test_ck_dsl_multiarch.py   # a fast CPU-only suite
 ```
 

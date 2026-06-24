@@ -64,9 +64,9 @@ benchmark records. It includes the operation family, candidate, algorithm,
 No-GPU GEMM dispatch tests:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=projects/composablekernel/python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
   ~/atom-venv/bin/python -m unittest discover \
-  -s projects/composablekernel/python/ck_dsl/dispatch/tests/gemm \
+  -s dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/dispatch/tests/gemm \
   -p 'test*.py'
 ```
 
@@ -76,18 +76,18 @@ ROCm GPU is not visible.
 Broader no-GPU regression checks:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=projects/composablekernel/python \
-  ~/atom-venv/bin/python projects/composablekernel/python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+  ~/atom-venv/bin/python dnn-providers/hip-kernel-provider/rocKE/Python/test/test_ck_dsl.py
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=projects/composablekernel/python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
   ~/atom-venv/bin/python -m unittest \
-  projects/composablekernel/python/test/test_ck_dsl_multiarch.py \
+  dnn-providers/hip-kernel-provider/rocKE/Python/test/test_ck_dsl_multiarch.py \
   -k TestGfx950ByteIdentical
 
 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=projects/composablekernel/python:projects/composablekernel/python/test \
+PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:dnn-providers/hip-kernel-provider/rocKE/Python/test \
   ~/atom-venv/bin/python -m ck_dsl_ir_parity_harness \
-  --compare projects/composablekernel/python/test/golden/ck_dsl_representative_ir_sha256.json
+  --compare dnn-providers/hip-kernel-provider/rocKE/Python/test/golden/ck_dsl_representative_ir_sha256.json
 ```
 
 ## Onboard A New Operator Family

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """GPU verify for the gfx1250 token-embedding gather kernel.
 
-  PYTHONPATH=python python3 -m \
+  PYTHONPATH=Python python3 -m \
       ck_dsl.examples.gfx1250.qwen3_30b_a3b.token_embedding_verify \
       --tokens 8 --hidden 2048 --vocab 4096
 """

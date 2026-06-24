@@ -285,4 +285,4 @@ Before considering a new builder done:
 - correctness is checked against a reference (`run_manifest --verify`, or a torch / numpy oracle in a parity harness);
 - benchmark reports median + spread, not a single lucky run (`benchmark_manifest(..., attempts=5, discard_first=True)`);
 - generated LLVM / ISA / resource summaries are inspected for the intended primitive (`analyze_llvm_ir`, `analyze_hsaco`);
-- the new path is added to one of the test suites (`python/test/test_ck_dsl.py` or `test_ck_dsl_examples.py`).
+- the new path is added to one of the test suites (`tests/test_ck_dsl.py` or `test_ck_dsl_examples.py`).

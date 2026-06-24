@@ -14,7 +14,7 @@ row/col mapping — a row<->col swap transposes the result and fails.
 Cross-build (this host has no gfx11 GPU; the Windows board runs it):
 
   # local: build hsaco + manifest into an output dir
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1151.wmma_iu8_probe \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1151.wmma_iu8_probe \
       --arch gfx11-generic --m 64 --n 64 --k 64 --output-dir /tmp/iu8_probe --emit-only
 
   # board (after scp of the output dir to C:\\ck_test\\iu8_probe):

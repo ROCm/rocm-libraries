@@ -7,19 +7,19 @@ These numbers are smoke-grade — they confirm the kernels build, verify, and re
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+  python tests/test_ck_dsl.py
 ```
 
 Result on this checkout: **245 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
 
 ## Documentation Verifier
 
-`python/ck_dsl/dsl_docs/development/verify_dsl_docs.py` imports every symbol referenced by this documentation tree, exercises every IR builder method, lowers every spec dataclass to LLVM / HIP / CK Tile, builds HSACO via libamd_comgr, and launches small kernels via `KernelLauncher`, `PipelineLauncher`, and `time_launches`. It exits non-zero if any check fails.
+`dsl_docs/development/verify_dsl_docs.py` imports every symbol referenced by this documentation tree, exercises every IR builder method, lowers every spec dataclass to LLVM / HIP / CK Tile, builds HSACO via libamd_comgr, and launches small kernels via `KernelLauncher`, `PipelineLauncher`, and `time_launches`. It exits non-zero if any check fails.
 
 ```bash
-PYTHONPATH=python python \
-  python/ck_dsl/dsl_docs/development/verify_dsl_docs.py
+PYTHONPATH=Python python \
+  dsl_docs/development/verify_dsl_docs.py
 ```
 
 Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on MI355X. Coverage includes:
@@ -50,7 +50,7 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 ## Generated Example Harness
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
   python python/test/test_ck_dsl_examples.py
 ```
 
@@ -68,9 +68,9 @@ Build + verify in one shot from the README-style entry:
 
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=python python \
+PYTHONPATH=Python python \
   -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-PYTHONPATH=python python \
+PYTHONPATH=Python python \
   -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
@@ -91,12 +91,12 @@ Shape: N=8, Hi=Wi=56, C=K=64, Y=X=3, pad=1, stride=1, dilation=1. Implicit-GEMM 
 ## Distribution-Driven Helpers
 
 ```bash
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 # -> distribution-driven reduce  M=32 N=4096 bs=256 vec=8  max_abs=0.000e+00
 
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 # -> 2D distribution-driven add  H=64 W=128 tile=(32,64) vec=8  max_abs=0.000e+00
 ```
 
@@ -105,8 +105,8 @@ Both demos go through the full `TileDistributionEncoding -> make_static_tile_dis
 ## CK Tile Small-Op Parity
 
 ```bash
-PYTHONPATH=python python \
-  python/ck_dsl/examples/common/ck_tile_parity.py --op all
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/common/ck_tile_parity.py --op all
 ```
 
 | op                                          | max_abs    | CK lat | torch ref | speedup | ok |
@@ -150,9 +150,9 @@ All passes within the per-op tolerance table (`examples/common/ck_tile_parity.py
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" \
+PYTHONPATH="Python:${AITER_PATH}" \
   python \
-  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d \
   --report "$OUT_DIR"/ckdsl_attention_smoke.json
 ```
@@ -266,18 +266,18 @@ Single command to reproduce the full validation pass in this doc:
 cd <composablekernel-checkout>
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl.py
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_ck_dsl_examples.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python tests/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python python/test/test_ck_dsl_examples.py
 
-PYTHONPATH=python python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-PYTHONPATH=python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+PYTHONPATH=Python python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=Python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-PYTHONPATH=python python python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=python python python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-PYTHONPATH=python python python/ck_dsl/examples/common/ck_tile_parity.py --op all
+PYTHONPATH=Python python Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=Python python Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=Python python Python/ck_dsl/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="Python:${AITER_PATH}" python \
+  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```

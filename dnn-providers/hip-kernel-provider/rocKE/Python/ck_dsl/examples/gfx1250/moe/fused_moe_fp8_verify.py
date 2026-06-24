@@ -8,7 +8,7 @@ dequantises the per-channel-quantised expert weights (so the only residual
 error is the dynamic fp8 activation quant). PASS at the Qwen3-30B-A3B decode
 shape confirms the end-to-end wiring.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.moe.fused_moe_fp8_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.moe.fused_moe_fp8_verify \
       --tokens 2 --experts 8 --topk 2 --hidden 256 --intermediate 128
 """
 

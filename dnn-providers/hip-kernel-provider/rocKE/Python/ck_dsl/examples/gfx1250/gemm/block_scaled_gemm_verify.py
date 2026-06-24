@@ -13,7 +13,7 @@ fails verify, so a PASS at multiple shapes confirms the mapping.
 
 Must run on a gfx1250 device:
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.gemm.block_scaled_gemm_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.gemm.block_scaled_gemm_verify \
       --m 16 --n 16 --k 128 --dtype fp8e4m3
 """
 

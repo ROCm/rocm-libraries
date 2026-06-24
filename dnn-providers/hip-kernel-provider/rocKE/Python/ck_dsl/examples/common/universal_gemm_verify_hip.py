@@ -9,7 +9,7 @@ confirm the HIP lowering path (lower_hip.py) is numerically correct on each
 arch: MFMA builtins on CDNA (gfx942/gfx950) and WMMA C++ builtins on RDNA
 wave32 (gfx1151).
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.common.universal_gemm_verify_hip --arch gfx950
+  PYTHONPATH=Python python3 -m ck_dsl.examples.common.universal_gemm_verify_hip --arch gfx950
 """
 
 from __future__ import annotations

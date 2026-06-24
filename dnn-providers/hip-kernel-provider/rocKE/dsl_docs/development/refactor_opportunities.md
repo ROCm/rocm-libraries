@@ -5,8 +5,8 @@ helper/transform/launch reviews) and the perf-drift investigation. Findings are
 de-duplicated and grouped by THEME, then ranked impact/effort within each theme.
 
 **Status of local suites (gfx950 / MI355X):**
-- `python/test/test_ck_dsl.py` — **245 passed** (2.8s)
-- `python/test/test_ck_dsl_multiarch.py` — **26 passed** (0.24s)
+- `tests/test_ck_dsl.py` — **245 passed** (2.8s)
+- `tests/instances/test_ck_dsl_multiarch.py` — **26 passed** (0.24s)
 
 Both green. None of the items below are regressions; they are maintainability /
 clarity / DRY / perf-enablement opportunities. Effort: **S** ~hours, **M** ~half-day,

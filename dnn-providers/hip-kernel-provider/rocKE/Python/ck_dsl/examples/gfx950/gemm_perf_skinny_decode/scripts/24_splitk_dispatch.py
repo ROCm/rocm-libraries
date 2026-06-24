@@ -22,13 +22,13 @@ prints the dispatch decision + grid for every shape and verifies the square
 shape stays split_k=1; pass ``--run`` for a quick on-GPU numeric sanity check.
 
 Run (heuristic dry-run, no GPU):
-  PYTHONPATH=python python \
-    python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py
+  PYTHONPATH=Python python \
+    Python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py
 
 Run (GPU numeric sanity, defer the perf sweep to 23_splitk_universal.py):
   CK_DSL_LLVM_FLAVOR=llvm22 sudo -n -E env HIP_VISIBLE_DEVICES=0 \
-    PYTHONPATH=python <venv>/bin/python \
-    python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py --run
+    PYTHONPATH=Python <venv>/bin/python \
+    Python/ck_dsl/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py --run
 """
 
 from __future__ import annotations

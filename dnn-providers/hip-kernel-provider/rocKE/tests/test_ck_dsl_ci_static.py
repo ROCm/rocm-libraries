@@ -8,8 +8,8 @@ descriptions and checks that the static IR parity suite covers every supported
 architecture family without needing a GPU.
 
 Run:
-  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:python/test \
-    python python/test/test_ck_dsl_ci_static.py
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python:python/test \
+    python tests/test_ck_dsl_ci_static.py
 """
 
 from __future__ import annotations

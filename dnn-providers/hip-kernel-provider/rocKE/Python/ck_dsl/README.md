@@ -57,17 +57,17 @@ rocKE/Python/ck_dsl/
 ```
 
 ## Quick Start
-Run from the Composable Kernel repository root:
+Run from the `rocKE/` root (the package lives under `Python/`):
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=Python
 python -m ck_dsl
 ```
 
 Build and verify one generated example:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=Python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
@@ -78,15 +78,15 @@ Run the core unit test suite (the IR/lowering tests need no GPU; ~20
 harness/timer tests require a GPU):
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  python python/test/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+  python tests/test_ck_dsl.py
 ```
 
-Run generated example tests when a ROCm GPU is available:
+For the full validation suite (relative-path guard + cross-engine byte-identity
+gate + pytest, plus ctest when the C++ tests are built), use the entrypoint:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
-  python python/test/test_ck_dsl_examples.py
+python tests/run_all.py
 ```
 
 ## Minimal Kernel Build
@@ -126,7 +126,7 @@ the lowered LLVM IR, and `artifact.timings` records the compile stages.
 For Python-owned examples, prefer the manifest runner:
 
 ```bash
-PYTHONPATH=python python -m ck_dsl.run_manifest \
+PYTHONPATH=Python python -m ck_dsl.run_manifest \
   "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 

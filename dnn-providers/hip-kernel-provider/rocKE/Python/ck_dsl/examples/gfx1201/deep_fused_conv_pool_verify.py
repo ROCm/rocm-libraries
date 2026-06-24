@@ -10,7 +10,7 @@ body is the arch-parametric one in ``instances/common``; this driver only pins
 the WMMA geometry and reuses the gfx950 harness's numpy reference + verify/bench
 helpers (they are spec-generic). Must run on a gfx1201 device.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.deep_fused_conv_pool_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.deep_fused_conv_pool_verify \
     --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
 """
 

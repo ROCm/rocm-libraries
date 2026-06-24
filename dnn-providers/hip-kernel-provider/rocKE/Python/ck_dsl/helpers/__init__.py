@@ -69,9 +69,9 @@ skeleton, and writing it from scratch is the single biggest source of
 bugs (lane-mapping errors, off-by-one in the load distribution, missing
 barriers, wrong epilogue indexing).
 
-See `python/ck_dsl/helpers/README.md` for a top-to-bottom worked
+See `Python/ck_dsl/helpers/README.md` for a top-to-bottom worked
 example that uses every helper in this module, and
-`python/ck_dsl/TRANSFORM_DAG.md` for how the coord-transform algebra
+`Python/ck_dsl/TRANSFORM_DAG.md` for how the coord-transform algebra
 in `ck_dsl.helpers.transforms` composes with these helpers to build full
 convolution kernels in the CK Tile style.
 """

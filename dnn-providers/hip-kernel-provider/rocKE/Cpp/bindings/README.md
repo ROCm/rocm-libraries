@@ -61,8 +61,9 @@ engine are copied into a `std::string` and `free`'d.
 1. Build the engine archive (read-only; never modify the engine):
 
    ```bash
-   cmake -S Cpp -B /tmp/ckc_pybind/engine -DCMAKE_BUILD_TYPE=Release
-   cmake --build /tmp/ckc_pybind/engine -j"$(nproc)"
+   # run from the rocKE/ root; the top-level CMakeLists builds the ckc_core archive
+   cmake -S . -B /tmp/ckc_pybind/engine -DCMAKE_BUILD_TYPE=Release
+   cmake --build /tmp/ckc_pybind/engine --target ckc_core -j"$(nproc)"
    # -> /tmp/ckc_pybind/engine/libckc_core.a
    ```
 
@@ -88,8 +89,8 @@ engine are copied into a `std::string` and `free`'d.
 
 ## Consistency proof
 
-`/tmp/ckc_pybind/prove_parity.py` drives all 7 GEMM configs from
-`tests/parity/gemm_emit.py` through `ckc_engine` and compares to the Python
+`/tmp/ckc_pybind/prove_parity.py` drives all the GEMM configs from
+`tests/instances/parity/gemm_emit.py` through `ckc_engine` and compares to the Python
 engine (`lower_kernel_to_llvm(build_universal_gemm(spec))` and
 `ir_serialize.serialize`). Because the binding drives the **same** C++ engine the
 differential harness already validates, valid configs are **byte-identical**
@@ -121,8 +122,8 @@ Python lowerer (byte-identical) and records why. Select explicitly with
 `CKC_PARITY_EMIT` (the prebuilt-emitter dir) — point both at the **same** fresh
 build. The backend/flavor flags are `CK_DSL_BACKEND`, `CK_DSL_LLVM_FLAVOR`,
 `CK_DSL_CPP_STRICT`. Full list:
-[`../../ck_dsl/dsl_docs/reference/env_flags.md`](../../ck_dsl/dsl_docs/reference/env_flags.md).
+[`../../dsl_docs/reference/env_flags.md`](../../dsl_docs/reference/env_flags.md).
 
 **Parity rule:** every optimization in the Python engine must have its C++ twin,
 proven byte-identical — see
-[`../../ck_dsl/dsl_docs/development/engine_parity.md`](../../ck_dsl/dsl_docs/development/engine_parity.md).
+[`../../dsl_docs/development/engine_parity.md`](../../dsl_docs/development/engine_parity.md).

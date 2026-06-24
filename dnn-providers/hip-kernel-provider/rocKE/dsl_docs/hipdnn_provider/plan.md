@@ -323,7 +323,7 @@ src/adapters/                                    (C++, the durable surface)
         ElementwiseSpec.hpp                      # mirrors the Python dataclass
     # gemm/, conv/ … added in later milestones
 
-python/ck_dsl_provider/                          (Python, the throwaway glue)
+Python/ck_dsl_provider/                          (Python, the throwaway glue)
     __init__.py
     compile_service.py                           # ~30 LoC entry point
 ```
@@ -371,10 +371,10 @@ real CPU-reference verification, both of which are meaningful only on a
 non-trivial kernel.
 
 **Op:** forward 2D convolution via `build_implicit_gemm_conv`
-(`projects/composablekernel/python/ck_dsl/instances/common/conv_implicit_gemm.py`).
+(`dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
-`projects/composablekernel/python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
+`dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
 — `N=8, H=W=56, C=64, K=64, Y=X=3, stride=1, pad=1, dilation=1`, FP16,
 NHWC. This is the smallest shape we know already compiles cleanly; the
 example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
@@ -784,7 +784,7 @@ listed below for traceability; full rationale is in the change log
 - ~~`[Q1b]`~~ — pybind11 confirmed as the binding library; raw CPython
   C API is the fallback. *(v0.4)*
 - ~~`[Q2]`~~ — Provider-local Python service confirmed
-  (`dnn-providers/ck-dsl-provider/python/ck_dsl_provider/compile_service.py`).
+  (`dnn-providers/ck-dsl-provider/Python/ck_dsl_provider/compile_service.py`).
   C++ adapter logic lives under `src/adapters/<op>/`. *(v0.4)*
 - ~~`[Q3]`~~ — First kernel is **implicit-GEMM convolution** with the
   bake-off shape (N=8, 56×56×64→64, 3×3, stride 1, pad 1, FP16, NHWC).
@@ -820,10 +820,10 @@ listed below for traceability; full rationale is in the change log
 
 All entries are committed code or in-tree documentation.
 
-- DSL compile entry: `projects/composablekernel/python/ck_dsl/helpers/compile.py`
-- DSL instances: `projects/composablekernel/python/ck_dsl/instances/`
-- DSL conv builder used for M1: `projects/composablekernel/python/ck_dsl/instances/common/conv_implicit_gemm.py`
-- DSL conv example (shape + perf numbers cited in §4): `projects/composablekernel/python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
+- DSL compile entry: `dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/helpers/compile.py`
+- DSL instances: `dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/`
+- DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/common/conv_implicit_gemm.py`
+- DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/examples/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
 - RFC 0002 (Plugin SDK design): `projects/hipdnn/docs/rfcs/0002_PluginSdkDesign.md`
@@ -868,7 +868,7 @@ All entries are committed code or in-tree documentation.
   (subprocess) as the fallback if libpython linkage proves
   unworkable. **Q1b** pybind11 as the binding library, raw CPython C
   API as fallback. **Q2** the Python compile service lives provider-
-  local at `dnn-providers/ck-dsl-provider/python/ck_dsl_provider/`,
+  local at `dnn-providers/ck-dsl-provider/Python/ck_dsl_provider/`,
   not under `ck_dsl/`. Five open questions remain (Q3–Q8); the most
   load-bearing is Q3 (first kernel — default still elementwise).
 - **v0.5** (2026-05-21) — **Q3 resolved: implicit-GEMM convolution**

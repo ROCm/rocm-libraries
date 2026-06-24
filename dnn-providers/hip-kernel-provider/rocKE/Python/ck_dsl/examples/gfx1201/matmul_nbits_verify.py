@@ -21,11 +21,11 @@ Real Qwen3.5-9B shapes (int4 / g32), pick via ``--family`` + ``--n/--k``:
   skinny_n:  N=32/K=4096
   decode_gemv: N=248320/K=4096 (M=1)
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
       --m 128 --n 4096 --k 4096
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
       --family skinny_n --m 128 --n 32 --k 4096
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1201.matmul_nbits_verify \
       --family decode_gemv --m 1 --n 248320 --k 4096
 """
 

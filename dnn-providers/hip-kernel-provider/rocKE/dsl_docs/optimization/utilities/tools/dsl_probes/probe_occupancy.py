@@ -62,10 +62,10 @@ def _bootstrap_ck_dsl() -> None:
         return
     except ImportError:
         pass
-    # utilities/tools/dsl_probes/<this>  -> ck_dsl/dsl_docs/optimization/...
+    # utilities/tools/dsl_probes/<this>  -> dsl_docs/optimization/...
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "python"
+        candidate = parent / "Python"
         if (candidate / "ck_dsl" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return

@@ -6,8 +6,8 @@
 Run with a Python interpreter that has torch, triton, and AITER available:
 
     export AITER_PATH=<aiter-checkout>
-    PYTHONPATH="python:${AITER_PATH}" python \\
-        python/ck_dsl/examples/attention/parity_unified_attention.py [--scenario name]
+    PYTHONPATH="Python:${AITER_PATH}" python \\
+        Python/ck_dsl/examples/attention/parity_unified_attention.py [--scenario name]
 
 The harness:
   1. Builds the standard AITER unified-attention test inputs (paged KV, GQA).
@@ -33,7 +33,7 @@ from typing import List, Optional, Tuple
 import torch
 
 ROOT = Path(__file__).resolve().parents[5]  # composablekernel/
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 aiter_path = os.environ.get("AITER_PATH")
 if aiter_path:
     sys.path.insert(0, aiter_path)

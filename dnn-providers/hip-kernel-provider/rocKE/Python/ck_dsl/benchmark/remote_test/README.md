@@ -101,7 +101,7 @@ export CKDSL_REMOTE_HOST=ckdsl-login                                 # ssh alias
 export CKDSL_DOCKER_IMAGE=rocm/composable_kernel:ck_ub24.04_rocm7.2
 export CKDSL_DOCKER_EXTRA_FLAGS="-e HIP_VISIBLE_DEVICES \
   -e ROCR_VISIBLE_DEVICES -e GPU_DEVICE_ORDINAL --group-add render"
-export PYTHONPATH=/path/to/rocm-libraries/projects/composablekernel/python
+export PYTHONPATH=/path/to/rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python
 ```
 
 Then `source ~/.ckdsl_env` before any `cli` invocation.
@@ -155,7 +155,7 @@ matching idle node gets picked; `--gres=gpu:1` requests one GPU. The
 
 ```
 $CKDSL_REMOTE_STAGE/
-├── ck_pkg/ck_dsl/...     # slim mirror of python/ck_dsl/ used as PYTHONPATH
+├── ck_pkg/ck_dsl/...     # slim mirror of Python/ck_dsl/ used as PYTHONPATH
 ├── gfx942/               # hsaco + manifest + run_spec.json + srun.{out,err}
 └── gfx1151/
 ```

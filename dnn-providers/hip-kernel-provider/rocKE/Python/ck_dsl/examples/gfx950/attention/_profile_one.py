@@ -8,9 +8,9 @@ Launches the production-dispatched 2D kernel for a d64/b32/GQA8/sinks shape.
 
 import sys
 
-sys.path.insert(0, "python")
+sys.path.insert(0, "Python")
 sys.path.insert(
-    0, "python/ck_dsl/dsl_docs/optimization/utilities/tools/stage1_benchmark"
+    0, "dsl_docs/optimization/utilities/tools/stage1_benchmark"
 )
 
 import torch  # noqa: E402

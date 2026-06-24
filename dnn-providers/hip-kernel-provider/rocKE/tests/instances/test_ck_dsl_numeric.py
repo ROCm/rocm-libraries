@@ -21,7 +21,7 @@ breach):
                                              gfx942 status)
 
 Requires a ROCm GPU and torch (e.g. a dedicated ~/.venv); skipped otherwise.
-Run:  PYTHONPATH=python <torch-python> python/test/test_ck_dsl_numeric.py
+Run:  PYTHONPATH=Python <torch-python> tests/instances/test_ck_dsl_numeric.py
 """
 
 from __future__ import annotations

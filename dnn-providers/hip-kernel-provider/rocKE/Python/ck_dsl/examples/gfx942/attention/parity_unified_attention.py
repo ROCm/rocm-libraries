@@ -35,13 +35,13 @@ The harness:
 
 Run (needs torch + a gfx942 GPU):
 
-    PYTHONPATH=python .venv/bin/python \\
-        python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py \\
+    PYTHONPATH=Python .venv/bin/python \\
+        Python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py \\
         --scenario correctness
 
     # force the L4 (WG=64) fallback instead of the default wide4:
-    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
-        python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py \\
+    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=Python .venv/bin/python \\
+        Python/ck_dsl/examples/gfx942/attention/parity_unified_attention.py \\
         --scenario Fp16_Prefill_GQA_S2048_D128
 """
 
@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import List, Optional
 
 ROOT = Path(__file__).resolve().parents[5]  # composablekernel/
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 SHAPES_JSON = Path(__file__).resolve().parent / "shapes.json"
 

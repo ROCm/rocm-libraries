@@ -13,7 +13,7 @@ Covers the wave32 WMMA attention surface:
 
 The GPU probe class is skipped unless run on a gfx1250 device.
 
-    PYTHONPATH=python python3 -m pytest ck_dsl/tests/test_gfx1250_attention.py -k "not Gpu"
+    PYTHONPATH=Python python3 -m pytest ck_dsl/tests/test_gfx1250_attention.py -k "not Gpu"
 """
 
 from __future__ import annotations

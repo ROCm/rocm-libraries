@@ -7,7 +7,7 @@ element-wise quant contracts. Arch-level facts that span multiple targets live
 in ``test/test_ck_dsl_multiarch.py``; this file is the gfx1250-specific surface
 the operator sandboxes rely on.
 
-    PYTHONPATH=python python3 -m pytest ck_dsl/tests/test_gfx1250_foundation.py
+    PYTHONPATH=Python python3 -m pytest ck_dsl/tests/test_gfx1250_foundation.py
 """
 
 from __future__ import annotations

@@ -12,7 +12,7 @@ This box auto-clocks +-25-30%, so only same-process interleaved ratios are
 valid. This harness builds both kernels once, verifies each against the
 numpy reference (C = A @ B.T), then benches them round-robin.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1151.wmma_gemm_compare_orders \
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1151.wmma_gemm_compare_orders \
       --m 4096 --n 4096 --k 4096 --rounds 5 --iters 100
 """
 

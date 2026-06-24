@@ -21,11 +21,11 @@ in the GPU device group), exactly like the L6 numeric lane:
 python3 -m ck_dsl.examples.run_all --list
 
 # capture goldens (first time, or after an *intended* change)
-sudo -n -E PYTHONPATH=python TMPDIR=/tmp <venv>/python \
+sudo -n -E PYTHONPATH=Python TMPDIR=/tmp <venv>/python \
     -m ck_dsl.examples.run_all --bless
 
 # assert against goldens (CI / repeat); exits nonzero on any FAIL/DRIFT/ERROR
-sudo -n -E PYTHONPATH=python TMPDIR=/tmp <venv>/python \
+sudo -n -E PYTHONPATH=Python TMPDIR=/tmp <venv>/python \
     -m ck_dsl.examples.run_all --check
 
 # filter by name/family substring

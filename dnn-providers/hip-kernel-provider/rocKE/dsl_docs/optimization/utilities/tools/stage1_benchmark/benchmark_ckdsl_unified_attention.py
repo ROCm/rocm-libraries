@@ -45,7 +45,7 @@ _CKDSL_ROOT = os.environ.get("CKDSL_ROOT")
 if _CKDSL_ROOT:
     sys.path.insert(0, _CKDSL_ROOT)
 else:
-    # This file lives inside python/ck_dsl/...; REPO_ROOT is the python root.
+    # This file lives inside Python/ck_dsl/...; REPO_ROOT is the python root.
     if REPO_ROOT.exists():
         sys.path.insert(0, str(REPO_ROOT))
 

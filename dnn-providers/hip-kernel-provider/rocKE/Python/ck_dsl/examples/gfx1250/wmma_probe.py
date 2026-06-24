@@ -16,8 +16,8 @@ at multiple tile counts uniquely confirms the mapping.
 
 Must run on a gfx1250 device:
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.wmma_probe --m 16 --n 16 --k 32
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1250.wmma_probe --m 64 --n 64 --k 64
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.wmma_probe --m 16 --n 16 --k 32
+  PYTHONPATH=Python python3 -m ck_dsl.examples.gfx1250.wmma_probe --m 64 --n 64 --k 64
 """
 
 from __future__ import annotations

@@ -105,8 +105,8 @@ the standard MoE workloads look like in production):
 ```bash
 cd <composablekernel-checkout>
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/gfx950/moe/fused_moe_e2e_perf.py \
+PYTHONPATH="Python:${AITER_PATH}" python \
+  Python/ck_dsl/examples/gfx950/moe/fused_moe_e2e_perf.py \
   --attempts 10 --warmup 3 \
   --report /tmp/moe_perf.json
 ```
@@ -827,8 +827,8 @@ graph capture is valid and per-launch overhead is already amortized.
 
 ```bash
 cd <composablekernel-checkout>
-PYTHONPATH=python python \
-  python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
   --scenario {small, decode1, decode8} \
   --attempts 10 --warmup 3
 ```
@@ -902,19 +902,19 @@ per-expert GEMM shapes to confirm the same tile still wins.
 # E2E perf
 cd <composablekernel-checkout>
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/gfx950/moe/fused_moe_e2e_perf.py \
+PYTHONPATH="Python:${AITER_PATH}" python \
+  Python/ck_dsl/examples/gfx950/moe/fused_moe_e2e_perf.py \
   --attempts 10 --warmup 3 --report /tmp/moe_perf.json
 
 # Tuner: small / decode1 / decode8
-PYTHONPATH=python python \
-  python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
   --scenario small --attempts 10 --warmup 3
-PYTHONPATH=python python \
-  python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
   --scenario decode1 --attempts 10 --warmup 3
-PYTHONPATH=python python \
-  python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
+PYTHONPATH=Python python \
+  Python/ck_dsl/examples/gfx950/moe/tune_gate_up_silu.py \
   --scenario decode8 --attempts 10 --warmup 3
 ```
 
@@ -938,17 +938,17 @@ cd <composablekernel-checkout>
 # End-to-end parity + perf for the preshuffle / active-tile-skip knobs
 # on FusedMoeForward (HIP-graph-replayed, 6 scenarios). Optional:
 # --warmup N (default 10), --iters N (default 50).
-python python/ck_dsl/examples/gfx950/moe/test_fused_moe_preshuffle.py
+python Python/ck_dsl/examples/gfx950/moe/test_fused_moe_preshuffle.py
 
 # Standalone BatchedGemm parity + perf for trait.preshuffle_b=True.
 # Optional: --B --M --N --K --tile_m --tile_n --tile_k
 #           --pipeline --scheduler --epilogue --iters
-python python/ck_dsl/examples/gfx950/moe/test_preshuffle_b.py
+python Python/ck_dsl/examples/gfx950/moe/test_preshuffle_b.py
 
 # Standalone BatchedGemm parity + perf for trait.active_tile_skip=True
 # (all-active vs all-inactive timing). Optional:
 # --B --M --N --K --tile_m --tile_n --tile_k
-python python/ck_dsl/examples/gfx950/moe/test_active_tile_skip.py
+python Python/ck_dsl/examples/gfx950/moe/test_active_tile_skip.py
 ```
 
 `test_fused_moe_preshuffle.py` gates every variant at `rel ≤ 5e-2` vs

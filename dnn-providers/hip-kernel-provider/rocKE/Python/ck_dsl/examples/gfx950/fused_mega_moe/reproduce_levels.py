@@ -34,7 +34,7 @@ step table):
     L10 active de-padded grid                0.152-> 0.131  flag (harness grid)
     L11 persistent kernel + XCD (NEUTRAL)    0.131         flag (persistent) OFF-default
 
-Run from ``projects/composablekernel/python`` with ``PYTHONPATH=$(pwd)``::
+Run from ``dnn-providers/hip-kernel-provider/rocKE/Python`` with ``PYTHONPATH=$(pwd)``::
 
     PYTHONPATH=$(pwd) python \
         -m ck_dsl.examples.gfx950.fused_mega_moe.reproduce_levels
@@ -57,7 +57,7 @@ from typing import Optional
 HERE = Path(__file__).resolve().parent
 LEVELS_DIR = HERE / "levels"
 ROOT = HERE.resolve().parents[5]  # .../composablekernel
-sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

@@ -19,7 +19,7 @@ Two cases are checked, each with the same A/B/C tensors and a
 
 Run::
 
-    cd <repo>/projects/composablekernel/python
+    cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
     python ck_dsl/examples/moe/test_active_tile_skip.py
 """
 

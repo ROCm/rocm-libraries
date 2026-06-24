@@ -9,7 +9,7 @@ This page is a recipe book for the most common ways to extend `ck_dsl`:
 5. Adding a new MFMA atom or a new dtype.
 6. Adding a new optimization lever to the autotuner.
 
-Each recipe is a concrete checklist. Tests in `python/test/test_ck_dsl.py` are pinned to the IR / LLVM shape; the recipes describe what to add and what to assert.
+Each recipe is a concrete checklist. Tests in `tests/test_ck_dsl.py` are pinned to the IR / LLVM shape; the recipes describe what to add and what to assert.
 
 ## 1. Adding A New IR Operation
 

@@ -11,7 +11,7 @@ plus end-to-end perf delta.
 
 Run with::
 
-    cd <repo>/projects/composablekernel/python
+    cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
     python ck_dsl/examples/moe/test_fused_moe_preshuffle.py
 """
 

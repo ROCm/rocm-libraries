@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Verify every claim made by ck_dsl/dsl_docs against the real package.
+"""Verify every claim made by dsl_docs against the real package.
 
 Imports are deliberately interleaved with the verification sections so that
 each block reads as a self-contained "what does this subpackage export"

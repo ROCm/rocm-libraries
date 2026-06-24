@@ -52,7 +52,7 @@ Use this skill when:
 Example commands from the CK DSL repo root:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=Python
 
 # If the kernel artifact is already built, inspect the HSACO/code object.
 llvm-objdump -d --mcpu=<gfx_arch> path/to/kernel.hsaco > /tmp/kernel.isa
@@ -67,7 +67,7 @@ directly from a CK DSL kernel builder, lower the kernel to LLVM IR and ask
 pipelined kernel look serialized.
 
 ```bash
-export PYTHONPATH=<repo>/projects/composablekernel/python
+export PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocKE/Python
 
 python3 - <<'PY'
 from pathlib import Path
@@ -100,10 +100,10 @@ If available, use CK DSL probes first because they package common extraction and
 counting steps:
 
 ```bash
-python ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes/probe_isa_inspect.py \
+python dsl_docs/optimization/utilities/tools/dsl_probes/probe_isa_inspect.py \
   --demo <demo_name>
 
-python ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes/probe_intrinsic_counts.py \
+python dsl_docs/optimization/utilities/tools/dsl_probes/probe_intrinsic_counts.py \
   --demo <demo_name>
 ```
 

@@ -184,7 +184,7 @@ directly. From the `composablekernel/python` directory:
 
 ```bash
 export PYTHONPATH=.
-python ck_dsl/dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py \
+python dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py \
   --demo attention_tiled_2d
 ```
 

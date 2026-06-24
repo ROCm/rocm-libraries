@@ -16,14 +16,14 @@ kernel symbol.
 
 Example:
 
-    PYTHONPATH=python python/ck_dsl/.venv/bin/python \\
-      python/ck_dsl/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
+    PYTHONPATH=Python Python/ck_dsl/.venv/bin/python \\
+      Python/ck_dsl/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
       --limit 10 --iterations 100 --warmup 10
 
 To reproduce the current best measured host-dispatch policy:
 
-    PYTHONPATH=python python/ck_dsl/.venv/bin/python \\
-      python/ck_dsl/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
+    PYTHONPATH=Python Python/ck_dsl/.venv/bin/python \\
+      Python/ck_dsl/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
       --smart-dispatch-policy latest
 """
 
