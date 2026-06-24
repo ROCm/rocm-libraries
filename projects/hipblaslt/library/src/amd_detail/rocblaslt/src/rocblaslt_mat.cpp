@@ -128,6 +128,29 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
+    // ROCM-26455: refuse problems whose output (D/E) addressing would overflow
+    // the 32-bit global store offset used by the assembly GEMM kernels on
+    // affected architectures. Without this guard the kernel silently writes
+    // wrong (or no) data and still returns success. See
+    // rocblaslt_matmul_exceeds_32bit_store_offset in rocblaslt_mat_utils.hpp.
+    if(rocblaslt_matmul_exceeds_32bit_store_offset(handle,
+                                                   m,
+                                                   n,
+                                                   num_batches_a,
+                                                   ldd,
+                                                   batch_stride_d,
+                                                   type_d,
+                                                   is_e_enabled(epilogue),
+                                                   lde,
+                                                   batch_stride_e,
+                                                   aux_type))
+    {
+        log_error(__func__,
+                  "output addressing exceeds the 32-bit store-offset limit (ROCM-26455); returning "
+                  "not-supported to avoid silently incorrect results");
+        return rocblaslt_status_not_implemented;
+    }
+
     auto& gemmData = matmul_descr->m_data;
 
     int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0

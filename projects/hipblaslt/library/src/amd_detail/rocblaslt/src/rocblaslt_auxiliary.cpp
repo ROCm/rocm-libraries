@@ -2072,6 +2072,23 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         void* betaf  = (void*)beta;
         auto  prob   = construct_rocblaslt_problem(
             handle, matmul_descr, matA, matB, matC, matD, alphaf, betaf, algo->max_workspace_bytes);
+
+        // ROCM-26455: report unsupported for problems whose output (D/E)
+        // addressing would overflow the kernels' 32-bit global store offset on
+        // affected architectures (consistent with the execute/heuristic guards).
+        if(rocblaslt_matmul_exceeds_32bit_store_offset(handle,
+                                                       prob.m,
+                                                       prob.n,
+                                                       prob.batch_count,
+                                                       prob.col_stride_d,
+                                                       prob.batch_stride_d,
+                                                       prob.d_type,
+                                                       is_e_enabled(matmul_descr->epilogue),
+                                                       prob.col_stride_e,
+                                                       prob.batch_stride_e,
+                                                       prob.aux_type))
+            throw rocblaslt_status_not_implemented;
+
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
         if(status != rocblaslt_status_success)
@@ -2141,6 +2158,31 @@ rocblaslt_status
         }
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
+
+        // ROCM-26455: hide all solutions for problems whose output (D/E)
+        // addressing would overflow the kernels' 32-bit global store offset on
+        // affected architectures. Returning zero heuristic results gives callers
+        // a clear "unsupported" signal instead of a kernel that silently
+        // produces wrong results. Keep this consistent with the execute-path
+        // guard in rocblaslt_matmul_impl.
+        if(rocblaslt_matmul_exceeds_32bit_store_offset(handle,
+                                                       prob.m,
+                                                       prob.n,
+                                                       prob.batch_count,
+                                                       prob.col_stride_d,
+                                                       prob.batch_stride_d,
+                                                       prob.d_type,
+                                                       is_e_enabled(matmul_desc->epilogue),
+                                                       prob.col_stride_e,
+                                                       prob.batch_stride_e,
+                                                       prob.aux_type))
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            *returnAlgoCount = 0;
+            log_api(__func__, "ROCM-26455 guard: output exceeds 32-bit store offset, returnAlgoCount", 0);
+            return rocblaslt_status_success;
+        }
 
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
