@@ -51,7 +51,7 @@ int main(int, char**) {
     hip::std::inplace_vector<hip::jthread, numberOfThreads> jts;
     for (auto i = 0u; i < numberOfThreads; ++i) {
       jts.emplace_back(support::make_test_jthread([&calledTimes] {
-        hip::this_thread::sleep_for(hip::std::chrono::milliseconds{2});
+        hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
         calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
       }));
     }

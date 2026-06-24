@@ -72,7 +72,7 @@ int main(int, char**) {
   }
 #endif
 
-  hip::this_thread::sleep_for(hip::std::chrono::milliseconds{2});
+  hip::this_thread::sleep_for(cuda::std::chrono::milliseconds{2});
 #endif
   return 0;
 }
