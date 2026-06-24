@@ -1499,5 +1499,23 @@ protected:
         TestController::get_instance().reset_size_transformer();
     }
 };
+
+template<class Param, class SizeTransformer=test_controller::IdentityTransformer>
+class ControlledTestWithParam : public ::testing::TestWithParam<Param>
+{
+protected:
+    // Called before each individual test is run.
+    void SetUp() override
+    {
+        TestController::get_instance().set_size_transformer(SizeTransformer());
+        CHECK_TEST_ENABLEMENT();
+    }
+
+    // Called after each individual test completes.
+    void TearDown() override
+    {
+        TestController::get_instance().reset_size_transformer();
+    }
+};
     
 } // namespace test_controller
