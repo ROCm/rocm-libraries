@@ -145,7 +145,19 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
 
             // Seems like identical definition for MFMA, and value does not exist for WMMA.
             static constexpr index_t kABKPerLane = MmaOp::kABKPerLane;
+
+            static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess; // Tentative.
+
+            static constexpr index_t kCMLane = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
         };
+
+        // Overall handling of AttrNumAccess in CK Tile is a big mess. This definition will probably
+        // work for most MFMA intrinsics but not for WMMA, which in the CK Tile system has a sort of
+        // "canonical" unmerge of the K dimension which happens *before* the "true" attrNumAccess.
+        // Further complicating factor are packNumAccess, differing A/B numAccess values, and the
+        // recent complication of AttrNumAccess by for some reason adding the datatype packedness
+        // into it.
+        static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
     // ensures that we get a tile distribution for the uncompressed A matrix, which is what the

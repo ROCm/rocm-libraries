@@ -154,10 +154,12 @@ struct UnificationDispatcher
 
     // Scale checks.
     // TODO: Add the tiny types after those are merged.
-    static_assert(!IsMx || (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t> ||
-                            std::is_same_v<AType, pk_fp4_t>));
+    static_assert(!IsMx ||
+                  (std::is_same_v<AType, fp8_t> || std::is_same_v<AType, bf8_t> ||
+                   std::is_same_v<AType, pk_fp4_t>) ||
+                  std::is_same_v<AType, pk_fp6x16_t>);
     static_assert(!IsMx || (std::is_same_v<BType, fp8_t> || std::is_same_v<BType, bf8_t> ||
-                            std::is_same_v<BType, pk_fp4_t>));
+                            std::is_same_v<BType, pk_fp4_t> || std::is_same_v<BType, pk_fp6x16_t>));
 
     // Convert WGAttrNumAccessEnums to index_t values. Default value sent to 1 for now, but needs a
     // better implementation TODO.

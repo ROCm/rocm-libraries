@@ -141,7 +141,22 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
 
             // Seems like identical definition for MFMA, and value does not exist for WMMA.
             static constexpr index_t kABKPerLane = MmaOp::kABKPerLane;
+
+            static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess; // Tentative.
+
+            static constexpr index_t kCMLane = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
+
+            // TODO: We probably want a separate pipeline for the scale16 intrinsics.
+            static constexpr index_t kScaleGranularity = 32;
         };
+
+        // Overall handling of AttrNumAccess in CK Tile is a big mess. This definition will probably
+        // work for most MFMA intrinsics but not for WMMA, which in the CK Tile system has a sort of
+        // "canonical" unmerge of the K dimension which happens *before* the "true" attrNumAccess.
+        // Further complicating factor are packNumAccess, differing A/B numAccess values, and the
+        // recent complication of AttrNumAccess by for some reason adding the datatype packedness
+        // into it.
+        static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
 
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
