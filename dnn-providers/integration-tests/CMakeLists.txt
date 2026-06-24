@@ -155,9 +155,9 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
 add_subdirectory(gpu_ref)
 
-option(BUILD_SDPA_AOTRITON_HARNESS
-    "Build the standalone SDPA gpu_ref vs AOTriton comparison driver" OFF)
-if(BUILD_SDPA_AOTRITON_HARNESS)
+option(BUILD_SDPA_REFERENCE_HARNESS
+    "Build the standalone SDPA gpu_ref vs selectable PyTorch MATH/AOTriton reference driver" OFF)
+if(BUILD_SDPA_REFERENCE_HARNESS)
     add_subdirectory(sdpa_aotriton_harness)
 endif()
 

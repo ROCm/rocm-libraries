@@ -2,7 +2,7 @@
 
 A *run directory* contains one subdirectory per case plus an ``index.json``
 listing every case. Each case subdirectory holds the input ``.npy`` files, the
-output ``.npy`` files produced by the three backends, and a ``manifest.json``
+output ``.npy`` files produced by the driver/reference paths, and a ``manifest.json``
 describing the case (the fields of :class:`sdpa_cases.Case` plus a ``files``
 block and a mutable ``status`` block).
 
@@ -48,7 +48,7 @@ FILE_NAMES = {
     "mask": "mask.npy",
     "gpuref_o": "gpuref_o.npy",
     "gpuref_lse": "gpuref_lse.npy",
-    "aotriton_o": "aotriton_o.npy",
+    "reference_o": "reference_o.npy",
     "math_hp_o": "math_hp_o.npy",
     "math_lp_o": "math_lp_o.npy",
 }
@@ -75,7 +75,7 @@ def case_files(run_dir: str, name: str, *, has_mask: bool) -> Dict[str, Optional
             "v",
             "gpuref_o",
             "gpuref_lse",
-            "aotriton_o",
+            "reference_o",
             "math_hp_o",
             "math_lp_o",
         )

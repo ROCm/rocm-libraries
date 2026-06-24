@@ -5,7 +5,7 @@
 
 // ============================================================================
 // Minimal, dependency-free NumPy .npy v1.0 reader/writer for the standalone
-// SDPA gpu_ref vs AOTriton comparison driver.
+// SDPA gpu_ref vs selectable PyTorch MATH/AOTriton reference driver.
 //
 // Reader: parses C-contiguous, little-endian arrays of dtype '<f4', '<f2',
 // '<u2' or '|u1' and returns the raw bytes plus shape. No dtype conversion is

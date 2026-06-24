@@ -1,12 +1,12 @@
-"""Test-case definitions for the SDPA gpu_ref vs AOTriton numerical harness.
+"""Test-case definitions for the SDPA gpu_ref vs reference numerical harness.
 
 A :class:`Case` describes a single forward SDPA configuration: shapes, dtype,
 masking mode, optional custom scale, and a deterministic seed. Cases are grouped
 into tiers (``quick``, ``medium``, ``large``, ``irregular``) of increasing cost /
 coverage.
 
-Scope (intersection of what the gpu_ref kernel and AOTriton-via-PyTorch both
-support, forward-only):
+Scope (forward-only; PyTorch MATH supports the whole matrix, while explicit
+AOTriton mode may skip unsupported dtype/shape combinations):
   * plain MHA
   * causal (top-left aligned, square only: Sq == Skv)
   * additive float mask (full rank-4 [B, Hq, Sq, Skv])
@@ -15,10 +15,10 @@ support, forward-only):
   * GQA / MQA (Hkv divides Hq; the same Hkv is used for both K and V)
   * custom scale
 
-Dtypes: bf16 and fp16 are validated against the AOTriton oracle. fp8 (e4m3, e5m2
-and their fnuz variants) cannot use AOTriton (torch SDPA rejects fp8 on every
-backend), so fp8 cases are validated against torch's fp32 MATH reference instead;
-see run_torch.py and compare.py.
+Dtypes: bf16 and fp16 can be validated against either PyTorch MATH or AOTriton.
+fp8 (e4m3, e5m2 and their fnuz variants) always falls back to torch's fp32 MATH
+reference because torch SDPA rejects fp8 on every backend; see run_torch.py and
+compare.py.
 
 This module has no third-party dependencies so it always imports cleanly.
 """
@@ -28,9 +28,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-# fp8 inputs cannot use the AOTriton oracle (torch SDPA rejects fp8 on every
-# backend), so fp8 cases are compared against torch's fp32 MATH reference instead
-# (see run_torch.py / compare.py). bf16 / fp16 use AOTriton as the oracle.
+# fp8 inputs cannot use the AOTriton reference (torch SDPA rejects fp8 on every
+# backend), so fp8 cases always fall back to torch's fp32 MATH reference instead
+# (see run_torch.py / compare.py). bf16 / fp16 support selectable references.
 FP8_DTYPES = ("fp8_e4m3", "fp8_e5m2", "fp8_e4m3_fnuz", "fp8_e5m2_fnuz")
 VALID_DTYPES = ("bf16", "fp16") + FP8_DTYPES
 
@@ -245,7 +245,7 @@ def quick_cases(seed_base: int = 0) -> List[Case]:
     cases.append(_make("bf16", 1, 4, 4, 128, 128, 64, "mask", seed_base))
 
     # A small fp8 presence (one plain + one causal per format) so the default tier
-    # exercises the fp32-MATH oracle path as well as the AOTriton path.
+    # exercises the fp32-MATH fallback used when AOTriton cannot service a dtype.
     for dtype in FP8_DTYPES:
         cases.append(_make(dtype, 1, 4, 4, 128, 128, 64, "plain", seed_base))
         cases.append(_make(dtype, 1, 4, 4, 128, 128, 64, "causal", seed_base))
@@ -359,13 +359,14 @@ def irregular_cases(seed_base: int = 0) -> List[Case]:
 
 
 def large_cases(seed_base: int = 0) -> List[Case]:
-    """Opt-in slow tier (~10 min): larger tensors stressing AOTriton at scale.
+    """Opt-in slow tier (~10 min): larger tensors stressing SDPA at scale.
 
     The reference kernel recomputes QK^T per output element, so cost grows with
     B * Hq * Sq * Skv * D. Seqlens reach 16384, head dims up to 256, plus bigger
-    batch/head counts, long NPOT pairs, and large window/mask cases. Every shape
-    here is serviceable by AOTriton (flash for plain/causal/GQA/scale, mem-
-    efficient for window/mask) — empirically verified to produce no SKIPs.
+    batch/head counts, long NPOT pairs, and large window/mask cases. The bf16/fp16
+    shapes are intended to be serviceable by AOTriton (flash for
+    plain/causal/GQA/scale, mem-efficient for window/mask) when AOTriton is the
+    selected reference.
     Batch and head counts are kept modest where the sequence length is long so a
     single case does not dominate, and the torch MATH oracle stays within memory.
     """

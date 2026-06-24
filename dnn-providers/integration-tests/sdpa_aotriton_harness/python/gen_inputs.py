@@ -3,9 +3,9 @@
 For each case in the selected tier this:
   1. Seeds torch deterministically (``case.seed``).
   2. Generates Q/K/V as float32 ``randn`` of the right shapes.
-  3. Casts ONCE to the case dtype (bf16 or fp16). Both the on-disk ``.npy`` and
-     (later, in run_torch) the torch tensors derive from this same cast tensor,
-     so the C++ driver and torch see bit-identical inputs.
+  3. Casts ONCE to the case dtype (bf16, fp16, or fp8). Both the on-disk ``.npy``
+     and (later, in run_torch) the torch tensors derive from this same cast
+     tensor, so the C++ driver and torch see bit-identical inputs.
   4. Saves Q/K/V per the integration contract (bf16 -> raw uint16 bits).
   5. For ``mode == "mask"`` generates a finite random additive bias mask and
      saves it as fp32.
@@ -102,10 +102,10 @@ def _generate_case(case: sdpa_cases.Case, run_dir: str) -> dict:
         bias = (
             torch.randn(case.B, case.Hq, case.Sq, case.Skv, dtype=torch.float32) * 0.5
         )
-        # gpu_ref reads fp32; AOTriton reads a dtype-cast of this. For bf16/fp16,
-        # rounding the bias through the case dtype here makes them identical (the
-        # torch-side fp32->dtype cast is then lossless). fp8 cases use the fp32-MATH
-        # oracle (no AOTriton mem-efficient path to match), so the bias stays fp32.
+        # gpu_ref reads fp32; AOTriton reads a dtype-cast of this when selected.
+        # For bf16/fp16, rounding the bias through the case dtype here makes them
+        # identical (the torch-side fp32->dtype cast is then lossless). fp8 cases
+        # always fall back to the fp32-MATH reference, so the bias stays fp32.
         if case.dtype in ("bf16", "fp16"):
             target = torch.bfloat16 if case.dtype == "bf16" else torch.float16
             bias = bias.to(target).to(torch.float32)

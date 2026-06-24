@@ -1,39 +1,42 @@
-"""Compare the gpu_ref CANDIDATE against the AOTriton ORACLE per case.
+"""Compare the gpu_ref CANDIDATE against the selected reference per case.
 
-Framing: **AOTriton** (flash / mem-efficient via PyTorch SDPA) is the oracle /
-reference of record; the **gpu_ref** kernel is the candidate under test.
+Framing: the **gpu_ref** kernel is the candidate under test. ``run_torch`` writes
+``reference_o`` from either PyTorch MATH or AOTriton, plus MATH HP/LP diagnostic
+outputs for the adaptive tolerance budget.
 
 For **fp8** dtypes AOTriton is unavailable (torch SDPA rejects fp8 on every
-backend), so the oracle of record is torch's fp32-MATH reference instead: run_torch
-writes that into ``aotriton_o`` (and ``math_hp_o``) and the low-precision budget leg
-(``math_lp_o``) uses fp16. The methodology below is otherwise unchanged; for fp8 the
-candidate and oracle share the identical fp8 input bits, so ``err`` reflects fp32
+backend), so ``run_torch`` always writes torch's fp32-MATH output into
+``reference_o`` and ``math_hp_o``; the low-precision budget leg (``math_lp_o``)
+uses fp16. The methodology below is otherwise unchanged; for fp8 the candidate
+and reference share the identical fp8 input bits, so ``err`` reflects fp32
 compute agreement and several diagnostic columns coincide.
 
-Methodology (adaptive tolerance with an independent precision-gap budget):
+Methodology:
 
-  * ``math_hp_o`` (torch MATH backend, inputs upcast to fp32) and ``math_lp_o``
-    (torch MATH backend, native low-precision inputs) bracket the inherent
-    bf16/fp16 attention error. Their gap is the *budget* -- it depends on
-    neither the candidate nor the oracle.
-  * The candidate must agree with the oracle to within a fudge factor of that
-    budget, with an absolute floor per dtype.
+  * ``pytorch-math`` compares the fp32 gpu_ref candidate directly against
+    ``math_hp_o`` / ``reference_o``. That is a fp32-vs-fp32 comparison, so it uses
+    a tight absolute fp32 threshold.
+  * ``aotriton`` compares the fp32 gpu_ref candidate against a low-precision
+    backend. That path uses an independent low-precision budget from
+    ``math_hp_o`` vs ``math_lp_o``.
 
-For each non-skipped case, all in float32::
+For each non-skipped case, all comparison math is in float32::
 
-    err            = max(abs(gpuref_o - aotriton_o))   # candidate vs oracle
-    budget         = max(abs(math_hp_o - math_lp_o))    # fp32-vs-LP gap (torch math)
-    atol_floor     = {"bf16": 1e-2, "fp16": 1e-3, fp8: 1e-3}[dtype]
-    threshold      = max(atol_floor, fudge * budget)    # rtol = 0
-    passed         = err <= threshold
+    err             = max(abs(gpuref_o - reference_o))  # candidate vs reference
+    budget          = max(abs(math_hp_o - math_lp_o))   # diagnostic fp32-vs-LP gap
+    if reference == "aotriton":
+        threshold   = max(lp_atol_floor[dtype], fudge * budget)
+    else:
+        threshold   = fp32_atol_floor[dtype]
+    passed          = err <= threshold
     # diagnostics (report-only):
-    gpuref_vs_fp32 = max(abs(gpuref_o  - math_hp_o))    # candidate a sound fp32 impl?
-    aotriton_vs_lp = max(abs(aotriton_o - math_lp_o))   # oracle a standard LP impl?
+    gpuref_vs_fp32  = max(abs(gpuref_o    - math_hp_o))  # candidate a sound fp32 impl?
+    reference_vs_lp = max(abs(reference_o - math_lp_o))  # only meaningful for LP refs
 
 The budget previously used the candidate (``|gpuref - math_lp|``), which is
 circular now that gpu_ref is the thing under test; ``|math_hp - math_lp|`` has
 the same magnitude (bf16/fp16 attention error) but is independent of both the
-candidate and the oracle.
+candidate and the selected reference.
 
 NaN / Inf in any output is treated as a failure (the case matrix avoids
 fully-masked rows, so finite outputs are expected everywhere).
@@ -52,9 +55,10 @@ import numpy as np
 
 import manifest as mf
 
-# fp8 err is fp32-compute-level: the candidate and oracle consume the identical fp8
-# bits (the quantization is shared, not part of err), so the floor matches fp16.
-ATOL_FLOOR = {
+# AOTriton is a low-precision backend reference, so its pass/fail threshold uses
+# a floor plus an adaptive fp32-vs-LP MATH budget. PyTorch MATH is an fp32 oracle,
+# so it gets a separate tight fp32 absolute threshold.
+LP_ATOL_FLOOR = {
     "bf16": 1e-2,
     "fp16": 1e-3,
     "fp8_e4m3": 1e-3,
@@ -62,7 +66,16 @@ ATOL_FLOOR = {
     "fp8_e4m3_fnuz": 1e-3,
     "fp8_e5m2_fnuz": 1e-3,
 }
-DIAG_WARN = 1e-2  # warn threshold for the report-only diagnostics
+FP32_ATOL_FLOOR = {
+    "bf16": 1e-4,
+    "fp16": 1e-4,
+    "fp8_e4m3": 1e-4,
+    "fp8_e5m2": 1e-4,
+    "fp8_e4m3_fnuz": 1e-4,
+    "fp8_e5m2_fnuz": 1e-4,
+}
+FP32_DIAG_WARN = 1e-4
+LP_DIAG_WARN = 1e-2
 
 
 def _load_f32(path: str) -> np.ndarray:
@@ -97,8 +110,11 @@ def compare_case(man: Dict[str, Any], fudge: float) -> Dict[str, Any]:
         "Skv": man["Skv"],
         "D": man["D"],
         "mode": man["mode"],
-        "backend": status.get("backend_used"),
+        "reference": status.get("reference"),
+        "reference_backend": status.get("reference_backend"),
     }
+    if "requested_reference" in status:
+        result["requested_reference"] = status["requested_reference"]
 
     if state == "skipped":
         result["result"] = "SKIP"
@@ -116,7 +132,7 @@ def compare_case(man: Dict[str, Any], fudge: float) -> Dict[str, Any]:
     files = man["files"]
     try:
         gpuref = _load_f32(files["gpuref_o"])
-        aotriton = _load_f32(files["aotriton_o"])
+        reference = _load_f32(files["reference_o"])
         math_hp = _load_f32(files["math_hp_o"])
         math_lp = _load_f32(files["math_lp_o"])
     except FileNotFoundError as exc:
@@ -124,32 +140,41 @@ def compare_case(man: Dict[str, Any], fudge: float) -> Dict[str, Any]:
         result["reason"] = f"missing output: {exc}"
         return result
 
-    if gpuref.shape != aotriton.shape or gpuref.shape != math_lp.shape:
+    if (
+        gpuref.shape != reference.shape
+        or gpuref.shape != math_hp.shape
+        or gpuref.shape != math_lp.shape
+    ):
         result["result"] = "ERROR"
         result["reason"] = (
-            f"shape mismatch: gpuref {gpuref.shape}, aotriton {aotriton.shape}, "
-            f"math_lp {math_lp.shape}"
+            f"shape mismatch: gpuref {gpuref.shape}, reference {reference.shape}, "
+            f"math_hp {math_hp.shape}, math_lp {math_lp.shape}"
         )
         return result
 
-    if _has_nonfinite(gpuref, aotriton, math_hp, math_lp):
+    if _has_nonfinite(gpuref, reference, math_hp, math_lp):
         result["result"] = "FAIL"
         result["reason"] = "non-finite (NaN/Inf) value in an output"
         return result
 
-    # Candidate (gpu_ref) vs oracle (AOTriton).
-    err = _max_abs_diff(gpuref, aotriton)
+    # Candidate (gpu_ref) vs selected reference.
+    err = _max_abs_diff(gpuref, reference)
     # Budget = independent fp32-vs-low-precision gap (torch math). Depends on
-    # neither candidate nor oracle, so it is not circular. The old budget used
+    # neither candidate nor reference, so it is not circular. The old budget used
     # |gpuref - math_lp|, which is circular now that gpu_ref is under test;
     # |math_hp - math_lp| has the same magnitude (bf16/fp16 attention error).
     budget = _max_abs_diff(math_hp, math_lp)
-    # Diagnostics (report-only).
     gpuref_vs_fp32 = _max_abs_diff(gpuref, math_hp)
-    aotriton_vs_lp = _max_abs_diff(aotriton, math_lp)
+    effective_reference = status.get("reference")
+    if effective_reference == "aotriton":
+        reference_vs_lp = _max_abs_diff(reference, math_lp)
+        atol_floor = LP_ATOL_FLOOR[dtype]
+        threshold = max(atol_floor, fudge * budget)
+    else:
+        reference_vs_lp = None
+        atol_floor = FP32_ATOL_FLOOR[dtype]
+        threshold = atol_floor
 
-    atol_floor = ATOL_FLOOR[dtype]
-    threshold = max(atol_floor, fudge * budget)
     passed = err <= threshold
 
     result["err"] = err
@@ -158,9 +183,11 @@ def compare_case(man: Dict[str, Any], fudge: float) -> Dict[str, Any]:
     result["threshold"] = threshold
     result["ratio"] = (err / threshold) if threshold > 0 else float("inf")
     result["gpuref_vs_fp32"] = gpuref_vs_fp32
-    result["gpuref_vs_fp32_warn"] = gpuref_vs_fp32 > DIAG_WARN
-    result["aotriton_vs_lp"] = aotriton_vs_lp
-    result["aotriton_vs_lp_warn"] = aotriton_vs_lp > DIAG_WARN
+    result["gpuref_vs_fp32_warn"] = gpuref_vs_fp32 > FP32_DIAG_WARN
+    result["reference_vs_lp"] = reference_vs_lp
+    result["reference_vs_lp_warn"] = (
+        reference_vs_lp is not None and reference_vs_lp > LP_DIAG_WARN
+    )
     result["result"] = "PASS" if passed else "FAIL"
     return result
 

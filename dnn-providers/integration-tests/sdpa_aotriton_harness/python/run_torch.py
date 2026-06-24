@@ -1,17 +1,16 @@
-"""Compute the AOTriton and math (HP/LP) SDPA references via PyTorch on ROCm.
+"""Compute selectable SDPA references via PyTorch on ROCm.
 
 For each (non-skipped) case in a run directory this:
   * Loads Q/K/V (and optional mask) per the dtype contract onto CUDA.
-  * AOTriton output (the oracle / reference of record):
-    ``F.scaled_dot_product_attention`` under, in order,
-    ``SDPBackend.FLASH_ATTENTION`` then ``SDPBackend.EFFICIENT_ATTENTION``
-    (never MATH). Records the backend that succeeded. If both raise, the case is
-    marked skipped ("aotriton-unsupported") and processing continues.
   * math_hp_o: the MATH backend with inputs upcast to float32 (independent fp32
     reference; with math_lp_o it sets the precision-gap budget, and it also
     sanity-checks the gpu_ref candidate).
   * math_lp_o: the MATH backend on the native low-precision (bf16/fp16) inputs
-    (low-precision math reference).
+    (fp16 for fp8 cases).
+  * reference_o: either math_hp_o (``pytorch-math``) or AOTriton via
+    ``SDPBackend.FLASH_ATTENTION`` then ``SDPBackend.EFFICIENT_ATTENTION``.
+    fp8 always falls back to ``pytorch-math`` because torch SDPA rejects fp8 on
+    every backend.
 
 Outputs are always saved upcast to float32 ('<f4'), matching the gpu_ref output
 contract.
@@ -159,6 +158,14 @@ def _save_f32(path: str, tensor: Any) -> None:
     np.save(path, arr.astype("<f4", copy=False))
 
 
+def _mark_ok(status: dict, reference: str) -> None:
+    """Record successful reference processing and clear stale failure metadata."""
+    status["state"] = "ok"
+    status["reference"] = reference
+    status.pop("reason", None)
+    status.pop("detail", None)
+
+
 def _run_case_fp8(
     man: dict,
     q: Any,
@@ -166,20 +173,13 @@ def _run_case_fp8(
     v: Any,
     attn_mask: Optional[Any],
     *,
+    requested_reference: str,
     is_causal: bool,
     scale: Optional[float],
     Hq: int,
     Hkv: int,
 ) -> dict:
-    """Compute the references for an fp8 case using the fp32-MATH oracle.
-
-    torch SDPA rejects fp8 on every backend (flash / efficient / math) and cannot
-    even run native-fp8 MATH, so AOTriton is unavailable. The oracle of record is
-    therefore torch's MATH backend on fp8 inputs upcast to fp32 (a lossless widen),
-    and the low-precision budget leg uses fp16 (the smallest precision torch MATH
-    will run). Since the candidate and the oracle consume the identical fp8 bits,
-    the comparison measures the gpu_ref fp32 compute against torch's fp32 compute.
-    """
+    """Compute references for an fp8 case using the fp32-MATH fallback."""
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
 
@@ -195,7 +195,7 @@ def _run_case_fp8(
         mask_hp = None
         mask_lp = None
 
-    # fp32 MATH: both the oracle of record and the high-precision reference.
+    # fp32 MATH: both the effective reference and the high-precision diagnostic.
     with sdpa_kernel(SDPBackend.MATH):
         out_hp = _sdpa(
             q32,
@@ -208,7 +208,7 @@ def _run_case_fp8(
             Hkv=Hkv,
         )
         torch.cuda.synchronize()
-    _save_f32(files["aotriton_o"], out_hp)
+    _save_f32(files["reference_o"], out_hp)
     _save_f32(files["math_hp_o"], out_hp)
 
     # fp16 MATH: low-precision reference for the independent precision-gap budget.
@@ -226,13 +226,17 @@ def _run_case_fp8(
         torch.cuda.synchronize()
     _save_f32(files["math_lp_o"], out_lp)
 
-    status["state"] = "ok"
-    status["backend_used"] = "math-fp32"
+    _mark_ok(status, "pytorch-math")
+    if requested_reference == "aotriton":
+        status["requested_reference"] = "aotriton"
+    else:
+        status.pop("requested_reference", None)
+    status.pop("reference_backend", None)
     return man
 
 
-def _run_case(man: dict) -> dict:
-    """Compute and save the three references for one case; update its status."""
+def _run_case(man: dict, reference: str) -> dict:
+    """Compute and save references for one case; update its status."""
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
 
@@ -249,7 +253,16 @@ def _run_case(man: dict) -> dict:
 
     if dtype in sdpa_cases.FP8_DTYPES:
         return _run_case_fp8(
-            man, q, k, v, attn_mask, is_causal=is_causal, scale=scale, Hq=Hq, Hkv=Hkv
+            man,
+            q,
+            k,
+            v,
+            attn_mask,
+            requested_reference=reference,
+            is_causal=is_causal,
+            scale=scale,
+            Hq=Hq,
+            Hkv=Hkv,
         )
 
     # Per-path mask precision: flash rejects any bias, so masked/windowed cases
@@ -265,9 +278,47 @@ def _run_case(man: dict) -> dict:
 
     files = man["files"]
     status = man.setdefault("status", {})
+    status.pop("requested_reference", None)
+    status.pop("reference_backend", None)
+
+    # --- math high-precision reference: upcast inputs to fp32. ---
+    with sdpa_kernel(SDPBackend.MATH):
+        q32, k32, v32 = q.float(), k.float(), v.float()
+        out_hp = _sdpa(
+            q32,
+            k32,
+            v32,
+            attn_mask=mask_hp,
+            is_causal=is_causal,
+            scale=scale,
+            Hq=Hq,
+            Hkv=Hkv,
+        )
+        torch.cuda.synchronize()
+    _save_f32(files["math_hp_o"], out_hp)
+
+    # --- math low-precision: native dtype inputs, output upcast. ---
+    with sdpa_kernel(SDPBackend.MATH):
+        out_lp = _sdpa(
+            q,
+            k,
+            v,
+            attn_mask=mask_lp,
+            is_causal=is_causal,
+            scale=scale,
+            Hq=Hq,
+            Hkv=Hkv,
+        )
+        torch.cuda.synchronize()
+    _save_f32(files["math_lp_o"], out_lp)
+
+    if reference == "pytorch-math":
+        _save_f32(files["reference_o"], out_hp)
+        _mark_ok(status, "pytorch-math")
+        return man
 
     # --- AOTriton path: flash, then efficient; never math. ---
-    backend_used: Optional[str] = None
+    reference_backend: Optional[str] = None
     last_err: Optional[str] = None
     for backend, label in (
         (SDPBackend.FLASH_ATTENTION, "flash"),
@@ -286,65 +337,38 @@ def _run_case(man: dict) -> dict:
                     Hkv=Hkv,
                 )
             torch.cuda.synchronize()
-            _save_f32(files["aotriton_o"], out)
-            backend_used = label
+            _save_f32(files["reference_o"], out)
+            reference_backend = label
             break
         except Exception as exc:  # backend cannot service this shape/config
             last_err = f"{label}: {type(exc).__name__}: {exc}"
 
-    if backend_used is None:
+    status["reference"] = "aotriton"
+    if reference_backend is None:
         status["state"] = "skipped"
         status["reason"] = "aotriton-unsupported"
         status["detail"] = last_err
         return man
 
-    # --- math high-precision reference: upcast inputs to fp32. ---
-    with sdpa_kernel(SDPBackend.MATH):
-        q32, k32, v32 = q.float(), k.float(), v.float()
-        out_hp = _sdpa(
-            q32,
-            k32,
-            v32,
-            attn_mask=mask_hp,
-            is_causal=is_causal,
-            scale=scale,
-            Hq=Hq,
-            Hkv=Hkv,
-        )
-        torch.cuda.synchronize()
-        _save_f32(files["math_hp_o"], out_hp)
-
-    # --- math low-precision: native dtype inputs, output upcast. ---
-    with sdpa_kernel(SDPBackend.MATH):
-        out_lp = _sdpa(
-            q,
-            k,
-            v,
-            attn_mask=mask_lp,
-            is_causal=is_causal,
-            scale=scale,
-            Hq=Hq,
-            Hkv=Hkv,
-        )
-        torch.cuda.synchronize()
-        _save_f32(files["math_lp_o"], out_lp)
-
-    status["state"] = "ok"
-    status["backend_used"] = backend_used
+    _mark_ok(status, "aotriton")
+    status["reference_backend"] = reference_backend
     return man
 
 
-def run(run_dir: str) -> int:
+def run(run_dir: str, reference: str = "pytorch-math") -> int:
     """Process every case in ``run_dir``; rewrite each manifest with its status.
 
     Returns the number of cases that errored (not skipped); 0 on full success.
     """
+    if reference not in ("pytorch-math", "aotriton"):
+        raise ValueError(f"unsupported reference mode: {reference!r}")
+
     index = mf.read_index(run_dir)
     n_err = 0
     for name in index["cases"]:
         man = mf.read_manifest(run_dir, name)
         try:
-            man = _run_case(man)
+            man = _run_case(man, reference)
         except Exception as exc:  # unexpected failure: record and continue
             man.setdefault("status", {})
             man["status"]["state"] = "error"
@@ -359,9 +383,15 @@ def main() -> int:
     parser.add_argument(
         "--run-dir", required=True, help="run directory from gen_inputs"
     )
+    parser.add_argument(
+        "--reference",
+        choices=("pytorch-math", "aotriton"),
+        default="pytorch-math",
+        help="reference mode (default: pytorch-math)",
+    )
     args = parser.parse_args()
     run_dir = os.path.abspath(args.run_dir)
-    n_err = run(run_dir)
+    n_err = run(run_dir, args.reference)
     print(f"run_torch complete ({n_err} errored).")
     return 1 if n_err else 0
 

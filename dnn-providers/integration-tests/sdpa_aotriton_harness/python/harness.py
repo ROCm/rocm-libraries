@@ -1,13 +1,13 @@
-"""End-to-end driver for the SDPA gpu_ref-vs-AOTriton numerical harness.
+"""End-to-end driver for the SDPA gpu_ref-vs-reference numerical harness.
 
-Framing: **AOTriton** is the oracle / reference of record; the **gpu_ref**
-kernel is the candidate under test.
+Framing: the **gpu_ref** kernel is the candidate under test; ``run_torch`` writes
+the selected PyTorch MATH or AOTriton reference.
 
 Pipeline:
   (a) gen_inputs   -> populate a run dir with Q/K/V/mask + manifests
   (b) C++ driver   -> for each case, run THIS branch's fp32 gpu_ref candidate,
                       writing gpuref_o.npy
-  (c) run_torch    -> AOTriton oracle + math (HP/LP) references via PyTorch
+  (c) run_torch    -> selected reference + math (HP/LP) references via PyTorch
   (d) compare      -> adaptive-tolerance pass/fail
   (e) summary      -> a table to stdout; non-zero exit if any case FAILs/ERRORs
 
@@ -132,9 +132,9 @@ def print_summary(results: List[Dict[str, Any]]) -> Dict[str, int]:
     """Print the results table and return pass/fail/skip/error counts."""
     header = (
         f"{'name':<46} {'dtype':<5} {'shape (BxHqxHkv SqxSkvxD)':<28} "
-        f"{'mode':<7} {'backend':<9} {'err':<10} {'budget':<10} "
-        f"{'thresh':<10} {'ratio':<8} {'g_vs_fp32':<11} {'a_vs_lp':<11} "
-        f"{'RESULT':<6}"
+        f"{'mode':<7} {'reference':<12} {'ref_backend':<11} {'err':<10} "
+        f"{'budget':<10} {'thresh':<10} {'ratio':<8} {'g_vs_fp32':<11} "
+        f"{'ref_vs_lp':<11} {'RESULT':<6}"
     )
     print(header)
     print("-" * len(header))
@@ -148,15 +148,16 @@ def print_summary(results: List[Dict[str, Any]]) -> Dict[str, int]:
         g_vs_fp32 = _fmt(r.get("gpuref_vs_fp32"))
         if r.get("gpuref_vs_fp32_warn"):
             g_vs_fp32 += "!"
-        a_vs_lp = _fmt(r.get("aotriton_vs_lp"))
-        if r.get("aotriton_vs_lp_warn"):
-            a_vs_lp += "!"
+        ref_vs_lp = _fmt(r.get("reference_vs_lp"))
+        if r.get("reference_vs_lp_warn"):
+            ref_vs_lp += "!"
         line = (
             f"{r['name']:<46} {r['dtype']:<5} {shape:<28} "
-            f"{r['mode']:<7} {str(r.get('backend') or '-'):<9} "
+            f"{r['mode']:<7} {str(r.get('reference') or '-'):<12} "
+            f"{str(r.get('reference_backend') or '-'):<11} "
             f"{_fmt(r.get('err')):<10} {_fmt(r.get('budget')):<10} "
             f"{_fmt(r.get('threshold')):<10} {ratio_s:<8} {g_vs_fp32:<11} "
-            f"{a_vs_lp:<11} {r['result']:<6}"
+            f"{ref_vs_lp:<11} {r['result']:<6}"
         )
         print(line)
         if r["result"] in ("SKIP", "ERROR", "FAIL") and r.get("reason"):
@@ -176,6 +177,7 @@ def run_harness(
     out_dir: Optional[str] = None,
     fudge: float = 4.0,
     seed_base: int = 0,
+    reference: str = "pytorch-math",
 ) -> int:
     """Run the full pipeline; return a process exit code (0 = all good)."""
     run_dir = os.path.abspath(out_dir) if out_dir else _default_run_dir()
@@ -188,8 +190,8 @@ def run_harness(
     print("[2/4] Running C++ gpu_ref driver ...")
     run_driver(driver, run_dir)
 
-    print("[3/4] Running torch references (AOTriton + math) ...")
-    run_torch.run(run_dir)
+    print(f"[3/4] Running torch references ({reference} + math diagnostics) ...")
+    run_torch.run(run_dir, reference)
 
     print("[4/4] Comparing ...")
     results = compare_mod.compare(run_dir, fudge)
@@ -206,7 +208,7 @@ def main() -> int:
     parser.add_argument(
         "--driver",
         required=True,
-        help="path to the built sdpa_aotriton_ref_driver binary",
+        help="path to the built sdpa_reference_driver binary",
     )
     parser.add_argument(
         "--tier",
@@ -232,6 +234,12 @@ def main() -> int:
         help="base added to each per-case seed (default: 0)",
     )
     parser.add_argument(
+        "--reference",
+        choices=("pytorch-math", "aotriton"),
+        default="pytorch-math",
+        help="reference mode (default: pytorch-math)",
+    )
+    parser.add_argument(
         "--keep",
         action="store_true",
         help="(retained for compatibility) keep the run directory; it is never "
@@ -250,6 +258,7 @@ def main() -> int:
         out_dir=args.out,
         fudge=args.fudge,
         seed_base=args.seed_base,
+        reference=args.reference,
     )
 
 

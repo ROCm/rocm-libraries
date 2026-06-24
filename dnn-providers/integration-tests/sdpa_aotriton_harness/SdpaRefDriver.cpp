@@ -8,7 +8,8 @@
 // fp32 LSE) to .npy files.
 //
 // A separate Python harness generates the inputs and compares this driver's
-// output against AOTriton. This program is the C++ half only.
+// output against the selected PyTorch MATH or AOTriton reference. This program
+// is the C++ half only.
 //
 // Integration contract (must match the Python side):
 //   - .npy v1.0, little-endian, C-contiguous.
@@ -69,7 +70,7 @@ struct Options
 {
     throw std::runtime_error(
         message
-        + "\nUsage: sdpa_aotriton_ref_driver --q Q.npy --k K.npy --v V.npy [--mask MASK.npy]"
+        + "\nUsage: sdpa_reference_driver --q Q.npy --k K.npy --v V.npy [--mask MASK.npy]"
           " --o O.npy [--lse LSE.npy]"
           " --dtype {bf16|fp16|fp32|fp8_e4m3|fp8_e5m2|fp8_e4m3_fnuz|fp8_e5m2_fnuz}"
           " [--scale FLOAT] [--left INT] [--right INT] [--top-left|--bottom-right]");
@@ -416,7 +417,7 @@ int main(int argc, char** argv)
     }
     catch(const std::exception& e)
     {
-        std::cerr << "sdpa_aotriton_ref_driver: error: " << e.what() << "\n";
+        std::cerr << "sdpa_reference_driver: error: " << e.what() << "\n";
         return 1;
     }
 }
