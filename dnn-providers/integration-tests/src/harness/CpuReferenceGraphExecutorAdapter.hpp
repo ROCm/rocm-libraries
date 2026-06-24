@@ -18,6 +18,11 @@ namespace hipdnn_integration_tests
 class CpuReferenceGraphExecutorAdapter : public IReferenceGraphExecutor
 {
 public:
+    bool isApplicable(void* graphBuffer, size_t size) override
+    {
+        return _executor.isApplicable(graphBuffer, size);
+    }
+
     void execute(void* graphBuffer,
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack) override

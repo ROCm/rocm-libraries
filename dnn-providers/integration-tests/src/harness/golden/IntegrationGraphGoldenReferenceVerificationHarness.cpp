@@ -95,6 +95,10 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runReferenceExecutor(
     ReferenceExecutorType type, std::unordered_map<int64_t, void*>& variantPack)
 {
     auto executor = makeReferenceExecutor(type);
+    if(!executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+    {
+        throw ReferenceCapabilityError(refLabel(type) + " is not applicable for this graph");
+    }
     executor->execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
 }
 

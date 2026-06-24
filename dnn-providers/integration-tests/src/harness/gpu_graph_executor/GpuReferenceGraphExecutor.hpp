@@ -18,6 +18,23 @@ class GpuReferenceGraphExecutor : public IReferenceGraphExecutor
 public:
     GpuReferenceGraphExecutor() = default;
 
+    bool isApplicable(void* graphBuffer, size_t size) override
+    {
+        auto graphWrap
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
+
+        for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
+        {
+            auto& node = graphWrap.getNode(i);
+            if(!isNodeApplicable(node, graphWrap.getTensorMap()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     void execute(void* graphBuffer,
                  size_t size,
                  const std::unordered_map<int64_t, void*>& variantPack) override
@@ -71,6 +88,24 @@ private:
             }
         }
         return updatedVariantPack;
+    }
+
+    bool isNodeApplicable(
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        try
+        {
+            auto key = buildSignatureKey(node, tensorMap);
+            const auto& builder = _planRegistry.getPlanBuilder(key);
+            return builder.isApplicable(node, tensorMap);
+        }
+        catch(...)
+        {
+            return false;
+        }
     }
 
     std::unique_ptr<detail::IGpuGraphNodePlanExecutor>
