@@ -32,22 +32,14 @@ _isWgBarrier = lambda x: isinstance(x, SBarrier) and "-3" not in str(x)
 
 
 def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
-    """Wave-0-only cluster_barrier signal (no workgroup barrier).
+    """Wave-0-only cluster_barrier signal.
 
     Wave 0 alone issues the cluster_barrier signal; all other waves branch over
     it. Ends at the ``skipPreSignal`` label so all waves fall through to whatever
     work follows; the matching wait is emitted later by ``subtileClusterBarrierWait``.
-
-    This module carries no workgroup barrier of its own; ``spliceClusterBarrierSignal``
-    places it immediately after the mainloop's existing workgroup barrier so that
-    sync is reused rather than duplicated.
     """
     mod = Module("subtile_cluster_barrier_signal")
     skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "", 16)
-    # No workgroup barrier here: this signal is spliced in immediately after the
-    # mainloop's existing workgroup barrier (s_barrier_signal -1/s_barrier_wait -1)
-    # by spliceClusterBarrierSignal, so all waves are already synced before wave 0
-    # announces the workgroup's arrival to the cluster.
     # Elect wave 0 to issue the single cluster_barrier signal. sgpr("WaveIdx")
     # holds the wave index (wId = fTid // wavelen), initialized for every TDM
     # kernel, so wave 0 is simply WaveIdx == 0.
@@ -62,17 +54,6 @@ def subtileClusterBarrierWait(writer, kernel, label="") -> Module:
     """The all-waves cluster_barrier wait that closes the handshake."""
     mod = Module("subtile_cluster_barrier_wait")
     mod.add(SBarrier(True, True, True, "cluster_barrier wait"))
-    return mod
-
-
-def subtileClusterBarrier(writer, kernel, label="") -> Module:
-    """Signal + wait emitted back-to-back (no latency hiding).
-
-    Retained for callers that do not splice the wait away from the signal.
-    """
-    mod = Module("subtile_cluster_barrier")
-    mod.appendModule(subtileClusterBarrierSignal(writer, kernel, label))
-    mod.appendModule(subtileClusterBarrierWait(writer, kernel, label))
     return mod
 
 
