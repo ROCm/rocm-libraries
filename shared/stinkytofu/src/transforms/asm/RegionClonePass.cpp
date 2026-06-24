@@ -35,8 +35,7 @@ constexpr size_t kAcc2SrcIdx = 2;
 
 /// True for an MFMA whose src C (acc) is a real accumulator operand.
 bool isMfmaWithAcc(const StinkyInstruction* inst) {
-    return inst && inst->getModifier<MFMAModifiers>() &&
-           inst->getSrcRegs().size() > kAcc2SrcIdx;
+    return inst && inst->getModifier<MFMAModifiers>() && inst->getSrcRegs().size() > kAcc2SrcIdx;
 }
 
 /// True if bb's terminator branches to label (the loop back-edge to startLabel).
