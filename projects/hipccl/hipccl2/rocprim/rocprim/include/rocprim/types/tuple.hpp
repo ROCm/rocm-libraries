@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -973,6 +973,8 @@ tuple_element_t<I, tuple<Types...>>&& get(tuple<Types...>&& t) noexcept
     return static_cast<value_type&&>(static_cast<type&>(t.base).get());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
 template<size_t I, class... Types>
 ROCPRIM_HOST_DEVICE
 inline tuple_element_t<I, tuple<Types...>>&& get(const tuple<Types...>&& t) noexcept
@@ -981,6 +983,8 @@ inline tuple_element_t<I, tuple<Types...>>&& get(const tuple<Types...>&& t) noex
     using type       = detail::tuple_value<I, tuple_element_t<I, tuple<Types...>>>;
     return static_cast<const value_type&&>(static_cast<const type&>(t.base).get());
 }
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 // ////////////////////////
 // make_tuple

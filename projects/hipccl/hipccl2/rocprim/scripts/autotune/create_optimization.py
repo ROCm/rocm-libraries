@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -676,6 +676,15 @@ class AlgorithmDeviceSearchN(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceTopkAir(Algorithm):
+    algorithm_name = "device_topk_air"
+    cpp_configuration_template_name = "topk_air_config_template"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceSelectFlag(Algorithm):
     algorithm_name = "device_select_flag"
     cpp_configuration_template_name = "select_flag_config_template"
@@ -821,6 +830,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceSelectUnique(fallback_entries)
     elif algorithm_name == 'device_select_unique_by_key':
         return AlgorithmDeviceSelectUniqueByKey(fallback_entries)
+    elif algorithm_name == 'device_topk_air':
+        return AlgorithmDeviceTopkAir(fallback_entries)
     elif algorithm_name == 'device_reduce_by_key':
         return AlgorithmDeviceReduceByKey(fallback_entries)
     elif algorithm_name == 'device_find_first_of':
