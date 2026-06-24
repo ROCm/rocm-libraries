@@ -348,16 +348,10 @@ def build_client(
 
 @task
 def precommit_install(c):
-    """Install the hipblaslt/TensileLite git pre-commit hook.
+    """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
 
-    uv sync provisions the pre-commit app into the env, but writing the git hook
-    is a separate, one-time-per-clone step (uv has no post-sync hook). Run this
-    once after `uv sync`. The hook is shared across the repo's worktrees.
-
-    pre-commit refuses to install while core.hooksPath is set. If it is set to
-    the default hooks dir (a redundant setting -- git uses that dir anyway, so
-    git-lfs hooks are unaffected), this clears it. If it points somewhere custom,
-    this bails rather than change a deliberate setup.
+    Clears core.hooksPath only when it points at the default hooks dir; bails if
+    it points somewhere custom.
     """
     root = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], text=True

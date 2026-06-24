@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Pre-commit runner for TensileLite unit + characterization tests.
+"""Pre-commit runner for the TensileLite tests affected by staged changes.
 
-Selects the tests affected by the staged changes and runs them. When the
-affected set cannot be narrowed confidently, it runs the full unit +
-characterization suite (the safe fallback).
-
-Wired in from ``projects/hipblaslt/.pre-commit-config.yaml`` as an
-``always_run`` / ``pass_filenames: false`` local hook, so this script computes
-the staged file set itself (via git) rather than relying on pre-commit's file
-filtering. That also means the monorepo root config's ``projects/hipblaslt/.*``
-opt-out does not suppress it.
-
-Tests run via ``uv run pytest`` from the tensilelite directory: uv provisions
-the workspace env (deps + the rocisa native extension) from ``uv.lock`` and runs
-pytest in it. Nothing else -- no backend selection, no tunables. To bypass the
-hook for a single commit, use ``git commit --no-verify``.
+Computes the staged file set via git, selects the affected unit +
+characterization tests, and runs them with ``uv run pytest``; falls back to the
+full suite when the set cannot be narrowed. Bypass with ``git commit --no-verify``.
 """
 
 from __future__ import annotations
@@ -97,7 +86,7 @@ def referenced_modules(test_file: Path) -> set[str]:
                 for alias in node.names:
                     refs.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
-                if node.level:  # relative import; not a Tensile.* module path
+                if node.level:
                     continue
                 if node.module:
                     refs.add(node.module)
@@ -126,13 +115,7 @@ def tests_for_module(module: str, index: dict[Path, set[str]]) -> set[Path]:
 
 
 def failed_test_files(tl_root: Path) -> list[str]:
-    """Test files that just failed, from pytest's last-failed cache.
-
-    Keys are ``path::nodeid`` relative to the pytest rootdir (the tensilelite
-    directory), so the bare paths are exactly what a follow-up ``uv run pytest``
-    from that directory expects. Returns ``[]`` if the cache is absent or
-    unreadable, so callers can fall back to the full run set.
-    """
+    """Test files that just failed, from pytest's last-failed cache (``[]`` if absent)."""
     cache = tl_root / ".pytest_cache" / "v" / "cache" / "lastfailed"
     try:
         data = json.loads(cache.read_text(encoding="utf-8"))
@@ -168,11 +151,10 @@ def main() -> int:
         if rel.suffix != ".py":
             ignored.append(rel)
             continue
-        # Python file under tensilelite.
         if rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
             changed_tests.add(rel)
         elif rel.parts[:2] == ("Tensile", "Tests"):
-            ignored.append(rel)  # non-unit tests (need GPU client); out of scope
+            ignored.append(rel)
         elif rel.parts[:1] == ("Tensile",):
             changed_sources.append(rel)
         else:
@@ -230,11 +212,7 @@ def main() -> int:
         log("    Tests run via `uv run`; install uv or commit from an env that has it.")
         return 1
 
-    # --no-sync: run in the already-provisioned .venv without syncing or
-    # rewriting uv.lock. The hook must not mutate tracked files mid-commit:
-    # pre-commit stashes unstaged changes first, so a sync here would re-resolve
-    # against the reverted lockfile and rewrite uv.lock, which pre-commit then
-    # flags as "files were modified by this hook". Provision once via `uv sync`.
+    # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
     argv = ["uv", "run", "--no-sync", "pytest", "-q", "-ra", "-n", "8", *nodes]
     result = subprocess.run(argv, cwd=tl_root)
     rc = result.returncode
