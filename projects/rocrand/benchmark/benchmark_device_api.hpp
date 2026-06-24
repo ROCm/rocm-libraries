@@ -132,7 +132,13 @@ constexpr int get_vectorization()
     constexpr bool is_philox4x32_10 = std::is_same_v<EngineState, rand_state_philox4x32_10_t>;
     if constexpr(is_philox4x32_10)
     {
-#ifndef __HIP__
+#ifdef __HIP__
+        // rocrand_poisson4 is slow!
+        if constexpr(D == DISTRIBUTION_POISSON)
+        {
+            return 1;
+        }
+#else
         // curand_uniform4_double(philox4x32) is slow!
         if constexpr(D == DISTRIBUTION_UNIFORM && std::is_same_v<T, double>)
         {
