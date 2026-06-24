@@ -62,6 +62,9 @@ TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 
 TEST_P(IntegrationGpuBenchmarkingKnobCba, ExecutesSuccessfully)
 {
+    // Fused conv-bias-activ benchmarking path hangs under ASAN on gfx942 (xnack+):
+    // intermittent unkillable GPU stall. Passes on gfx90a.
+    SKIP_IF_ASAN();
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;
