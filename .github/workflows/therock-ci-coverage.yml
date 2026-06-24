@@ -352,6 +352,7 @@ jobs:
           retention-days: 90
 
       - name: Upload coverage to Codecov
+        id: codecov
         if: ${{ always() }}
         continue-on-error: true
         shell: bash
@@ -365,19 +366,24 @@ jobs:
           # container's own Python interpreter instead.
           if ! python3 -m pip install --quiet codecov-cli; then
             echo "Could not install codecov-cli; skipping upload."
+            echo "uploaded=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ -z "${CODECOV_TOKEN:-}" ]]; then
             echo "CODECOV_TOKEN is empty (expected for fork PRs, which do not receive"
             echo "repository secrets); attempting a tokenless upload (public repo)."
           fi
-          codecovcli upload-process \
+          if codecovcli upload-process \
             --disable-search \
             --file coverage-report/coverage.info \
             --flag "${{ inputs.cmake_target }}" \
             --name "${{ inputs.cmake_target }}-${{ inputs.amdgpu_families }}" \
-            --slug "${{ github.repository }}" \
-            || echo "Codecov upload failed (non-fatal)."
+            --slug "${{ github.repository }}"; then
+            echo "uploaded=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Codecov upload failed (non-fatal)."
+            echo "uploaded=false" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Coverage report summary
         if: ${{ always() }}
@@ -393,6 +399,10 @@ jobs:
               echo '```'
             fi
             echo "- Report artifact: \`${REPORT_ARTIFACT}\` (download from [run artifacts](${RUN_URL}))"
-            echo "- Codecov: https://app.codecov.io/gh/${{ github.repository }}/pull/${{ github.event.pull_request.number }} (flag: ${{ inputs.cmake_target }})"
+            if [[ "${{ steps.codecov.outputs.uploaded }}" == "true" ]]; then
+              echo "- Codecov: https://app.codecov.io/gh/${{ github.repository }}/pull/${{ github.event.pull_request.number }} (flag: ${{ inputs.cmake_target }})"
+            else
+              echo "- Codecov: upload unavailable for this run (fork PRs do not receive CODECOV_TOKEN, and tokenless upload is disabled for this repo). Use the report artifact above; Codecov populates when run in a non-fork context."
+            fi
           # tee so the summary is also visible in this step's log, not only the job summary page.
           } | tee -a "${GITHUB_STEP_SUMMARY}"
