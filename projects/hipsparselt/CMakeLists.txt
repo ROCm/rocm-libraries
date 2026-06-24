@@ -147,45 +147,83 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
-    if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
-    endif()
+    if(HIPSPARSELT_ENABLE_THEROCK)
+        find_package(hipblaslt CONFIG REQUIRED)
 
-    block(SCOPE_FOR VARIABLES)
-    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
-    # Builds tensilelite's device libraries (.co/.dat)
-    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
-    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
-    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
-    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
-    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_LIBLOGIC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
-        CACHE STRING "" FORCE
-    )
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
-        CACHE FILEPATH "License file for package" FORCE
-    )
-
-    if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
-            CACHE PATH "path to tensile library" FORCE
+        set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+            CACHE FILEPATH "License file for package" FORCE
         )
+
+        if(HIPSPARSELT_ENABLE_DEVICE)
+            set(_hipsparselt_logic
+                "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+            )
+            set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
+            set(_hipsparselt_codegen_flags "")
+            if(HIPSPARSELT_ENABLE_ASAN)
+                list(APPEND _hipsparselt_codegen_flags ASAN)
+            endif()
+            hipblaslt_create_device_library(
+                TARGET tensilelite-device-libraries
+                LOGIC_PATH "${_hipsparselt_logic}"
+                OUTPUT_DIR "${_hipsparselt_tensile_out}"
+                ARCHES ${GPU_TARGETS}
+                CXX_COMPILER "${CMAKE_CXX_COMPILER}"
+                ${_hipsparselt_codegen_flags}
+            )
+
+            if(WIN32)
+                set(_hipsparselt_tensile_libdir "${CMAKE_INSTALL_BINDIR}/hipsparselt")
+            else()
+                set(_hipsparselt_tensile_libdir "${CMAKE_INSTALL_LIBDIR}/hipsparselt")
+            endif()
+            install(
+                DIRECTORY "${_hipsparselt_tensile_out}/library"
+                DESTINATION "${_hipsparselt_tensile_libdir}"
+                COMPONENT runtime
+            )
+        endif()
     else()
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR
-            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
-            CACHE PATH "path to tensile library" FORCE
-        )
-    endif()
+        set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
+        if(NOT EXISTS "${HIPBLASLT_PATH}")
+            message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
+        endif()
 
-    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt EXCLUDE_FROM_ALL)
-    endblock()
+        block(SCOPE_FOR VARIABLES)
+        set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+        set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+        # Builds tensilelite's device libraries (.co/.dat)
+        set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
+        set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+        set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
+        set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
+        set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
+        set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+        # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
+        set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
+        set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
+        set(HIPBLASLT_LIBLOGIC_PATH
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+            CACHE STRING "" FORCE
+        )
+        set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+            CACHE FILEPATH "License file for package" FORCE
+        )
+
+        if(WIN32)
+            set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+                CACHE PATH "path to tensile library" FORCE
+            )
+        else()
+            set(HIPBLASLT_TENSILE_LIBRARY_DIR
+                "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+                CACHE PATH "path to tensile library" FORCE
+            )
+        endif()
+
+        add_subdirectory("${HIPBLASLT_PATH}" hipblaslt EXCLUDE_FROM_ALL)
+        endblock()
+    endif()
 endif()
 
 add_subdirectory(library)
