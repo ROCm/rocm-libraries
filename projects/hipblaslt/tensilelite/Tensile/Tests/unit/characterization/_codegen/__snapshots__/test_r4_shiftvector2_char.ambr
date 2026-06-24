@@ -2,15 +2,15 @@
 # name: test_r4_shiftvector2_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x64x16_SN_LDSB0_m8KnuJM8bxs0ZxEdGO9CdkXUnaJ6PI_iwU01_zYQLs=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x64x16_SN_LDSB0jE9CzAXMhC1g_gIMizS1JsSSwiVF-x3wsjXCsvRuuEA=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x128x16_SN_LDSB0ZipCF56AgYIiW2_828YIqqhyG94FqTPSZvaxiBtrGEM=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x128x16_SN_LDSB0JZxUHB9vuWyLfjGMQGAS_8O3l4gR9yxU1GPrfS5K71M=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_SN_LDSB0_CiXkti3-vriks8cKWXcsByJsB8xH-uIy0eOEnh04r7c=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_SN_LDSB0_fp3wANJpuuDc9WqnM4hjBUDQAijVD5Xm8dpK97BxaJs=',
       'err': 0,
     }),
   ])
