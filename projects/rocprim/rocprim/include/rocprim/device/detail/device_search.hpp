@@ -75,23 +75,16 @@ void search_kernel_impl(InputIterator1 input,
     {
         size_t i          = 0;
         size_t current_id = id;
-        for(; i < keys_size - 1 && current_id < size; i++, current_id++)
+        bool   found      = current_id + keys_size <= size;
+        for(; i < keys_size && found; i++, current_id++)
         {
-            if(!compare_function(input[current_id], keys[i]))
-            {
-                break;
-            }
+            found &= compare_function(input[current_id], keys[i]);
         }
 
-        // If the i is the last value for the key and the compare is also true,
-        // the pattern is found.
-        if(current_id < size && i == (keys_size - 1)
-           && compare_function(input[current_id], keys[i]))
-        {
-            index        = id;
-            find_pattern = true;
-            break;
-        }
+        // The first time the pattern if found we want to save it.
+        const bool replace = !find_pattern && found;
+        find_pattern |= replace;
+        index = replace ? id : index;
     }
 
     // Construct a mask of threads in this wave which have the same digit.
@@ -221,36 +214,23 @@ void search_kernel_shared_impl(InputIterator1 input,
     {
         size_t i          = 0;
         size_t current_id = id;
+        bool   found      = current_id + keys_size <= check;
         // Values till the items_per_block are in shared_memory
-        for(; i < keys_size - 1 && current_id < check_both; i++, current_id++)
+        for(; i < keys_size && found && current_id < check_both; i++, current_id++)
         {
-            if(!compare_function(local_input[current_id], local_keys[i]))
-            {
-                break;
-            }
+            found &= compare_function(local_input[current_id], local_keys[i]);
         }
         // Compare values that are not in the shared memory
-        for(; current_id >= items_per_block && i < keys_size - 1 && current_id < check;
+        for(; i < keys_size && found && current_id >= items_per_block && current_id < check;
             i++, current_id++)
         {
-            if(!compare_function(input[current_id + block_offset], local_keys[i]))
-            {
-                break;
-            }
+            found &= compare_function(input[current_id + block_offset], local_keys[i]);
         }
 
-        // If the i is the last value for the key and the compare is also true,
-        // the pattern is found.
-        if(current_id + block_offset < size && i == (keys_size - 1)
-           && compare_function(current_id < items_per_block ? local_input[current_id]
-                                                            : input[current_id + block_offset],
-                               local_keys[i]))
-        {
-            index        = id + block_offset;
-            find_pattern = true;
-            // Want to find the first occurance, do not need to search further.
-            break;
-        }
+        // The first time the pattern if found we want to save it.
+        const bool replace = !find_pattern && found;
+        find_pattern |= replace;
+        index = replace ? id + block_offset : index;
     }
 
     // Construct a mask of threads in this wave which have the same digit.

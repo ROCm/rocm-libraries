@@ -23,9 +23,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
 
-### Optimizations
+### Optimized
 
 * Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+* Reduced branching in `device_search` and `device_find_end`.
 
 ### Changed
 
