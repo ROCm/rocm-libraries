@@ -223,6 +223,7 @@ def main() -> int:
         return 1
 
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
+    # -n 8: fixed; -n auto = os.cpu_count() over-subscribes large CI/dev hosts.
     argv = ["uv", "run", "--no-sync", "pytest", "-q", "-ra", "-n", "8", *nodes]
     result = subprocess.run(argv, cwd=tl_root)
     rc = result.returncode
@@ -235,7 +236,7 @@ def main() -> int:
 
     bar = "=" * 64
     update_targets = failed_test_files(tl_root) or nodes
-    update_cmd = "uv run pytest --snapshot-update " + " ".join(update_targets)
+    update_cmd = "uv run --no-sync pytest --snapshot-update " + " ".join(update_targets)
     log("")
     log(bar)
     log("  X  TENSILELITE TESTS FAILED (rc=%d) -- COMMIT BLOCKED" % rc)
