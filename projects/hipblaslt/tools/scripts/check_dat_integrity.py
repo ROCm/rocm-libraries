@@ -24,6 +24,10 @@ _MAPPING_RE = re.compile(
 )
 
 
+class _MappingLoadError(Exception):
+    pass
+
+
 def _archDir(libDir: Path, arch: str) -> Path:
     return libDir / arch.split(":")[0]
 
@@ -44,11 +48,17 @@ def _scanArchs(libDir: Path):
 def _loadMapping(libDir: Path, arch: str):
     base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".zlib")
-    if gz_path.is_file():
-        raw = zlib.decompress(gz_path.read_bytes())
-        return msgpack.unpackb(raw, raw=False, strict_map_key=False)
-    with open(base, "rb") as f:
-        return msgpack.unpack(f, raw=False, strict_map_key=False)
+    src = gz_path if gz_path.is_file() else base
+    try:
+        if src == gz_path:
+            raw = zlib.decompress(src.read_bytes())
+            return msgpack.unpackb(raw, raw=False, strict_map_key=False)
+        with open(src, "rb") as f:
+            return msgpack.unpack(f, raw=False, strict_map_key=False)
+    except (OSError, ValueError, zlib.error) as exc:
+        raise _MappingLoadError(
+            f"arch={arch}: failed to read/decode Mapping ({src.name}): {exc}"
+        ) from exc
 
 
 def validate(libDir: Path) -> List[str]:
@@ -76,7 +86,11 @@ def validate(libDir: Path) -> List[str]:
         libDir.glob("*/*_fallback_*.dat.zlib")
     )
     for arch in sorted(archs):
-        mapping = _loadMapping(libDir, arch)
+        try:
+            mapping = _loadMapping(libDir, arch)
+        except _MappingLoadError as exc:
+            violations.append(str(exc))
+            continue
         archDir = _archDir(libDir, arch)
 
         for idx, kernelName in mapping.items():

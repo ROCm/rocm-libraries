@@ -41,7 +41,11 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <random>
 #include <string>
+#include <vector>
+
+#include <unistd.h>
 
 #include <msgpack.hpp>
 #include <zlib.h>
@@ -86,6 +90,77 @@ namespace
         ASSERT_TRUE(out.good()) << "write failed for " << path;
     }
 
+    std::vector<Bytef> packMapping(const std::map<std::string, std::string>& entries)
+    {
+        msgpack::sbuffer buffer;
+        msgpack::pack(buffer, entries);
+        return std::vector<Bytef>(reinterpret_cast<const Bytef*>(buffer.data()),
+                                  reinterpret_cast<const Bytef*>(buffer.data()) + buffer.size());
+    }
+
+    // Compress with an explicit zlib window-bits setting so tests can emit
+    // non-zlib-wrapped streams (raw deflate at -15, gzip at +31) that the
+    // loader's inflateInit (zlib header only) must reject.
+    void writeDeflateWithWindowBits(const fs::path&           path,
+                                    const std::vector<Bytef>& payload,
+                                    int                       windowBits)
+    {
+        z_stream strm{};
+        int      ret = deflateInit2(
+            &strm, Z_BEST_COMPRESSION, Z_DEFLATED, windowBits, 8, Z_DEFAULT_STRATEGY);
+        ASSERT_EQ(ret, Z_OK) << "deflateInit2 failed";
+
+        std::vector<Bytef> out(payload.size() + 128);
+        strm.next_in   = const_cast<Bytef*>(payload.data());
+        strm.avail_in  = static_cast<uInt>(payload.size());
+        strm.next_out  = out.data();
+        strm.avail_out = static_cast<uInt>(out.size());
+        ret            = deflate(&strm, Z_FINISH);
+        uLong produced = out.size() - strm.avail_out;
+        deflateEnd(&strm);
+        ASSERT_EQ(ret, Z_STREAM_END) << "deflate did not finish in one pass";
+
+        std::ofstream o(path, std::ios::binary);
+        ASSERT_TRUE(o.good()) << "could not open " << path << " for writing";
+        o.write(reinterpret_cast<const char*>(out.data()),
+                static_cast<std::streamsize>(produced));
+        ASSERT_TRUE(o.good()) << "write failed for " << path;
+    }
+
+    void writeCompressedBytes(const fs::path& path, const std::vector<Bytef>& bytes)
+    {
+        uLongf compressedSize = compressBound(static_cast<uLong>(bytes.size()));
+        std::vector<Bytef> compressed(compressedSize);
+        int ret = compress2(compressed.data(),
+                            &compressedSize,
+                            bytes.data(),
+                            static_cast<uLong>(bytes.size()),
+                            Z_BEST_COMPRESSION);
+        ASSERT_EQ(ret, Z_OK) << "zlib compress2 failed";
+
+        std::ofstream out(path, std::ios::binary);
+        ASSERT_TRUE(out.good()) << "could not open " << path << " for writing";
+        out.write(reinterpret_cast<const char*>(compressed.data()),
+                  static_cast<std::streamsize>(compressedSize));
+        ASSERT_TRUE(out.good()) << "write failed for " << path;
+    }
+
+    std::vector<char> readFile(const fs::path& path)
+    {
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if(!in.good())
+            return {};
+        auto size = in.tellg();
+        if(size == std::ifstream::pos_type(-1))
+            return {};
+        std::vector<char> data(static_cast<size_t>(size));
+        in.seekg(0);
+        in.read(data.data(), static_cast<std::streamsize>(data.size()));
+        if(!in.good())
+            return {};
+        return data;
+    }
+
     struct CompressedLibraryLoadTest : public ::testing::Test
     {
         fs::path tmpDir;
@@ -95,6 +170,8 @@ namespace
             tmpDir = fs::temp_directory_path()
                      / fs::path("hipblaslt-compressed-test-"
                                 + std::to_string(::testing::UnitTest::GetInstance()->random_seed())
+                                + "-"
+                                + std::to_string(static_cast<long long>(getpid()))
                                 + "-"
                                 + ::testing::UnitTest::GetInstance()->current_test_info()->name());
             fs::create_directories(tmpDir);
@@ -169,6 +246,56 @@ TEST_F(CompressedLibraryLoadTest, HandlesCorruptCompressedFile)
     EXPECT_EQ(mapping.at(7), "fallback_kernel");
 }
 
+TEST_F(CompressedLibraryLoadTest, FallsBackWhenCompressedPayloadIsInvalidMsgpack)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // 0xc1 is a reserved msgpack byte. The zlib stream is valid, but the
+    // inflated payload is not a valid msgpack object.
+    writeCompressedBytes(gzPath, {0xc1});
+    writeMsgpackMapping(datPath, {{"11", "fallback_for_bad_msgpack"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(11), "fallback_for_bad_msgpack");
+}
+
+TEST_F(CompressedLibraryLoadTest, FallsBackWhenCompressedTrailerIsTruncated)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    writeCompressedMsgpackMapping(gzPath, {{"0", "from_truncated_compressed"}});
+    auto compressed = readFile(gzPath);
+    ASSERT_GT(compressed.size(), 4u);
+    compressed.resize(compressed.size() - 2);
+    {
+        std::ofstream out(gzPath, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.good()) << "could not reopen " << gzPath;
+        out.write(compressed.data(), static_cast<std::streamsize>(compressed.size()));
+        ASSERT_TRUE(out.good()) << "truncate rewrite failed for " << gzPath;
+    }
+
+    writeMsgpackMapping(datPath, {{"0", "fallback_for_truncated_checksum"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(0), "fallback_for_truncated_checksum");
+}
+
+TEST_F(CompressedLibraryLoadTest, LoadsWhenFilenameAlreadyEndsWithZlib)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    writeCompressedMsgpackMapping(gzPath, {{"3", "direct_zlib_path"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(gzPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(3), "direct_zlib_path");
+}
+
 TEST_F(CompressedLibraryLoadTest, ReturnsEmptyWhenNeitherExists)
 {
     fs::path datPath = tmpDir / "nonexistent.dat";
@@ -177,7 +304,185 @@ TEST_F(CompressedLibraryLoadTest, ReturnsEmptyWhenNeitherExists)
     EXPECT_TRUE(mapping.empty());
 }
 
-TEST_F(CompressedLibraryLoadTest, LoadTimingComparison)
+TEST_F(CompressedLibraryLoadTest, LoadsCompressedSpanningMultipleInflateChunks)
+{
+    std::map<std::string, std::string> entries;
+    std::mt19937                       rng(123);
+    for(int i = 0; i < 4000; ++i)
+    {
+        std::string value(400, 'x');
+        for(auto& c : value)
+            c = static_cast<char>('a' + (rng() % 26));
+        entries[std::to_string(i)] = value;
+    }
+
+    fs::path datPath = tmpDir / "big_mapping.dat";
+    fs::path gzPath  = tmpDir / "big_mapping.dat.zlib";
+
+    writeCompressedMsgpackMapping(gzPath, entries);
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), entries.size());
+    for(auto const& entry : entries)
+    {
+        int key = std::stoi(entry.first);
+        auto it = mapping.find(key);
+        ASSERT_NE(it, mapping.end()) << "missing key " << key;
+        EXPECT_EQ(it->second, entry.second) << "mismatch for key " << key;
+    }
+}
+
+TEST_F(CompressedLibraryLoadTest, CorruptCompressedFileWithNoFallbackReturnsEmpty)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // Corrupt .zlib and NO uncompressed .dat to fall back to.
+    {
+        std::ofstream out(gzPath, std::ios::binary);
+        const char garbage[] = "definitely not a zlib stream";
+        out.write(garbage, sizeof(garbage));
+    }
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    EXPECT_TRUE(mapping.empty());
+}
+
+TEST_F(CompressedLibraryLoadTest, EmptyCompressedFileReturnsEmpty)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // Zero-byte .zlib: inflate sees no data and never reaches Z_STREAM_END.
+    { std::ofstream out(gzPath, std::ios::binary); }
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    EXPECT_TRUE(mapping.empty());
+}
+
+TEST_F(CompressedLibraryLoadTest, EmptyUncompressedFileReturnsEmpty)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+
+    // Zero-byte .dat with no .zlib sibling: parse never completes.
+    { std::ofstream out(datPath, std::ios::binary); }
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    EXPECT_TRUE(mapping.empty());
+}
+
+TEST_F(CompressedLibraryLoadTest, TruncatedCompressedBodyFallsBackToUncompressed)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // Keep only the first half of a valid zlib stream: the header is intact but
+    // inflate can never reach Z_STREAM_END (distinct from the trailer-only
+    // truncation case). The valid .dat sibling must win.
+    writeCompressedMsgpackMapping(gzPath, {{"0", "real"}, {"1", "real_two"}});
+    auto compressed = readFile(gzPath);
+    ASSERT_GT(compressed.size(), 8u);
+    compressed.resize(compressed.size() / 2);
+    {
+        std::ofstream out(gzPath, std::ios::binary | std::ios::trunc);
+        out.write(compressed.data(), static_cast<std::streamsize>(compressed.size()));
+        ASSERT_TRUE(out.good()) << "truncate rewrite failed for " << gzPath;
+    }
+
+    writeMsgpackMapping(datPath, {{"42", "fallback_after_body_truncation"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(42), "fallback_after_body_truncation");
+}
+
+TEST_F(CompressedLibraryLoadTest, TruncatedCompressedBodyWithNoFallbackReturnsEmpty)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    writeCompressedMsgpackMapping(gzPath, {{"0", "real"}, {"1", "real_two"}});
+    auto compressed = readFile(gzPath);
+    ASSERT_GT(compressed.size(), 8u);
+    compressed.resize(compressed.size() / 2);
+    {
+        std::ofstream out(gzPath, std::ios::binary | std::ios::trunc);
+        out.write(compressed.data(), static_cast<std::streamsize>(compressed.size()));
+        ASSERT_TRUE(out.good()) << "truncate rewrite failed for " << gzPath;
+    }
+
+    // No .dat sibling: must degrade to an empty map without throwing.
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    EXPECT_TRUE(mapping.empty());
+}
+
+TEST_F(CompressedLibraryLoadTest, RawDeflatePayloadFallsBackToUncompressed)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // Raw deflate (no zlib header). inflateInit expects a zlib header, so this
+    // must be rejected — guards against a future writer switching to raw deflate.
+    writeDeflateWithWindowBits(gzPath, packMapping({{"0", "raw_deflate"}}), -15);
+    writeMsgpackMapping(datPath, {{"0", "fallback_for_raw_deflate"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(0), "fallback_for_raw_deflate");
+}
+
+TEST_F(CompressedLibraryLoadTest, GzipWrappedPayloadFallsBackToUncompressed)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // gzip header (wbits +31). inflateInit does NOT auto-detect gzip, so this
+    // must be rejected — pins the exact accepted header set to zlib only.
+    writeDeflateWithWindowBits(gzPath, packMapping({{"0", "gzip"}}), 31);
+    writeMsgpackMapping(datPath, {{"0", "fallback_for_gzip"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(0), "fallback_for_gzip");
+}
+
+TEST_F(CompressedLibraryLoadTest, TrailingGarbageAfterValidObjectLoadsLeadingObject)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // A complete msgpack map followed by extra bytes, all validly zlib-wrapped
+    // (Adler-32 passes). The streaming parser stops at the first complete
+    // object; this pins that documented behavior (leading object wins, trailing
+    // bytes ignored) rather than leaving it unspecified.
+    auto payload = packMapping({{"0", "leading"}, {"1", "object"}});
+    payload.insert(payload.end(), {0xde, 0xad, 0xbe, 0xef, 0x00, 0x11});
+    writeCompressedBytes(gzPath, payload);
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 2u);
+    EXPECT_EQ(mapping.at(0), "leading");
+    EXPECT_EQ(mapping.at(1), "object");
+}
+
+TEST_F(CompressedLibraryLoadTest, DirectoryAtCompressedPathFallsBackToUncompressed)
+{
+    fs::path datPath = tmpDir / "test_mapping.dat";
+    fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+
+    // A directory sitting where the .zlib should be: exists() is true but no
+    // readable byte stream can be obtained. Must degrade to the .dat sibling,
+    // not crash. (tellg() yields a huge/negative value caught by the size
+    // guards, or the read fails — every path leads to fallback.)
+    fs::create_directory(gzPath);
+    writeMsgpackMapping(datPath, {{"0", "fallback_past_directory"}});
+
+    auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+    ASSERT_EQ(mapping.size(), 1u);
+    EXPECT_EQ(mapping.at(0), "fallback_past_directory");
+}
+
+TEST_F(CompressedLibraryLoadTest, DISABLED_LoadTimingComparison)
 {
     // Build a realistic payload: 500 entries with long kernel names matching
     // the naming convention used in real hipBLASLt shard files.

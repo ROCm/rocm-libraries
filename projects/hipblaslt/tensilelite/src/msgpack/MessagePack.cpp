@@ -28,8 +28,11 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <vector>
 
 #include <zlib.h>
 
@@ -75,56 +78,79 @@ namespace TensileLite
     bool readCompressedMsgObject(std::string const&     gz_filename,
                                  msgpack::object_handle& result)
     {
-        std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
-        if(!in.is_open())
+        try
         {
-            return false;
-        }
-
-        auto compressed_size = static_cast<size_t>(in.tellg());
-        in.seekg(0);
-        std::vector<uint8_t> compressed(compressed_size);
-        in.read(reinterpret_cast<char*>(compressed.data()), compressed_size);
-        if(!in)
-        {
-            return false;
-        }
-
-        z_stream strm{};
-        if(inflateInit(&strm) != Z_OK)
-            return false;
-
-        strm.next_in  = compressed.data();
-        strm.avail_in = static_cast<uInt>(compressed_size);
-
-        // Stream inflate output directly into msgpack::unpacker in chunks,
-        // mirroring the uncompressed path so decompress and parse overlap.
-        msgpack::unpacker unp;
-        constexpr size_t  buffer_size = 1 << 19;
-        bool              finished_parsing = false;
-        int               ret;
-
-        do
-        {
-            unp.reserve_buffer(buffer_size);
-            strm.next_out  = reinterpret_cast<uint8_t*>(unp.buffer());
-            strm.avail_out = static_cast<uInt>(buffer_size);
-
-            ret = inflate(&strm, Z_NO_FLUSH);
-            if(ret != Z_OK && ret != Z_STREAM_END)
+            std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
+            if(!in.is_open())
             {
-                inflateEnd(&strm);
                 return false;
             }
 
-            size_t produced = buffer_size - strm.avail_out;
-            unp.buffer_consumed(produced);
-            finished_parsing = unp.next(result);
-        } while(!finished_parsing && ret == Z_OK);
+            auto pos = in.tellg();
+            if(pos < 0)
+                return false;
 
-        inflateEnd(&strm);
+            auto compressed_size = static_cast<size_t>(pos);
+            if(compressed_size > std::numeric_limits<uInt>::max())
+                return false;
 
-        return finished_parsing;
+            in.seekg(0);
+            std::vector<uint8_t> compressed(compressed_size);
+            in.read(reinterpret_cast<char*>(compressed.data()), compressed_size);
+            if(!in)
+            {
+                return false;
+            }
+
+            z_stream strm{};
+            if(inflateInit(&strm) != Z_OK)
+                return false;
+
+            struct InflateGuard
+            {
+                z_stream* stream;
+                ~InflateGuard()
+                {
+                    inflateEnd(stream);
+                }
+            } guard{&strm};
+
+            strm.next_in  = compressed.data();
+            strm.avail_in = static_cast<uInt>(compressed_size);
+
+            // Stream inflate output directly into msgpack::unpacker in chunks,
+            // mirroring the uncompressed path so decompress and parse overlap.
+            msgpack::unpacker unp;
+            constexpr size_t  buffer_size = 1 << 19;
+            bool              finished_parsing = false;
+            bool              inflate_complete = false;
+            int               ret;
+
+            do
+            {
+                unp.reserve_buffer(buffer_size);
+                strm.next_out  = reinterpret_cast<uint8_t*>(unp.buffer());
+                strm.avail_out = static_cast<uInt>(buffer_size);
+
+                ret = inflate(&strm, Z_NO_FLUSH);
+                if(ret != Z_OK && ret != Z_STREAM_END)
+                    return false;
+
+                if(ret == Z_STREAM_END)
+                    inflate_complete = true;
+
+                size_t produced = buffer_size - strm.avail_out;
+                unp.buffer_consumed(produced);
+                if(!finished_parsing)
+                    finished_parsing = unp.next(result);
+            } while(ret == Z_OK);
+
+            return inflate_complete && finished_parsing;
+        }
+        catch(std::exception const&)
+        {
+            return false;
+        }
     }
     } // anonymous namespace
 
@@ -132,8 +158,23 @@ namespace TensileLite
     {
         try
         {
+            std::string base_filename = filename;
+            constexpr char            zlib_suffix[] = ".zlib";
+            constexpr size_t          zlib_suffix_size = sizeof(zlib_suffix) - 1;
+            if(base_filename.size() >= zlib_suffix_size
+               && base_filename.compare(base_filename.size() - zlib_suffix_size,
+                                        zlib_suffix_size,
+                                        zlib_suffix)
+                      == 0)
+            {
+                if(readCompressedMsgObject(base_filename, result))
+                    return true;
+
+                base_filename.resize(base_filename.size() - zlib_suffix_size);
+            }
+
             // Probe for a zlib-compressed variant first
-            std::string gz_filename = filename + ".zlib";
+            std::string gz_filename = base_filename + ".zlib";
             if(std::filesystem::exists(gz_filename))
             {
                 if(readCompressedMsgObject(gz_filename, result))
@@ -145,12 +186,12 @@ namespace TensileLite
             }
 
             // Fall back to uncompressed file
-            std::ifstream in(filename, std::ios::in | std::ios::binary);
+            std::ifstream in(base_filename, std::ios::in | std::ios::binary);
             if(!in.is_open())
             {
                 if(Debug::Instance().printDataInit())
-                    std::cout << "Error loading " << filename << " (msgpack):\nFailed to open file"
-                              << std::endl;
+                    std::cout << "Error loading " << base_filename
+                              << " (msgpack):\nFailed to open file" << std::endl;
 
                 return false;
             }
@@ -172,14 +213,14 @@ namespace TensileLite
                 {
                     const char* const error_str
                         = in.eof() ? "Unexpected end of file" : "Read failure";
-                    std::cout << "Error loading " << filename << " (msgpack):\n"
+                    std::cout << "Error loading " << base_filename << " (msgpack):\n"
                               << error_str << std::endl;
                 }
 
                 return false;
             }
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
