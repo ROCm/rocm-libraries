@@ -1697,6 +1697,46 @@ namespace rocisa
         }
     };
 
+    struct GlobalLoadAsyncToLdsB128 : public GLOBALLoadInstruction
+    {
+        GlobalLoadAsyncToLdsB128(const std::shared_ptr<RegisterContainer>& vLdsAddr,
+                                 const std::shared_ptr<RegisterContainer>& vGlobalOffset,
+                                 const std::shared_ptr<RegisterContainer>& saddr,
+                                 std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                                 const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(
+                  InstType::INST_B128, vLdsAddr, vGlobalOffset, saddr, modifier, comment)
+        {
+            instStr = "global_load_async_to_lds_";
+        }
+
+        GlobalLoadAsyncToLdsB128(const GlobalLoadAsyncToLdsB128& other)
+            : GLOBALLoadInstruction(other)
+        {
+            instStr = "global_load_async_to_lds_";
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, vaddr, saddr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {dst, vaddr, saddr};
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadAsyncToLdsB128>(*this);
+        }
+    };
+
     struct BufferStoreB8 : public MUBUFStoreInstruction
     {
         BufferStoreB8(const std::shared_ptr<RegisterContainer>& src,

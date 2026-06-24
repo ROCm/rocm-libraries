@@ -432,6 +432,15 @@ DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical =
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
+// Global async-to-LDS DMA — gfx1250 only.
+// global_load_async_to_lds_b128: 128-bit async load from global to LDS.
+// All three are source/input: S0 = 32-bit vgpr LDS byte-address (dest in LDS),
+// S1 = 32-bit vaddr (global offset), S2 = 64-bit saddr (global base).
+// Tracked by ASYNCcnt (not LOADcnt); no vgpr destination.
+DEF_T(GlobalLoadAsyncToLdsB128Inst, "global_load_async_to_lds_b128", .format = VGLOBAL,
+    .logical = "GlobalLoadAsyncToLdsB128",
+    .operand_fields = { {S0, vaddr, vgpr, 32}, {S1, vaddr, vgpr, 32}, {S2, saddr, sreg, 64} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
