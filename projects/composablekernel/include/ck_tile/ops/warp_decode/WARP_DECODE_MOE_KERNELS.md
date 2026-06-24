@@ -627,7 +627,7 @@ as a universal verdict.
 | **LDS gate/up X-staging** | helps DeepSeek-BF16 only | mixed across shapes/dtypes; a single warp has little reuse to stage |
 | **LDS down intermediate staging** | 1.1–1.45× slower | 4-warp reuse doesn't amortize the copy+barrier; **8-warp / double-buffered chunked retest is untried** |
 | **NPerWarp=2 (gate_up)** | mixed / slight loss | halves occupancy; weights dominate so activation reuse is small. Diverges from the dense-GEMM result where it wins — possibly coupled to the (failed) swizzle and reg-alloc; worth a fresh look |
-| **XCD / chiplet workgroup swizzle** | neutral on DeepSeek (large grid); regressed when packing | only plausibly useful on **small-grid Qwen INTER=512** (CU under-feeding); untested there |
+| **XCD / chiplet workgroup swizzle** | neutral on DeepSeek (large grid); regressed when packing | **conflicts with the GEMM-decode result — see §11.1.** Plausibly useful only on **small-grid Qwen INTER=512** (CU under-feeding); untested there |
 | **Short-INTER wide/subgroup down (`down_short_d2`)** | 2.6–4.6× slower on Qwen | fewer lanes halves wave count; Qwen down is latency-bound on a ~10 MB problem |
 | **down_fp4_h2_wide (kVector=32 + H2)** | strictly dominated | single K-iteration kills pipelining |
 | **fp4→fp32 + v_pk_fma_f32 down** | slower than dot2-nonop | needs 2× the conversion work (activation is bf16) |
@@ -640,6 +640,40 @@ as a universal verdict.
 counter correction — `FetchSize`/`TCC_MISS` undercount HBM by 2× (128 B L2 line
 vs the 64 B the counters assume). Cross-check with the EA counter
 (`TCC_EA*_RDREQ_DRAM_32B*32`) and the exact routing footprint, not `FetchSize`.
+
+### 11.1 XCD swizzle: why it helps GEMM decode but (so far) not MoE decode
+
+This is a genuine **conflict in the data** worth re-checking, not a settled result.
+The skinny-GEMM `gemm_decode` work found XCD/chiplet workgroup remapping to be a
+**large win** at small N — e.g. M=1 / N=2048: **7.59 TB/s (95% HBM) vs 4.09 TB/s
+(51%)** for `wvSpltK` (see `docs/20260603_decode_gemm_status.md` "Small-N — XCD
+swizzle dominates"). The MoE warp-decode sweeps found it **neutral/regressing**.
+Most-likely reasons (hypotheses, to be verified):
+
+- **Cross-wave data reuse is the thing XCD remap co-locates, and MoE decode has
+  almost none.** XCD swizzle helps by mapping workgroups that touch the *same*
+  bytes onto the same chiplet so they hit that XCD's L2 slice. GEMM decode reuses a
+  shared operand across its `mp/np` register tile (the activation row / weight
+  column is read by many output elements), so remapping turns that reuse into L2
+  locality. MoE warp-decode is **one wave per output scalar with no register
+  tile** — each wave streams a *distinct* expert weight row and discards it, so
+  there is no shared footprint to co-locate.
+- **Expert collision is rare at decode.** The only MoE reuse would be two tokens
+  routed to the *same* expert (their gate/up/down rows coincide). At decode the
+  expected reuse is `≈ B·TOPK/E ≈ 1.1×` at the reference shapes (e.g. DeepSeek
+  E=256, Qwen E=512) — i.e. tokens almost never collide on an expert, so even a
+  perfect token→XCD remap finds nothing to share.
+- **Tiling / grid differ.** GEMM decode's win was at *small N* where the grid
+  under-fills 256 CUs and remap also rebalances CU occupancy; the MoE sweeps were
+  dominated by large-grid DeepSeek (already full) and the packing variant
+  regressed. The small-grid MoE case (Qwen INTER=512) — the analogue of GEMM's
+  small-N regime — was **not** isolated, so the comparison isn't apples-to-apples.
+
+**Actionable:** re-test XCD swizzle on MoE specifically (a) on small-grid Qwen
+(INTER=512/256/128, B=1) where occupancy rebalancing — not data reuse — could pay,
+and (b) *after* any cross-wave reuse tiling lands (token-batched `kMPerWarp`, or
+the LDS staging kernels), since that is what made it pay for GEMM. Until then,
+treat "XCD swizzle doesn't help MoE decode" as **regime-limited, not refuted.**
 
 ---
 
@@ -675,8 +709,10 @@ vs the 64 B the counters assume). Cross-check with the EA counter
    `docs/reviews/vllm-zero-init-splitk-review.md`.*
 5. **8-warp / double-buffered chunked LDS down** — the untried follow-up that
    would actually create the cross-wave reuse staging needs.
-6. **Chunk-swept XCD swizzle on small-grid Qwen INTER=512** — the only swizzle
-   regime not yet falsified.
+6. **Re-test XCD swizzle on MoE (small-grid Qwen INTER=512, and after a
+   reuse-tiling lands)** — GEMM decode got a large small-N win from it (§11.1);
+   the MoE-neutral result is regime-limited, not refuted. The only swizzle regime
+   not yet falsified for MoE.
 7. **kVector autotuning** per shape/dtype (size to ~one 128-bit transaction;
    going wider only helps when issue-bound).
 8. **Cooperative top-k / standalone topk producer** — deferred; topk is a small
