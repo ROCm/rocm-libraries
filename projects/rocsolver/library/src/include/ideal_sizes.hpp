@@ -249,6 +249,27 @@
 #define xxTD2_SSKER_MAX_N 192
 #endif
 
+/***************** gehrd **********************************************
+*******************************************************************************/
+/*! \brief Determines the size of the leading block reduced at each step of the
+    blocked Hessenberg reduction algorithm (GEHRD). Also applies to the
+    corresponding batched and strided-batched routines.*/
+#ifndef GEHRD_BLOCKSIZE
+#define GEHRD_BLOCKSIZE 32
+#endif
+
+/*! \brief Determines the size at which rocSOLVER switches from the blocked
+    to the unblocked algorithm when executing GEHRD. Also applies to the
+    corresponding batched and strided-batched routines.
+
+    \details GEHRD will use LAHR2 to reduce blocks of GEHRD_BLOCKSIZE columns
+    at a time until the rest of the matrix has no more than GEHRD_GEHD2_SWITCHSIZE
+    rows or columns; at this point the remainder is reduced with the unblocked
+    algorithm (GEHD2).*/
+#ifndef GEHRD_GEHD2_SWITCHSIZE
+#define GEHRD_GEHD2_SWITCHSIZE 128
+#endif
+
 /***************** sygs2/sygst and hegs2/hegst ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the leading block that is reduced to standard form at each step

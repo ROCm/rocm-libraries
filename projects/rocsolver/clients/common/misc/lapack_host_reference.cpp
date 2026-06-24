@@ -1845,7 +1845,7 @@ void zgehd2_(int* n,
              rocblas_double_complex* work,
              int* info);
 
-void sgehrd_(int* n, int* ilo, int* ihi, float* A, int* lda, float* ipiv, float* work, int* info, int* lwork);
+void sgehrd_(int* n, int* ilo, int* ihi, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
 void dgehrd_(int* n,
              int* ilo,
              int* ihi,
@@ -1853,8 +1853,8 @@ void dgehrd_(int* n,
              int* lda,
              double* ipiv,
              double* work,
-             int* info,
-             int* lwork);
+             int* lwork,
+             int* info);
 void cgehrd_(int* n,
              int* ilo,
              int* ihi,
@@ -1862,8 +1862,8 @@ void cgehrd_(int* n,
              int* lda,
              rocblas_float_complex* ipiv,
              rocblas_float_complex* work,
-             int* info,
-             int* lwork);
+             int* lwork,
+             int* info);
 void zgehrd_(int* n,
              int* ilo,
              int* ihi,
@@ -1871,8 +1871,8 @@ void zgehrd_(int* n,
              int* lda,
              rocblas_double_complex* ipiv,
              rocblas_double_complex* work,
-             int* info,
-             int* lwork);
+             int* lwork,
+             int* info);
 
 void ssytrd_(char* uplo,
              int* n,
@@ -7042,7 +7042,7 @@ void cpu_gehrd<float>(rocblas_int n,
                       int lwork)
 {
     int info;
-    sgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+    sgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &lwork, &info);
 }
 
 template <>
@@ -7056,7 +7056,7 @@ void cpu_gehrd<double>(rocblas_int n,
                        int lwork)
 {
     int info;
-    dgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+    dgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &lwork, &info);
 }
 
 template <>
@@ -7070,7 +7070,7 @@ void cpu_gehrd<rocblas_float_complex>(rocblas_int n,
                                       int lwork)
 {
     int info;
-    cgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+    cgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &lwork, &info);
 }
 
 template <>
@@ -7084,7 +7084,7 @@ void cpu_gehrd<rocblas_double_complex>(rocblas_int n,
                                        int lwork)
 {
     int info;
-    zgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &info, &lwork);
+    zgehrd_(&n, &ilo, &ihi, A, &lda, ipiv, work, &lwork, &info);
 }
 
 // sytrd & hetrd

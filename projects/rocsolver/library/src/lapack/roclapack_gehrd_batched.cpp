@@ -25,29 +25,29 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
-#include "roclapack_gehd2.hpp"
+#include "roclapack_gehrd.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename I, typename U>
-rocblas_status rocsolver_gehd2_batched_impl(rocblas_handle handle,
+rocblas_status rocsolver_gehrd_batched_impl(rocblas_handle handle,
                                             const I n,
                                             const I ilo,
                                             const I ihi,
                                             U A,
                                             const I lda,
                                             T* ipiv,
-                                            const rocblas_stride stridep,
+                                            const rocblas_stride strideP,
                                             const I batch_count)
 {
-    ROCSOLVER_ENTER_TOP("gehd2_batched", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda,
-                        "--strideP", stridep, "--batch_count", batch_count);
+    ROCSOLVER_ENTER_TOP("gehrd_batched", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda,
+                        "--strideP", strideP, "--batch_count", batch_count);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, ipiv, batch_count);
+    rocblas_status st = rocsolver_gehrd_argCheck(handle, n, ilo, ihi, lda, A, ipiv, batch_count);
     if(st != rocblas_status_continue)
         return st;
 
@@ -57,40 +57,45 @@ rocblas_status rocsolver_gehd2_batched_impl(rocblas_handle handle,
     // batched execution
     rocblas_stride strideA = 0;
 
-    // memory workspace sizes:
-    // size for constants in rocblas calls
+    // memory workspace sizes
     size_t size_scalars;
-    // size of arrays of pointers (for batched cases) and re-usable workspace
     size_t size_work_workArr;
-    // extra requirements for calling LARF and LARFG
-    size_t size_Abyx_norms;
-    // size of temporary array to store diagonal elements
-    size_t size_diag;
-    rocsolver_gehd2_getMemorySize<true, T>(n, ilo, ihi, batch_count, &size_scalars,
-                                           &size_work_workArr, &size_Abyx_norms, &size_diag);
+    size_t size_norms_tmptr;
+    size_t size_diag_beta;
+    size_t size_F;
+    size_t size_work_vec;
+    size_t size_Y;
+    rocsolver_gehrd_getMemorySize<true, T>(n, ilo, ihi, batch_count, &size_scalars,
+                                           &size_work_workArr, &size_norms_tmptr, &size_diag_beta,
+                                           &size_F, &size_work_vec, &size_Y);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work_workArr,
-                                                      size_Abyx_norms, size_diag);
+                                                      size_norms_tmptr, size_diag_beta, size_F,
+                                                      size_work_vec, size_Y);
 
     // memory workspace allocation
-    void *scalars, *work_workArr, *Abyx_norms, *diag;
-    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr, size_Abyx_norms, size_diag);
+    void *scalars, *work_workArr, *norms_tmptr, *diag_beta, *F, *work_vec, *Y;
+    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr, size_norms_tmptr,
+                              size_diag_beta, size_F, size_work_vec, size_Y);
 
     if(!mem)
         return rocblas_status_memory_error;
 
     scalars = mem[0];
     work_workArr = mem[1];
-    Abyx_norms = mem[2];
-    diag = mem[3];
+    norms_tmptr = mem[2];
+    diag_beta = mem[3];
+    F = mem[4];
+    work_vec = mem[5];
+    Y = mem[6];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
-    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, stridep,
-                                       batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
-                                       (T*)diag);
+    return rocsolver_gehrd_template<true, false, T>(
+        handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, strideP, batch_count, (T*)scalars,
+        work_workArr, (T*)norms_tmptr, diag_beta, (T*)F, (T*)work_vec, (T*)Y);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -103,60 +108,60 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
-rocblas_status rocsolver_sgehd2_batched(rocblas_handle handle,
+rocblas_status rocsolver_sgehrd_batched(rocblas_handle handle,
                                         const rocblas_int n,
                                         const rocblas_int ilo,
                                         const rocblas_int ihi,
                                         float* const A[],
                                         const rocblas_int lda,
                                         float* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gehd2_batched_impl<float>(handle, n, ilo, ihi, A, lda, ipiv,
-                                                          stridep, batch_count);
+    return rocsolver::rocsolver_gehrd_batched_impl<float>(handle, n, ilo, ihi, A, lda, ipiv,
+                                                          strideP, batch_count);
 }
 
-rocblas_status rocsolver_dgehd2_batched(rocblas_handle handle,
+rocblas_status rocsolver_dgehrd_batched(rocblas_handle handle,
                                         const rocblas_int n,
                                         const rocblas_int ilo,
                                         const rocblas_int ihi,
                                         double* const A[],
                                         const rocblas_int lda,
                                         double* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gehd2_batched_impl<double>(handle, n, ilo, ihi, A, lda, ipiv,
-                                                           stridep, batch_count);
+    return rocsolver::rocsolver_gehrd_batched_impl<double>(handle, n, ilo, ihi, A, lda, ipiv,
+                                                           strideP, batch_count);
 }
 
-rocblas_status rocsolver_cgehd2_batched(rocblas_handle handle,
+rocblas_status rocsolver_cgehrd_batched(rocblas_handle handle,
                                         const rocblas_int n,
                                         const rocblas_int ilo,
                                         const rocblas_int ihi,
                                         rocblas_float_complex* const A[],
                                         const rocblas_int lda,
                                         rocblas_float_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gehd2_batched_impl<rocblas_float_complex>(
-        handle, n, ilo, ihi, A, lda, ipiv, stridep, batch_count);
+    return rocsolver::rocsolver_gehrd_batched_impl<rocblas_float_complex>(
+        handle, n, ilo, ihi, A, lda, ipiv, strideP, batch_count);
 }
 
-rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
+rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
                                         const rocblas_int n,
                                         const rocblas_int ilo,
                                         const rocblas_int ihi,
                                         rocblas_double_complex* const A[],
                                         const rocblas_int lda,
                                         rocblas_double_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
-    return rocsolver::rocsolver_gehd2_batched_impl<rocblas_double_complex>(
-        handle, n, ilo, ihi, A, lda, ipiv, stridep, batch_count);
+    return rocsolver::rocsolver_gehrd_batched_impl<rocblas_double_complex>(
+        handle, n, ilo, ihi, A, lda, ipiv, strideP, batch_count);
 }
 
 } // extern C

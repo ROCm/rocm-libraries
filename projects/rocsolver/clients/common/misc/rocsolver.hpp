@@ -1328,10 +1328,10 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
 {
     if(STRIDED)
         return GEHRD
-            ? rocblas_status_not_implemented
+            ? rocsolver_sgehrd_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc)
             : rocsolver_sgehd2_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc);
     else
-        return GEHRD ? rocblas_status_not_implemented
+        return GEHRD ? rocsolver_sgehrd(handle, n, ilo, ihi, A, lda, ipiv)
                      : rocsolver_sgehd2(handle, n, ilo, ihi, A, lda, ipiv);
 }
 
@@ -1350,10 +1350,10 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
 {
     if(STRIDED)
         return GEHRD
-            ? rocblas_status_not_implemented
+            ? rocsolver_dgehrd_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc)
             : rocsolver_dgehd2_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc);
     else
-        return GEHRD ? rocblas_status_not_implemented
+        return GEHRD ? rocsolver_dgehrd(handle, n, ilo, ihi, A, lda, ipiv)
                      : rocsolver_dgehd2(handle, n, ilo, ihi, A, lda, ipiv);
 }
 
@@ -1372,10 +1372,10 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
 {
     if(STRIDED)
         return GEHRD
-            ? rocblas_status_not_implemented
+            ? rocsolver_cgehrd_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc)
             : rocsolver_cgehd2_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc);
     else
-        return GEHRD ? rocblas_status_not_implemented
+        return GEHRD ? rocsolver_cgehrd(handle, n, ilo, ihi, A, lda, ipiv)
                      : rocsolver_cgehd2(handle, n, ilo, ihi, A, lda, ipiv);
 }
 
@@ -1394,10 +1394,10 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
 {
     if(STRIDED)
         return GEHRD
-            ? rocblas_status_not_implemented
+            ? rocsolver_zgehrd_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc)
             : rocsolver_zgehd2_strided_batched(handle, n, ilo, ihi, A, lda, stA, ipiv, stP, bc);
     else
-        return GEHRD ? rocblas_status_not_implemented
+        return GEHRD ? rocsolver_zgehrd(handle, n, ilo, ihi, A, lda, ipiv)
                      : rocsolver_zgehd2(handle, n, ilo, ihi, A, lda, ipiv);
 }
 
@@ -1415,7 +1415,7 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
                                             rocblas_stride stP,
                                             rocblas_int bc)
 {
-    return GEHRD ? rocblas_status_not_implemented
+    return GEHRD ? rocsolver_sgehrd_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc)
                  : rocsolver_sgehd2_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc);
 }
 
@@ -1432,7 +1432,7 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
                                             rocblas_stride stP,
                                             rocblas_int bc)
 {
-    return GEHRD ? rocblas_status_not_implemented
+    return GEHRD ? rocsolver_dgehrd_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc)
                  : rocsolver_dgehd2_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc);
 }
 
@@ -1449,7 +1449,7 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
                                             rocblas_stride stP,
                                             rocblas_int bc)
 {
-    return GEHRD ? rocblas_status_not_implemented
+    return GEHRD ? rocsolver_cgehrd_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc)
                  : rocsolver_cgehd2_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc);
 }
 
@@ -1466,7 +1466,7 @@ inline rocblas_status rocsolver_gehd2_gehrd(bool STRIDED,
                                             rocblas_stride stP,
                                             rocblas_int bc)
 {
-    return GEHRD ? rocblas_status_not_implemented
+    return GEHRD ? rocsolver_zgehrd_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc)
                  : rocsolver_zgehd2_batched(handle, n, ilo, ihi, A, lda, ipiv, stP, bc);
 }
 /*****************************************************/

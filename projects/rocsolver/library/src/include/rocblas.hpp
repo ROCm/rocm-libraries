@@ -354,7 +354,8 @@ rocblas_status rocblasCall_axpy(rocblas_handle handle,
                                 rocblas_stride shifty,
                                 rocblas_int incy,
                                 rocblas_stride stridey,
-                                rocblas_int batch_count)
+                                rocblas_int batch_count,
+                                T** workArr = nullptr)
 {
     // TODO: How to get alpha for trace logging
     ROCBLAS_ENTER("axpy", "n:", n, "shiftX:", shiftx, "incx:", incx, "shiftY:", shifty,
@@ -380,7 +381,8 @@ rocblas_status rocblasCall_axpy(rocblas_handle handle,
                                 rocblas_stride shifty,
                                 rocblas_int incy,
                                 rocblas_stride stridey,
-                                rocblas_int batch_count)
+                                rocblas_int batch_count,
+                                T** workArr = nullptr)
 {
     // TODO: How to get alpha for trace logging
     ROCBLAS_ENTER("axpy", "n:", n, "shiftX:", shiftx, "incx:", incx, "shiftY:", shifty,
@@ -390,6 +392,38 @@ rocblas_status rocblasCall_axpy(rocblas_handle handle,
                                                                   shiftx, incx, stridex, y, shifty,
                                                                   incy, stridey, batch_count));
     return rocblas_status_success;
+}
+
+// axpy: strided flat x, batched pointer-array y (uses workArr to build x pointer array)
+template <typename T>
+rocblas_status rocblasCall_axpy(rocblas_handle handle,
+                                rocblas_int n,
+                                const T* alpha,
+                                rocblas_stride stride_alpha,
+                                const T* x,
+                                rocblas_stride shiftx,
+                                rocblas_int incx,
+                                rocblas_stride stridex,
+                                T* const* y,
+                                rocblas_stride shifty,
+                                rocblas_int incy,
+                                rocblas_stride stridey,
+                                rocblas_int batch_count,
+                                T** workArr = nullptr)
+{
+    ROCBLAS_ENTER("axpy", "n:", n, "shiftX:", shiftx, "incx:", incx, "shiftY:", shifty,
+                  "incy:", incy, "bc:", batch_count);
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+    rocblas_int blocks = (batch_count - 1) / 256 + 1;
+
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr,
+                            const_cast<T*>(x), stridex, batch_count);
+
+    return rocblas_internal_axpy_batched_template(handle, n, alpha, stride_alpha,
+                                                  cast2constType<T>(workArr), shiftx, incx, stridex,
+                                                  y, shifty, incy, stridey, batch_count);
 }
 
 // iamax
