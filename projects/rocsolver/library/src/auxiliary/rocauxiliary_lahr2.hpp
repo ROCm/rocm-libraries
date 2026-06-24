@@ -410,7 +410,7 @@ rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
                                         U A,
                                         T* tau,
                                         T* F,
-                                        U Y,
+                                        T* Y,
                                         const rocblas_int batch_count = 1)
 {
     // order is important for unit tests:
@@ -452,7 +452,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         T* F,
                                         const rocblas_int ldf,
                                         const rocblas_stride strideF,
-                                        U Y,
+                                        T* Y,
                                         const rocblas_int shiftY,
                                         const rocblas_int ldy,
                                         const rocblas_stride strideY,
