@@ -5,6 +5,7 @@
 
 #include "fake_backend/MockHipdnnBackend.hpp"
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
 #include <hipdnn_frontend/version.h>
 
 #include <array>
@@ -22,7 +23,7 @@ const std::string SUCCESS_VERSION = std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR
 
 TEST(TestBackendInterface, TryToUseBackendInterfaceSuccess)
 {
-    EXPECT_TRUE(std::dynamic_pointer_cast<HipdnnBackendWrapper>(
+    EXPECT_TRUE(std::dynamic_pointer_cast<HipdnnDirectBackendWrapper>(
         tryToUseBackendInterface(SUCCESS_VERSION.c_str())));
 }
 
@@ -52,7 +53,7 @@ TEST(TestBackendInterface, VersionEqualsVersionString)
 
 TEST(TestBackendInterface, BackendGetSerializedExecutionPlanExtForwardsToBackend)
 {
-    HipdnnBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
+    HipdnnDirectBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
     size_t planByteSize = 0;
 
     EXPECT_EQ(
@@ -62,7 +63,7 @@ TEST(TestBackendInterface, BackendGetSerializedExecutionPlanExtForwardsToBackend
 
 TEST(TestBackendInterface, BackendCreateAndDeserializeExecutionPlanExtForwardsToBackend)
 {
-    HipdnnBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
+    HipdnnDirectBackendWrapper backendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
     hipdnnBackendDescriptor_t descriptor = nullptr;
     const std::array<uint8_t, 1> serializedPlan{0};
 

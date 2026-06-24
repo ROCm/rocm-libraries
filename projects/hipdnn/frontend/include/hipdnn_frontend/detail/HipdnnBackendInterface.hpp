@@ -116,6 +116,14 @@ public:
                                                   size_t* apiVersionLen)
         = 0;
 
+    virtual hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t callback,
+                                                 hipdnnSeverity_t minLevel,
+                                                 hipdnnLogCallbackMode_t mode,
+                                                 hipdnnUserLogCallbackHandle_t userHandle)
+        = 0;
+    virtual hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) = 0;
+    virtual hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) = 0;
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {

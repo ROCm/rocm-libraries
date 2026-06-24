@@ -193,6 +193,24 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+    hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t /*callback*/,
+                                         hipdnnSeverity_t /*minLevel*/,
+                                         hipdnnLogCallbackMode_t /*mode*/,
+                                         hipdnnUserLogCallbackHandle_t /*userHandle*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t /*level*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* /*level*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
 };
 
 } // namespace hipdnn_frontend::detail

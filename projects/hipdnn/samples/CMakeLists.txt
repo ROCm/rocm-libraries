@@ -156,6 +156,30 @@ add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Post-install test for the runtime-load frontend target. Links ONLY
+# hipdnn_frontend_dynamic -- deliberately NOT hipdnn_test_sdk, which links the
+# direct hipdnn_frontend and would pull libhipdnn_backend back onto the link line,
+# defeating the point. The backend is therefore resolved at runtime via
+# dlopen/dlsym, proving the installed dynamic target is consumable end-to-end.
+add_executable(hipdnn_sample_conv_fprop_dynamic dynamic/ConvFpropDynamic.cpp)
+target_link_libraries(hipdnn_sample_conv_fprop_dynamic
+    PRIVATE hip::host Threads::Threads hipdnn_frontend_dynamic)
+target_compile_options(hipdnn_sample_conv_fprop_dynamic PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+set_target_properties(hipdnn_sample_conv_fprop_dynamic PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+# The dynamic exe does not link libhipdnn_backend, so give it an RPATH to the lib
+# dir (ROCm layout: bin/ -> ../lib) so the dynamic wrapper's dlopen can find the
+# backend at runtime. On Windows the backend DLL sits in bin alongside the exe and
+# is located by the default search, so no RPATH is needed there.
+set_target_properties(hipdnn_sample_conv_fprop_dynamic PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    BUILD_RPATH "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}"
+)
+clang_tidy_check(hipdnn_sample_conv_fprop_dynamic)
+list(APPEND HIPDNN_ALL_SAMPLES hipdnn_sample_conv_fprop_dynamic)
+add_hipdnn_sample_test(hipdnn_sample_conv_fprop_dynamic)
+
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
 

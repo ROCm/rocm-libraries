@@ -138,6 +138,21 @@ public:
                  char* apiVersion,
                  size_t* apiVersionLen),
                 (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setUserLogCallbackExt,
+                (hipdnnUserLogCallback_t callback,
+                 hipdnnSeverity_t minLevel,
+                 hipdnnLogCallbackMode_t mode,
+                 hipdnnUserLogCallbackHandle_t userHandle),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendSetGlobalLogLevelExt,
+                (hipdnnSeverity_t level),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetGlobalLogLevelExt,
+                (hipdnnSeverity_t * level),
+                (override));
 };
 
 // NOLINTEND
