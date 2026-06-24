@@ -175,6 +175,18 @@ int main(int argc, char** argv) noexcept
         if(parser.is_used("--golden-data-dir"))
         {
             goldenDataDir = parser.get<std::string>("--golden-data-dir");
+            if(!std::filesystem::exists(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir path does not exist: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+            if(!std::filesystem::is_directory(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir is not a directory: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
         }
 
         // Parse --verification-mode (case-insensitive); invalid value -> exit 1.
@@ -228,15 +240,17 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
-                                                         std::move(engineName),
-                                                         failOnUnsupported,
-                                                         skipGraphValidation,
-                                                         std::move(configPath),
-                                                         refExecType,
-                                                         allowBundles,
-                                                         std::move(goldenDataDir),
-                                                         verificationMode);
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = std::move(articlePath);
+        opts.engineName = std::move(engineName);
+        opts.failOnUnsupported = failOnUnsupported;
+        opts.skipGraphValidation = skipGraphValidation;
+        opts.configPath = std::move(configPath);
+        opts.referenceExecutorType = refExecType;
+        opts.allowBundles = allowBundles;
+        opts.goldenDataDir = std::move(goldenDataDir);
+        opts.verificationMode = verificationMode;
+        hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.

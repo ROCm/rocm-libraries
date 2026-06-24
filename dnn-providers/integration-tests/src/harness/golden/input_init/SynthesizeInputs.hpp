@@ -131,9 +131,9 @@ inline SynthesisResult
     tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    tracker.fillFree(a->prev_running_mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    tracker.fillFree(a->prev_running_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
-    tracker.fillFree(a->momentum_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
+    tracker.fillFree(a->prev_running_mean_tensor_uid(), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->prev_running_variance_tensor_uid(), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->momentum_tensor_uid(), 0.0f, 1.0f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
@@ -159,8 +159,8 @@ inline SynthesisResult
     }
     tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    tracker.fillFree(a->inv_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
+    tracker.fillFree(a->inv_variance_tensor_uid(), 0.5f, 1.5f, rng);
     tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
@@ -202,9 +202,9 @@ inline SynthesisResult fillPointwiseInputs(const hipdnn_flatbuffers_sdk::data_ob
         return SynthesisResult::unsupported("not PointwiseAttributes");
     }
     tracker.fillFree(a->in_0_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->in_1_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->in_2_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->axis_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->in_1_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->in_2_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->axis_tensor_uid(), -1.0f, 1.0f, rng);
     return SynthesisResult::ok();
 }
 
@@ -256,9 +256,9 @@ inline SynthesisResult
     tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.markDerived(a->mean_tensor_uid().value_or(0), "mean (forward output)");
-    tracker.markDerived(a->inv_variance_tensor_uid().value_or(0), "inv_variance (forward output)");
-    tracker.fillFree(a->epsilon_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
+    tracker.markDerived(a->mean_tensor_uid(), "mean (forward output)");
+    tracker.markDerived(a->inv_variance_tensor_uid(), "inv_variance (forward output)");
+    tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
     return SynthesisResult::ok();
 }
 
@@ -276,7 +276,7 @@ inline SynthesisResult fillRmsnormInputs(const hipdnn_flatbuffers_sdk::data_obje
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    tracker.fillFree(a->bias_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
     return SynthesisResult::ok();
 }
 
@@ -374,25 +374,25 @@ inline SynthesisResult fillSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_
     tracker.fillFree(a->q_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->attn_mask_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), 0.1f, 1.0f, rng);
 
     // FP8/MX quantization scale factors must match the data's true scale — see
     // the header comment. Refuse rather than fabricate a meaningless value.
-    tracker.markStructured(a->descale_q_tensor_uid().value_or(0), "descale_q");
-    tracker.markStructured(a->descale_k_tensor_uid().value_or(0), "descale_k");
-    tracker.markStructured(a->descale_v_tensor_uid().value_or(0), "descale_v");
-    tracker.markStructured(a->descale_s_tensor_uid().value_or(0), "descale_s");
-    tracker.markStructured(a->scale_s_tensor_uid().value_or(0), "scale_s");
-    tracker.markStructured(a->scale_o_tensor_uid().value_or(0), "scale_o");
+    tracker.markStructured(a->descale_q_tensor_uid(), "descale_q");
+    tracker.markStructured(a->descale_k_tensor_uid(), "descale_k");
+    tracker.markStructured(a->descale_v_tensor_uid(), "descale_v");
+    tracker.markStructured(a->descale_s_tensor_uid(), "descale_s");
+    tracker.markStructured(a->scale_s_tensor_uid(), "scale_s");
+    tracker.markStructured(a->scale_o_tensor_uid(), "scale_o");
 
-    tracker.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
-    tracker.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
-    tracker.markStructured(a->page_table_k_tensor_uid().value_or(0), "page_table_k");
-    tracker.markStructured(a->page_table_v_tensor_uid().value_or(0), "page_table_v");
-    tracker.markStructured(a->block_mask_tensor_uid().value_or(0), "block_mask");
-    tracker.markStructured(a->seed_tensor_uid().value_or(0), "dropout_seed");
-    tracker.markStructured(a->offset_tensor_uid().value_or(0), "dropout_offset");
+    tracker.markStructured(a->seq_len_q_tensor_uid(), "seq_len_q");
+    tracker.markStructured(a->seq_len_kv_tensor_uid(), "seq_len_kv");
+    tracker.markStructured(a->page_table_k_tensor_uid(), "page_table_k");
+    tracker.markStructured(a->page_table_v_tensor_uid(), "page_table_v");
+    tracker.markStructured(a->block_mask_tensor_uid(), "block_mask");
+    tracker.markStructured(a->seed_tensor_uid(), "dropout_seed");
+    tracker.markStructured(a->offset_tensor_uid(), "dropout_offset");
 
     return SynthesisResult::ok();
 }
@@ -417,18 +417,18 @@ inline SynthesisResult
     tracker.fillFree(a->k_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->v_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->do_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
-    tracker.fillFree(a->dropout_scale_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
-    tracker.fillFree(a->dropout_scale_inv_tensor_uid().value_or(0), 0.1f, 1.0f, rng);
-    tracker.fillFree(a->attn_mask_tensor_uid().value_or(0), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->dropout_scale_tensor_uid(), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->dropout_scale_inv_tensor_uid(), 0.1f, 1.0f, rng);
+    tracker.fillFree(a->attn_mask_tensor_uid(), -1.0f, 1.0f, rng);
 
     tracker.markDerived(a->o_tensor_uid(), "o (forward output)");
     tracker.markDerived(a->stats_tensor_uid(), "stats (forward softmax stats)");
 
-    tracker.markStructured(a->seq_len_q_tensor_uid().value_or(0), "seq_len_q");
-    tracker.markStructured(a->seq_len_kv_tensor_uid().value_or(0), "seq_len_kv");
-    tracker.markStructured(a->seed_tensor_uid().value_or(0), "dropout_seed");
-    tracker.markStructured(a->offset_tensor_uid().value_or(0), "dropout_offset");
+    tracker.markStructured(a->seq_len_q_tensor_uid(), "seq_len_q");
+    tracker.markStructured(a->seq_len_kv_tensor_uid(), "seq_len_kv");
+    tracker.markStructured(a->seed_tensor_uid(), "dropout_seed");
+    tracker.markStructured(a->offset_tensor_uid(), "dropout_offset");
 
     return SynthesisResult::ok();
 }

@@ -113,6 +113,19 @@ inline std::optional<std::filesystem::path>
     return std::nullopt;
 }
 
+struct TestConfigOptions
+{
+    std::optional<std::filesystem::path> articlePath;
+    std::optional<std::string> engineName;
+    bool failOnUnsupported = false;
+    bool skipGraphValidation = false;
+    std::optional<std::filesystem::path> configPath;
+    std::optional<ReferenceExecutorType> referenceExecutorType;
+    bool allowBundles = false;
+    std::optional<std::filesystem::path> goldenDataDir;
+    std::optional<VerificationMode> verificationMode;
+};
+
 // Singleton class for storing CLI-based test configuration.
 // All arguments are independently optional:
 //   - articlePath: omit to use hipDNN's default plugin discovery
@@ -134,27 +147,18 @@ public:
     TestConfig& operator=(TestConfig&&) = delete;
 
     // Initialize with CLI arguments. Must be called before any get() access.
-    static void initialize(std::optional<std::filesystem::path> articlePath,
-                           std::optional<std::string> engineName,
-                           bool failOnUnsupported = false,
-                           bool skipGraphValidation = false,
-                           std::optional<std::filesystem::path> configPath = std::nullopt,
-                           std::optional<ReferenceExecutorType> referenceExecutorType
-                           = std::nullopt,
-                           bool allowBundles = false,
-                           std::optional<std::filesystem::path> goldenDataDir = std::nullopt,
-                           std::optional<VerificationMode> verificationMode = std::nullopt)
+    static void initialize(TestConfigOptions opts)
     {
         TestConfig& instance = get();
         if(instance._initialized)
         {
             throw std::runtime_error("TestConfig::initialize() called more than once");
         }
-        instance._articlePath = std::move(articlePath);
-        instance._engineName = std::move(engineName);
-        instance._failOnUnsupported = failOnUnsupported;
-        instance._skipGraphValidation = skipGraphValidation;
-        instance._referenceExecutorType = referenceExecutorType;
+        instance._articlePath = std::move(opts.articlePath);
+        instance._engineName = std::move(opts.engineName);
+        instance._failOnUnsupported = opts.failOnUnsupported;
+        instance._skipGraphValidation = opts.skipGraphValidation;
+        instance._referenceExecutorType = opts.referenceExecutorType;
 
         // If CLI didn't provide a value, check env var once at init
         if(!instance._referenceExecutorType.has_value())
@@ -181,13 +185,13 @@ public:
             }
         }
 
-        if(configPath.has_value())
+        if(opts.configPath.has_value())
         {
-            instance._testSettings.emplace(*configPath);
+            instance._testSettings.emplace(*opts.configPath);
         }
 
         // Golden bundle configuration
-        instance._allowBundles = allowBundles;
+        instance._allowBundles = opts.allowBundles;
         if(!instance._allowBundles)
         {
             auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
@@ -197,8 +201,8 @@ public:
             }
         }
 
-        instance._goldenDataDir = resolveGoldenDataDir(std::move(goldenDataDir));
-        instance._verificationMode = resolveVerificationMode(verificationMode);
+        instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
+        instance._verificationMode = resolveVerificationMode(opts.verificationMode);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).

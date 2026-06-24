@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
@@ -157,6 +158,14 @@ public:
         _accounted.insert(uid);
     }
 
+    void fillFree(flatbuffers::Optional<int64_t> uid, float lo, float hi, std::mt19937& rng)
+    {
+        if(uid.has_value())
+        {
+            fillFree(*uid, lo, hi, rng);
+        }
+    }
+
     // Declares `uid` as STRUCTURED — accounts for it but records a refusal.
     void markStructured(int64_t uid, const char* role)
     {
@@ -166,6 +175,14 @@ public:
         }
         _accounted.insert(uid);
         _refusals.push_back(std::string(role) + " (structured input)");
+    }
+
+    void markStructured(flatbuffers::Optional<int64_t> uid, const char* role)
+    {
+        if(uid.has_value())
+        {
+            markStructured(*uid, role);
+        }
     }
 
     // Declares `uid` as DERIVED — accounts for it but records a refusal.
@@ -179,16 +196,23 @@ public:
         _refusals.push_back(std::string(role) + " (derived from another computation)");
     }
 
+    void markDerived(flatbuffers::Optional<int64_t> uid, const char* role)
+    {
+        if(uid.has_value())
+        {
+            markDerived(*uid, role);
+        }
+    }
+
     // Returns ok() when all owned leaf inputs were filled with random data.
     // Returns unsupported() when synthesis cannot produce valid data for
     // this graph — either because a leaf input is STRUCTURED/DERIVED
     // (we know about it but can't fill it), or because a leaf input was
     // never declared by any node's fill function.
     // Note: virtual inter-node tensors are not owned, so STRUCTURED/DERIVED
-    // calls on them are silently ignored. Absent optional tensors (uid 0 by
-    // hipdnn convention) are the caller's responsibility — fill functions
-    // should guard against calling fillFree/markStructured on uid 0 when the
-    // attribute means "not present."
+    // calls on them are silently ignored. Absent optional tensors are handled
+    // by the flatbuffers::Optional overloads of fillFree/markStructured/
+    // markDerived — they silently skip when the optional has no value.
     SynthesisResult finish(const char* opName) const
     {
         std::vector<std::string> reasons = _refusals;

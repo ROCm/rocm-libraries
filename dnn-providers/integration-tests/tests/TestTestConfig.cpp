@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "harness/TestConfig.hpp"
 
@@ -109,7 +110,8 @@ TEST(TestResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
 {
     using hipdnn_integration_tests::resolveVerificationMode;
 
-    // Assuming HIPDNN_TEST_VERIFICATION_MODE is not set in the test env.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_VERIFICATION_MODE");
     const auto result = resolveVerificationMode(std::nullopt);
     EXPECT_FALSE(result.has_value());
 }
@@ -128,7 +130,8 @@ TEST(TestResolveGoldenDataDir, NulloptCliWithoutEnvReturnsNullopt)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;
 
-    // Assuming HIPDNN_TEST_GOLDEN_DATA_DIR is not set in the test env.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        "HIPDNN_TEST_GOLDEN_DATA_DIR");
     const auto result = resolveGoldenDataDir(std::nullopt);
     EXPECT_FALSE(result.has_value());
 }
@@ -149,7 +152,11 @@ class TestConfigInitialized : public ::testing::Test
 protected:
     static void SetUpTestSuite()
     {
-        TestConfig::initialize(TEST_ARTICLE_PATH, TEST_ENGINE_NAME, true);
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = TEST_ARTICLE_PATH;
+        opts.engineName = TEST_ENGINE_NAME;
+        opts.failOnUnsupported = true;
+        TestConfig::initialize(std::move(opts));
     }
 };
 
@@ -214,7 +221,8 @@ TEST_F(TestConfigInitialized, GetGoldenDataDirThrowsWhenNotProvided)
 
 TEST_F(TestConfigInitialized, DoubleInitializeThrows)
 {
-    EXPECT_THROW(TestConfig::initialize(std::nullopt, std::nullopt), std::runtime_error);
+    EXPECT_THROW(TestConfig::initialize(hipdnn_integration_tests::TestConfigOptions{}),
+                 std::runtime_error);
 }
 
 // NOLINTEND(readability-identifier-naming)
