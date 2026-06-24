@@ -426,6 +426,7 @@ if(HIPBLASLT_ENABLE_HOST)
         TARGETS roc::hipblaslt roc::tensilelite-host
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
+        DEPENDS PACKAGE origami
         NAMESPACE roc::
     )
 

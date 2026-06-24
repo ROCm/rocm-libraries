@@ -76,7 +76,7 @@ if(TENSILELITE_ENABLE_HOST)
     target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
-            $<BUILD_INTERFACE:roc::origami>
+            roc::origami
             hip::host
         PRIVATE
             hip::device
@@ -107,6 +107,12 @@ if(TENSILELITE_ENABLE_HOST)
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
                 LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
                 ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+                FILE_SET tensilelite_public_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+                FILE_SET tensilelite_generated_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+                FILE_SET rocisa_public_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
             )
         elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
             install(TARGETS tensilelite-host
