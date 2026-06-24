@@ -47,6 +47,7 @@ struct heuristic_defaults_t {
   static constexpr size_t CACHE_LINE_BYTES     = 128;
   static constexpr size_t DRAM_SECTOR_BYTES    = 64;
   static constexpr size_t LDS_XFER_BYTES       = 128;
+  static constexpr size_t WAVEFRONT_SIZE       = 64;
   static constexpr double TAIL_LOOP_OVERHEAD   = 700.0;
   static constexpr double TILE_FIXED_OVERHEAD  = 1500.0;
 
@@ -83,6 +84,23 @@ struct heuristic_defaults_t {
 
   // TF32 Emulation Constants
   static constexpr double TF32_ARITH_INTENSITY_THRESHOLD = 1000.0;
+
+  // Model tuning constants (relocated from gemm.cpp)
+  static constexpr size_t OCCUPANCY_AMORT_CAP              = 4;
+  static constexpr double TARGET_OCCUPANCY                = 4.0;  // waves/SIMD
+  static constexpr double TARGET_WG_SLOTS_PER_CU          = 2.0;
+  static constexpr size_t L2_FIT_K_MIN                    = 64;
+  static constexpr double STORE_RATE_LOW                  = 0.05;
+  static constexpr double STORE_RATE_HIGH                 = 0.30;
+  static constexpr long   K_ITERS_RICH_THRESHOLD          = 4;
+  static constexpr double K_ITER_LOOP_OVERHEAD            = 500.0;
+  static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP   = 10.0;
+  static constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;
+  static constexpr double NARROW_LOAD_ITER_PENALTY        = 500.0;
+  static constexpr size_t EXACT_ONE_ITER_K_MIN           = 64;
+  static constexpr double EPILOGUE_OCC_SATURATION         = 2.0;
+  static constexpr double SCALAR_STORE_EXPOSED_PENALTY    = 4.0;
+  static constexpr double PARTIAL_TILE_WAVE_COST          = 0.5;
 };
 
 /**

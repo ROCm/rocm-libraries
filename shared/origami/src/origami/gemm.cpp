@@ -96,10 +96,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   // around the first few resident WGs.  Without the cap, batched problems
   // (real_occupancy in the tens or hundreds) drive occupancy_factor toward 0
   // and erase per-tile prologue/epilogue cost as a ranking signal.
-  constexpr size_t OCCUPANCY_AMORT_CAP = 4;
   real_occupancy = static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU));
   const size_t real_occupancy_for_factor =
-      std::min(static_cast<size_t>(real_occupancy), OCCUPANCY_AMORT_CAP);
+      std::min(static_cast<size_t>(real_occupancy), heuristic_defaults_t::OCCUPANCY_AMORT_CAP);
   occupancy_factor =
       pow(heuristic.occupancy_decay_base, real_occupancy_for_factor);
 
@@ -1262,13 +1261,14 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   // effective working set comes from the other stream.
   double pollution_rate_a = 1.0;
   double pollution_rate_b = 1.0;
-  const bool a_polluted = a_temporal && b_temporal;
-  const bool b_polluted = b_temporal && a_temporal;
-  if (a_polluted && l2_residency_a < 1.0 && effective_load_a > 0.0) {
+  // Pollution requires two competing temporal streams; the per-operand
+  // asymmetry comes from interference_frac_{a,b} below.
+  const bool both_temporal = a_temporal && b_temporal;
+  if (both_temporal && l2_residency_a < 1.0 && effective_load_a > 0.0) {
     const double interference_frac_a = a_interference / effective_load_a;
     pollution_rate_a = 1.0 - (1.0 - heuristic.l2_pollution_penalty) * interference_frac_a;
   }
-  if (b_polluted && l2_residency_b < 1.0 && effective_load_b > 0.0) {
+  if (both_temporal && l2_residency_b < 1.0 && effective_load_b > 0.0) {
     const double interference_frac_b = b_interference / effective_load_b;
     pollution_rate_b = 1.0 - (1.0 - heuristic.l2_pollution_penalty) * interference_frac_b;
   }
@@ -1338,15 +1338,14 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     const bool skinny_m          = (grid.m <= 2 && grid.n > grid.m * 8);
     const bool skinny_n          = (grid.n <= 2 && grid.m > grid.n * 8);
     const bool single_stream     = (grid.k == 1) && (grid.b == 1);
-    constexpr double l1_capacity = 32.0 * 1024.0;
 
     const double a_l1_ft  = a_temporal ? a_iter : 0.0;
     const double b_l1_ft  = b_temporal ? b_iter : 0.0;
     const double ab_l1_ft = a_l1_ft + b_l1_ft;
 
     if (single_stream && skinny_m && a_temporal) {
-      if (ab_l1_ft <= l1_capacity) {
-        const double headroom = 1.0 - ab_l1_ft / l1_capacity;
+      if (ab_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
+        const double headroom = 1.0 - ab_l1_ft / static_cast<double>(hardware.l1_capacity);
         H_mem_l1_A            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
         const double headroom = 1.0 - concurrent_load / l2_cap;
@@ -1356,8 +1355,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     }
 
     if (single_stream && skinny_n && b_temporal) {
-      if (ab_l1_ft <= l1_capacity) {
-        const double headroom = 1.0 - ab_l1_ft / l1_capacity;
+      if (ab_l1_ft <= static_cast<double>(hardware.l1_capacity)) {
+        const double headroom = 1.0 - ab_l1_ft / static_cast<double>(hardware.l1_capacity);
         H_mem_l1_B            = heuristic.l1_hit_rate_ceiling_skinny * clamp01(headroom);
       } else if (concurrent_load < l2_cap) {
         const double headroom = 1.0 - concurrent_load / l2_cap;
@@ -1568,8 +1567,7 @@ double compute_epilogue_latency(const problem_t& problem,
 
   if (d_bytes == 0.0) return 0.0;
 
-  constexpr size_t WAVEFRONT_SIZE = 64;
-  constexpr size_t SIMD_PER_CU    = 4;
+  constexpr size_t WAVEFRONT_SIZE = heuristic_defaults_t::WAVEFRONT_SIZE;
   constexpr size_t STORE_PATTERN_IDEAL = 0;
   constexpr size_t STORE_PATTERN_NARROW = 1;
   constexpr size_t STORE_PATTERN_WIDE_SPLIT = 2;
@@ -1579,7 +1577,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t wave_group_m_epi = std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_m), 1);
   const size_t wave_group_n_epi = std::max<size_t>(static_cast<size_t>(tparams(config).wave_group_n), 1);
   const size_t wave_num_epi     = std::max<size_t>(wave_group_m_epi * wave_group_n_epi, 1);
-  const size_t wave_issue_parallelism = std::min(wave_num_epi, SIMD_PER_CU);
+  const size_t wave_issue_parallelism = std::min(wave_num_epi, hardware_t::SIMDS_PER_CU);
   const double wave_batches =
       std::ceil(static_cast<double>(wave_num_epi) / static_cast<double>(wave_issue_parallelism));
 
@@ -1625,20 +1623,17 @@ double compute_epilogue_latency(const problem_t& problem,
   };
 
   struct tile_epilogue_plan_t {
+    // Per-wave store metrics summed over all waves of the tile (store_insts,
+    // issue_insts, sectors, useful_bytes, sector_bytes, pattern).
+    wave_store_plan_t store{};
     double acc_read = 0.0;
     double bounds = 0.0;
     double store_issue = 0.0;
     double store_memory = 0.0;
     double reduction = 0.0;
-    double store_insts = 0.0;
-    double issue_insts = 0.0;
-    double sectors = 0.0;
-    double useful_bytes = 0.0;
-    double sector_bytes = 0.0;
     double sector_efficiency = 1.0;
     double active_waves = 0.0;
     double max_wave_issue = 0.0;
-    size_t pattern = STORE_PATTERN_IDEAL;
 
     double total() const { return acc_read + bounds + store_issue + store_memory + reduction; }
   };
@@ -1734,14 +1729,13 @@ double compute_epilogue_latency(const problem_t& problem,
     const bool edge_path = scalar_path || tile_m != MT_M || tile_n != MT_N;
     // Split-K main kernels write an f32 partial to workspace (not the final
     // output), for BOTH the in-kernel tree reduction and the separate parallel
-    // (PostGSU) reduction.  The parallel path was previously priced at d_bytes,
-    // under-counting the partial-write traffic by the f32/output byte ratio.
+    // (PostGSU) reduction.
     const double store_elem_bytes = (splitting_factor > 1)
                                         ? static_cast<double>(heuristic.epilogue_workspace_bytes_per_elem)
                                         : d_bytes;
 
-    double total_bounds_issue = 0.0;
-    double max_wave_bounds_issue = 0.0;
+    double max_wave_store_insts  = 0.0;
+    double max_wave_sector_bytes = 0.0;
     for (size_t wg_m = 0; wg_m < wave_group_m_epi; ++wg_m) {
       const auto m_range = wave_range(MT_M, wave_group_m_epi, wg_m);
       const size_t active_m = active_extent(m_range, tile_m);
@@ -1752,36 +1746,38 @@ double compute_epilogue_latency(const problem_t& problem,
         if (wave.active_elements == 0.0) continue;
 
         tile.active_waves += 1.0;
-        tile.store_insts += wave.store_insts;
-        tile.issue_insts += wave.issue_insts;
-        tile.sectors += wave.sectors;
-        tile.useful_bytes += wave.useful_bytes;
-        tile.sector_bytes += wave.sector_bytes;
-        tile.max_wave_issue = std::max(tile.max_wave_issue, wave.issue_insts);
-        tile.pattern = std::max(tile.pattern, wave.pattern);
-
-        if (edge_path) {
-          const double wave_bounds = wave.store_insts * heuristic.epilogue_cycles_per_bounds_check;
-          total_bounds_issue += wave_bounds;
-          max_wave_bounds_issue = std::max(max_wave_bounds_issue, wave_bounds);
-        }
+        tile.store.store_insts += wave.store_insts;
+        tile.store.issue_insts += wave.issue_insts;
+        tile.store.sectors += wave.sectors;
+        tile.store.useful_bytes += wave.useful_bytes;
+        tile.store.sector_bytes += wave.sector_bytes;
+        tile.max_wave_issue  = std::max(tile.max_wave_issue, wave.issue_insts);
+        max_wave_store_insts  = std::max(max_wave_store_insts, wave.store_insts);
+        max_wave_sector_bytes = std::max(max_wave_sector_bytes, wave.sector_bytes);
+        tile.store.pattern = std::max(tile.store.pattern, wave.pattern);
       }
     }
 
-    tile.bounds = edge_path
-        ? std::max(max_wave_bounds_issue, total_bounds_issue / static_cast<double>(wave_issue_parallelism))
-        : 0.0;
+    // Critical path over the SIMD-issue lanes: either the slowest single wave,
+    // or the total work serialized over the available parallelism.  Used
+    // identically for bounds-check issue, store issue, and store memory.
+    auto critical_path = [&](double max_wave, double total) {
+      return std::max(max_wave, total / static_cast<double>(wave_issue_parallelism));
+    };
 
-    const double store_issue_parallel =
-        std::max(tile.max_wave_issue, tile.issue_insts / static_cast<double>(wave_issue_parallelism));
+    tile.bounds = edge_path ? heuristic.epilogue_cycles_per_bounds_check *
+                                  critical_path(max_wave_store_insts, tile.store.store_insts)
+                            : 0.0;
+    const double store_issue_parallel = critical_path(tile.max_wave_issue, tile.store.issue_insts);
     tile.store_issue = scalar_path
         ? store_issue_parallel * heuristic.epilogue_scalar_store_penalty
         : store_issue_parallel;
+    const double store_memory_bytes = critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
     tile.store_memory = (per_cu_store_bw > 0.0)
-        ? tile.sector_bytes / per_cu_store_bw
+        ? store_memory_bytes / per_cu_store_bw
         : 0.0;
     tile.sector_efficiency =
-        (tile.sector_bytes > 0.0) ? tile.useful_bytes / tile.sector_bytes : 1.0;
+        (tile.store.sector_bytes > 0.0) ? tile.store.useful_bytes / tile.store.sector_bytes : 1.0;
 
     // Per-tile K-split reduction (in-kernel: spinlock/tree/atomic).  This still
     // uses byte movement plus fixed sync terms because the reduction path is
@@ -1878,7 +1874,7 @@ double compute_epilogue_latency(const problem_t& problem,
     };
     double scalar_store_cost = 0.0;
     if (few_tiles) {
-      if (selected_epilogue.pattern == STORE_PATTERN_SCALAR_EDGE)
+      if (selected_epilogue.store.pattern == STORE_PATTERN_SCALAR_EDGE)
         scalar_store_cost = store_terms(selected_epilogue);
     } else {
       scalar_store_cost = w_m_edge * store_terms(epilogue_m_edge) +
@@ -1904,12 +1900,12 @@ double compute_epilogue_latency(const problem_t& problem,
     OLOG_DEBUG("epi_source_swap: " << tparams(config).source_swap);
     OLOG_DEBUG("epi_wave_issue_parallelism: " << wave_issue_parallelism);
     OLOG_DEBUG("epi_wave_batches: " << wave_batches);
-    OLOG_DEBUG("epi_store_pattern: " << selected_epilogue.pattern);
-    OLOG_DEBUG("epi_store_insts: " << selected_epilogue.store_insts);
-    OLOG_DEBUG("epi_store_issue_insts: " << selected_epilogue.issue_insts);
-    OLOG_DEBUG("epi_store_sectors: " << selected_epilogue.sectors);
-    OLOG_DEBUG("epi_store_useful_bytes: " << selected_epilogue.useful_bytes);
-    OLOG_DEBUG("epi_store_sector_bytes: " << selected_epilogue.sector_bytes);
+    OLOG_DEBUG("epi_store_pattern: " << selected_epilogue.store.pattern);
+    OLOG_DEBUG("epi_store_insts: " << selected_epilogue.store.store_insts);
+    OLOG_DEBUG("epi_store_issue_insts: " << selected_epilogue.store.issue_insts);
+    OLOG_DEBUG("epi_store_sectors: " << selected_epilogue.store.sectors);
+    OLOG_DEBUG("epi_store_useful_bytes: " << selected_epilogue.store.useful_bytes);
+    OLOG_DEBUG("epi_store_sector_bytes: " << selected_epilogue.store.sector_bytes);
     OLOG_DEBUG("epi_store_sector_efficiency: " << selected_epilogue.sector_efficiency);
     OLOG_DEBUG("epi_active_waves: " << selected_epilogue.active_waves);
     OLOG_DEBUG("epi_L_acc_read: " << selected_epilogue.acc_read);
@@ -1977,8 +1973,7 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
                                 * context.d_bytes;
   const double per_batch_ws = a_total_bytes_pb + b_total_bytes_pb + d_total_bytes_pb;
   const double l2_cap = static_cast<double>(hardware.L2_capacity);
-  constexpr size_t L2_FIT_K_MIN = 64;
-  if (l2_cap > 0.0 && per_batch_ws > l2_cap && problem.size.k >= L2_FIT_K_MIN) {
+  if (l2_cap > 0.0 && per_batch_ws > l2_cap && problem.size.k >= heuristic_defaults_t::L2_FIT_K_MIN) {
     const double overflow_ratio = per_batch_ws / l2_cap - 1.0;
     l2_fit_factor = std::max(0.0, 1.0 - overflow_ratio / 6.0);
   }
@@ -1996,10 +1991,8 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
     // Cached-D path: L2 bandwidth advantage is useful only when store latency
     // is exposed on the tile critical path.
     store_rate_ratio = store_exposure;
-    constexpr double STORE_RATE_LOW  = 0.05;
-    constexpr double STORE_RATE_HIGH = 0.30;
     ntd_l2_help_factor = std::clamp(
-        (store_rate_ratio - STORE_RATE_LOW) / (STORE_RATE_HIGH - STORE_RATE_LOW),
+        (store_rate_ratio - heuristic_defaults_t::STORE_RATE_LOW) / (heuristic_defaults_t::STORE_RATE_HIGH - heuristic_defaults_t::STORE_RATE_LOW),
         0.0,
         1.0);
     ntd_l2_help_factor *= l2_fit_factor;
@@ -2015,7 +2008,7 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
     // can evict A/B tiles the mainloop still needs. This tax only matters
     // when stores are exposed and the working set is well beyond L2.
     if (l2_cap > 0.0 && per_batch_ws > 2.0 * l2_cap &&
-        problem.size.k >= L2_FIT_K_MIN && store_rate_ratio > 0.30) {
+        problem.size.k >= heuristic_defaults_t::L2_FIT_K_MIN && store_rate_ratio > 0.30) {
       const double overflow_ratio = per_batch_ws / l2_cap - 2.0;
       const double thrash_factor = std::clamp(overflow_ratio * 0.05, 0.0, 0.5);
       L_epilogue *= 1.0 + thrash_factor;
@@ -2046,10 +2039,9 @@ static double apply_epilogue_store_cache_model(const problem_t& problem,
       }
     }
 
-    constexpr long K_ITERS_RICH_THRESHOLD = 4;
-    if (k_iters > K_ITERS_RICH_THRESHOLD) {
+    if (k_iters > heuristic_defaults_t::K_ITERS_RICH_THRESHOLD) {
       const double k_rich_excess = static_cast<double>(k_iters)
-                                 / static_cast<double>(K_ITERS_RICH_THRESHOLD)
+                                 / static_cast<double>(heuristic_defaults_t::K_ITERS_RICH_THRESHOLD)
                                  - 1.0;
       const double k_rich_penalty = std::clamp(k_rich_excess * 0.05, 0.0, 0.25);
       L_epilogue *= 1.0 + k_rich_penalty;
@@ -2121,7 +2113,7 @@ double compute_tile_latency(const problem_t& problem,
   //
   // Each effect is a score in [0, 1]; their product is a throughput multiplier
   // applied to L_compute (the only term that captures MFMA throughput). The
-  // multiplier (1 / score) is capped at PER_WAVE_MAX_MULTIPLIER so that a
+  // multiplier (1 / score) is capped at 1.5x so that a
   // single mis-scored term cannot dominate the predicted latency.
   //
   // Restricted to gfx942/gfx950, where the occupancy targets were calibrated.
@@ -2142,31 +2134,26 @@ double compute_tile_latency(const problem_t& problem,
     //
     // config.occupancy (Tensile CUOccupancy) is the resident workgroups per
     // CU: min over the LDS-, VGPR-, accVGPR-, and SGPR-limited occupancies,
-    // each expressed in WGs/CU. It supersedes the former per-thread VGPR step
-    // table. Latency hiding, however, is driven by resident waves per SIMD, so
-    // convert: waves/SIMD = WGs/CU * waves/WG / SIMDs_per_CU.
-    constexpr double SIMDS_PER_CU = 4.0;
+    // each expressed in WGs/CU. Latency hiding, however, is driven by resident 
+    // waves per SIMD, so convert: waves/SIMD = WGs/CU * waves/WG / SIMD_per_CU.
     const double wgs_per_cu = static_cast<double>(std::max(config.occupancy, 1));
     const double waves_per_simd =
-        wgs_per_cu * static_cast<double>(waves_per_wg) / SIMDS_PER_CU;
-    constexpr double TARGET_OCCUPANCY = 4.0;  // waves/SIMD
+        wgs_per_cu * static_cast<double>(waves_per_wg) / hardware_t::SIMDS_PER_CU;
     const double occupancy_score = std::clamp(
-        waves_per_simd / TARGET_OCCUPANCY, 0.0, 1.0);
+        waves_per_simd / heuristic_defaults_t::TARGET_OCCUPANCY, 0.0, 1.0);
 
     // Workgroup co-residency: how many workgroups fit on a CU to overlap work
     // across WG boundaries. config.occupancy is already resident WGs/CU, so it
     // is used directly, which (unlike a max-occupancy wave-slot ceiling) also
     // penalises register-starved kernels.
     const double wg_slots_per_cu = wgs_per_cu;
-    constexpr double TARGET_WG_SLOTS_PER_CU = 2.0;
     const double wg_score = std::clamp(
-        wg_slots_per_cu / TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
+        wg_slots_per_cu / heuristic_defaults_t::TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
 
     // Occupancy only helps by hiding *exposed* memory stalls: the portion of
     // per-iter memory latency the prefetch pipeline cannot overlap behind
     // compute. For compute-bound tiles (L_compute >= L_mem) memory is fully
-    // hidden, so the occupancy penalty must fade; otherwise a large-accumulator
-    // compute-bound f32 tile is penalised every K-iter and wrongly ranked last.
+    // hidden, so the occupancy penalty must fade.
     const double exposed_mem_frac = std::clamp(
         (L_mem - L_compute) / std::max(L_mem, 1.0), 0.0, 1.0);
     const double occupancy_score_eff =
@@ -2178,8 +2165,7 @@ double compute_tile_latency(const problem_t& problem,
     // Cap the multiplier. An uncapped product can fall to ~0.06 (single wave,
     // register spilling), implying a 16x compute inflation; real low-occupancy
     // kernels lose closer to 30-50%. Cap the penalty at 1.5x L_compute.
-    constexpr double PER_WAVE_MAX_MULTIPLIER = 1.5;
-    constexpr double PER_WAVE_MIN_SCORE = 1.0 / PER_WAVE_MAX_MULTIPLIER;
+    constexpr double PER_WAVE_MIN_SCORE = 1.0 / 1.5;
     per_wave_score = std::max(per_wave_score, PER_WAVE_MIN_SCORE);
 
     L_compute /= per_wave_score;
@@ -2291,7 +2277,6 @@ double compute_tile_latency(const problem_t& problem,
 
   // Cost of one full DepthU (MT_K-wide) K-iteration.  Used by the residual tail
   // window below and the oversize/one-iter DepthU penalties further down.
-  constexpr double K_ITER_LOOP_OVERHEAD = 500.0;
   const double L_main_per_iter = (pgr <= 1)
       ? (L_mem + L_compute * effective_tile_penalty) * eff_scale
             + L_cvt * effective_tile_penalty
@@ -2324,10 +2309,8 @@ double compute_tile_latency(const problem_t& problem,
     // behind the dominant MFMA chain — empirically the overhead acts more
     // like a small constant than a per-sub-iter charge.  Fade overhead to
     // ~20% of nominal once ETP exceeds ~10.
-    constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP = 10.0;
-    constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;
-    const double tail_overhead_scale = (effective_tile_penalty > TAIL_OVERHEAD_COMPUTE_BOUND_ETP)
-        ? TAIL_OVERHEAD_COMPUTE_BOUND_SCALE
+    const double tail_overhead_scale = (effective_tile_penalty > heuristic_defaults_t::TAIL_OVERHEAD_COMPUTE_BOUND_ETP)
+        ? heuristic_defaults_t::TAIL_OVERHEAD_COMPUTE_BOUND_SCALE
         : 1.0;
     const double L_tail_overhead = heuristic.tail_loop_overhead
                                  * static_cast<double>(tail_sub_iters)
@@ -2343,7 +2326,7 @@ double compute_tile_latency(const problem_t& problem,
     if (k_iters == 0) {
       const double wasted_ratio =
           static_cast<double>(MT_K) / static_cast<double>(tail_k) - 1.0;
-      L_tail += wasted_ratio * (L_main_per_iter + K_ITER_LOOP_OVERHEAD);
+      L_tail += wasted_ratio * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
     }
   }
 
@@ -2370,7 +2353,7 @@ double compute_tile_latency(const problem_t& problem,
   const double pgr_loop_overlap =
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
   const double L_loop_overhead =
-      K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
+      heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
 
   // Sub-cache-line DepthU narrow-load penalty.
   //
@@ -2398,9 +2381,8 @@ double compute_tile_latency(const problem_t& problem,
   const double b_underfill = b_k_coalesced
       ? std::max(0.0, phys_cl / std::max(mt_k_dd * b_bytes_du, 1.0) - 1.0) : 0.0;
   const double narrow_load_factor = a_underfill + b_underfill;
-  constexpr double NARROW_LOAD_ITER_PENALTY = 500.0;  // tunable
   const double L_narrow_load = narrow_load_factor * static_cast<double>(k_iters)
-                             * NARROW_LOAD_ITER_PENALTY;
+                             * heuristic_defaults_t::NARROW_LOAD_ITER_PENALTY;
 
   // DepthU oversize penalties.  These charge extra fixed cost when MT_K is
   // poorly matched to the problem K, independent of the residual tail window
@@ -2424,17 +2406,16 @@ double compute_tile_latency(const problem_t& problem,
   // to MT_K>K and pay a larger du_waste/oversize tax.  K > 64 is the cleanest
   // unbatched threshold; batched GEMMs are more sensitive to fill/drain, so the
   // K==64 boundary is included for them.
-  constexpr size_t EXACT_ONE_ITER_K_MIN = 64;
-  const bool exact_one_iter_large_k = K > EXACT_ONE_ITER_K_MIN;
+  const bool exact_one_iter_large_k = K > heuristic_defaults_t::EXACT_ONE_ITER_K_MIN;
   const bool exact_one_iter_batched_k64 =
-      (problem.batch > 1 && K >= EXACT_ONE_ITER_K_MIN && MT_K >= EXACT_ONE_ITER_K_MIN);
+      (problem.batch > 1 && K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN && MT_K >= heuristic_defaults_t::EXACT_ONE_ITER_K_MIN);
   const double exact_one_iter_ratio =
       (k_iters == 1 && tail_k == 0 && (exact_one_iter_large_k || exact_one_iter_batched_k64))
           ? 2.0
           : 0.0;
   const double L_du_waste =
       (mt_k_oversize_ratio + exact_one_iter_ratio)
-      * (L_main_per_iter + K_ITER_LOOP_OVERHEAD);
+      * (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
 
   // MainLoop subtotal.
   const double L_mainloop =
@@ -2451,9 +2432,8 @@ double compute_tile_latency(const problem_t& problem,
   // resident waves/CU (CUOccupancy).  Saturation at 2 waves/CU is calibrated to
   // gfx950.  Only multiplies the epilogue term, so it is negligible for
   // mainloop-bound tiles and only bites store-bound shapes.
-  constexpr double EPILOGUE_OCC_SATURATION = 2.0;
   const double cu_occ_epi = static_cast<double>(std::max(config.occupancy, 1));
-  const double epi_occ_exposure = std::max(1.0, EPILOGUE_OCC_SATURATION / cu_occ_epi);
+  const double epi_occ_exposure = std::max(1.0, heuristic_defaults_t::EPILOGUE_OCC_SATURATION / cu_occ_epi);
   double scalar_store_fraction = 0.0;
   const double L_epilogue_hbm =
       compute_epilogue_latency(problem, hardware, config, context, &scalar_store_fraction)
@@ -2473,9 +2453,8 @@ double compute_tile_latency(const problem_t& problem,
   // exposed when the kernel is store-bound; a long mainloop hides them.  Gate on
   // store-boundedness (not occupancy, which stays healthy even at CUOccupancy=1)
   // by amplifying the scalar store portion in proportion to store_exposure.
-  constexpr double SCALAR_STORE_EXPOSED_PENALTY = 4.0;
   const double scalar_store_mult =
-      1.0 + (SCALAR_STORE_EXPOSED_PENALTY - 1.0) * scalar_store_fraction * store_exposure;
+      1.0 + (heuristic_defaults_t::SCALAR_STORE_EXPOSED_PENALTY - 1.0) * scalar_store_fraction * store_exposure;
   L_epilogue *= scalar_store_mult;
 
   if (debug) {
@@ -2515,9 +2494,8 @@ double compute_tile_latency(const problem_t& problem,
       // ~50% of a fully-useful wave-row in wall time (MFMA + ds_read still
       // execute, but predicated stores / branch-skip recover some cycles).
       // Averaged over ceil_M_tiles (only the last is partial).
-      constexpr double PARTIAL_TILE_WAVE_COST = 0.5;
       m_overflow_inflation = 1.0
-          + PARTIAL_TILE_WAVE_COST * partial_m_tile_waste
+          + heuristic_defaults_t::PARTIAL_TILE_WAVE_COST * partial_m_tile_waste
                 / static_cast<double>(ceil_M_tiles);
     }
   }
