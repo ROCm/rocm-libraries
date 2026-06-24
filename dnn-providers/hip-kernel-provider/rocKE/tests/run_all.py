@@ -94,11 +94,13 @@ def main() -> int:
         status |= subprocess.run([sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS)).returncode
 
     build_root = Path(args.build_root)
-    # Only ctest when the C++ test binaries were actually built (the byte-identity
-    # gate builds just `ckc_core`, so a gate-only build dir has the registration
-    # file but no test executables -> running ctest there would spuriously fail).
+    # Only ctest when the CTest-registered binaries were actually built (the
+    # byte-identity gate builds just `ckc_core`, so a gate-only build dir has the
+    # registration file but no test executables -> running ctest there would
+    # spuriously fail). Gate on the registered tests only; `ckc_smoke` is an
+    # optional build-only target (not an add_test target) so it is not a signal.
     test_bins = [build_root / "tests" / b for b in
-                 ("ckc_smoke", "ckc_ir_serialize_roundtrip", "ckc_tiled_attention_2d_reentrancy")]
+                 ("ckc_ir_serialize_roundtrip", "ckc_tiled_attention_2d_reentrancy")]
     if (build_root / "CTestTestfile.cmake").exists() and any(b.exists() for b in test_bins):
         print("\n== ctest ==")
         status |= subprocess.run(["ctest", "--output-on-failure", "--no-tests=ignore"],
