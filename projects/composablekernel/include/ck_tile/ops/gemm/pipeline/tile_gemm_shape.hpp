@@ -45,6 +45,7 @@ struct TileGemmShape
 #endif
     static constexpr index_t flatKPerBlock = flatKPerWarp * kK / WarpTile::at(number<2>{});
 
+#ifndef __HIPCC_RTC__
     CK_TILE_HOST static std::string GetName()
     {
         // clang-format off
@@ -54,6 +55,7 @@ struct TileGemmShape
                       concat('x', (WarpTile::at(number<0>{})), WarpTile::at(number<1>{}), WarpTile::at(number<2>{})));
         // clang-format on
     }
+#endif // __HIPCC_RTC__
 };
 
 template <typename ClusterTile_,
@@ -72,6 +74,7 @@ struct ClusterTileGemmShape
     static constexpr index_t kclusterN = ClusterTile::at(number<1>{});
     static constexpr index_t kclusterK = ClusterTile::at(number<2>{});
 
+#ifndef __HIPCC_RTC__
     CK_TILE_HOST static std::string GetName()
     {
         // clang-format off
@@ -82,6 +85,7 @@ struct ClusterTileGemmShape
                       concat('x', (Base::WarpTile::at(number<0>{})), Base::WarpTile::at(number<1>{}), Base::WarpTile::at(number<2>{})));
         // clang-format on
     }
+#endif // __HIPCC_RTC__
 };
 
 template <typename T>

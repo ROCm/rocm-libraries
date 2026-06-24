@@ -45,6 +45,10 @@ template <> struct memOpToStr<memory_operation_enum::atomic_max> { static conste
 template <> struct memOpToStr<memory_operation_enum::add> { static constexpr const char * name = "add"; };
 // clang-format on
 
+// These host-only helpers return std::string, whose definition requires a
+// complete std::basic_string at parse time. Under hipRTC there is no full STL,
+// so exclude them (they are never used on the device path).
+#ifndef __HIPCC_RTC__
 template <typename ADataType_, typename BDataType_>
 std::string gemm_prec_str()
 {
@@ -61,5 +65,6 @@ std::string mem_op_string()
 {
     return std::string(memOpToStr<MemOp_>::name);
 }
+#endif
 
 } // namespace ck_tile

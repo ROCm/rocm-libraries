@@ -331,6 +331,7 @@ struct FmhaFwdKernel
 
     struct FmhaFwdCommonDropoutKargs : FmhaFwdDropoutSeedOffset
     {
+#ifndef __HIPCC_RTC__
         void init_dropout(float p_drop, uint64_t seed, uint64_t offset)
         {
             float p_undrop = 1.0 - p_drop;
@@ -354,6 +355,7 @@ struct FmhaFwdKernel
             this->drop_offset.ptr               = offset_ptr;
             this->is_drop_seed_offset_from_host = false;
         }
+#endif // __HIPCC_RTC__
 
         float rp_undrop             = 1;
         uint8_t p_undrop_in_uint8_t = std::numeric_limits<uint8_t>::max();
@@ -445,6 +447,7 @@ struct FmhaFwdKernel
         ck_tile::index_t kv_head_idx;
     };
 
+#ifndef __HIPCC_RTC__
     template <bool Cond = !kIsGroupMode>
     CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
     MakeKargsImpl(const void* q_ptr,
@@ -1343,6 +1346,7 @@ struct FmhaFwdKernel
             num_head_q_total,
             head_start);
     }
+#endif // __HIPCC_RTC__
 
     CK_TILE_HOST static constexpr auto GridSize(ck_tile::index_t batch_size_,
                                                 ck_tile::index_t nhead_,

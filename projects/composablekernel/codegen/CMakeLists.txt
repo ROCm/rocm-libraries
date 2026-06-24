@@ -34,12 +34,20 @@ file(GLOB_RECURSE CK_CODEGEN_DEVICE_FILES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ck/host/device_fmha_fwd/fmha_fwd_wrapper.hpp)
 add_embed_library(ck_codegen_headers ${CK_CODEGEN_DEVICE_FILES} RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/include SANITIZE)
 
+# Embed the in-repo rocm-cxx standard library. Embedded relative to the codegen
+# source dir so include names start with "rocm-cxx/"; headers.cpp remaps that
+# prefix to "rocm/" to match the <rocm/...> includes used inside rocm-cxx.
+file(GLOB_RECURSE CK_ROCM_CXX_FILES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocm-cxx/*.hpp)
+add_embed_library(ck_rocm_cxx_headers ${CK_ROCM_CXX_FILES} RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} SANITIZE)
+
 add_compile_options(-std=c++20)
 
 file(GLOB SOURCES CONFIGURE_DEPENDS src/*.cpp)
 # TODO: Use object library
 add_library(ck_host STATIC ${SOURCES})
-target_link_libraries(ck_host PRIVATE ck_headers ck_tile_headers ck_codegen_headers)
+target_link_libraries(ck_host PRIVATE ck_headers ck_tile_headers ck_codegen_headers ck_rocm_cxx_headers)
+target_include_directories(ck_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 set_target_properties(ck_host PROPERTIES 
     LINKER_LANGUAGE CXX
@@ -53,12 +61,12 @@ add_executable(ck-template-driver driver/main.cpp)
 target_link_libraries(ck-template-driver ck_host)
 
 rocm_install_targets(
-    TARGETS ck_host ck_headers ck_tile_headers ck_codegen_headers
+    TARGETS ck_host ck_headers ck_tile_headers ck_codegen_headers ck_rocm_cxx_headers
     EXPORT ck_host_targets
     INCLUDE include
 )
 rocm_export_targets(
-    TARGETS ck_host ck_headers ck_tile_headers ck_codegen_headers
+    TARGETS ck_host ck_headers ck_tile_headers ck_codegen_headers ck_rocm_cxx_headers
     EXPORT ck_host_targets
     NAMESPACE composable_kernel::
 )

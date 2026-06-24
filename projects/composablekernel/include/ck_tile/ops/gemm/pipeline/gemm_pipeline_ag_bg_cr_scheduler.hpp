@@ -47,6 +47,7 @@ enum struct TailNumber
 
 } // namespace ck_tile
 
+#ifndef __HIPCC_RTC__
 inline std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
                                 const ck_tile::GemmPipelineScheduler& s)
 {
@@ -80,3 +81,4 @@ inline std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os,
     }
     return os;
 }
+#endif

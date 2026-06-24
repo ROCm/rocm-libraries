@@ -9,7 +9,9 @@
 #include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
 
+#if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
 #include <hip/hip_fp16.h>
+#endif
 
 namespace ck_tile {
 

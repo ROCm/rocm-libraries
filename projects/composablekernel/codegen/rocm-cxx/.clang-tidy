@@ -1,0 +1,6 @@
+InheritParentConfig: True
+CheckOptions: 
+  - key:             readability-identifier-naming.MacroDefinitionPrefix
+    value:           ROCM_
+  - key:             readability-identifier-naming.ConstexprMethodIgnoredRegexp
+    value:           'quiet_NaN|signaling_NaN'

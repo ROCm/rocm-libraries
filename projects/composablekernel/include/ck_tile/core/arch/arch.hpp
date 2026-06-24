@@ -13,7 +13,9 @@
 #include "ck_tile/core/numeric/integral_constant.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
 #include <hip/hip_runtime.h>
+#endif
 
 #include <cstdint>
 #include <stdio.h>

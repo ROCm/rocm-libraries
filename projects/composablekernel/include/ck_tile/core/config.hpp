@@ -3,10 +3,12 @@
 
 #pragma once
 
+#if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
 #include "hip/hip_version.h"
 #ifndef CK_TILE_DONT_USE_HIP_RUNTIME_HEADERS
 #include "hip/hip_fp16.h"
 #include "hip/hip_runtime.h"
+#endif
 #endif
 
 #include <cstdint>

@@ -96,6 +96,7 @@ struct GemmPipelineProblemBase
     // In the base situation, the Preshuffle setting should be false.
     static constexpr bool Preshuffle = false;
 
+#ifndef __HIPCC_RTC__
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
@@ -105,6 +106,7 @@ struct GemmPipelineProblemBase
                       Scheduler);
         // clang-format on
     }
+#endif // __HIPCC_RTC__
 
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentA()
     {
@@ -318,6 +320,7 @@ struct UniversalGemmPipelineProblem
     static constexpr bool Async = Traits::Async;
 
     static constexpr index_t VectorLoadSize = Traits::_VectorSize;
+#ifndef __HIPCC_RTC__
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
@@ -332,6 +335,7 @@ struct UniversalGemmPipelineProblem
                     );
         // clang-format on
     }
+#endif // __HIPCC_RTC__
 };
 
 template <typename AsDataType_,
@@ -433,6 +437,7 @@ struct FlatmmPipelineProblem
     static constexpr auto BMemNTType         = BMemNTType_;
     static constexpr bool BPreShufflePermute = BPreShufflePermute_;
 
+#ifndef __HIPCC_RTC__
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
@@ -442,6 +447,7 @@ struct FlatmmPipelineProblem
                       Scheduler);
         // clang-format on
     }
+#endif // __HIPCC_RTC__
 
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentA()
     {

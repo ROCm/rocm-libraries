@@ -5,6 +5,10 @@
 
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 
+// Host-only string concatenation utilities. Excluded under hipRTC, which has no
+// <string>/<string_view>/<sstream> and never needs host name-generation helpers.
+#ifndef __HIPCC_RTC__
+
 namespace ck_tile {
 
 template <typename T>
@@ -121,3 +125,5 @@ template <typename Sep, typename First, typename... Rest>
 }
 
 } // namespace ck_tile
+
+#endif // __HIPCC_RTC__

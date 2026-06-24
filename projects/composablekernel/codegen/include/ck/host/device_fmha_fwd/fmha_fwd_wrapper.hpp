@@ -5,11 +5,31 @@
 
 // This header is designed to be embedded and used at RTC compilation time.
 
-#include <cmath>
+// #include <cmath>
 #include <cstdint>
 #include <cassert>
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/fmha.hpp"
+// Forward-only subset of ck_tile/ops/fmha.hpp. The umbrella header also pulls in
+// the bwd / batch_prefill / appendkv / pagedkv / splitkv / v3 paths, which this
+// wrapper never uses and which contain host-only code that does not compile under
+// hipRTC. Including only the forward pieces keeps the RTC translation unit lean.
+#include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/block/block_position_encoding.hpp"
+#include "ck_tile/ops/fmha/block/variants.hpp"
+// fmha_fwd_kernel.hpp references BlockDropout/NullBlockDropout (block_dropout.hpp)
+// and Alibi/EmptyPositionEncoding (block_position_encoding.hpp) but does not include
+// them itself; the umbrella header used to provide them earlier in the include order,
+// so they must precede the kernel here.
+#include "ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload.hpp"
+#include "ck_tile/ops/fmha/pipeline/tile_fmha_shape.hpp"
+#include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 #include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
 
 namespace ck_tile {

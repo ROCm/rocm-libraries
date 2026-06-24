@@ -1,0 +1,66 @@
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ */
+#ifndef ROCM_GUARD_ROCM_ALGORITHM_SEARCH_HPP
+#define ROCM_GUARD_ROCM_ALGORITHM_SEARCH_HPP
+
+#include <rocm/config.hpp>
+
+namespace rocm {
+inline namespace ROCM_INLINE_NS {
+
+template <class Iterator1, class Iterator2, class BinaryPredicate>
+constexpr Iterator1
+search(Iterator1 first, Iterator1 last, Iterator2 s_first, Iterator2 s_last, BinaryPredicate pred)
+{
+    for(;; ++first)
+    {
+        Iterator1 it = first;
+        for(Iterator2 s_it = s_first;; ++it, ++s_it)
+        {
+            if(s_it == s_last)
+            {
+                return first;
+            }
+            if(it == last)
+            {
+                return last;
+            }
+            if(not pred(*it, *s_it))
+            {
+                break;
+            }
+        }
+    }
+}
+
+template <class Iterator1, class Iterator2>
+constexpr Iterator1 search(Iterator1 first, Iterator1 last, Iterator2 s_first, Iterator2 s_last)
+{
+    return search(first, last, s_first, s_last, [](auto&& x, auto&& y) { return x == y; });
+}
+
+} // namespace ROCM_INLINE_NS
+} // namespace rocm
+#endif // ROCM_GUARD_ROCM_ALGORITHM_SEARCH_HPP

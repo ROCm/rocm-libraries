@@ -241,6 +241,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
 
     struct FmhaFwdCommonDropoutKargs : FmhaFwdDropoutSeedOffset
     {
+#ifndef __HIPCC_RTC__
         void init_dropout(float p_drop, uint64_t seed, uint64_t offset)
         {
             float p_undrop = 1.0 - p_drop;
@@ -264,6 +265,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             this->drop_offset.ptr               = offset_ptr;
             this->is_drop_seed_offset_from_host = false;
         }
+#endif
 
         float rp_undrop             = 1;
         uint8_t p_undrop_in_uint8_t = std::numeric_limits<uint8_t>::max();
@@ -325,6 +327,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         ck_tile::index_t kv_head_idx;
     };
 
+#ifndef __HIPCC_RTC__
     template <bool Cond = !kIsGroupMode>
     CK_TILE_HOST static constexpr std::enable_if_t<Cond, Kargs>
     MakeKargs(const void* q_ptr,
@@ -639,6 +642,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
 
         return kargs;
     }
+#endif
 
     CK_TILE_HOST static constexpr auto GridSize(ck_tile::index_t batch_size_,
                                                 ck_tile::index_t nhead_,
