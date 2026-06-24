@@ -734,6 +734,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             THROW_IF_HIP_ERROR(
                 hipMallocAsync(&workspace, workspaceSize, prob.handle->get_stream()));
         }
+        if(selected_algo_index_out)
+            *selected_algo_index_out = hipblaslt_ext::getIndexFromAlgo(heuristicResult.algo);
         hipblaslt_alpha_beta_type<Tc> alpha, beta;
         if(prob.alpha != nullptr)
         {

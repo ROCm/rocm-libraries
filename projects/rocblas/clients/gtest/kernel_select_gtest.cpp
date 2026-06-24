@@ -112,7 +112,7 @@ namespace
 
 } // namespace
 
-// (1) trsm decomposition produces many sub-problem lines, all attributed to rocblas_dtrsm.
+// (1) trsm decomposition produces many sub-problem lines, all attributed to rocblas_strsm.
 // Covers: the rocblas_internal_api_scope at trsm's _impl, multi-line decomposition output,
 // and demonstrates the primary use-case the feature was designed for.
 TEST(KernelSelect, TrsmDecompositionParentApi)
@@ -121,7 +121,7 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
     const std::string trace_path = make_trace_path("trsm");
     constexpr int     m          = 512;
     constexpr int     n          = 512;
-    constexpr double  alpha      = 1.0;
+    constexpr float   alpha      = 1.0f;
 
     setenv("ROCBLAS_LAYER", "0x10", 1);
     setenv("ROCBLAS_LOG_TRACE_PATH", trace_path.c_str(), 1);
@@ -130,10 +130,10 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
         rocblas_handle handle;
         ASSERT_EQ(rocblas_create_handle(&handle), rocblas_status_success);
 
-        device_vector<double> dA(size_t(m) * m);
-        device_vector<double> dB(size_t(m) * n);
+        device_vector<float> dA(size_t(m) * m);
+        device_vector<float> dB(size_t(m) * n);
 
-        ASSERT_EQ(rocblas_dtrsm(handle,
+        ASSERT_EQ(rocblas_strsm(handle,
                                 rocblas_side_left,
                                 rocblas_fill_upper,
                                 rocblas_operation_transpose,
@@ -153,8 +153,8 @@ TEST(KernelSelect, TrsmDecompositionParentApi)
     const std::string trace = read_trace(trace_path);
     // trsm at this size decomposes into >>1 sub-problems; require multiple lines all carrying
     // the trsm parent. (Exact count depends on internal block size, so we only lower-bound.)
-    const size_t lines = count_occurrences(trace, "parent_api=rocblas_dtrsm");
-    EXPECT_GT(lines, size_t(1)) << "expected multiple sub-problems attributed to rocblas_dtrsm, "
+    const size_t lines = count_occurrences(trace, "parent_api=rocblas_strsm");
+    EXPECT_GT(lines, size_t(1)) << "expected multiple sub-problems attributed to rocblas_strsm, "
                                 << "got " << lines << " in " << trace_path;
     EXPECT_NE(trace.find("-f gemm_strided_batched_ex"), std::string::npos);
     EXPECT_NE(trace.find("# source="), std::string::npos);
