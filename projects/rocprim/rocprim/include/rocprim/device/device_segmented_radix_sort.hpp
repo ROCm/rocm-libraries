@@ -48,8 +48,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
-
 namespace detail
 {
 
@@ -497,8 +495,6 @@ inline hipError_t segmented_radix_sort_impl(
 }
 
 } // end namespace detail
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel ascending radix sort primitive for device level.
 ///
