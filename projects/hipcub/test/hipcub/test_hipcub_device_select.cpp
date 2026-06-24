@@ -873,7 +873,7 @@ struct TestLargeIndicesSelectOp
     }
 };
 
-class HipcubDeviceSelectLargeIndicesTests : public ::testing::TestWithParam<unsigned int>
+class HipcubDeviceSelectLargeIndicesTests : public test_controller::ControlledTestWithParam<unsigned int>
 {
 public:
     const bool debug_synchronous = false;
@@ -885,7 +885,6 @@ INSTANTIATE_TEST_SUITE_P(HipcubDeviceSelectLargeIndicesTest,
 
 TEST_P(HipcubDeviceSelectLargeIndicesTests, LargeIndicesSelectOp)
 {
-    GTEST_SKIP_ASAN();
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -993,7 +992,7 @@ struct DeviceUniqueByKeyParams
 };
 
 template<class Params>
-class HipcubDeviceUniqueByKeyTests : public ::testing::Test
+class HipcubDeviceUniqueByKeyTests : public test_controller::ControlledTest<>
 {
 public:
     using key_type                   = typename Params::key_type;
@@ -1004,6 +1003,9 @@ public:
     using selected_count_type        = typename Params::selected_count_type;
     static constexpr bool use_graphs = Params::use_graphs;
 };
+
+class HipcubDeviceUniqueByKeySingleTests : public test_controller::ControlledTest<>
+{};
 
 struct TestUniqueEqualityOp
 {
@@ -1218,10 +1220,8 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
+TEST_F(HipcubDeviceUniqueByKeySingleTests, LargeIndicesUniqueByKey)
 {
-    GTEST_SKIP_ASAN();
-
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
