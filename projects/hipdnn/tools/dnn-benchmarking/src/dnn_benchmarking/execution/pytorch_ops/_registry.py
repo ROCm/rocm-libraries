@@ -110,7 +110,10 @@ class CompiledGraph:
                 run(tensors)
             except UnsupportedGraphError:
                 raise
-            except Exception as e:
+            except ValueError as e:
+                # A handler's ValueError signals an unsupported graph feature;
+                # normalize to UnsupportedGraphError so callers skip it. Any
+                # other exception is a real failure and propagates as an error.
                 raise UnsupportedGraphError(
                     f"PyTorch reference could not execute {op_type!r} with the provided "
                     f"dtypes/parameters: {e}"
@@ -127,20 +130,23 @@ def compile_graph(graph_json: Dict[str, Any]) -> CompiledGraph:
         A CompiledGraph that replays the planned ops on each execute().
 
     Raises:
-        ValueError: If graph contains unsupported operations.
-        UnsupportedGraphError: If an op cannot be planned.
+        UnsupportedGraphError: If the graph contains an operation, attribute, or
+            parameter the PyTorch reference does not support.
     """
     ops: List[Tuple[str, CompiledOp]] = []
     for node in graph_json.get("nodes", []):
         op_type = node.get("type")
         planner = _OP_HANDLERS.get(op_type)
         if planner is None:
-            raise ValueError(f"Unsupported operation type: {op_type}")
+            raise UnsupportedGraphError(f"Unsupported operation type: {op_type}")
         try:
             op = planner(node, graph_json)
         except UnsupportedGraphError:
             raise
-        except Exception as e:
+        except ValueError as e:
+            # A planner raises ValueError to signal a graph feature it cannot
+            # represent; normalize to UnsupportedGraphError so callers skip it.
+            # Any other exception is an unexpected failure and propagates.
             raise UnsupportedGraphError(
                 f"PyTorch reference could not execute {op_type!r} with the provided "
                 f"dtypes/parameters: {e}"
