@@ -756,8 +756,8 @@ inline void set_src_and_dst_roi_yuv(vector<string>::const_iterator imagePathsSta
          ++imagePathIter, i++) {
         int width = 0, height = 0;
         parse_yuv_dimensions(*imagePathIter, width, height);
-        roiTensorPtrSrc[i].xywhROI = {0, 0, width, height};
-        roiTensorPtrDst[i].xywhROI = {0, 0, width, height};
+        roiTensorPtrSrc[i].xywhROI = {{0, 0}, width, height};
+        roiTensorPtrDst[i].xywhROI = {{0, 0}, width, height};
         dstImgSizes[i].width = width;
         dstImgSizes[i].height = height;
     }
@@ -826,8 +826,8 @@ inline void set_src_and_dst_roi(vector<string>::const_iterator imagePathsStart,
             std::exit(1);
         }
 
-        roiTensorPtrSrc[i].xywhROI = {0, 0, width, height};
-        roiTensorPtrDst[i].xywhROI = {0, 0, width, height};
+        roiTensorPtrSrc[i].xywhROI = {{0, 0}, width, height};
+        roiTensorPtrDst[i].xywhROI = {{0, 0}, width, height};
         dstImgSizes[i].width = roiTensorPtrDst[i].xywhROI.roiWidth;
         dstImgSizes[i].height = roiTensorPtrDst[i].xywhROI.roiHeight;
     }
@@ -937,14 +937,14 @@ inline void convert_roi(RpptROI* roiTensorPtrSrc, RpptRoiType roiType, int batch
     if (roiType == RpptRoiType::LTRB) {
         for (int i = 0; i < batchSize; i++) {
             RpptRoiXywh roi = roiTensorPtrSrc[i].xywhROI;
-            roiTensorPtrSrc[i].ltrbROI = {roi.xy.x, roi.xy.y, roi.roiWidth - roi.xy.x,
-                                          roi.roiHeight - roi.xy.y};
+            roiTensorPtrSrc[i].ltrbROI = {{roi.xy.x, roi.xy.y},
+                                          {roi.roiWidth - roi.xy.x, roi.roiHeight - roi.xy.y}};
         }
     } else {
         for (int i = 0; i < batchSize; i++) {
             RpptRoiLtrb roi = roiTensorPtrSrc[i].ltrbROI;
-            roiTensorPtrSrc[i].xywhROI = {roi.lt.x, roi.lt.y, roi.rb.x - roi.lt.x + 1,
-                                          roi.rb.y - roi.lt.y + 1};
+            roiTensorPtrSrc[i].xywhROI = {
+                {roi.lt.x, roi.lt.y}, roi.rb.x - roi.lt.x + 1, roi.rb.y - roi.lt.y + 1};
         }
     }
 }
@@ -1116,8 +1116,7 @@ inline void convert_pkd3_to_pln3(Rpp8u* input, RpptDescPtr descPtr) {
     Rpp8u* inputCopy = (Rpp8u*)calloc(bufferSize, sizeof(Rpp8u));
     memcpy(inputCopy, input, bufferSize * sizeof(Rpp8u));
 
-    Rpp8u *inputTemp, *inputCopyTemp;
-    inputTemp = input + descPtr->offsetInBytes;
+    Rpp8u* inputTemp = input + descPtr->offsetInBytes;
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(descPtr->n)
@@ -1699,7 +1698,6 @@ inline void compare_reduction_output(T* output, string funcName, RpptDescPtr src
     int inputBitDepth = srcDescPtr->dataType;
     T* refOutput;
     int numChannels = (srcDescPtr->c == 1) ? 1 : 3;
-    int numOutputs = (srcDescPtr->c == 1) ? srcDescPtr->n : srcDescPtr->n * 4;
     if (inputBitDepth == RpptDataType::F32) {
         if (testCase == TENSOR_MIN)
             refOutput = reinterpret_cast<T*>(TensorMinReferenceOutputs_F32[numChannels].data());
@@ -1804,10 +1802,10 @@ void inline init_ricap_qa(int width, int height, int batchSize, Rpp32u* permutat
         permutationTensor[j + 3] = permutedArray[i + (batchSize * 3)];
     }
 
-    roiPtrInputCropRegion[0].xywhROI = {width - part0Width, 0, part0Width, part0Height};
-    roiPtrInputCropRegion[1].xywhROI = {part0Width, 0, width - part0Width, part0Height};
-    roiPtrInputCropRegion[2].xywhROI = {0, part0Height, part0Width, height - part0Height};
-    roiPtrInputCropRegion[3].xywhROI = {0, part0Height, width - part0Width, height - part0Height};
+    roiPtrInputCropRegion[0].xywhROI = {{width - part0Width, 0}, part0Width, part0Height};
+    roiPtrInputCropRegion[1].xywhROI = {{part0Width, 0}, width - part0Width, part0Height};
+    roiPtrInputCropRegion[2].xywhROI = {{0, part0Height}, part0Width, height - part0Height};
+    roiPtrInputCropRegion[3].xywhROI = {{0, part0Height}, width - part0Width, height - part0Height};
 }
 
 // RICAP Input Crop Region initializer for unit and performance testing
@@ -1843,17 +1841,21 @@ void inline init_ricap(int width, int height, int batchSize, Rpp32u* permutation
     int part0Width = std::round(randVal * width);
     int part0Height = std::round(randVal1 * height);
     roiPtrInputCropRegion[0].xywhROI = {
-        randrange(0, width - part0Width - 8), randrange(0, height - part0Height), part0Width,
+        {randrange(0, width - part0Width - 8), randrange(0, height - part0Height)},
+        part0Width,
         part0Height};  // Subtracted x coordinate by 8 to avoid corruption when HIP processes 8
                        // pixels at once
-    roiPtrInputCropRegion[1].xywhROI = {randrange(0, part0Width - 8),
-                                        randrange(0, height - part0Height), width - part0Width,
-                                        part0Height};
-    roiPtrInputCropRegion[2].xywhROI = {randrange(0, width - part0Width - 8),
-                                        randrange(0, part0Height), part0Width,
+    roiPtrInputCropRegion[1].xywhROI = {
+        {randrange(0, part0Width - 8), randrange(0, height - part0Height)},
+        width - part0Width,
+        part0Height};
+    roiPtrInputCropRegion[2].xywhROI = {
+        {randrange(0, width - part0Width - 8), randrange(0, part0Height)},
+        part0Width,
+        height - part0Height};
+    roiPtrInputCropRegion[3].xywhROI = {{randrange(0, part0Width - 8), randrange(0, part0Height)},
+                                        width - part0Width,
                                         height - part0Height};
-    roiPtrInputCropRegion[3].xywhROI = {randrange(0, part0Width - 8), randrange(0, part0Height),
-                                        width - part0Width, height - part0Height};
 }
 
 void inline init_remap(RpptDescPtr tableDescPtr, RpptDescPtr srcDescPtr, RpptROIPtr roiTensorPtrSrc,
@@ -2011,10 +2013,9 @@ void inline init_erase(int batchSize, int boxesInEachImage, Rpp32u* numOfBoxes,
 
 void generate_channel_dropout_mask(Rpp8u* dropoutTensor, Rpp32f* dropoutProbability, int batchSize,
                                    int channels, int seed) {
-    int numThreads = omp_get_max_threads();
     omp_set_dynamic(0);
 
-#pragma omp parallel for num_threads(numThreads)
+#pragma omp parallel for num_threads(omp_get_max_threads())
     for (int batchCount = 0; batchCount < batchSize; batchCount++) {
         std::mt19937 rng(seed + batchCount);
         std::bernoulli_distribution keepDist(1.0f - dropoutProbability[batchCount]);

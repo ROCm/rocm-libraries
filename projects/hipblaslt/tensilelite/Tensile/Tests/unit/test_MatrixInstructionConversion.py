@@ -157,7 +157,7 @@ custom.config:
    GlobalReadVectorWidthB: 2
    AssertFree0ElementMultiple: 4
    AssertSummationElementMultiple: 1
-   NoReject: 1
+   NoReject: True
    InternalSupportParams:
       KernArgsVersion: 0
       SupportUserGSU: False
