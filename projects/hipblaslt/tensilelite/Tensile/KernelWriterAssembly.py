@@ -82,7 +82,7 @@ from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -16767,18 +16767,29 @@ class KernelWriterAssembly(KernelWriter):
       else kernel["ProblemType"]["ComputeDataType"].numRegisters()
     return gwvw * reg - numVgprs
 
-  def getTurn(self, kernel, gwvw, dim):
+  def getEpilogueGlobalLoadTurn(self, kernel, gwvw, dim):
+    """Macro-tile coverage turns for epilogue vector global loads and LDS staging."""
     divisor = kernel["SubGroup0"] * kernel["SubGroup1"]
     turn    = ceil(kernel["MacroTile%d"%dim] / (divisor * gwvw))
     return turn, divisor
 
+  def getEpilogueGlobalLoadStrideBpe(self, kernel, gwvw, dim, bpe=None):
+    _, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+    if bpe is None:
+      bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
+    return (divisor * gwvw) * bpe
+
+  def getTurn(self, kernel, gwvw, dim):
+    """Epilogue vector turn count (global load + LDS staging). GW batch slot spacing uses coordOffset."""
+    return self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+
   def addVectorGlobalLoad(self, kernel, srdName: str, offsetVgpr, shiftOffset, dataType, bpe, gwvw, tmpVgpr1Res: ContinuousRegister, dstOffset, dim):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + dstOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
     addr1         = sgpr("Srd%s"%srdName, 4)
-    offset        = (divisor * gwvw) * bpe
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim, bpe)
 
     for i in range(turn):
       if i != 0:
@@ -16791,8 +16802,8 @@ class KernelWriterAssembly(KernelWriter):
   def addVectorLocalStore(self, kernel, addressStr: str, offsetVgpr, shiftOffset, dataType, gwvw, tmpVgpr1Res: ContinuousRegister, srcOffset, subGroupOffset, dim, setToOne=False, comment=""):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + srcOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
-    offset        = (divisor * gwvw) * self.states.bpeCinternal
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
     if setToOne:
       module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
@@ -17031,6 +17042,13 @@ class KernelWriterAssembly(KernelWriter):
         if isinstance(storeModule, DSStoreInstruction):
           storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
+
+    # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only
+    # (matches the GlobalWriteBatch bias/SAV barrier gating). Single-DU MX
+    # kernels do not need it.
+    if kernel.get("UseSubtileImpl") and isSubtileMultiDU(kernel):
+      module.add(SWaitCnt(dscnt=0, comment="drain epilogue vector LDS writes"))
+      module.add(SBarrier(comment="sync waves after epilogue vector LDS writes"))
 
     return module
 

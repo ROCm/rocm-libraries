@@ -9,6 +9,8 @@ if(TENSILELITE_ENABLE_AUTOBUILD)
 endif()
 
 if(TENSILELITE_ENABLE_HOST)
+    find_package(ZLIB REQUIRED)
+
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
 
@@ -50,6 +52,7 @@ if(TENSILELITE_ENABLE_HOST)
             roc::origami
         PRIVATE
             hip::device
+            ZLIB::ZLIB
     )
 
     include(CheckCXXSourceCompiles)
