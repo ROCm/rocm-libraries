@@ -35,9 +35,9 @@ public:
     __forceinline__ __device__ __host__ scrambled_sobol64_engine() : scramble_constant() {}
 
     __forceinline__ __device__ __host__
-        scrambled_sobol64_engine(const unsigned long long int* vectors,
-                                 const unsigned long long int  scramble_constant,
-                                 const unsigned int            offset)
+    scrambled_sobol64_engine(const unsigned long long int* vectors,
+                             const unsigned long long int  scramble_constant,
+                             const unsigned long long int  offset)
         : m_engine(vectors, 0), scramble_constant(scramble_constant)
     {
         discard(offset);
@@ -115,7 +115,7 @@ typedef rocrand_device::scrambled_sobol64_engine<false> rocrand_state_scrambled_
 __forceinline__ __device__ __host__
 void rocrand_init(const unsigned long long int*    vectors,
                   const unsigned long long int     scramble_constant,
-                  const unsigned int               offset,
+                  const unsigned long long int     offset,
                   rocrand_state_scrambled_sobol64* state)
 {
     *state = rocrand_state_scrambled_sobol64(vectors, scramble_constant, offset);

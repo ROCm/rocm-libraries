@@ -207,7 +207,7 @@ typedef rocrand_device::sobol64_engine<false> rocrand_state_sobol64;
  */
 __forceinline__ __device__ __host__
 void rocrand_init(const unsigned long long int* vectors,
-                  const unsigned int            offset,
+                  const unsigned long long int  offset,
                   rocrand_state_sobol64*        state)
 {
     *state = rocrand_state_sobol64(vectors, offset);
