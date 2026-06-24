@@ -6,13 +6,13 @@ GlobalParameters:
   NumElementsToValidateWinner: -1
   KernelTime: False
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
-  DataInitTypeA: 3
-  DataInitTypeB: 3
+  DataInitTypeA: 13
+  DataInitTypeB: 12
   DataInitTypeD: 2
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
@@ -57,7 +57,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  2, 4,  2, 2]
@@ -91,12 +91,13 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [True]
         - ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [False]
+        - PreloadKernArgs: [True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
