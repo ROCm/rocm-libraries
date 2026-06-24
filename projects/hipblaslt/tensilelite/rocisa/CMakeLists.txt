@@ -210,6 +210,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
         COPYONLY
     )
+    # STINKYTOFU_ROOT_DIR feeds @STINKYTOFU_ROOT_DIR@ in _build_info.py (the
+    # staleness check scans stinkytofu sources too, since the conversion glue is
+    # compiled into _rocisa). It is set via PARENT_SCOPE only in the
+    # add_subdirectory build; in the de-bundled find_package build it is unset,
+    # which would leave the path empty and make the check scan the CWD. Point it
+    # at the real stinkytofu source tree.
+    if(NOT STINKYTOFU_ROOT_DIR)
+        cmake_path(ABSOLUTE_PATH _stinkytofu_src_dir NORMALIZE OUTPUT_VARIABLE STINKYTOFU_ROOT_DIR)
+    endif()
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py"

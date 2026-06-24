@@ -61,7 +61,8 @@ if _bi is not None:
     # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
     # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
     # and stinkytofu are loaded independently.
-    _roots = [Path(_bi.SOURCE_ROOT), Path(_bi.STINKYTOFU_SOURCE_ROOT)]
+    # Filter empties so a missing root never resolves to Path("") (the CWD).
+    _roots = [Path(r) for r in (_bi.SOURCE_ROOT, _bi.STINKYTOFU_SOURCE_ROOT) if r]
     _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
