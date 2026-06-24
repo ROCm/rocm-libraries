@@ -152,10 +152,6 @@ THEROCK_CI_PATTERNS = [
 ]
 
 
-def is_path_workflow_file_related_to_ci(path: str) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in THEROCK_CI_PATTERNS)
-
-
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
