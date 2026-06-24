@@ -2,7 +2,36 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
-## hipSPARSELt 0.2.7
+## hipSPARSELt changes since ROCm 7.13
+
+### Added
+
+* Support for the following data type combinations for the LLVM target gfx942:
+  * FP8_FNUZ(E4M3_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
+  * BF8_FNUZ(E5M2_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
+
+## hipSPARSELt 0.2.8 for ROCm 7.13
+
+### Added
+
+* CTest and test categories support (`--smoke`, `--pre_checkin`, and `--nightly`).
+
+### Optimized
+
+* Provided more kernels for the FP16, BF16 and Int8 datatypes.
+* Improved the performance of the `HIPSPARSELT_PRUNE_SPMMA_TILE` function.
+
+### Resolved issues
+
+* Fixed incorrect behavior when retrieving the PCI chip ID.
+* Fixed LDS out-of-bounds read in `prune_tile_kernel`.
+* Fixed out-of-bounds access for compress function test cases.
+* Fixed missing null terminator in the return value of `hipsparseLtGetArchName()`
+* Fixed incorrect CPU result when `bias_type` is BF16 for spmm test cases.
+* Fixed double-free issue in example code: `example_prune_strip`.
+* Fixed symbol interposition in the hipSPARSELt library.
+
+## hipSPARSELt 0.2.7 for ROCm 7.12
 
 ### Added
 

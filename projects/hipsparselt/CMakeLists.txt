@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.7 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.9 LANGUAGES CXX)
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
@@ -183,7 +183,6 @@ if(HIPSPARSELT_ENABLE_HIP)
         )
     endif()
 
-    set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
     # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
     target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)

@@ -3,6 +3,17 @@
 
 import sys
 import types
+
+from pathlib import Path as _Path
+
+if any(_Path(__file__).parent.glob("_rocisa.abi3.*")) and sys.version_info < (3, 12):
+    raise ImportError(
+        f"rocisa stable-ABI extension requires Python >= 3.12 "
+        f"(running {sys.version_info.major}.{sys.version_info.minor}). "
+        f"Install a non-stable-ABI build or upgrade Python."
+    )
+del _Path
+
 from ._rocisa import *
 from . import _rocisa
 
@@ -11,3 +22,57 @@ from . import _rocisa
 for _name, _obj in vars(_rocisa).items():
     if isinstance(_obj, types.ModuleType) and not _name.startswith("_"):
         sys.modules.setdefault(f"rocisa.{_name}", _obj)
+
+# Staleness check: only active in source builds.
+# Pre-built packages (wheels, apt) lack _build_info.py — the import is
+# silently skipped. Catching ImportError (not just ModuleNotFoundError)
+# because Python 3.10 raises ImportError for missing relative submodules.
+# The intentional staleness ImportError is raised outside the try/except
+# so it is never swallowed.
+_bi = None
+try:
+    from . import _build_info as _bi
+except ImportError:
+    pass  # Pre-built package — no source tree, skip check
+
+def _find_stale_sources(so_path, source_roots, build_dir):
+    """Return source files newer than so_path, excluding files under build_dir.
+
+    Extracted from the module-level staleness check so it can be unit-tested
+    without requiring a real _rocisa.so or touching actual source files.
+    """
+    from pathlib import Path
+
+    so_mtime = Path(so_path).stat().st_mtime
+    build_dir = Path(build_dir).resolve()
+    stale = []
+    for root in source_roots:
+        for pattern in ("*.[ch]pp", "*.h", "*.def", "*.inc"):
+            for p in Path(root).rglob(pattern):
+                if p.stat().st_mtime > so_mtime and not p.resolve().is_relative_to(build_dir):
+                    stale.append(str(p))
+    return stale
+
+
+if _bi is not None:
+    from pathlib import Path
+
+    _so = Path(_rocisa.__file__)
+    # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
+    # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
+    # and stinkytofu are loaded independently.
+    _roots = [Path(_bi.SOURCE_ROOT), Path(_bi.STINKYTOFU_SOURCE_ROOT)]
+    _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
+    if _stale:
+        _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
+        raise ImportError(
+            "rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.\n"
+            f"  Modified: {', '.join(_preview)}\n"
+            "  Rebuild:  invoke rocisa"
+        )
+    del _bi, _so, _stale, _roots, Path
+
+
+def hasStinkyTofuBackend() -> bool:
+    """Return True if rocisa was built with StinkyTofu backend support."""
+    return hasattr(_rocisa, "isSupportedByStinkyTofu")

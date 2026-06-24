@@ -24,8 +24,9 @@ The rocBLAS public repository is located at
 
   .. grid-item-card:: Installation
 
-    * :doc:`Install rocBLAS on Linux <./install/Linux_Install_Guide>`
-    * :doc:`Install rocBLAS on Windows <./install/Windows_Install_Guide>`
+    * :doc:`Install rocBLAS <./install/install>`
+    * :doc:`Build rocBLAS on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build rocBLAS on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3
@@ -47,7 +48,7 @@ The rocBLAS public repository is located at
   .. grid-item-card:: Reference
 
     * :ref:`env-variables`
-    * :ref:`data-types-support`
+    * :ref:`rocblas-data-type-support`
     * :ref:`api-reference-guide`
 
 To contribute to the documentation, see `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

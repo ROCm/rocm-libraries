@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
@@ -10,13 +12,14 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
-void attributes_bindings(nb::module_& m)
+void attributesBindings(nb::module_& m)
 {
     // BatchnormAttributes
     nb::class_<graph::BatchnormAttributes>(m, "BatchnormAttributes")
@@ -27,6 +30,12 @@ void attributes_bindings(nb::module_& m)
              &graph::BatchnormAttributes::set_compute_data_type,
              nb::rv_policy::reference_internal)
         .def("get_compute_data_type", &graph::BatchnormAttributes::get_compute_data_type)
+        .def(
+            "set_epsilon",
+            [](graph::BatchnormAttributes& self,
+               const std::shared_ptr<graph::TensorAttributes>& epsilon)
+                -> graph::BatchnormAttributes& { return self.set_epsilon(epsilon); },
+            nb::rv_policy::reference_internal)
         .def("get_epsilon", &graph::BatchnormAttributes::get_epsilon)
         .def("get_momentum", &graph::BatchnormAttributes::get_momentum)
         .def("get_x", &graph::BatchnormAttributes::get_x)

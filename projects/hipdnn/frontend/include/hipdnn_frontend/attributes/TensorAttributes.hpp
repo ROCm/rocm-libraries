@@ -73,15 +73,15 @@ class TensorAttributes
 {
 public:
     /// Variant type for storing pass-by-value scalar values
-    using ValueVariant
-        = std::variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t>;
+    using ValueVariant = std::
+        variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t, bool>;
 
     /// @brief Default constructor
     TensorAttributes() = default;
 
     /**
      * @brief Construct a pass-by-value tensor from a scalar
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
      * @param scalar The scalar value to store in the tensor
      */
     template <typename T>
@@ -116,7 +116,7 @@ public:
 
     /**
      * @brief Set a pass-by-value scalar in this tensor
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
      * @param v The scalar value
      * @return Reference to this for method chaining
      */
@@ -130,7 +130,8 @@ public:
                                          std::is_same<T, bfloat16>,
                                          std::is_same<T, uint8_t>,
                                          std::is_same<T, int32_t>,
-                                         std::is_same<T, int64_t>>,
+                                         std::is_same<T, int64_t>,
+                                         std::is_same<T, bool>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
         _dataType = getDataTypeEnumFromType<T>();

@@ -46,6 +46,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
         hardware_slow                  = origami::hardware_t(gpu_arch_enum,
                                             304,
                                             65536,
+                                            512 * 1024,  // rf_capacity
                                             8,
                                             1.0,
                                             1.0,
@@ -57,6 +58,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
         hardware_fast                  = origami::hardware_t(gpu_arch_enum,
                                             304,
                                             65536,
+                                            512 * 1024,  // rf_capacity
                                             8,
                                             1.0,
                                             1.0,
@@ -71,6 +73,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
         hardware_slow                  = origami::hardware_t(gpu_arch_enum,
                                             256,
                                             163840,
+                                            512 * 1024,  // rf_capacity
                                             8,
                                             1.0,
                                             1.0,
@@ -82,6 +85,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
         hardware_fast                  = origami::hardware_t(gpu_arch_enum,
                                             256,
                                             163840,
+                                            512 * 1024,  // rf_capacity
                                             8,
                                             1.0,
                                             1.0,
@@ -90,17 +94,24 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.8,
                                             1,
                                             std::make_tuple(0, 0.008, 0));
+      } else if (gpu_arch == 1250) {
+        hardware_slow                    = make_hardware(950);
+        hardware_slow.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_slow.compute_clock_ghz  = 1.4;
+        hardware_fast                    = make_hardware(950);
+        hardware_fast.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_fast.compute_clock_ghz  = 1.8;
       }
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config = make_config(128, 128, 64, 32, 32, 8);
 
       auto latency_config_slow =
-          origami::compute_total_latency(problem, hardware_slow, config, hardware_slow.N_CU);
+          origami::gemm::compute_total_latency(problem, hardware_slow, config, hardware_slow.N_CU);
       auto flops_slow = origami::compute_perf_gflops(hardware_slow, problem, latency_config_slow);
 
       auto latency_config_fast =
-          origami::compute_total_latency(problem, hardware_fast, config, hardware_fast.N_CU);
+          origami::gemm::compute_total_latency(problem, hardware_fast, config, hardware_fast.N_CU);
       auto flops_fast = origami::compute_perf_gflops(hardware_fast, problem, latency_config_fast);
 
       REQUIRE(flops_fast > flops_slow);
@@ -118,6 +129,8 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx942);
       } else if (gpu_arch == 950) {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx950);
+      } else if (gpu_arch == 1250) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx1250);
       }
     }
   }
@@ -402,7 +415,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
-      } else if (gpu_arch == 950) {
+      } else if (gpu_arch == 950 || gpu_arch == 1250) {
         invalid_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
@@ -548,6 +561,7 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
 
 TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast returns positive latency") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -567,7 +581,7 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
       config.tensile().wave_group_n = 2;
       config.tensile().prefetch_global_read = 2;
       
-      double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
       
       REQUIRE(latency > 0);
     }
@@ -576,6 +590,7 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
 
 TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
@@ -597,9 +612,9 @@ TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formo
       config_simulation.tensile().wave_group_n = 2;
       config_simulation.tensile().prefetch_global_read = 2;
       
-      double latency_estimation = origami::compute_total_latency(
+      double latency_estimation = origami::gemm::compute_total_latency(
           problem, hardware, config_estimation, hardware.N_CU);
-      double latency_simulation = origami::compute_total_latency(
+      double latency_simulation = origami::gemm::compute_total_latency(
           problem, hardware, config_simulation, hardware.N_CU);
       
       // Both should be positive
@@ -614,6 +629,7 @@ TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formo
 
 TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles various problem sizes") {
       auto hardware = make_hardware(gpu_arch);
       
@@ -639,7 +655,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
         
         INFO("Problem size: " << m << "x" << n << "x" << k);
         REQUIRE(latency > 0);
@@ -650,6 +666,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
 
 TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles different tile sizes") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(4096, 4096, 4096);
@@ -674,7 +691,7 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        double latency = origami::gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
         
         INFO("Tile size: " << mt_m << "x" << mt_n << "x" << mt_k);
         REQUIRE(latency > 0);
@@ -816,7 +833,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
-      auto skGrid   = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      auto skGrid   = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
       size_t numMT_M = (problem.size.m + config.mt.m - 1) / config.mt.m;
       size_t numMT_N = (problem.size.n + config.mt.n - 1) / config.mt.n;
 
@@ -902,9 +919,32 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
       if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 3);
+        REQUIRE(out_wgm.wgm == 4);
       else if (gpu_arch == 950)
         REQUIRE(out_wgm.wgm == 4);
+
+      // Test 8: K-split StreamK (skGrid > tiles) must NOT use the chunk transform.
+      // Splitting a tile across multiple workgroups requires the StreamK fixup, whose
+      // spin-wait handoff assumes a tile's co-op workgroups stay in consecutive physical
+      // order. The chunk remap reorders them and can deadlock, so chunking must be off.
+      {
+        auto skGrid_split = 2 * numMT_M * numMT_N;  // split_factor = 2 (skGrid > tiles)
+
+        // Non-temporal case that produces a non-zero chunk for a data-parallel grid
+        // (see Test 1) must report chunk == 0 once the grid is K-split.
+        config.cache_hints_a = 4;
+        config.cache_hints_b = 3;
+        auto out_wgm_split_nt =
+            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
+        REQUIRE(out_wgm_split_nt.wgmxccchunk == 0);
+        config.cache_hints_a = 0;
+        config.cache_hints_b = 0;
+
+        // Main path (no cache hints) must also report chunk == 0 when K-split.
+        auto out_wgm_split =
+            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
+        REQUIRE(out_wgm_split.wgmxccchunk == 0);
+      }
     }
   }
 }

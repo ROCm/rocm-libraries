@@ -3,7 +3,31 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.37
+## Since last release (ROCm 7.13)
+
+### Added
+
+* Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
+* Support for the gfx1250 architecture.
+
+### Optimized
+
+* Improved performance of even-length real transforms with real lengths between 512 and 8192, extending to larger lengths (up to around 32768) on devices with more LDS.
+
+### Changed
+
+* Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
+  * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+
+### Resolved issues
+
+* Fixed possible incorrect results for multi-dimensional real transforms with small lengths (e.g., smaller than 128) along the two fastest-varying dimensions.
+
+## rocFFT 1.0.37 for ROCm 7.13
+
+### Added
+
+* Support for the gfx90c compilation target.
 
 ### Optimized
 
@@ -30,6 +54,8 @@ Documentation for rocFFT is available at
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
 * Split the precompiled kernel cache file (`rocfft_kernel_cache.db`) into per-architecture files (`rocfft_kernel_cache_gfx950.db`, `rocfft_kernel_cache_gfx1201.db`, etc).
+* `rocfft_plan_create` returns `rocfft_status_invalid_offset` for any usage of non-zero offsets in plan descriptions. The feature is not supported yet.
+* Callback functions specified as function pointers on execution info handles will be deprecated in a future release.
 
 ### Resolved issues
 

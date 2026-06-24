@@ -25,6 +25,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <string_view>
@@ -131,9 +133,6 @@ class IRParser {
     const std::vector<Diagnostic>& getDiagnostics() const {
         return diagnostics;
     }
-
-    /// Print all diagnostics to stderr.
-    void printDiagnostics() const;
 
     /// Parse all functions in the input.
     std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions();
@@ -300,12 +299,6 @@ std::unique_ptr<ParsedFunction> IRParser::parse() {
     func->funcName = "";
     func->blocks.push_back(std::move(block));
     return func;
-}
-
-void IRParser::printDiagnostics() const {
-    for (const auto& diag : diagnostics) {
-        std::cerr << diag.format() << "\n";
-    }
 }
 
 std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
@@ -939,6 +932,46 @@ std::optional<StinkyRegister> IRParser::parseRegister() {
     } else if (regTypeStr == "off") {
         // MUBUF "off" keyword: vaddr field with no address register.
         return StinkyRegister("off");
+    } else if (regTypeStr == "hwreg") {
+        // hwreg(id, offset, size) — numeric form only (matches emitter).
+        if (peek().kind != TokenKind::LeftParen) {
+            emitError("Expected '(' after hwreg");
+            return std::nullopt;
+        }
+        consume();
+        auto readU16 = [&](uint16_t& out) -> bool {
+            if (peek().kind != TokenKind::IntegerLiteral && peek().kind != TokenKind::HexLiteral)
+                return false;
+            auto v = safeStoi(std::string(consume().text));
+            if (!v || *v < 0 || *v > 0xFFFF) return false;
+            out = static_cast<uint16_t>(*v);
+            return true;
+        };
+        uint16_t id = 0, offset = 0, size = 32;
+        if (!readU16(id)) {
+            emitError("Expected hwreg id");
+            return std::nullopt;
+        }
+        if (peek().kind == TokenKind::Comma) {
+            consume();
+            if (!readU16(offset)) {
+                emitError("Expected hwreg offset");
+                return std::nullopt;
+            }
+            if (peek().kind == TokenKind::Comma) {
+                consume();
+                if (!readU16(size)) {
+                    emitError("Expected hwreg size");
+                    return std::nullopt;
+                }
+            }
+        }
+        if (peek().kind != TokenKind::RightParen) {
+            emitError("Expected ')' to close hwreg");
+            return std::nullopt;
+        }
+        consume();
+        return StinkyRegister::Hwreg(id, offset, size);
     }
 
     // Handle "v10" / "s5" / "acc12" etc.: identifier = regType + digits (no space)

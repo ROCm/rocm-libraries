@@ -34,6 +34,7 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+# Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
     set(INSERT_KERNELS_LIST)
@@ -204,6 +205,7 @@ set( MIOpen_Source
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
+
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
@@ -232,14 +234,10 @@ set( MIOpen_Source
     solver/conv/conv_mlir_igemm_wrw.cpp
     solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
-    solver/conv/conv_ocl_dir2D11x11.cpp
-    solver/conv/conv_ocl_dir2Dfwd.cpp
-    solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
-    solver/conv/conv_ocl_dir2Dfwd1x1.cpp
-    solver/conv/conv_ocl_dir2Dfwdgen.cpp
+    solver/conv/conv_hip_dir2D_bwdWrW_53.cpp
+    solver/conv/conv_hip_dir2D11x11.cpp
+    solver/conv/conv_hip_dir2Dfwd.cpp
+    solver/conv/conv_hip_dir2Dfwd_exhaustive_search.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
     solver/conv/conv_winoRxS.cpp
@@ -256,7 +254,7 @@ set( MIOpen_Source
     solver/conv_ck_igemm_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_grp_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_fwd_bias_res_add_activ_fused.cpp
-    solver/conv_ocl_dir2Dfwd_fused.cpp
+    solver/conv_hip_dir2Dfwd_fused.cpp
     solver/conv_winoRxS_fused.cpp
     solver/glu/backward_glu.cpp
     solver/glu/forward_glu.cpp
@@ -363,7 +361,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -548,9 +545,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormFwdInferPerAct.cpp
         kernels/MIOpenBatchNormBwdSpatial.cpp
         kernels/MIOpenBatchNormBwdPerAct.cpp
-        kernels/MIOpenConvDirUni.cl
-        kernels/MIOpenConvDirBatchNormActiv.cl
-        kernels/MIOpenConvDirGenFwd.cl
+        kernels/MIOpenConvDirUniHip.cpp
+        kernels/MIOpenConvDirBatchNormActivHip.cpp
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
         kernels/MIOpenGetitem.cpp
@@ -566,9 +562,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenPoolingBwdND.cpp
         kernels/MIOpenPoolingForwardNaive.cpp
         kernels/MIOpenPoolingND.cpp
-        kernels/MIOpenConv1x1S.cl
-        kernels/MIOpenConv1x1J1.cl
-        kernels/MIOpenConv1x1J1_stride.cl
+
         kernels/MIOpenReduceCalculation.cpp
         kernels/MIOpenReduceExtreme.cpp
         kernels/MIOpenReduceSum.cpp
@@ -585,12 +579,10 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenIm3d2Col.cpp
         kernels/MIOpenCol2Im2d.cpp
         kernels/MIOpenCol2Im3d.cpp
-        kernels/MIOpenConvBwdWrWS2.cl
-        kernels/MIOpenGroupConvBwdWrWS2.cl
-        kernels/MIOpenConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
-        kernels/MIOpenConvFwd_LxL_11.cl
+        kernels/MIOpenConvBwdWrW_LxG_P53Hip.cpp
+        kernels/MIOpenGroupConvBwdWrW_LxG_P53Hip.cpp
+        kernels/MIOpenConvFwd_LxL_11.cpp
+
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
         kernels/bugzilla_34765_detect.s
@@ -780,6 +772,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
+    # Batch kernel sources into grouped object files to reduce object count.
     function(inline_kernels_src BATCH_FACTOR KERNELS KERNEL_INCLUDES EXTRA_OPTIONS MESSAGE_SUFFIX)
         set(KERNELS_BATCH)
         set(KERNELS_BATCH_SIZE 0)
@@ -892,6 +885,7 @@ if(zstd_FOUND)
     target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
 endif()
 
+# Link the given libraries into TARGET for both build and interface usage.
 function(target_internal_library TARGET)
     target_link_libraries(${TARGET} PRIVATE ${ARGN})
     target_link_libraries(${TARGET} INTERFACE $<BUILD_INTERFACE:${ARGN}>)
@@ -963,7 +957,7 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
-        configure_file("${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${MODEL_FILE_FILENAME}" COPYONLY)
+        configure_file("${MODEL_FILE}" "${KERNELS_BINARY_DIR}/${MODEL_FILE_FILENAME}" COPYONLY)
     endforeach()
 endif()
 
@@ -1011,10 +1005,11 @@ endif()
 
 if(hipblaslt_FOUND)
     target_link_libraries( MIOpen PRIVATE roc::hipblaslt )
-    target_include_directories( MIOpen INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
+    target_include_directories( MIOpen SYSTEM INTERFACE
+        $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
 endif()
 
-target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
+target_include_directories( MIOpen SYSTEM PRIVATE ${ROCRAND_INCLUDE_DIR} )
 
 # For backward compatibility with ROCm 5.3
 # Build with library libMLIRMIOpen
@@ -1088,9 +1083,9 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
 # embed find db
     foreach(EMBED_ARCH ${MIOPEN_EMBED_DB})
         message(STATUS "Adding find db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt")
+        list(APPEND CODE_OBJECTS "${KERNELS_BINARY_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt")
         message(STATUS "Adding perf db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}")
+        list(APPEND CODE_OBJECTS "${KERNELS_BINARY_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}")
     endforeach()
 # Embed Bin Cache
     if(NOT MIOPEN_BINCACHE_PATH STREQUAL "")

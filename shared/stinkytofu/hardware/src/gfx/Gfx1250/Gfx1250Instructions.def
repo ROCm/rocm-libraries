@@ -81,6 +81,7 @@ DEF_BATCH(.format = SOPP_WAIT16,
     SWaitKmcntInst, "s_wait_kmcnt", .flags = {WaitCnt},
     SWaitLoadcntInst, "s_wait_loadcnt", .flags = {WaitCnt},
     SWaitStorecntInst, "s_wait_storecnt", .flags = {WaitCnt},
+    SWaitXcntInst, "s_wait_xcnt", .flags = {WaitCnt}, .logical = "SWaitXCnt",
     SWaitTensorcntInst, "s_wait_tensorcnt", .flags = {WaitTensorCnt}, .logical = "SWaitTensorcnt",
     SWaitAluInst, "s_wait_alu", .flags = {HasSideEffect},
         .operand_fields = { {S0, .type=wait_alu} },
@@ -220,16 +221,21 @@ DEF_BATCH(.format = DS_STORE,
         .operand_fields = { {S1, .size=192} },
 )
 // Matrix Instructions (WMMA/MXWMMA only; gfx1250 has no MFMA)
+//
+// XDL classification:
+// gfx1250-specific WMMA/SWMMAC with <=16-bit inputs are XDL;
+// FP32-input WMMA and gfx12-era 16x16x16 variants are NOT XDL.
+
 // v_wmma_scale_* — VOP3PX2 (128-bit), inherit fields from MXWMMA_SCALE
-DEF_BATCH(.format = MXWMMA_SCALE,
+DEF_BATCH(.format = MXWMMA_SCALE, .flags = {WMMA_XDL},
     VWmmaScaleF3216x16x128F8f6f4Inst, "v_wmma_scale_f32_16x16x128_f8f6f4",
     VWmmaScaleF3232x16x128F4Inst, "v_wmma_scale_f32_32x16x128_f4",
         .operand_fields = { {D0, .size=512}, {S1, .size=256}, {S2, .size=512} },
 )
-// v_wmma_scale16_* — VOP3PX3 (192-bit), inherit fields from MXWMMA_SCALE16
-DEF_BATCH(.format = MXWMMA_SCALE16,
+// v_wmma_scale16_* — VOP3PX3 (128-bit), inherit fields from MXWMMA_SCALE16
+DEF_BATCH(.format = MXWMMA_SCALE16, .flags = {WMMA_XDL},
     VWmmaScale16F3216x16x128F8f6f4Inst, "v_wmma_scale16_f32_16x16x128_f8f6f4",
-        .cost = {6, 8}, .costOverride = { { MatrixFmtData(FP4, FP4), 4, 4 } },
+        .cost = {1, 8}, .coissue = 0x00C0, .costOverride = { { MatrixFmtModifiers(FP4, FP4), 1, 4 } },
     VWmmaScale16F3232x16x128F4Inst, "v_wmma_scale16_f32_32x16x128_f4",
         .operand_fields = { {D0, .size=512}, {S1, .size=256}, {S2, .size=512} },
 )
@@ -237,7 +243,7 @@ DEF_BATCH(.format = MXWMMA_SCALE16,
 // === SWMMA (v_swmmac_*) - grouped by shape: 16x16x64, 16x16x128 ===
 
 // 16x16x64
-DEF_BATCH(.format = SWMMA,
+DEF_BATCH(.format = SWMMA, .flags = {WMMA_XDL},
     VSwmmacBf1616x16x64Bf16Inst, "v_swmmac_bf16_16x16x64_bf16",
         .operand_fields = { {D0, .size=128}, {S1, .size=512} },
     VSwmmacF1616x16x64F16Inst, "v_swmmac_f16_16x16x64_f16",
@@ -250,7 +256,7 @@ DEF_BATCH(.format = SWMMA,
         .operand_fields = { {S1, .size=512} },
 )
 // 16x16x128
-DEF_BATCH(.format = SWMMA,
+DEF_BATCH(.format = SWMMA, .flags = {WMMA_XDL},
     VSwmmacF3216x16x128Bf8Bf8Inst, "v_swmmac_f32_16x16x128_bf8_bf8",
         .operand_fields = { {S1, .size=512}, {S2, .size=64} },
     VSwmmacF3216x16x128Fp8Fp8Inst, "v_swmmac_f32_16x16x128_fp8_fp8",
@@ -268,16 +274,17 @@ DEF_BATCH(.format = SWMMA,
     VSwmmacF3216x16x128Fp8Bf8Inst, "v_swmmac_f32_16x16x128_fp8_bf8",
         .operand_fields = { {S1, .size=512}, {S2, .size=64} },
 )
-DEF_T(VSwmmacI3216x16x128Iu8Inst, "v_swmmac_i32_16x16x128_iu8", .format = SWMMA_INT8,
+DEF_T(VSwmmacI3216x16x128Iu8Inst, "v_swmmac_i32_16x16x128_iu8", .format = SWMMA_INT8, .flags = {WMMA_XDL},
     .operand_fields = { {S1, .size=512}, {S2, .size=64} })
 
 // === WMMA (v_wmma_*) - grouped by shape: 16x16x4, 16x16x32, 16x16x64, 16x16x128 ===
 // 16x16x4
 DEF_T(VWmmaF3216x16x4F32Inst, "v_wmma_f32_16x16x4_f32", .format = WMMA,
+    .cost = {1, 16},
     .operand_fields = { {S0, .size=64}, {S1, .size=64} })
 
 // 16x16x32
-DEF_BATCH(.format = WMMA,
+DEF_BATCH(.format = WMMA, .flags = {WMMA_XDL},
     VWmmaBf1616x16x32Bf16Inst, "v_wmma_bf16_16x16x32_bf16",
         .operand_fields = { {D0, .size=128}, {S2, .size=128} },
     VWmmaF3216x16x32Bf16Inst, "v_wmma_f32_16x16x32_bf16",
@@ -288,7 +295,7 @@ DEF_BATCH(.format = WMMA,
         .operand_fields = { {D0, .size=128} },
 )
 // 16x16x64
-DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x64,
+DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x64, .flags = {WMMA_XDL},
     VWmmaF1616x16x64Bf8Bf8Inst, "v_wmma_f16_16x16x64_bf8_bf8",
         .operand_fields = { {D0, .size=128}, {S2, .size=128} },
     VWmmaF1616x16x64Bf8Fp8Inst, "v_wmma_f16_16x16x64_bf8_fp8",
@@ -302,9 +309,9 @@ DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x64,
     VWmmaF3216x16x64Fp8Bf8Inst, "v_wmma_f32_16x16x64_fp8_bf8",
     VWmmaF3216x16x64Fp8Fp8Inst, "v_wmma_f32_16x16x64_fp8_fp8",
 )
-DEF_T(VWmmaI3216x16x64Iu8Inst, "v_wmma_i32_16x16x64_iu8", .format = WMMA_INT8)
+DEF_T(VWmmaI3216x16x64Iu8Inst, "v_wmma_i32_16x16x64_iu8", .format = WMMA_INT8, .flags = {WMMA_XDL})
 // 16x16x128
-DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA, .cost = {5, 8}, .costOverride = { { MatrixFmtData(FP4, FP4), 3, 4 } },
+DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA, .flags = {WMMA_XDL}, .cost = {1, 8}, .coissue = 0x00E0, .costOverride = { { MatrixFmtModifiers(FP4, FP4), 1, 4 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
 
 // === gfx12-only WMMA/SWMMA (not available on gfx1250) ===
@@ -357,7 +364,7 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
-    SSwappcB64Inst, "s_swappc_b64", .flags = {HasSideEffect}, .logical = "SSwapPCB64",
+    SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSwapPCB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64, .type=sreg} },
     SAndSaveexecB32Inst, "s_and_saveexec_b32", .flags = {ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB32",
         .operand_fields = { {D0, .type=sreg} },
@@ -374,7 +381,7 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {S0, .size=16} },
     SGetpcB64Inst, "s_getpc_b64", .flags = {HasSideEffect}, .logical = "SGetPCB64",
         .operand_fields = { {D0, sdst, sdst, 64} },
-    SSetpcB64Inst, "s_setpc_b64", .flags = {HasSideEffect}, .logical = "SSetPCB64",
+    SSetpcB64Inst, "s_setpc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSetPCB64",
         .operand_fields = { {S0, ssrc0, sreg, 64} },
 )
 
@@ -389,6 +396,27 @@ DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb", .format = SOPP, .flags = {HasSideEffect
 DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical = "SSleep",
     .operand_fields = { {S0, simm16, sleep, 16} })
 
+// s_clause groups the following N instructions (N+1 = simm16) into an
+// uninterruptible clause; instruction-stream side effect, no operand reads.
+DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logical = "SClause",
+    .operand_fields = { {S0, simm16, simm16, 16} })
+
+// Global memory fences (ENC_VGLOBAL) — used by the StreamK partial-tile handshake on
+// gfx1250 where L2 is partitioned across CUs/XCDs and SMEM is not
+// coherent with the VMEM flag store. Source has no explicit register operands;
+// the only modifier is cache scope (typically SCOPE_DEV), carried as
+// CacheScopeModifiers so the emitter prints " scope:SCOPE_DEV".
+DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
+DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
+
+// Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
+// to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
+// so reordering it affects performance but not correctness.
+// Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
+// temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
+DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .logical = "GlobalPrefetchB8",
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
@@ -401,6 +429,14 @@ DEF_T(SGetregB32Inst, "s_getreg_b32", .format = SOPK, .flags = {HasSideEffect}, 
 DEF_BATCH(.format = SOP2,
     SAddI32Inst, "s_add_i32", .flags = {ImplicitWriteSCC}, .logical = "SAddI32",
     SAddU32Inst, "s_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SAddU32",
+
+    // Canonical AMD ISA mnemonic is s_add_nc_u64; s_add_u64 is the
+    // historical alias and is still emitted by some assemblers.
+    SAddU64Inst, "s_add_u64", .logical = "SAddU64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
+    SAddNcU64Inst, "s_add_nc_u64", .logical = "SAddU64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
+
     SAddcU32Inst, "s_addc_u32", .flags = {ImplicitReadSCC, ImplicitWriteSCC}, .logical = "SAddCU32",
     SAndB32Inst, "s_and_b32", .flags = {ImplicitWriteSCC}, .logical = "SAndB32",
     SAndB64Inst, "s_and_b64", .flags = {ImplicitWriteSCC}, .logical = "SAndB64",
@@ -410,6 +446,15 @@ DEF_BATCH(.format = SOP2,
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SAshrI32Inst, "s_ashr_i32", .flags = {ImplicitWriteSCC}, .logical = "SAShiftRightI32",
     SAshrI64Inst, "s_ashr_i64", .flags = {ImplicitWriteSCC},
+        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
+
+    // s_bfe_u32 sdst, ssrc0, ssrc1 — scalar bit-field extract (unsigned 32);
+    // Writes SCC.
+    SBfeU32Inst, "s_bfe_u32", .flags = {ImplicitWriteSCC}, .logical = "SBfeU32",
+
+    // s_bfe_u64 sdst, ssrc0, ssrc1 — scalar bit-field extract (unsigned 64);
+    // Writes SCC.
+    SBfeU64Inst, "s_bfe_u64", .flags = {ImplicitWriteSCC}, .logical = "SBfeU64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64} },
     SBfmB32Inst, "s_bfm_b32", .logical = "SBfmB32",
 
@@ -472,6 +517,16 @@ DEF_BATCH(.format = SMRD_LOAD,
         .operand_fields = { {D0, .size=512} },
 )
 
+// SMRD / SMEM — S_PREFETCH_INST_PC_REL (PC-relative; koffset simm24, slength, klength simm5)
+DEF_T(SPrefetchInstPcRelInst, "s_prefetch_inst_pc_rel",
+    .format = SMRD,
+    .flags = {ScalarInstPrefetch},
+    .operand_fields = {
+        {S0, ioffset, simm24, 32},
+        {S1, soffset, smem_offset_nok, 32},
+        {S2, sdata, simm5, 32},
+    })
+
 // Scalar Compare
 DEF_BATCH(.format = SOPC,
     SBitcmp1B32Inst, "s_bitcmp1_b32", .logical = "SBitcmp1B32",
@@ -516,9 +571,11 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
     VAddF16Inst, "v_add_f16", .logical = "VAddF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VAddF32Inst, "v_add_f32", .logical = "VAddF32",
-    VAddF64Inst, "v_add_f64", .logical = "VAddF64",
+    VAddF64Inst, "v_add_f64", .logical = "VAddF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAddNcU32Inst, "v_add_nc_u32", .logical = "VAddU32",
+    VAddNcU64Inst, "v_add_nc_u64", .logical = {"VAddNCU64", "_VAddNCU64"},
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAndB32Inst, "v_and_b32", .logical = "VAndB32",
 )
 
@@ -536,12 +593,16 @@ DEF_T(VAddCoU32Inst, "v_add_co_u32", .format = VOP3, .logical = "VAddCOU32",
 // Vector ALU — VOP3 only (commutative)
 DEF_BATCH(.format = VOP3_COMMUTATIVE,
     VAdd3U32Inst, "v_add3_u32", .logical = "VAdd3U32",
-    VAddNcI32Inst, "v_add_nc_i32", .logical = "VAddI32",
     VFmaF16Inst, "v_fma_f16", .logical = "VFmaF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16}, {S2, .size=16} },
     VFmaF32Inst, "v_fma_f32", .logical = "VFmaF32",
-    VFmaF64Inst, "v_fma_f64", .logical = "VFmaF64",
+    VFmaF64Inst, "v_fma_f64", .logical = "VFmaF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64}, {S2, .size=64} },
+)
+
+// Vector ALU — VOP3 only (2 sources, commutative)
+DEF_BATCH(.format = VOP3_2SRC_COMMUTATIVE,
+    VAddNcI32Inst, "v_add_nc_i32", .logical = "VAddI32",
     VMulHiI32Inst, "v_mul_hi_i32", .logical = "VMulHII32",
     VMulHiU32Inst, "v_mul_hi_u32", .logical = "VMulHIU32",
     VMulLoU32Inst, "v_mul_lo_u32", .logical = "VMulLOU32",
@@ -557,19 +618,19 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
     VMaxF16Inst, "v_max_f16", .logical = "VMaxF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VMaxF32Inst, "v_max_f32", .logical = "VMaxF32",
-    VMaxF64Inst, "v_max_f64", .logical = "VMaxF64",
+    VMaxF64Inst, "v_max_f64", .logical = "VMaxF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VMaxI32Inst, "v_max_i32", .logical = "VMaxI32",
     VMinF16Inst, "v_min_f16", .logical = "VMinF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VMinF32Inst, "v_min_f32", .logical = "VMinF32",
-    VMinF64Inst, "v_min_f64", .logical = "VMinF64",
+    VMinF64Inst, "v_min_f64", .logical = "VMinF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VMinI32Inst, "v_min_i32", .logical = "VMinI32",
     VMulF16Inst, "v_mul_f16", .logical = "VMulF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VMulF32Inst, "v_mul_f32", .logical = "VMulF32",
-    VMulF64Inst, "v_mul_f64", .logical = "VMulF64",
+    VMulF64Inst, "v_mul_f64", .logical = "VMulF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VMulI32I24Inst, "v_mul_i32_i24", .logical = "VMulI32I24",
     VMulU32U24Inst, "v_mul_u32_u24", .logical = "VMulU32U24",
@@ -678,13 +739,26 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     },
 )
 
+// Vector ALU — VOP1 only (indirect dst via M0)
+// v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+// runtime (indirect VGPR write).
+DEF_T(VMovRelsD2B32Inst, "v_movrelsd_2_b32", .format = VOP1,
+    .operand_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, vgpr, 32},
+    },
+)
+
 // Vector ALU — VOP2 non-commutative (dual VOP2/VOP3 encoding)
 DEF_BATCH(.format = VOP2,
     VSubF16Inst, "v_sub_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
     VSubF32Inst, "v_sub_f32", .logical = "VSubF32",
+    // Dual VOP2/VOP3 encoding: allow src1 to be generic src in promoted VOP3 form.
     VSubNcU32Inst, "v_sub_nc_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
     VSubU32Inst, "v_sub_u32", .logical = "VSubU32",
+        .operand_fields = { {S1, .type=src} },
 )
 
 // Vector ALU — VOP3 only (with carry output)
@@ -739,13 +813,13 @@ DEF_BATCH(.format = VOPC,
     VCmpClassF16Inst, "v_cmp_class_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpClassF32Inst, "v_cmp_class_f32", .logical = "VCmpClassF32",
-    VCmpClassF64Inst, "v_cmp_class_f64",
+    VCmpClassF64Inst, "v_cmp_class_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64} },
     // eq
     VCmpEqF16Inst, "v_cmp_eq_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpEqF32Inst, "v_cmp_eq_f32", .logical = "VCmpEQF32",
-    VCmpEqF64Inst, "v_cmp_eq_f64", .logical = "VCmpEQF64",
+    VCmpEqF64Inst, "v_cmp_eq_f64", .logical = "VCmpEQF64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpEqI16Inst, "v_cmp_eq_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -761,7 +835,7 @@ DEF_BATCH(.format = VOPC,
     VCmpGeF16Inst, "v_cmp_ge_f16", .logical = "VCmpGEF16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpGeF32Inst, "v_cmp_ge_f32", .logical = "VCmpGEF32",
-    VCmpGeF64Inst, "v_cmp_ge_f64", .logical = "VCmpGEF64",
+    VCmpGeF64Inst, "v_cmp_ge_f64", .logical = "VCmpGEF64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpGeI16Inst, "v_cmp_ge_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -777,7 +851,7 @@ DEF_BATCH(.format = VOPC,
     VCmpGtF16Inst, "v_cmp_gt_f16", .logical = "VCmpGTF16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpGtF32Inst, "v_cmp_gt_f32", .logical = "VCmpGTF32",
-    VCmpGtF64Inst, "v_cmp_gt_f64", .logical = "VCmpGTF64",
+    VCmpGtF64Inst, "v_cmp_gt_f64", .logical = "VCmpGTF64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpGtI16Inst, "v_cmp_gt_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -793,7 +867,7 @@ DEF_BATCH(.format = VOPC,
     VCmpLeF16Inst, "v_cmp_le_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpLeF32Inst, "v_cmp_le_f32",
-    VCmpLeF64Inst, "v_cmp_le_f64",
+    VCmpLeF64Inst, "v_cmp_le_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpLeI16Inst, "v_cmp_le_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -809,7 +883,7 @@ DEF_BATCH(.format = VOPC,
     VCmpLgF16Inst, "v_cmp_lg_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpLgF32Inst, "v_cmp_lg_f32",
-    VCmpLgF64Inst, "v_cmp_lg_f64",
+    VCmpLgF64Inst, "v_cmp_lg_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpLgI16Inst, "v_cmp_lg_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -825,7 +899,7 @@ DEF_BATCH(.format = VOPC,
     VCmpLtF16Inst, "v_cmp_lt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpLtF32Inst, "v_cmp_lt_f32",
-    VCmpLtF64Inst, "v_cmp_lt_f64",
+    VCmpLtF64Inst, "v_cmp_lt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpLtI16Inst, "v_cmp_lt_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -852,43 +926,43 @@ DEF_BATCH(.format = VOPC,
     VCmpNeqF16Inst, "v_cmp_neq_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNeqF32Inst, "v_cmp_neq_f32",
-    VCmpNeqF64Inst, "v_cmp_neq_f64",
+    VCmpNeqF64Inst, "v_cmp_neq_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpNgeF16Inst, "v_cmp_nge_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNgeF32Inst, "v_cmp_nge_f32",
-    VCmpNgeF64Inst, "v_cmp_nge_f64",
+    VCmpNgeF64Inst, "v_cmp_nge_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpNgtF16Inst, "v_cmp_ngt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNgtF32Inst, "v_cmp_ngt_f32",
-    VCmpNgtF64Inst, "v_cmp_ngt_f64",
+    VCmpNgtF64Inst, "v_cmp_ngt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpNleF16Inst, "v_cmp_nle_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNleF32Inst, "v_cmp_nle_f32",
-    VCmpNleF64Inst, "v_cmp_nle_f64",
+    VCmpNleF64Inst, "v_cmp_nle_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpNlgF16Inst, "v_cmp_nlg_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNlgF32Inst, "v_cmp_nlg_f32",
-    VCmpNlgF64Inst, "v_cmp_nlg_f64",
+    VCmpNlgF64Inst, "v_cmp_nlg_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpNltF16Inst, "v_cmp_nlt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpNltF32Inst, "v_cmp_nlt_f32",
-    VCmpNltF64Inst, "v_cmp_nlt_f64",
+    VCmpNltF64Inst, "v_cmp_nlt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     // o, u (float only)
     VCmpOF16Inst, "v_cmp_o_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpOF32Inst, "v_cmp_o_f32",
-    VCmpOF64Inst, "v_cmp_o_f64",
+    VCmpOF64Inst, "v_cmp_o_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpUF16Inst, "v_cmp_u_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpUF32Inst, "v_cmp_u_f32", .logical = "VCmpUF32",
-    VCmpUF64Inst, "v_cmp_u_f64",
+    VCmpUF64Inst, "v_cmp_u_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
 )
 
@@ -899,13 +973,13 @@ DEF_BATCH(.format = VCMPX,
     VCmpxClassF16Inst, "v_cmpx_class_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxClassF32Inst, "v_cmpx_class_f32", .logical = "VCmpXClassF32",
-    VCmpxClassF64Inst, "v_cmpx_class_f64",
+    VCmpxClassF64Inst, "v_cmpx_class_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64} },
     // eq
     VCmpxEqF16Inst, "v_cmpx_eq_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxEqF32Inst, "v_cmpx_eq_f32",
-    VCmpxEqF64Inst, "v_cmpx_eq_f64",
+    VCmpxEqF64Inst, "v_cmpx_eq_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxEqI16Inst, "v_cmpx_eq_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -921,7 +995,7 @@ DEF_BATCH(.format = VCMPX,
     VCmpxGeF16Inst, "v_cmpx_ge_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxGeF32Inst, "v_cmpx_ge_f32",
-    VCmpxGeF64Inst, "v_cmpx_ge_f64",
+    VCmpxGeF64Inst, "v_cmpx_ge_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxGeI16Inst, "v_cmpx_ge_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -937,7 +1011,7 @@ DEF_BATCH(.format = VCMPX,
     VCmpxGtF16Inst, "v_cmpx_gt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxGtF32Inst, "v_cmpx_gt_f32",
-    VCmpxGtF64Inst, "v_cmpx_gt_f64",
+    VCmpxGtF64Inst, "v_cmpx_gt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxGtI16Inst, "v_cmpx_gt_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -953,7 +1027,7 @@ DEF_BATCH(.format = VCMPX,
     VCmpxLeF16Inst, "v_cmpx_le_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxLeF32Inst, "v_cmpx_le_f32",
-    VCmpxLeF64Inst, "v_cmpx_le_f64",
+    VCmpxLeF64Inst, "v_cmpx_le_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxLeI16Inst, "v_cmpx_le_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -969,7 +1043,7 @@ DEF_BATCH(.format = VCMPX,
     VCmpxLgF16Inst, "v_cmpx_lg_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxLgF32Inst, "v_cmpx_lg_f32",
-    VCmpxLgF64Inst, "v_cmpx_lg_f64",
+    VCmpxLgF64Inst, "v_cmpx_lg_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxLgI16Inst, "v_cmpx_lg_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -985,7 +1059,7 @@ DEF_BATCH(.format = VCMPX,
     VCmpxLtF16Inst, "v_cmpx_lt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxLtF32Inst, "v_cmpx_lt_f32", .logical = "VCmpXLtF32",
-    VCmpxLtF64Inst, "v_cmpx_lt_f64",
+    VCmpxLtF64Inst, "v_cmpx_lt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxLtI16Inst, "v_cmpx_lt_i16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
@@ -1012,43 +1086,43 @@ DEF_BATCH(.format = VCMPX,
     VCmpxNeqF16Inst, "v_cmpx_neq_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNeqF32Inst, "v_cmpx_neq_f32",
-    VCmpxNeqF64Inst, "v_cmpx_neq_f64",
+    VCmpxNeqF64Inst, "v_cmpx_neq_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxNgeF16Inst, "v_cmpx_nge_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNgeF32Inst, "v_cmpx_nge_f32",
-    VCmpxNgeF64Inst, "v_cmpx_nge_f64",
+    VCmpxNgeF64Inst, "v_cmpx_nge_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxNgtF16Inst, "v_cmpx_ngt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNgtF32Inst, "v_cmpx_ngt_f32",
-    VCmpxNgtF64Inst, "v_cmpx_ngt_f64",
+    VCmpxNgtF64Inst, "v_cmpx_ngt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxNleF16Inst, "v_cmpx_nle_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNleF32Inst, "v_cmpx_nle_f32",
-    VCmpxNleF64Inst, "v_cmpx_nle_f64",
+    VCmpxNleF64Inst, "v_cmpx_nle_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxNlgF16Inst, "v_cmpx_nlg_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNlgF32Inst, "v_cmpx_nlg_f32",
-    VCmpxNlgF64Inst, "v_cmpx_nlg_f64",
+    VCmpxNlgF64Inst, "v_cmpx_nlg_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxNltF16Inst, "v_cmpx_nlt_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxNltF32Inst, "v_cmpx_nlt_f32",
-    VCmpxNltF64Inst, "v_cmpx_nlt_f64",
+    VCmpxNltF64Inst, "v_cmpx_nlt_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     // o, u (float only)
     VCmpxOF16Inst, "v_cmpx_o_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxOF32Inst, "v_cmpx_o_f32",
-    VCmpxOF64Inst, "v_cmpx_o_f64",
+    VCmpxOF64Inst, "v_cmpx_o_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
     VCmpxUF16Inst, "v_cmpx_u_f16",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },
     VCmpxUF32Inst, "v_cmpx_u_f32",
-    VCmpxUF64Inst, "v_cmpx_u_f64",
+    VCmpxUF64Inst, "v_cmpx_u_f64", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64}, {S1, .size=64} },
 )
 
@@ -1068,7 +1142,7 @@ DEF_BATCH(.format = VOP1,
     VCvtF32U32Inst, "v_cvt_f32_u32", .logical = "VCvtU32toF32",
     VCvtF64U32Inst, "v_cvt_f64_u32", .logical = "VCvtU32toF64",
         .operand_fields = { {D0, .size=64} },
-    VCvtU32F64Inst, "v_cvt_u32_f64", .logical = "VCvtF64toU32",
+    VCvtU32F64Inst, "v_cvt_u32_f64", .logical = "VCvtF64toU32", .flags = {DPMACC},
         .operand_fields = { {S0, .size=64} },
     VCvtI32F32Inst, "v_cvt_i32_f32", .logical = "VCvtF32toI32",
     VCvtPkF32Bf8Inst, "v_cvt_pk_f32_bf8", .logical = "VCvtPkBF8toF32",
@@ -1079,7 +1153,7 @@ DEF_BATCH(.format = VOP1,
 )
 
 // Vector Convert (VOP3-only, 2 sources)
-DEF_BATCH(.format = VOP3,
+DEF_BATCH(.format = VOP3_2SRC,
     VCvtPkBf16F32Inst, "v_cvt_pk_bf16_f32", .logical = "VCvtPkF32toBF16",
     VCvtPkF16F32Inst, "v_cvt_pk_f16_f32", .logical = "VCvtPkF32toF16",
     VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32", .logical = "VCvtPkF32toBF8",
@@ -1090,7 +1164,7 @@ DEF_BATCH(.format = VOP3,
 
 // Vector Convert (VOP3-only, stochastic rounding, D0 is read-write)
 DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32", .logical = "VCvtSRF32toBF8",
-    .format = VOP3,
+    .format = VOP3_2SRC,
     .operand_fields = {
         {D0, vdst, vgpr, 8, RW},
         {S0, src0, src, 32},
@@ -1098,7 +1172,7 @@ DEF_T(VCvtSrBf8F32Inst, "v_cvt_sr_bf8_f32", .logical = "VCvtSRF32toBF8",
     },
 )
 DEF_T(VCvtSrFp8F32Inst, "v_cvt_sr_fp8_f32", .logical = "VCvtSRF32toFP8",
-    .format = VOP3,
+    .format = VOP3_2SRC,
     .operand_fields = {
         {D0, vdst, vgpr, 8, RW},
         {S0, src0, src, 32},
@@ -1139,8 +1213,35 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
         {S1, src1, src, 32},
     },
 )
+// Pack-of-8 conversion (8x F32 -> 8x FP8/BF8) with F32 scale.
+DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+    },
+)
+// Stochastic-rounding pack-of-8 conversion (8x F32 -> 8x FP8) with F32 scale.
+DEF_T(VCvtScalef32SrPk8Fp8F32Inst, "v_cvt_scalef32_sr_pk8_fp8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+        {S2, src2, src, 32},
+    },
+)
 
-// Vector Transcendental (dual VOP1/VOP3 encoding, inherits from VOP1)
+// Vector Transcendental — 16/32-bit
 DEF_BATCH(.format = VOP1_TRANSCENDENTAL,
     VCosF16Inst, "v_cos_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
@@ -1154,20 +1255,23 @@ DEF_BATCH(.format = VOP1_TRANSCENDENTAL,
     VRcpF16Inst, "v_rcp_f16", .logical = "VRcpF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VRcpF32Inst, "v_rcp_f32", .logical = "VRcpF32",
-    VRcpF64Inst, "v_rcp_f64", .logical = "VRcpF64",
-        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
     VRcpIflagF32Inst, "v_rcp_iflag_f32", .logical = "VRcpIFlagF32",
     VRsqF16Inst, "v_rsq_f16", .logical = "VRsqF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VRsqF32Inst, "v_rsq_f32", .logical = "VRsqF32",
-    VRsqF64Inst, "v_rsq_f64",
-        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
     VSinF16Inst, "v_sin_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VSinF32Inst, "v_sin_f32",
     VSqrtF16Inst, "v_sqrt_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VSqrtF32Inst, "v_sqrt_f32",
+)
+// Vector Transcendental — 64-bit
+DEF_BATCH(.format = VOP1_TRANSCENDENTAL, .flags = {Trans64},
+    VRcpF64Inst, "v_rcp_f64", .logical = "VRcpF64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
+    VRsqF64Inst, "v_rsq_f64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64} },
     VSqrtF64Inst, "v_sqrt_f64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64} },
 )

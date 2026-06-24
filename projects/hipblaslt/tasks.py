@@ -546,9 +546,13 @@ def build(
         else:
             client_opts = ["-DHIPBLASLT_ENABLE_BLIS=OFF"]
         if not use_system_packages and install_deps:
+            # LAPACK superbuild installs into deps_prefix (see _install_system_deps), not /usr/local.
+            deps_lib = deps_prefix / "lib"
+            blas_a = (deps_lib / "libblas.a").as_posix()
+            lapack_a = (deps_lib / "liblapack.a").as_posix()
             client_opts += [
-                "-DBLAS_LIBRARIES=/usr/local/lib/libblas.a",
-                '"-DLAPACK_LIBRARIES=/usr/local/lib/liblapack.a;/usr/local/lib/libblas.a"',
+                f"-DBLAS_LIBRARIES={blas_a}",
+                f'"-DLAPACK_LIBRARIES={lapack_a};{blas_a}"',
                 "-DBLA_STATIC=ON",
             ]
 
@@ -684,7 +688,7 @@ def _install_system_deps(
 ):
     tensile_msgpack_backend = not no_msgpack
 
-    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev"]
+    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev", "libgmock-dev", "libgtest-dev"]
     lib_centos = ["epel-release", "make", "gcc-c++", "rpm-build"]
     lib_centos8 = ["epel-release", "make", "gcc-c++", "rpm-build", "numactl-libs"]
     lib_fedora = ["make", "gcc-c++", "libcxx-devel", "rpm-build", "numactl-libs"]

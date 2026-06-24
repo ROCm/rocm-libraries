@@ -22,45 +22,59 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
+ * @note SwPrefetchScratchSgpr: -1 disables SwPrefetchInsertionPass; >=0 runs and uses that scratch.
+ *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
+ * constructor.
  */
-#define MODULE_OPTIONS_LIST(X)            \
-    X(DebugLevel, int)                    \
-    X(OptLevel, int)                      \
-    X(TileA0, int)                        \
-    X(TileB0, int)                        \
-    X(TileM0, int)                        \
-    X(NumGRA, uint32_t)                   \
-    X(NumGRB, uint32_t)                   \
-    X(NumGRM, uint32_t)                   \
-    X(wavefrontSize, int)                 \
-    X(SubGroup0, int)                     \
-    X(SubGroup1, int)                     \
-    X(WaveGroup0, int)                    \
-    X(WaveGroup1, int)                    \
-    X(VectorWidthA, int)                  \
-    X(VectorWidthB, int)                  \
-    X(GlobalReadVectorWidthA, int)        \
-    X(GlobalReadVectorWidthB, int)        \
-    X(DirectToLdsA, bool)                 \
-    X(DirectToLdsB, bool)                 \
-    X(UseSgprForGRO, int)                 \
-    X(PrintBeforePass, std::string)       \
-    X(PrintAfterPass, std::string)        \
-    X(DebugPass, std::string)             \
-    X(PassOrderSnapshotJson, std::string) \
-    X(EnableWaitCntInsertion, bool)       \
-    X(HasVgprMSB16, bool)
+#define MODULE_OPTIONS_LIST(X)              \
+    X(DebugLevel, int)                      \
+    X(OptLevel, int)                        \
+    X(TileA0, int)                          \
+    X(TileB0, int)                          \
+    X(TileM0, int)                          \
+    X(NumGRA, uint32_t)                     \
+    X(NumGRB, uint32_t)                     \
+    X(NumGRM, uint32_t)                     \
+    X(wavefrontSize, int)                   \
+    X(SubGroup0, int)                       \
+    X(SubGroup1, int)                       \
+    X(WaveGroup0, int)                      \
+    X(WaveGroup1, int)                      \
+    X(VectorWidthA, int)                    \
+    X(VectorWidthB, int)                    \
+    X(GlobalReadVectorWidthA, int)          \
+    X(GlobalReadVectorWidthB, int)          \
+    X(DirectToLdsA, bool)                   \
+    X(DirectToLdsB, bool)                   \
+    X(UseSgprForGRO, int)                   \
+    X(PrintBeforePass, std::string)         \
+    X(PrintAfterPass, std::string)          \
+    X(DebugPass, std::string)               \
+    X(VerifyEach, bool)                     \
+    X(EnableRemarks, bool)                  \
+    X(EnableWaitCntInsertion, bool)         \
+    X(EnableLoopCarriedTokenDeps, bool)     \
+    X(EnableESM2, bool)                     \
+    X(VgprMsbMode, int)                     \
+    X(EnableSwPrefetchInsertion, bool)      \
+    X(SwPrefetchScratchSgpr, int)           \
+    X(ClusterBarrier, bool)                 \
+    X(PrefetchGlobalRead, int)              \
+    X(PrefetchLocalRead, int)
 
 namespace stinkytofu {
 /**
@@ -91,7 +105,7 @@ namespace stinkytofu {
  *   std::string asm = module->emitAssembly();
  * @endcode
  */
-class StinkyAsmModule {
+class STINKYTOFU_EXPORT StinkyAsmModule {
    public:
     /**
      * @brief Options for the StinkyAsmModule
@@ -132,6 +146,33 @@ class StinkyAsmModule {
     std::string getName() const;
 
     /**
+     * @brief Set the name used for output files (e.g. aggregated_instruction_cost.txt).
+     * When set, Backend writes <outputName>_aggregated_instruction_cost.txt so it matches
+     * the full kernel name (e.g. .o basename). When empty, getName() is used.
+     * @param name Full kernel name for output file basename
+     */
+    void setOutputName(const std::string& name);
+
+    /**
+     * @brief Get the output file basename (cost file, etc.). Empty means use getName().
+     * @return Output name string, or empty to use module name
+     */
+    std::string getOutputName() const;
+
+    /**
+     * @brief Set the directory for output files (e.g. cost file).
+     * When set, Backend writes to <outputDir>/<kernel_full_name>/aggregated_instruction_cost.txt
+     * (e.g. comparison_output/1024_vgpr_gfx1250/<full_name>/). When empty, files go to cwd.
+     * @param dir Path such as "comparison_output/1024_vgpr_gfx1250"
+     */
+    void setOutputDir(const std::string& dir);
+
+    /**
+     * @brief Get the output directory. Empty means use current working directory.
+     */
+    std::string getOutputDir() const;
+
+    /**
      * @brief Get the target architecture
      * @return Architecture array [major, minor, stepping]
      */
@@ -147,6 +188,13 @@ class StinkyAsmModule {
      * @brief Run optimization pipeline on the module
      */
     void runOptimizationPipeline();
+
+    /**
+     * @brief Read uint64 metadata from the underlying Function by key.
+     * @param key Metadata key
+     * @return Metadata value if key exists
+     */
+    std::optional<uint64_t> getMetaDataU64(const std::string& key) const;
 
     /**
      * @brief Get the underlying Function
@@ -209,6 +257,31 @@ class StinkyAsmModule {
      * @param moduleOptions ModuleOptions
      */
     void setModuleOptions(const ModuleOptions& moduleOptions);
+
+    /**
+     * @brief Set total instruction size in bytes (encoding size) for the module.
+     * Used to emit .amdhsa_inst_pref_size (totalBytes/128). Typically set by the
+     * backend after running the optimization pipeline.
+     */
+    void setTotalInstructionBytes(int64_t totalBytes);
+
+    /**
+     * @brief Get total instruction size in bytes, or -1 if not set.
+     */
+    int64_t getTotalInstructionBytes() const;
+
+    // ---- Plugin data (opaque key-value store for pass plugins) ----
+
+    void setPluginDataI64(const std::string& key, int64_t value);
+    int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    void setPluginDataStr(const std::string& key, const std::string& value);
+    std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;
+
+    // ---- Pass plugin support ----
+
+    PassBuilder& getPassBuilder();
+    const PassBuilder& getPassBuilder() const;
 
    private:
     struct Impl;

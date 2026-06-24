@@ -3,19 +3,18 @@
 
 find_package(Threads REQUIRED)
 
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hip_kernel_provider_integration_tests
     main.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
-    RMSnorm/IntegrationGpuRMSnormForward.cpp
-    Layernorm/IntegrationGpuLayernormForward.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -46,12 +45,36 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
+            asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
+            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
+        # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
+        target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+            ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
+        )
+        # Ensure codegen runs before compiling the integration tests
+        add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
         )
     endif()
+endif()
+
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackward.cpp
+        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
+        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormForward.cpp
+        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormBackward.cpp
+        hip_mlops_engine/Layernorm/IntegrationGpuLayernormForward.cpp
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)

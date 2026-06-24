@@ -46,6 +46,10 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
 namespace TensileLite
@@ -115,6 +119,8 @@ namespace TensileLite
     {
         size_t waveNum;
 
+        dim3 clusterDim{1, 1, 1};
+
         dim3 workGroupSize;
         dim3 threadTile;
         dim3 macroTile;
@@ -137,7 +143,9 @@ namespace TensileLite
         int    packSummationDims          = 0;
         int    magicDivAlg                = 1;
         int    streamK                    = 0;
+        int    streamKForceDPOnly         = 0;
         int    streamKAtomic              = 0;
+        int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;
 
@@ -166,7 +174,14 @@ namespace TensileLite
         int nonTemporalA = 0;
         int nonTemporalB = 0;
 
+        int adaptiveGemmNTAB = 0;
+
         int customMainLoopScheduling = 0;
+
+        // Whether the kernel uses the subtile implementation (UseSubtileImpl).
+        // Plumbed into the Origami config so heuristics can reason about subtile
+        // kernels (e.g. rejecting them for small K).
+        bool useSubtileImpl = false;
 
         int NonTemporalD = 0;
         int WaveSeparateGlobalReadA = 0;
@@ -182,6 +197,8 @@ namespace TensileLite
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
 
+        int expertSchedulingMode = 0;
+
         std::array<int, 2> waveGroup;
     };
 
@@ -189,6 +206,10 @@ namespace TensileLite
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
         size_t               grid      = 0;
+        // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
+        // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
+        int                  streamKTileSchedulingMode = 0;
+        int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
     };
 
     struct GSUSettings
@@ -316,6 +337,15 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
+        // Result of host-side AdaptiveGemmNTAB dispatch.
+        // nta/ntb are either 0 (cached) or 4 (non-temporal).
+        // Packed into internalArg0 bits 12/13 when InternalArgsSupport.version >= 3.
+        struct AdaptiveGemmNTAB
+        {
+            uint32_t nta = 0;
+            uint32_t ntb = 0;
+        };
+
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
@@ -342,6 +372,18 @@ namespace TensileLite
                                        Hardware const&      hardware,
                                        size_t               tiles,
                                        origami::reduction_t reductionStrat) const;
+        // Resolve the effective StreamK=5 hybrid sub-mode for a launch: returns
+        // true for the dynamic (SK4) path, false for the static (SK3) path.
+        // Precedence (highest first): the TENSILE_STREAMK5_FORCE_MODE debug env
+        // override (0=force static, 1=force dynamic), then the problem tri-state
+        // streamKTileSchedulingMode (0=OFF/static unless smCountTarget()>0,
+        // 1=ON/dynamic), then AUTO (2) via the origami hybrid-mode heuristic.
+        // Only meaningful when
+        // sizeMapping.streamK == 5. This is the single source of truth shared by
+        // grid sizing (getSKGrid) and kernel-arg packing (generateSingleCall) so
+        // the launch grid and the packed args can never disagree.
+        bool                 streamK5EffectiveDynamic(Problem const&  problem,
+                                                      Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -445,7 +487,8 @@ namespace TensileLite
                         size_t                              autoStaggerUMapping,
                         size_t                              autoStaggerU,
                         size_t                              autoStaggerUStrideShift,
-                        uint32_t                            autoGsuVal) const;
+                        uint32_t                            autoGsuVal,
+                        AdaptiveGemmNTAB                    ntab) const;
 
         template <typename KA>
         inline void calculateSingleCallWorkGroupItems(std::vector<Problem> const& problems,
@@ -586,6 +629,17 @@ namespace TensileLite
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
+
+            // In-device MX scale layout expected by the kernel. Mirrors the
+            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // Encoded as a small int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema:
+            //   0 = NoSwizzle       (default; canonical row/column layout)
+            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
+            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
+            // The host (DataInitialization) consults this to decide whether to
+            // apply the K-dimension swizzle on the MX scale tensor before upload.
+            int mxScaleFormat = 0;
         };
 
         struct LinearModel
@@ -649,6 +703,8 @@ namespace TensileLite
         double calculateNumBatches(Problem const&  problem) const;
         SizeMapping getSizeMapping(void) const {return sizeMapping;};
         origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
+        AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
+                                                   Hardware const* hardware) const;
     };
 
     template <typename TAct>
@@ -662,3 +718,5 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

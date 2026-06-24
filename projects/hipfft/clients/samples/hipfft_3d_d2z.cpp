@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -39,7 +39,7 @@ int main()
     const size_t Ny = 5;
     const size_t Nz = 6;
 
-    std::cout << "Nx: " << Nx << "\tNy " << Ny << "\tNz " << Nz << std::endl;
+    std::cout << "Nx: " << Nx << "\tNy: " << Ny << "\tNz: " << Nz << std::endl;
 
     const size_t Nzcomplex = Nz / 2 + 1;
     const size_t rstride   = Nzcomplex * 2; // Nz for out-of-place
@@ -48,8 +48,7 @@ int main()
     const size_t complex_bytes = 2 * sizeof(double) * Nx * Ny * Nzcomplex;
 
     double*    x;
-    hipError_t hip_rt;
-    hip_rt = hipMalloc(&x, real_bytes);
+    hipError_t hip_rt = hipMalloc(&x, real_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -85,16 +84,14 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    // Create plan:
+    // Create plan (hipfftPlan3d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
-    hipfft_rt = hipfftPlan3d(&plan, // plan handle
-                             Nx,
-                             Ny,
-                             Nz, // transform lengths
-                             HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
+    hipfftResult hipfft_rt
+        = hipfftPlan3d(&plan, // plan handle
+                       Nx,
+                       Ny,
+                       Nz, // transform lengths
+                       HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan3d failed");
 
@@ -124,7 +121,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(plan);
+    if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(x);
     if(hip_rt != hipSuccess)

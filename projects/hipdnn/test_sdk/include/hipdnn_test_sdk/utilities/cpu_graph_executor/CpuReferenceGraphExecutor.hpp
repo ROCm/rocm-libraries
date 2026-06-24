@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -35,7 +36,8 @@ public:
                  const std::unordered_map<int64_t, void*>& variantPack)
     {
         auto graphWrap
-            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, size);
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
 
         std::vector<std::unique_ptr<detail::IGraphNodePlanExecutor>> planExecutors;
 
@@ -129,10 +131,14 @@ private:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return detail::RMSNormFwdSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes:
+            return detail::RMSNormBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return detail::BlockScaleDequantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:
             return detail::SdpaFwdSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes:
+            return detail::SdpaBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes:
             return detail::ReductionSignatureKey(node, tensorMap, computeType);
         default:

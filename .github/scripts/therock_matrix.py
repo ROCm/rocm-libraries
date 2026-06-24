@@ -2,12 +2,14 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 
+import copy
 import os
 
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "dnn-providers/integration-tests": "dnn-provider-integration-tests",
     "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
@@ -30,7 +32,8 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
-    "shared/rocroller": "blas",
+    "shared/rocroller": "rocroller",
+    "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
 
@@ -45,13 +48,14 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "tensilelite"],
     },
     "miopen": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN=ON",
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
         "projects_to_test": ["miopen", "miopenprovider"],
     },
@@ -96,6 +100,8 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -104,6 +110,7 @@ additional_options = {
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
+            "hipdnn-integration-tests",
         ],
         "project_to_add": "miopen",
     },
@@ -111,8 +118,18 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": ["miopenprovider"],
+        "project_to_add": "miopen",
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
@@ -127,6 +144,14 @@ additional_options = {
         "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
+    # rocRoller is built under the BLAS umbrella but only tested when its own
+    # subtree changes. Merges into the "blas" job when a PR touches both, which
+    # avoids a redundant BLAS build and S3 artifact overlap.
+    "rocroller": {
+        "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
+        "projects_to_test": ["rocroller"],
+        "project_to_add": "blas",
+    },
 }
 
 # If a project has dependencies that are also being built, we combine build options and test options
@@ -135,36 +160,50 @@ dependency_graph = {
     "miopen": ["blas", "rand"],
 }
 
+# When these subtrees change, also activate the given optional matrix project so
+# its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
+SUBTREE_EXTRA_MATRIX_PROJECTS = {
+    "projects/hipblaslt": "sparselt",
+}
+
 
 def collect_projects_to_run(subtrees):
     platform = os.getenv("PLATFORM")
     projects = set()
+    # Work on per-call deep copies so module-level state stays immutable across calls.
+    local_project_map = copy.deepcopy(project_map)
+    local_additional_options = copy.deepcopy(additional_options)
+
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
 
+        extra_matrix = SUBTREE_EXTRA_MATRIX_PROJECTS.get(subtree)
+        if extra_matrix:
+            projects.add(extra_matrix)
+
     for project in list(projects):
         # Check if an optional math component was included.
-        if project in additional_options:
-            project_options_to_add = additional_options[project]
+        if project in local_additional_options:
+            project_options_to_add = local_additional_options[project]
 
             project_to_add = project_options_to_add["project_to_add"]
-            # If `project_to_add` is in included, add options to the existing `project_map` entry
+            # If `project_to_add` is in included, add options to the existing `local_project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add]["cmake_options"].extend(
+                local_project_map[project_to_add]["cmake_options"].extend(
                     project_options_to_add["cmake_options"]
                 )
-                project_map[project_to_add]["projects_to_test"].extend(
+                local_project_map[project_to_add]["projects_to_test"].extend(
                     project_options_to_add["projects_to_test"]
                 )
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
-                project_map[project_to_add]["cmake_options"] = project_options_to_add[
-                    "cmake_options"
-                ]
-                project_map[project_to_add]["projects_to_test"] = (
+                local_project_map[project_to_add]["cmake_options"] = (
+                    project_options_to_add["cmake_options"]
+                )
+                local_project_map[project_to_add]["projects_to_test"] = (
                     project_options_to_add["projects_to_test"]
                 )
 
@@ -176,24 +215,24 @@ def collect_projects_to_run(subtrees):
             for dependency in dependency_graph[project]:
                 # If the dependency is also included, let's combine to avoid overlap
                 if dependency in projects:
-                    project_map[project]["cmake_options"].extend(
-                        project_map[dependency]["cmake_options"]
+                    local_project_map[project]["cmake_options"].extend(
+                        local_project_map[dependency]["cmake_options"]
                     )
-                    project_map[project]["projects_to_test"].extend(
-                        project_map[dependency]["projects_to_test"]
+                    local_project_map[project]["projects_to_test"].extend(
+                        local_project_map[dependency]["projects_to_test"]
                     )
                     to_remove_from_project_map.append(dependency)
 
     # if dependency is included in projects and parent is found, we delete the dependency as the parent will build and test
     for to_remove_item in to_remove_from_project_map:
         projects.remove(to_remove_item)
-        del project_map[to_remove_item]
+        del local_project_map[to_remove_item]
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
-        if project in project_map:
-            project_map_data = project_map.get(project)
+        if project in local_project_map:
+            project_map_data = local_project_map.get(project)
 
             # Check if platform-based additional flags are needed
             if (

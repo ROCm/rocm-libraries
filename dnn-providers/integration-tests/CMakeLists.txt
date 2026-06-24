@@ -3,11 +3,15 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 
 project(hipdnn-integration-tests LANGUAGES CXX)
+
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +35,9 @@ else()
     message(STATUS "CMAKE_INSTALL_PREFIX set to default: ${CMAKE_INSTALL_PREFIX}")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake
+)
 
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(NOT ENABLE_CLANG_FORMAT)
@@ -101,8 +107,22 @@ endif()
 find_package(Threads REQUIRED)
 
 include(Dependencies)
+fetch_gtest_dependency()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# Copy integration test bundles into the build tree so tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
+# NOTE: file(COPY) runs at configure time only. If you add or modify files
+# under integration_test_bundles/, re-run cmake to pick up the changes.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration_test_bundles/"
+     DESTINATION "${CMAKE_BINARY_DIR}/lib/integration_test_bundles")
+
+# Install integration test bundles so installed tests can find them at
+# <exe_dir>/../lib/integration_test_bundles/
+install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/integration_test_bundles"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
@@ -121,6 +141,7 @@ target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
 target_link_libraries(${INTEGRATION_TESTS_EXE}
     PRIVATE
         hip::host
+        hipdnn_gpu_ref
         hipdnn_test_sdk
         hipdnn_plugin_sdk
         GTest::gtest
@@ -142,7 +163,7 @@ finalize_test_targets("${PROJECT_NAME}")
 
 # For standalone builds we need to install the ctest files
 if(NOT ROCM_LIBS_SUPERBUILD)
-    install_integration_tests_ctest_files()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)

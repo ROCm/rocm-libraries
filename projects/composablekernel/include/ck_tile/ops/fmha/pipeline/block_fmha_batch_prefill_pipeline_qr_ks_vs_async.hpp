@@ -35,7 +35,8 @@ template <typename IndexArrayType,
 CK_TILE_DEVICE void load_physical_pages(const index_t* page_idx,
                                         const CoordVecType& coord_vec,
                                         index_t global_seq_offset,
-                                        IndexArrayType& physical_pages)
+                                        IndexArrayType& physical_pages,
+                                        index_t max_page_table_idx)
 {
     static constexpr index_t kLog2PageSize = [] {
         index_t shift = 0;
@@ -56,8 +57,9 @@ CK_TILE_DEVICE void load_physical_pages(const index_t* page_idx,
         static_for<0, kLoopCount, 1>{}([&](auto k0) {
             const index_t global_token_idx =
                 global_seq_offset + thread_coord_start + kLoopStart + kLoopStride * k0.value;
-            const index_t page_id = global_token_idx >> kLog2PageSize;
-            physical_pages[k0]    = page_idx[page_id];
+            const index_t page_id =
+                ck_tile::min(global_token_idx >> kLog2PageSize, max_page_table_idx);
+            physical_pages[k0] = page_idx[page_id];
         });
     }
     else
@@ -75,7 +77,7 @@ CK_TILE_DEVICE void load_physical_pages(const index_t* page_idx,
             static_for<0, kLoopCount, 1>{}([&](auto k0) {
                 const index_t global_token_idx =
                     global_seq_offset + thread_coord_start + kLoopStart + kLoopStride * k0.value;
-                physical_pages[k0] = page_idx[global_token_idx];
+                physical_pages[k0] = page_idx[ck_tile::min(global_token_idx, max_page_table_idx)];
             });
         }
         else if constexpr(kVTileCrossesPages)
@@ -85,8 +87,9 @@ CK_TILE_DEVICE void load_physical_pages(const index_t* page_idx,
             static_for<0, kLoopCount, 1>{}([&](auto k0) {
                 const index_t global_token_idx =
                     global_seq_offset + thread_coord_start + kLoopStart + kLoopStride * k0.value;
-                const index_t page_id = global_token_idx >> kLog2PageSize;
-                physical_pages[k0]    = page_idx[page_id];
+                const index_t page_id =
+                    ck_tile::min(global_token_idx >> kLog2PageSize, max_page_table_idx);
+                physical_pages[k0] = page_idx[page_id];
             });
         }
         else
@@ -94,7 +97,8 @@ CK_TILE_DEVICE void load_physical_pages(const index_t* page_idx,
             // V tile fully contained in one page: lane0 lookup, broadcast to all
             const index_t lane0_start = __builtin_amdgcn_readfirstlane(thread_coord_start);
             const index_t lane0_page_id =
-                (global_seq_offset + lane0_start + kLoopStart) >> kLog2PageSize;
+                ck_tile::min((global_seq_offset + lane0_start + kLoopStart) >> kLog2PageSize,
+                             max_page_table_idx);
             const index_t shared_physical_page = page_idx[lane0_page_id];
 
             static_for<0, kLoopCount, 1>{}(
@@ -158,7 +162,7 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
     const index_t& thread_coord_start   = coord_vec[kCoordAxis];
     constexpr index_t kInPageOffsetMask = (1 << kLog2PageSize) - 1;
 
-    // Addressing strategy — four cases controlled by (kPageBlockSize vs kN0, kUseGlobalLoad_):
+    // Addressing strategy - four cases controlled by (kPageBlockSize vs kN0, kUseGlobalLoad_):
     //
     //   Case 1: kPageBlockSize >= kN0
     //     SRD is rebased per-tile to the page base (rebase_{k,v}_window in caller).
@@ -427,6 +431,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                const index_t page_stride_v,
                DropoutType& dropout,
                const float sink_v,
+               const index_t max_page_table_idx,
                // KV_BLOCKSCALE parameters (only used when QScaleEnum == KV_BLOCKSCALE)
                const float* k_descale_ptr             = nullptr,
                const float* v_descale_ptr             = nullptr,
@@ -454,6 +459,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
+
+        // K is staged into LDS through a single K-major descriptor whose depth is parameterized
+        // by kK1 (see MakeKLdsStoreBlockDescriptor / GetSingleSmemElementSpaceSize in the custom
+        // policy), while the gemm0 (QK^T) main loop advances the K DRAM window by kK0 and reads
+        // kK0-deep K chunks from that same LDS buffer. The two only agree when kK0 == kK1; with
+        // kK0 != kK1 the async copy mis-strides K into LDS and gemm0 reads past the per-buffer
+        // chunk into neighboring buffers/padding, silently corrupting the result. Enforce the
+        // invariant so illegal tiles (e.g. bk0=64, bk1=32) fail to compile instead of producing
+        // garbage at runtime.
+        static_assert(kK0 == kK1,
+                      "qr_ks_vs_async stages K through a bk1-major LDS descriptor; bk0 must "
+                      "equal bk1.");
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
@@ -573,7 +590,16 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 {
                     auto lse =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-                    set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
+
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse, -numeric<SMPLComputeDataType>::infinity());
+                    }
+
                     store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
                 }
                 buffer_load_fence(0); // rocm-6.1, if whole tile is masked out, need to fence(0)
@@ -611,7 +637,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                             kN0 / NRepeat,
                             kKVMemoryLayout,
                             true,
-                            kN0>(page_idx, k_coord, current_seq_k, k_physical_pages);
+                            kN0>(
+            page_idx, k_coord, current_seq_k, k_physical_pages, max_page_table_idx);
 
         kv_offset_array_transform<statically_indexed_array<index_t, NRepeat>,
                                   decltype(k_coord),
@@ -718,24 +745,24 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         // The decomposition pattern differs by memory layout:
         //
         // VECTORIZED_LAYOUT (ColumnMajor, custom distribution):
-        //   3D decomposition: K = K2 × K0 × K1
+        //   3D decomposition: K = K2 x K0 x K1
         //   - K2 (V_KIterOuter): Outer iteration count
         //   - K0 (V_KLanes):     Lanes for K dimension (matches GEMM kABKLane)
         //   - K1 (V_KIterInner): Vector load size (matches GEMM kKPerThread)
         //   - hs_lengthss_[I1] = {K2, K0, K1}, size = 3 (or {K0, K1} size = 2 if no outer iter)
         //
         // LINEAR_LAYOUT ColumnMajor (base class distribution):
-        //   2D decomposition: K = K0 × K1
+        //   2D decomposition: K = K0 x K1
         //   - K0: Lanes for K dimension (may not match GEMM kABKLane)
         //   - K1: Vector load size
         //   - hs_lengthss_[I1] = {K0, K1}, size = 2
         //
         // LINEAR_LAYOUT RowMajor (base class distribution):
-        //   4D decomposition: K = K0 × K1 × K2 × K3 (uses shuffle_tile for GEMM alignment)
-        //   3D decomposition: K = K0 × K1 × K2 (fallback case)
+        //   4D decomposition: K = K0 x K1 x K2 x K3 (uses shuffle_tile for GEMM alignment)
+        //   3D decomposition: K = K0 x K1 x K2 (fallback case)
         //   - Page lookup uses Y-space's last dimension only (inner iteration)
         //
-        // V_PageIdxRepeat = total number of page lookups per thread = V_KIterOuter × V_KIterInner
+        // V_PageIdxRepeat = total number of page lookups per thread = V_KIterOuter x V_KIterInner
         constexpr index_t V_KIterInner = VDstrEncode::hs_lengthss_[I1].back();
 
         // Compute V_KIterOuter and V_KLanes based on memory layout and K decomposition
@@ -839,7 +866,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                         1,
                                         kKVMemoryLayout,
                                         false,
-                                        kN0>(page_idx, v_coord, current_seq_k, v_physical_pages_k2);
+                                        kN0>(
+                        page_idx, v_coord, current_seq_k, v_physical_pages_k2, max_page_table_idx);
 
                     // Copy to merged array
                     static_for<0, V_KIterInner, 1>{}([&](auto k1) {
@@ -859,7 +887,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                     1,
                                     kKVMemoryLayout,
                                     false,
-                                    kN0>(page_idx, v_coord, current_seq_k, v_physical_pages);
+                                    kN0>(
+                    page_idx, v_coord, current_seq_k, v_physical_pages, max_page_table_idx);
             }
         };
 
@@ -921,7 +950,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     v_physical_pages, stride_v, page_stride_v, v_coord, v_offsets, current_seq_k);
             }
 
-            // v_offsets semantics — see the four-case addressing-strategy block above
+            // v_offsets semantics - see the four-case addressing-strategy block above
             // kNeedFullOffset in kv_offset_array_transform. Three cases reach this lambda:
             //   Case 1 (kPageBlockSize >= kN0):           within-page offset; page base in SRD.
             //   Case 2 (page_size < kN0, kUseGlobalLoad): within-page offset; page base computed
@@ -953,7 +982,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
 
         // Initial V SRD rebase. Single source of truth: rebase_v_window's own
         // `if constexpr(kPageBlockSize >= kN0)` makes this a no-op for case 2/3.
-        // Do not re-add an outer guard here — it would duplicate the inner check
+        // Do not re-add an outer guard here - it would duplicate the inner check
         // and drift if the lambda's gating condition ever changes.
         rebase_v_window(v_dram_window, v_physical_pages[number<0>{}]);
 
@@ -998,12 +1027,12 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             // To support smaller page sizes (cross-page tiles), need:
             //
             // 1. K descale: Load per-token k_descale_vec[NRepeat] based on k_physical_pages[k0]
-            //    - After GEMM0 (S = Q × K^T), apply column-wise scaling: S[:,j] *= k_descale[j]
+            //    - After GEMM0 (S = Q x K^T), apply column-wise scaling: S[:,j] *= k_descale[j]
             //    - Requires modifying s_acc_element_func to accept column index
             //
             // 2. V descale: Load per-token v_descale_vec[V_PageIdxRepeat] based on
             // v_physical_pages[k0]
-            //    - Before GEMM1 (O = P × V), apply row-wise scaling to P: P[i,j] *= v_descale[j]
+            //    - Before GEMM1 (O = P x V), apply row-wise scaling to P: P[i,j] *= v_descale[j]
             //    - Or pre-scale V in LDS (more complex)
             //
             // 3. K and V may be on different pages for the same token index, so need separate
@@ -1298,7 +1327,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                     // For KV_BLOCKSCALE: precompute (m - shift) once per row
                     // exp2(s - (m - shift)) = exp2(s - m + shift) = exp2(s - m) * 2^shift
-                    // This scales P by 2^shift (≈448 for fp8_e4m3) without explicit multiply
+                    // This scales P by 2^shift (~=448 for fp8_e4m3) without explicit multiply
                     auto validated_m = get_validated_m(m[i_idx]);
                     auto row_max     = scale_s * validated_m;
                     if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE)
@@ -1516,7 +1545,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                                     kN0 / NRepeat,
                                     kKVMemoryLayout,
                                     true,
-                                    kN0>(page_idx, k_coord, current_seq_k, k_physical_pages);
+                                    kN0>(
+                    page_idx, k_coord, current_seq_k, k_physical_pages, max_page_table_idx);
 
                 kv_offset_array_transform<statically_indexed_array<index_t, NRepeat>,
                                           decltype(k_coord),
@@ -1536,7 +1566,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                     k_dram_window.update_physical_pages(k_physical_pages);
                 rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
 
-                // After sink→window transition (i_total_loops == num_sink_loop), V window
+                // After sink->window transition (i_total_loops == num_sink_loop), V window
                 // was advanced by kN0 (one normal iter), but current_seq_k jumped by k_advance
                 // = seqlen_k_start - sink_seq_end + kN0 > kN0.  Re-init V to current_seq_k.
                 if constexpr(kHasSink)
@@ -1672,7 +1702,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                const index_t page_stride_k,
                const index_t page_stride_v,
                DropoutType& dropout,
-               float sink_v) const
+               float sink_v,
+               const index_t max_page_table_idx) const
     {
         return operator()(q_dram_block_window_tmp,
                           identity{},
@@ -1701,7 +1732,77 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                           page_stride_k,
                           page_stride_v,
                           dropout,
-                          sink_v);
+                          sink_v,
+                          max_page_table_idx);
+    }
+
+    // Overload for KV_BLOCKSCALE: K/V descale is per-page
+    // This is a convenience overload that forwards to the main operator() with kv_scale parameters
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+               RandValDramBlockWindowTmp& randval_dram_block_window_tmp, // M0*N0 tile
+               LSEDramBlockWindowTmp& lse_dram_block_window_tmp,         // M0*1 tile
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               const AttentionVariant& variant,
+               const AttentionVariantParams& variant_params,
+               const BlockIndices& block_indices,
+               void* smem_ptr,
+               const index_t* page_idx,
+               const index_t stride_k,
+               const index_t stride_v,
+               const index_t page_stride_k,
+               const index_t page_stride_v,
+               DropoutType& dropout,
+               const float* k_descale_ptr,
+               const float* v_descale_ptr,
+               index_t nblock_stride_kv_block_descale,
+               index_t nhead_stride_kv_block_descale) const
+    {
+        return operator()(q_dram_block_window_tmp,
+                          identity{},
+                          k_dram_block_window_tmp,
+                          identity{},
+                          v_dram_block_window_tmp,
+                          identity{},
+                          bias_dram_block_window_tmp,
+                          identity{},
+                          randval_dram_block_window_tmp,
+                          lse_dram_block_window_tmp,
+                          identity{},
+                          identity{},
+                          identity{},
+                          identity{},
+                          mask,
+                          position_encoding,
+                          scale_s,
+                          variant,
+                          variant_params,
+                          block_indices,
+                          smem_ptr,
+                          page_idx,
+                          stride_k,
+                          stride_v,
+                          page_stride_k,
+                          page_stride_v,
+                          dropout,
+                          k_descale_ptr,
+                          v_descale_ptr,
+                          nblock_stride_kv_block_descale,
+                          nhead_stride_kv_block_descale);
     }
 
     // Overload for KV_BLOCKSCALE: K/V descale is per-page
@@ -1736,6 +1837,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                const index_t page_stride_v,
                DropoutType& dropout,
                float sink_v,
+               const index_t max_page_table_idx,
                const float* k_descale_ptr,
                const float* v_descale_ptr,
                index_t nblock_stride_kv_block_descale,
@@ -1769,6 +1871,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                           page_stride_v,
                           dropout,
                           sink_v,
+                          max_page_table_idx,
                           k_descale_ptr,
                           v_descale_ptr,
                           nblock_stride_kv_block_descale,

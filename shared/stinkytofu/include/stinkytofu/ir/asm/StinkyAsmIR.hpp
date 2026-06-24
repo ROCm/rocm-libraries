@@ -29,6 +29,7 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -44,12 +45,13 @@ namespace stinkytofu {
 #include "hardware/gfxIsa.inc"
 
 // Represents a single assembly instruction.
-struct StinkyInstruction : public IRBase {
+struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class IRBase;
     friend class AsmIRBuilder;
     friend class DefUseChainUpdater;
     friend class DefUseChainBuilder;
 
+    const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
 
@@ -62,8 +64,6 @@ struct StinkyInstruction : public IRBase {
     // instructions that DEFINE the values USED by this instruction
     // (producers of this instruction's operands).
     std::vector<StinkyInstruction*> sources;
-
-    const HwInstDesc* hwInstDesc;
 
     // Modifiers are extra bits/fields in the instruction encoding that
     // tweak how the operation is performed, without needing a completely
@@ -82,7 +82,7 @@ struct StinkyInstruction : public IRBase {
           issueCycles(mcid->issue),
           latencyCycles(mcid->latency) {}
 
-    ~StinkyInstruction() = default;
+    ~StinkyInstruction() override = default;
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -258,7 +258,7 @@ struct StinkyInstruction : public IRBase {
 
 /// Builder for assembly-level IR.
 /// In passes, create StinkyInstruction only through this builder.
-class AsmIRBuilder : public IRBuilder {
+class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
    public:
     const GfxArchID arch;
 
@@ -292,7 +292,7 @@ class AsmIRBuilder : public IRBuilder {
     /// reordered across it.
     StinkyInstruction* createFence() {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         return create(&fenceMCID);
     }
 
@@ -309,9 +309,9 @@ class AsmIRBuilder : public IRBuilder {
     AsmIRBuilder(BasicBlock& bb, GfxArchID arch) : IRBuilder(bb), arch(arch) {}
 };
 
-const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
-const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
@@ -337,12 +337,20 @@ inline bool isMUBUFStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MUBUFStore);
 }
 
+inline bool isMUBUFAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_MUBUFAtomic);
+}
+
 inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
+}
+
+inline bool isFLATAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATAtomic);
 }
 
 inline bool isGLOBALLoad(const StinkyInstruction& inst) {
@@ -359,6 +367,14 @@ inline bool isSMemLoad(const StinkyInstruction& inst) {
 
 inline bool isSMemStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemStore);
+}
+
+inline bool isBufferMemLoad(const StinkyInstruction& inst) {
+    return isMUBUFLoad(inst) || isFLATLoad(inst) || isGLOBALLoad(inst);
+}
+
+inline bool isBufferMemStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
 }
 
 /// Check if instruction is a scheduling fence pseudo-instruction.
@@ -379,8 +395,7 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || inst.is(InstFlag::IF_MUBUFAtomic) ||
-           inst.is(InstFlag::IF_FLATAtomic);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -397,6 +412,10 @@ inline bool isDSRead(const StinkyInstruction& inst) {
 
 inline bool isDSWrite(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSStore);
+}
+
+inline bool isDSAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DSAtomic);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {
@@ -434,18 +453,46 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
-// Get the branch target label name from a branch instruction.
-// Branch instructions store their target as the first source register (LiteralString type).
-inline std::string getBranchTarget(const StinkyInstruction& inst) {
-    assert(isBranch(inst) && "Instruction must be a branch");
-    assert(!inst.getSrcRegs().empty() &&
-           "Branch instruction must have at least one source register");
+inline bool isIndirectBranch(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_IndirectBranch);
+}
 
+// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+inline bool isCall(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
+}
+
+// Label names of basic-block targets for \p given branch instruction.
+//
+// At most one target is returned today. Switch / multi-way branch semantics
+// (several labels from one terminator) are not modeled.
+//
+// Resolution (first match wins):
+//   - Not a branch → {}
+//   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
+//   - IF_IndirectBranch without LabelData → {}
+//   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
+//   - Otherwise → {}
+inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
+    if (!isBranch(inst)) return {};
+
+    if (const auto* label = inst.getModifier<LabelData>()) {
+        return {label->label};
+    }
+
+    if (isIndirectBranch(inst)) return {};
+
+    if (inst.getSrcRegs().empty()) return {};
     const StinkyRegister& targetReg = inst.getSrcRegs()[0];
-    assert(targetReg.dataType == StinkyRegister::Type::LiteralString &&
-           "Branch target must be a LiteralString");
+    if (targetReg.dataType != StinkyRegister::Type::LiteralString) return {};
+    return {targetReg.getLiteralString()};
+}
 
-    return targetReg.getLiteralString();
+// Single-target shim. Returns the first label from getBranchTargets(), or "" if
+// the instruction has no statically-known branch target label.
+inline std::string getBranchTarget(const StinkyInstruction& inst) {
+    auto targets = getBranchTargets(inst);
+    return targets.empty() ? std::string{} : targets.front();
 }
 
 inline bool isWaitCnt(const StinkyInstruction& inst) {
@@ -518,6 +565,31 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     return false;
 }
 
+/// Returns true if the instruction has LDS pseudo-register operands,
+/// indicating MemTokenData has been assigned and ordering is enforced
+/// by the DAG via def-use edges.
+inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    return false;
+}
+
+/// Returns true if the instruction forces the DAG scheduler to cut a new
+/// region.  This covers true side effects (stores, branches, waits) and
+/// memory ops that lack MemTokenData (LDS pseudo-registers), where the
+/// scheduler has no dependency edges to prove reordering is safe.
+inline bool hasSideEffect(const StinkyInstruction& inst) {
+    if (!inst.getHwInstDesc()) return false;
+    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
+        return true;
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+        !hasLdsPseudoRegs(inst))
+        return true;
+    return false;
+}
+
 /// Check if instruction is a vector ALU instruction (v_*)
 /// Excludes transcendental instructions which are classified separately
 inline bool isVectorALU(const StinkyInstruction& inst) {
@@ -534,6 +606,25 @@ inline bool isTranscendental(const StinkyInstruction& inst) {
 /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
 inline bool isScalarALU(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SALU);
+}
+
+/// Check if instruction is an XDL WMMA/SWMMAC instruction.
+/// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
+inline bool isXDLWMMA(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a 64-bit transcendental.
+/// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
+inline bool isTrans64(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_Trans64);
+}
+
+/// Check if instruction is a double-precision MACC VALU.
+/// Includes v_add_f64, v_fma_f64, f64 compares (v_cmp_lt_f64), v_cvt_u32_f64.
+/// Excludes f64 transcendentals (v_rcp_f64) — those are Trans64/TRANS.
+inline bool isDPMACC(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DPMACC);
 }
 
 }  // namespace stinkytofu

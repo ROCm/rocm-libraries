@@ -2,16 +2,67 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
+## hipBLASLt 1.4.0
+
+### Added
+
+* Complex datatype support for gfx942 and gfx950.
+* `hipblasLtSetSmCountTarget()` / `hipblasLtGetSmCountTarget()` handle-level
+  helpers (the analogue of cuBLAS's `cublasSetSmCountTarget` /
+  `cublasGetSmCountTarget`). `int32_t`, default `0` meaning "use all
+  compute units"; negative values are rejected with
+  `HIPBLAS_STATUS_INVALID_VALUE`.
+* `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` matmul-descriptor attribute and
+  `HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET` preference attribute (same
+  semantics). When a per-matmul / per-preference value is non-zero it
+  takes precedence over the handle-level value. Lets callers convey an
+  estimate of how many CUs hipBLASLt should target for kernel selection
+  and persistent-grid sizing — useful when another kernel (e.g. RCCL)
+  is co-running on the device or when a persistent grid should be sized
+  for a known CU budget. (This is a hint, not a CU reservation.)
+* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` and matching ext API
+  (`setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`) accept
+  the tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
+  ON=1 dynamic SK4, AUTO=2 origami heuristic). Invalid values return
+  `HIPBLAS_STATUS_INVALID_VALUE`. `hipblaslt-bench` `--streamk_tile_scheduling`
+  and `--sm_count_target` forward into the matmul descriptor
+  (see `clients/bench/README.md`).
+
+### Changed
+
+* StreamK=5 tile scheduling default is now `OFF` (`0`, static SK3 sub-path)
+  instead of `AUTO` (`2`). Set `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` (or
+  `hipblasLtSetSmCountTarget`) to a positive value to engage the origami
+  hybrid-mode heuristic per launch even when the mode is `OFF`; use
+  `HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO` (`2`) to always delegate to the
+  heuristic regardless of `sm_count_target`.
+
 ## hipBLASLt 1.3.0
 
 ### Added
 
 * General Batched GEMM support.
+* `HIPBLASLT_CHECK_NUMERICS` environment variable: opt-in post-GEMM NaN
+  scanner for `hipblasLtMatmul` output (D matrix). Accepts numeric
+  (`1`, `2`) or word values (`info`, `warn`, `none`/`off`). Output goes
+  to the standard hipBLASLt log sink (or `stderr` if no log sink is
+  configured). Per-call cost is one scanner kernel launch only -- no
+  `hipStreamSynchronize`, no per-call alloc/free. A persistent 4-byte
+  device flag is allocated once in the handle constructor and drained
+  once at handle destruction with a single `hipDeviceSynchronize`;
+  a teardown log line reports the first matmul call_id at which NaN
+  was observed (or that none was, with a sampling caveat when the
+  scanner only ran on a subset of calls). Companion env vars allow
+  sampling (`HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY`) and a bisect window
+  (`HIPBLASLT_CHECK_NUMERICS_SCAN_FROM` / `_SCAN_UNTIL`). A C API
+  `hipblasLtCheckNumericsDrain(handle, &first_nan_call_id)` lets
+  frameworks drive a drain on demand.
 
 ### Changed
 
 * Replaced `install.sh` with an invoke-based task runner (`tasks.py`) to support cross-platform builds including Windows (ROCm 7.0+).
 * gtest and msgpack-cxx are now fetched automatically via CMake FetchContent if not found on the system.
+* Greatly improved MXFP4 GEMM performance when using HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT
 
 ## hipBLASLt 1.2.2 for ROCm 7.2.1
 

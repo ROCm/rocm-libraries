@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,6 @@ from Tensile.Common import fastdeepcopy as deepcopy
 from Tensile.Common.Constants import INDEX_CHARS
 from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
-
 
 
 
@@ -513,119 +512,107 @@ _defaultProblemType = {
 # Cinternal: basically should == ComputeDataType
 # This is used in _checkIfSupportedGEMMType()
 _validGEMMTypes = [
-    ("H", "H", "H"),
-    ("S", "S", "S"),
-    ("D", "D", "D"),
-    ("C", "C", "C"),
-    ("Z", "Z", "Z"),
-    ("H", "H", "S"),
-    ("H", "S", "S"),
-    ("B", "B", "S"),
-    ("B", "S", "S"),
-    ("B", "H", "S"),
-    ("I8", "I", "I"),
-    ("4xi8", "I", "I"),
-    ("I8", "I8", "I"),
-    ("I8", "I", "S"),
-    ("I8", "I8", "S"),
-    ("I8", "H", "S"),
-    ("I8", "B", "S"),
-    ("F8", "S", "S"),
-    ("B8", "S", "S"),
-    ("F8B8", "S", "S"),
-    ("B8F8", "S", "S"),
-    ("F8", "H", "S"),
-    ("B8", "H", "S"),
-    ("F8B8", "H", "S"),
-    ("B8F8", "H", "S"),
-    ("B8", "B", "S"),
-    ("H", "F8", "S"),
-    ("F8", "B", "S"),
-    ("F8B8", "B", "S"),
-    ("B8F8", "B", "S"),  # in/out are both R8
-    ("F8", "F8", "S"),
-    ("B8", "B8", "S"),
-    ("F8B8", "B8", "S"),
-    ("B8F8", "B8", "S"),
-    ("F8", "B8", "S"),
-    ("B8", "F8", "S"),
-    ("F8B8", "F8", "S"),
-    ("B8F8", "F8", "S"),  # F8 NANOO
-    ("F8N", "S", "S"),
-    ("B8N", "S", "S"),
-    ("F8B8N", "S", "S"),
-    ("B8F8N", "S", "S"),
-    ("F8N", "H", "S"),
-    ("B8N", "H", "S"),
-    ("F8B8N", "H", "S"),
-    ("B8F8N", "H", "S"),
-    ("B8N", "B", "S"),
-    ("H", "F8N", "S"),
-    ("F8N", "B", "S"),
-    ("F8B8N", "B", "S"),
-    ("B8F8N", "B", "S"),  # in/out are both R8
-    ("F8N", "F8N", "S"),
-    ("B8N", "B8N", "S"),
-    ("F8B8N", "B8N", "S"),
-    ("B8F8N", "B8N", "S"),
-    ("F8N", "B8N", "S"),
-    ("B8N", "F8N", "S"),
-    ("F8B8N", "F8N", "S"),
-    ("B8F8N", "F8N", "S"),
-    ("F4", "S", "S"),
-    ("F6", "S", "S"),
-    ("B6", "S", "S"),
-]
-
-_validMXGEMMTypes = [
-    ("F8", "S", "S"),
-    ("F8B8", "S", "S"),
-    ("B8", "S", "S"),
-    ("B8F8", "S", "S"),
-    ("F6", "S", "S"),
-    ("F6B6", "S", "S"),
-    ("B6", "S", "S"),
-    ("B6F6", "S", "S"),
-    ("F4", "S", "S"),
-    ("F8", "H", "S"),
-    ("F8B8", "H", "S"),
-    ("B8", "H", "S"),
-    ("B8F8", "H", "S"),
-    ("F6", "H", "S"),
-    ("F6B6", "H", "S"),
-    ("B6", "H", "S"),
-    ("B6F6", "H", "S"),
-    ("F4", "H", "S"),
-    ("F8", "B", "S"),
-    ("F8B8", "B", "S"),
-    ("B8", "B", "S"),
-    ("B8F8", "B", "S"),
-    ("F6", "B", "S"),
-    ("F6B6", "B", "S"),
-    ("B6", "B", "S"),
-    ("B6F6", "B", "S"),
-    ("F4", "B", "S"),
-    ("F8", "F8", "S"),
-    ("F8B8", "F8", "S"),
-    ("B8", "F8", "S"),
-    ("B8F8", "F8", "S"),
-    ("F6", "F8", "S"),
-    ("F6B6", "F8", "S"),
-    ("B6", "F8", "S"),
-    ("B6F6", "F8", "S"),
-    ("F4", "F8", "S"),
-    ("F8", "B8", "S"),
-    ("F8B8", "B8", "S"),
-    ("B8", "B8", "S"),
-    ("B8F8", "B8", "S"),
-    ("F6", "B8", "S"),
-    ("F6B6", "B8", "S"),
-    ("B6", "B8", "S"),
-    ("B6F6", "B8", "S")
-]
-
-_validMXGEMMBlock = [
-    16, 32
+    ("H", "H", "H", "H"),
+    ("S", "S", "S", "S"),
+    ("D", "D", "D", "D"),
+    ("C", "C", "C", "C"),
+    ("Z", "Z", "Z", "Z"),
+    ("H", "H", "H", "S"),
+    ("H", "H", "S", "S"),
+    ("B", "B", "B", "S"),
+    ("B", "B", "S", "S"),
+    ("B", "B", "H", "S"),
+    ("I8", "I8", "I", "I"),
+    ("4xi8", "4xi8", "I", "I"),
+    ("I8", "I8", "I8", "I"),
+    ("I8", "I8", "I", "S"),
+    ("I8", "I8", "I8", "S"),
+    ("I8", "I8", "H", "S"),
+    ("I8", "I8", "B", "S"),
+    ("F8", "F8", "S", "S"),
+    ("B8", "B8", "S", "S"),
+    ("F8", "B8", "S", "S"),
+    ("B8", "F8", "S", "S"),
+    ("F8", "F8", "H", "S"),
+    ("B8", "B8", "H", "S"),
+    ("F8", "B8", "H", "S"),
+    ("B8", "F8", "H", "S"),
+    ("B8", "B8", "B", "S"),
+    ("H", "H", "F8", "S"),
+    ("F8", "F8", "B", "S"),
+    ("F8", "B8", "B", "S"),
+    ("B8", "F8", "B", "S"),  # in/out are both R8
+    ("F8", "F8", "F8", "S"),
+    ("B8", "B8", "B8", "S"),
+    ("F8", "B8", "B8", "S"),
+    ("B8", "F8", "B8", "S"),
+    ("F8", "F8", "B8", "S"),
+    ("B8", "B8", "F8", "S"),
+    ("F8", "B8", "F8", "S"),
+    ("B8", "F8", "F8", "S"),  # F8 NANOO
+    ("F8N", "F8N", "S", "S"),
+    ("B8N", "B8N", "S", "S"),
+    ("F8N", "B8N", "S", "S"),
+    ("B8N", "F8N", "S", "S"),
+    ("F8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "H", "S"),
+    ("F8N", "B8N", "H", "S"),
+    ("B8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "B", "S"),
+    ("H", "H", "F8N", "S"),
+    ("F8N", "F8N", "B", "S"),
+    ("F8N", "B8N", "B", "S"),
+    ("B8N", "F8N", "B", "S"),  # in/out are both R8
+    ("F8N", "F8N", "F8N", "S"),
+    ("B8N", "B8N", "B8N", "S"),
+    ("F8N", "B8N", "B8N", "S"),
+    ("B8N", "F8N", "B8N", "S"),
+    ("F8N", "F8N", "B8N", "S"),
+    ("B8N", "B8N", "F8N", "S"),
+    ("F8N", "B8N", "F8N", "S"),
+    ("B8N", "F8N", "F8N", "S"),
+    ("F6", "F6", "S", "S"),
+    ("B6", "B6", "S", "S"),
+    ("F6", "B6", "S", "S"),
+    ("B6", "F6", "S", "S"),
+    ("F8", "F6", "S", "S"),
+    ("F6", "F8", "S", "S"),
+    ("F8", "F4", "S", "S"),
+    ("F4", "F8", "S", "S"),
+    ("F6", "F4", "S", "S"),
+    ("F4", "F6", "S", "S"),
+    ("F6", "F4", "B", "S"),
+    ("F4", "F6", "B", "S"),
+    ("B6", "F4", "S", "S"),
+    ("F4", "B6", "S", "S"),
+    ("B6", "F4", "B", "S"),
+    ("F4", "B6", "B", "S"),
+    ("F8", "B6", "S", "S"),
+    ("B6", "F8", "S", "S"),
+    ("F6", "B8", "S", "S"),
+    ("B8", "F6", "S", "S"),
+    ("F4", "B8", "S", "S"),
+    ("B8", "F4", "S", "S"),
+    ("F4", "F4", "S", "S"),
+    ("F4", "F4", "H", "S"),
+    ("F4", "F4", "B", "S"),
+    ("F4", "F4", "F8", "S"),
+    ("F6", "F6", "H", "S"),
+    ("F6", "F6", "B", "S"),
+    ("F6", "F6", "F8", "S"),
+    ("F6", "F6", "B8", "S"),
+    ("B6", "B6", "H", "S"),
+    ("B6", "B6", "B", "S"),
+    ("B6", "B6", "F8", "S"),
+    ("B6", "B6", "B8", "S"),
+    ("F6", "B6", "H", "S"),
+    ("F6", "B6", "B", "S"),
+    ("F6", "B6", "F8", "S"),
+    ("F6", "B6", "B8", "S"),
+    ("B6", "F6", "H", "S"),
+    ("B6", "F6", "B", "S"),
+    ("B6", "F6", "F8", "S"),
+    ("B6", "F6", "B8", "S"),
 ]
 
 
@@ -633,58 +620,92 @@ _validMXGEMMBlock = [
 # *_TiToTc_BH*.yaml where Ti, To, and Tc are the data types of A/B, C/D, and computation, respectively.
 # The name of the library logic files for non-HPA (HPA=F) types is: *_TiB*.yaml.
 _HPATypes = [
-    ("H", "S", "S"),
-    ("H", "H", "S"),
-    ("B", "B", "S"),
-    ("B", "S", "S"),
-    ("B", "H", "S"),
-    ("I8", "I", "I"),
-    ("4xi8", "I", "I"),
-    ("I8", "I", "S"),
-    ("I8", "I8", "S"),
-    ("I8", "H", "S"),
-    ("I8", "B", "S"),
-    ("F8", "S", "S"),
-    ("B8", "S", "S"),
-    ("F8B8", "S", "S"),
-    ("B8F8", "S", "S"),
-    ("F8", "H", "S"),
-    ("B8", "H", "S"),
-    ("F8B8", "H", "S"),
-    ("B8F8", "H", "S"),
-    ("H", "F8", "S"),
-    ("F8", "B", "S"),
-    ("F8B8", "B", "S"),  # in/out are both R8
-    ("F8", "F8", "S"),
-    ("B8", "B8", "S"),
-    ("F8B8", "B8", "S"),
-    ("B8F8", "B8", "S"),
-    ("F8", "B8", "S"),
-    ("B8", "F8", "S"),
-    ("F8B8", "F8", "S"),
-    ("B8F8", "F8", "S"),
-    ("F8N", "S", "S"),
-    ("B8N", "S", "S"),
-    ("F8B8N", "S", "S"),
-    ("B8F8N", "S", "S"),
-    ("F8N", "H", "S"),
-    ("B8N", "H", "S"),
-    ("F8B8N", "H", "S"),
-    ("B8F8N", "H", "S"),
-    ("H", "F8N", "S"),
-    ("F8N", "B", "S"),
-    ("F8B8N", "B", "S"),  # in/out are both R8
-    ("F8N", "F8N", "S"),
-    ("B8N", "B8N", "S"),
-    ("F8B8N", "B8N", "S"),
-    ("B8F8N", "B8N", "S"),
-    ("F8N", "B8N", "S"),
-    ("B8N", "F8N", "S"),
-    ("F8B8N", "F8N", "S"),
-    ("B8F8N", "F8N", "S"),
-    ("F4", "S", "S"),
-    ("F6", "S", "S"),
-    ("B6", "S", "S"),
+    ("H", "H", "S", "S"),
+    ("H", "H", "H", "S"),
+    ("B", "B", "B", "S"),
+    ("B", "B", "S", "S"),
+    ("B", "B", "H", "S"),
+    ("I8", "I8", "I", "I"),
+    ("4xi8", "4xi8", "I", "I"),
+    ("I8", "I8", "I", "S"),
+    ("I8", "I8", "I8", "S"),
+    ("I8", "I8", "H", "S"),
+    ("I8", "I8", "B", "S"),
+    ("F8", "F8", "S", "S"),
+    ("B8", "B8", "S", "S"),
+    ("F8", "B8", "S", "S"),
+    ("B8", "F8", "S", "S"),
+    ("F8", "F8", "H", "S"),
+    ("B8", "B8", "H", "S"),
+    ("F8", "B8", "H", "S"),
+    ("B8", "F8", "H", "S"),
+    ("H", "H", "F8", "S"),
+    ("F8", "F8", "B", "S"),
+    ("F8", "B8", "B", "S"),  # in/out are both R8
+    ("F8", "F8", "F8", "S"),
+    ("B8", "B8", "B8", "S"),
+    ("F8", "B8", "B8", "S"),
+    ("B8", "F8", "B8", "S"),
+    ("F8", "F8", "B8", "S"),
+    ("B8", "B8", "F8", "S"),
+    ("F8", "B8", "F8", "S"),
+    ("B8", "F8", "F8", "S"),
+    ("F8N", "F8N", "S", "S"),
+    ("B8N", "B8N", "S", "S"),
+    ("F8N", "B8N", "S", "S"),
+    ("B8N", "F8N", "S", "S"),
+    ("F8N", "F8N", "H", "S"),
+    ("B8N", "B8N", "H", "S"),
+    ("F8N", "B8N", "H", "S"),
+    ("B8N", "F8N", "H", "S"),
+    ("H", "H", "F8N", "S"),
+    ("F8N", "F8N", "B", "S"),
+
+    ("F8N", "B8N", "B", "S"),  # in/out are both R8
+    ("F8N", "F8N", "F8N", "S"),
+    ("B8N", "B8N", "B8N", "S"),
+    ("F8N", "B8N", "B8N", "S"),
+    ("B8N", "F8N", "B8N", "S"),
+    ("F8N", "F8N", "B8N", "S"),
+    ("B8N", "B8N", "F8N", "S"),
+    ("F8N", "B8N", "F8N", "S"),
+    ("B8N", "F8N", "F8N", "S"),
+    ("F6", "F6", "S", "S"),
+    ("B6", "B6", "S", "S"),
+    ("F6", "B6", "S", "S"),
+    ("B6", "F6", "S", "S"),
+    ("F8", "F6", "S", "S"),
+    ("F6", "F8", "S", "S"),
+    ("F8", "F4", "S", "S"),
+    ("F4", "F8", "S", "S"),
+    ("F6", "F4", "S", "S"),
+    ("F4", "F6", "S", "S"),
+    ("F6", "F4", "B", "S"),
+    ("F4", "F6", "B", "S"),
+    ("B6", "F4", "S", "S"),
+    ("F4", "B6", "S", "S"),
+    ("B6", "F4", "B", "S"),
+    ("F4", "B6", "B", "S"),
+    ("F4", "F4", "S", "S"),
+    ("F4", "F4", "H", "S"),
+    ("F4", "F4", "B", "S"),
+    ("F4", "F4", "F8", "S"),
+    ("F6", "F6", "H", "S"),
+    ("F6", "F6", "B", "S"),
+    ("F6", "F6", "F8", "S"),
+    ("F6", "F6", "B8", "S"),
+    ("B6", "B6", "H", "S"),
+    ("B6", "B6", "B", "S"),
+    ("B6", "B6", "F8", "S"),
+    ("B6", "B6", "B8", "S"),
+    ("F6", "B6", "H", "S"),
+    ("F6", "B6", "B", "S"),
+    ("F6", "B6", "F8", "S"),
+    ("F6", "B6", "B8", "S"),
+    ("B6", "F6", "H", "S"),
+    ("B6", "F6", "B", "S"),
+    ("B6", "F6", "F8", "S"),
+    ("B6", "F6", "B8", "S"),
 ]
 
 def problemTypeToEnum(problemType):
@@ -728,6 +749,72 @@ def problemTypeToEnum(problemType):
   else:
       problemType["DataTypeMXSB"] = DataTypeEnum.E8
 
+# Pre-compute expected types for ProblemType parameters from _defaultProblemType.
+# Note: For _defaultProblemType, the values are defaults (not lists of allowed values),
+# so we just take type(defaultValue) directly.
+_expectedProblemTypeParamTypes = {
+    key: {type(value)} for key, value in _defaultProblemType.items()
+}
+
+
+def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
+                                       keyPathPrefix: str = "ProblemType"):
+  """Validate that every ProblemType parameter has the correct Python type.
+
+  Checks ProblemType parameters against ``_defaultProblemType``. ``bool``
+  where ``int`` is expected (or vice versa) is the canonical YAML
+  collapse this gate targets; ``type()`` (not ``isinstance``) keeps the
+  two distinct.
+
+  Two consumption modes:
+
+  - ``raiseOnMismatch=True`` (default, input-YAML path): raises a
+    :class:`ConfigTypeError` on the first mistyped key encountered.
+  - ``raiseOnMismatch=False`` (library-logic path): mismatches are only
+    appended to the module-level ``_typeMismatchCollector`` (printed
+    later via ``printTypeMismatchSummary``). Never raises.
+
+  Args:
+      state: The ProblemType state dict (parameter name -> value).
+      srcFile: The YAML source file path, included in messages.
+      raiseOnMismatch: see above. Default True.
+      keyPathPrefix: prefix for the error keypath (default "ProblemType").
+  """
+  # _skipTypeCheck lives in Common/ValidParameters (Common -> Solution
+  # import direction), but the type-mismatch collector still lives in
+  # Solution. Import the collector inside the function to avoid the
+  # historical Naming -> Problem -> Solution -> Naming circular dep.
+  from Tensile.SolutionStructs.Solution import _typeMismatchCollector
+  from Tensile.Common.ValidParameters import _skipTypeCheck
+  from Tensile.Common.TypeValidationErrors import (
+      ConfigTypeError, formatMismatch,
+  )
+
+  for key, value in state.items():
+    if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:
+      continue
+    expectedTypes = _expectedProblemTypeParamTypes[key]
+    actualType = type(value)
+    # Use type() not isinstance() so bool/int are distinguished.
+    if actualType not in expectedTypes:
+      if raiseOnMismatch:
+        raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
+      else:
+        expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
+        collectorKey = (key, actualType.__name__, expectedStr)
+        if collectorKey not in _typeMismatchCollector:
+          _typeMismatchCollector[collectorKey] = {
+            "count": 0,
+            "values": set(),
+            "files": set(),
+          }
+        entry = _typeMismatchCollector[collectorKey]
+        entry["count"] += 1
+        entry["values"].add(repr(value))
+        if srcFile:
+          entry["files"].add(srcFile)
+
+
 class ProblemType(Mapping):
   ########################################
 
@@ -735,11 +822,25 @@ class ProblemType(Mapping):
   def FromDefaultConfig(printIndexAssignmentInfo: bool):
     return ProblemType(_defaultProblemType, printIndexAssignmentInfo)
 
-  def __init__(self, config, printIndexAssignmentInfo: bool):
+  def __init__(
+      self,
+      config,
+      printIndexAssignmentInfo: bool,
+      srcFile: str = "",
+      *,
+      raiseOnTypeMismatch: bool = True,
+  ):
     self.state = {}
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
+
+    # Validate parameter types against the _defaultProblemType registry
+    validateProblemTypeParameterTypes(
+        self.state,
+        srcFile=srcFile,
+        raiseOnMismatch=raiseOnTypeMismatch,
+    )
 
     # adjusting all data types
     if "DataType" in config:
@@ -775,7 +876,7 @@ class ProblemType(Mapping):
     else:
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
-    
+
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
     else:
@@ -956,29 +1057,14 @@ class ProblemType(Mapping):
   #   See the discussion in ValidParameters.py for validGEMMTypes
   ################################################################################
   def _checkIfSupportedGEMMType(self):
-    # Here we use "DataType" instead of "MacDataTypeA(B)" for validation. It is totally fine cause we passed "MacDataTypeA(B)" into Client side.
-    # Ex: MacDataTypeA: b6, MacDataTypeB: f4 -> we can either choose "DataType: f4" or "DataType: b6"
-    inType = self["DataType"]
+    inTypeA = self["MacDataTypeA"]
+    inTypeB = self["MacDataTypeB"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
 
-    gemmType = ( inType.toChar(), outType.toChar(), computeType.toChar() )
+    gemmType = ( inTypeA.toChar(), inTypeB.toChar(), outType.toChar(), computeType.toChar() )
     if gemmType not in _validGEMMTypes:
       raise Exception("This typed-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet."%(gemmType[0], gemmType[1], gemmType[2]))
-
-    if self["MXBlockA"] or self["MXBlockB"]:
-      if gemmType not in _validMXGEMMTypes:
-        raise Exception("This typed-MX-GEMM (Ti, To, Tc) = (%s, %s, %s) is not supported yet." % (gemmType[0], gemmType[1], gemmType[2]))
-      if self["MXBlockA"] == 0:
-        if self["MXBlockB"] not in _validMXGEMMBlock:
-          raise Exception("MXShape is not supported")
-      elif self["MXBlockB"] == 0:
-        if self["MXBlockA"] not in _validMXGEMMBlock:
-          raise Exception("MXShape is not supported")
-      elif (self["MXBlockA"] != self["MXBlockB"]):
-        raise Exception("MXShape is not supported")
-      elif (self["MXBlockA"] not in _validMXGEMMBlock):
-        raise Exception("MXShape is not supported")
 
   ########################################
   def initGEMM(self):
@@ -1144,13 +1230,12 @@ class ProblemType(Mapping):
     state["TLUB"] = strideIdxB < unrollIdxB
     if state["MXBlockB"]:
       state["TLUMXSB"] = state["TLUB"]
-    #state["TLUB"] = True # hack
 
     if printIndexAssignmentInfo:
       print("TLUA:  %s (stridePosA(%d) <? unrollIdxA(%d)" % \
-			(state["TLUA"], strideIdxA, unrollIdxA))
+           (state["TLUA"], strideIdxA, unrollIdxA))
       print("TLUB:  %s (stridePosB(%d) <? unrollIdxB(%d)" % \
-	  		(state["TLUB"], strideIdxB, unrollIdxB))
+           (state["TLUB"], strideIdxB, unrollIdxB))
       print("Index01A:  %s" % state["Index01A"])
       print("Index01B:  %s" % state["Index01B"])
     #unrollDimStrideGreaterThanTileDimStrideA = TLUA = !transA = fast
@@ -1194,7 +1279,8 @@ class ProblemType(Mapping):
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
-    gemmType = (self["DataType"].toChar(),self["DestDataType"].toChar(),self["ComputeDataType"].toChar() )
+    gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
+                self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
     if gemmType in _HPATypes:
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
@@ -1314,9 +1400,8 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
   for d in ["DataType", "ComputeDataType", "DestDataType"]:
     dtype = DataType(problem[d])
-    # filter out int8/f8/b8, because it is not supported by bias datatype
-    # TODO
-    if not dtype.isInt8() and not dtype.is8bitFloat():
+    # filter out sizeof(dtype) <= 1, because it is not supported by bias datatype
+    if dtype.numBytes() > 1:
       bList.append(dtype)
 
   biasDataTypeList = list(set(bList))

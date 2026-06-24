@@ -29,11 +29,15 @@
 #include <cstdlib>
 #include <set>
 #include <string>
+#include <Tensile/Macros.hpp>
+
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
 
 #include <Tensile/Singleton.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -67,6 +71,14 @@ namespace TensileLite
         bool skipKernelLaunch() const;
 
         bool useStreamKDataParrallel() const;
+
+        // SK5 hybrid mode debug override.
+        // Return value semantics:
+        //   -1 -> respect the API attribute / GemmPreference setting
+        //    0 -> force the static (SK3) path
+        //    1 -> force the dynamic (SK4) path
+        // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
+        int streamK5ForceMode() const;
 
         int useExperimentalSelection() const;
 
@@ -141,8 +153,12 @@ namespace TensileLite
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
+        // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
+        int         m_streamK5ForceMode   = -1;
         StringSet   m_excludedFromGetAll;
 
         Debug();
     };
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

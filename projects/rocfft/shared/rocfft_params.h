@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -347,7 +347,7 @@ public:
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
-                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 
                 auto rocret = rocfft.execution_info_set_work_buffer(
@@ -364,7 +364,7 @@ public:
 
     // Return the number of expected callback entries for supplied
     // fields.
-    size_t expected_callback_count(const std::vector<fft_field>& fields)
+    size_t expected_callback_count(const std::vector<fft_field>& fields) const
     {
         // If fields are not specified, we consider the input or
         // output to have a single brick (and thus expect a single
@@ -387,14 +387,14 @@ public:
         return expected_callbacks;
     }
 
-    fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                             std::vector<void*>* load_cb_data,
-                             std::vector<void*>* store_cb_func,
-                             std::vector<void*>* store_cb_data,
-                             size_t              load_cb_shared_mem_bytes  = 0,
-                             size_t              store_cb_shared_mem_bytes = 0) override
+    fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes  = 0,
+                                     size_t              store_cb_shared_mem_bytes = 0) override
     {
-        if(run_callbacks)
+        if(run_callbacks == fft_callback_type_funcptr)
         {
             auto expected_load_cb_count  = expected_callback_count(ifields);
             auto expected_store_cb_count = expected_callback_count(ofields);
@@ -428,8 +428,8 @@ public:
         return fft_status_from_rocfftparams(ret);
     }
 
-    void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
-                           std::vector<gpubuf>& /* input_data_gpu (unused) */,
+    void multi_gpu_prepare(const std::vector<hostbuf>& input_data_host,
+                           const std::vector<gpubuf>& /* input_data_gpu (unused) */,
                            std::vector<void*>& mgpu_ibuffers,
                            std::vector<void*>& mgpu_obuffers) override
     {

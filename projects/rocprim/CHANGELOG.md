@@ -2,7 +2,22 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 4.4.0 for ROCm 7.13
+## Since last release ROCm 7.13
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
+## Since last release ROCm 7.12
 
 ### Added
 
@@ -13,6 +28,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Reduced build times for unit tests.
 * Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
 
 ### Resolved issues
 
@@ -93,6 +112,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 

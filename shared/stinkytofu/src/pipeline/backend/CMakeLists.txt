@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # Add backend sources to the stinkytofu target
-target_sources(stinkytofu PRIVATE
+target_sources(stinkytofu_objs PRIVATE
     Backend.cpp
     BackendRegistry.cpp
     Gfx1250Backend.cpp

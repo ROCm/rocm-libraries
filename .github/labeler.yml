@@ -14,7 +14,6 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
-  - any-glob-to-any-file: 'shared/rocroller/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "project: hipblaslt-provider":
@@ -24,10 +23,6 @@
 "project: hip-kernel-provider":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
-
-"project: fusilli-provider":
-- changed-files:
-  - any-glob-to-any-file: 'dnn-providers/fusilli-provider/**/*'
 
 "project: hipdnn-integration-tests":
 - changed-files:
@@ -61,6 +56,7 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "ci:hipsparselt-fast":
 - changed-files:
@@ -77,6 +73,10 @@
 "project: none":
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
+
+"project: rocalution":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocalution/**/*'
 
 "project: rocblas":
 - changed-files:
@@ -106,6 +106,10 @@
 "project: rocthrust":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
+
+"project: rpp":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rpp/**/*'
 
 "shared: mxdatagenerator":
 - changed-files:

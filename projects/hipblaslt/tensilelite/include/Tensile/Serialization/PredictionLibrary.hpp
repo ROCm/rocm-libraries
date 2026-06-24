@@ -30,6 +30,12 @@
 
 #include <Tensile/PredictionLibrary.hpp>
 
+#include <Tensile/Debug.hpp>
+#include <Tensile/Macros.hpp>
+#include <iostream>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     namespace Serialization
@@ -101,6 +107,14 @@ namespace TensileLite
                                         solution->sizeMapping.matrixInstruction[2])};
                             }
 
+                            if(Debug::Instance().printPropertyEvaluation()
+                               && solution->sizeMapping.CUOccupancy <= 0)
+                            {
+                                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                                          << solution->sizeMapping.CUOccupancy
+                                          << " (<=0) for solution '" << solution->kernelName
+                                          << "'; clamping to 1 in origami config.\n";
+                            }
                             origami::config_t origami_config = {
                                 .mt = {solution->sizeMapping.macroTile.x,
                                        solution->sizeMapping.macroTile.y,
@@ -109,6 +123,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
+                                .subtile                   = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
@@ -128,3 +143,5 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

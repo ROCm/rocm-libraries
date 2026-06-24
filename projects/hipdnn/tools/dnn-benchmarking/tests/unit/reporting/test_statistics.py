@@ -86,7 +86,7 @@ class TestBenchmarkMetadata:
         assert metadata.warmup_iters == 0
         assert metadata.benchmark_iters == 0
         assert metadata.engine_id == 0
-        assert metadata.gpu_backend == ""
+        assert metadata.timing_backend == ""
         # hostname and timestamp are auto-generated
         assert metadata.hostname != ""
         assert metadata.timestamp != ""
@@ -99,14 +99,14 @@ class TestBenchmarkMetadata:
             warmup_iters=10,
             benchmark_iters=100,
             engine_id=1,
-            gpu_backend="torch",
+            timing_backend="hip",
         )
         assert metadata.graph_name == "test_graph"
         assert metadata.graph_path == "/path/to/graph.json"
         assert metadata.warmup_iters == 10
         assert metadata.benchmark_iters == 100
         assert metadata.engine_id == 1
-        assert metadata.gpu_backend == "torch"
+        assert metadata.timing_backend == "hip"
 
 
 class TestBenchmarkResult:
@@ -127,18 +127,18 @@ class TestBenchmarkResult:
         result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
         assert result.has_kernel_timings is True
 
-    def test_gpu_backend_from_metadata(self) -> None:
-        """Test gpu_backend property reads from metadata."""
-        metadata = BenchmarkMetadata(gpu_backend="torch")
+    def test_timing_backend_from_metadata(self) -> None:
+        """Test timing_backend property reads from metadata."""
+        metadata = BenchmarkMetadata(timing_backend="hip")
         result = BenchmarkResult(
             e2e_timings=[1.0], kernel_timings=[0.5], metadata=metadata
         )
-        assert result.gpu_backend == "torch"
+        assert result.timing_backend == "hip"
 
-    def test_gpu_backend_empty_without_metadata(self) -> None:
-        """Test gpu_backend is empty when no metadata."""
+    def test_timing_backend_empty_without_metadata(self) -> None:
+        """Test timing_backend is empty when no metadata."""
         result = BenchmarkResult(e2e_timings=[1.0])
-        assert result.gpu_backend == ""
+        assert result.timing_backend == ""
 
     def test_to_dict_basic(self) -> None:
         """Test to_dict with basic result."""
@@ -153,7 +153,7 @@ class TestBenchmarkResult:
     def test_to_dict_with_metadata(self) -> None:
         """Test to_dict includes metadata."""
         metadata = BenchmarkMetadata(
-            graph_name="test", gpu_backend="torch", benchmark_iters=100
+            graph_name="test", timing_backend="hip", benchmark_iters=100
         )
         result = BenchmarkResult(
             e2e_timings=[1.0], kernel_timings=[0.5], metadata=metadata
@@ -161,7 +161,7 @@ class TestBenchmarkResult:
         data = result.to_dict()
         assert "metadata" in data
         assert data["metadata"]["graph_name"] == "test"
-        assert data["metadata"]["gpu_backend"] == "torch"
+        assert data["metadata"]["timing_backend"] == "hip"
         assert data["metadata"]["benchmark_iters"] == 100
 
     def test_to_json(self) -> None:
@@ -195,7 +195,7 @@ class TestBenchmarkResult:
                 "warmup_iters": 10,
                 "benchmark_iters": 100,
                 "engine_id": 1,
-                "gpu_backend": "torch",
+                "timing_backend": "hip",
                 "hostname": "test-host",
                 "timestamp": "2026-01-20T12:00:00",
             },
@@ -203,7 +203,38 @@ class TestBenchmarkResult:
         result = BenchmarkResult.from_dict(data)
         assert result.metadata is not None
         assert result.metadata.graph_name == "test_graph"
-        assert result.metadata.gpu_backend == "torch"
+        assert result.metadata.timing_backend == "hip"
+
+    def test_from_dict_accepts_legacy_gpu_backend_metadata(self) -> None:
+        """Test from_dict accepts pre-rename gpu_backend metadata."""
+        data = {
+            "e2e_timings": [1.0],
+            "kernel_timings": None,
+            "metadata": {
+                "graph_name": "test_graph",
+                "gpu_backend": "hip",
+            },
+        }
+        result = BenchmarkResult.from_dict(data)
+        assert result.metadata is not None
+        assert result.metadata.timing_backend == "hip"
+
+    def test_from_dict_drops_legacy_gpu_backend_when_timing_backend_exists(
+        self,
+    ) -> None:
+        """Test from_dict ignores legacy gpu_backend when timing_backend exists."""
+        data = {
+            "e2e_timings": [1.0],
+            "kernel_timings": None,
+            "metadata": {
+                "graph_name": "test_graph",
+                "gpu_backend": "legacy",
+                "timing_backend": "hip",
+            },
+        }
+        result = BenchmarkResult.from_dict(data)
+        assert result.metadata is not None
+        assert result.metadata.timing_backend == "hip"
 
     def test_round_trip_serialization(self, tmp_path) -> None:
         """Test that results survive JSON round-trip."""
@@ -216,7 +247,7 @@ class TestBenchmarkResult:
                 warmup_iters=10,
                 benchmark_iters=100,
                 engine_id=1,
-                gpu_backend="torch",
+                timing_backend="hip",
             ),
         )
 
@@ -228,7 +259,7 @@ class TestBenchmarkResult:
         assert loaded.kernel_timings == original.kernel_timings
         assert loaded.metadata is not None
         assert loaded.metadata.graph_name == original.metadata.graph_name
-        assert loaded.metadata.gpu_backend == original.metadata.gpu_backend
+        assert loaded.metadata.timing_backend == original.metadata.timing_backend
         assert loaded.metadata.benchmark_iters == original.metadata.benchmark_iters
 
     def test_round_trip_no_kernel_timings(self, tmp_path) -> None:

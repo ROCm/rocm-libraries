@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 500      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -15,7 +15,7 @@ GlobalParameters:
   DataInitTypeB: 3
   DataInitTypeC: 0
   DataInitTypeD: 0
-  DataInitTypeE: 3
+  DataInitTypeE: 0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   # Tensor printing controls:
@@ -47,15 +47,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
       UseBias: 1
       BiasSrc: D
-      Activation: 1
+      Activation: True
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
       # UseScaleAlphaVec: 1
@@ -78,7 +78,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -87,8 +87,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [1]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [true]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -109,15 +109,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
       UseBias: 1
       BiasSrc: D
-      Activation: 1
+      Activation: True
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
       # UseScaleAlphaVec: 1
@@ -140,7 +140,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -149,8 +149,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [1]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [true]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -171,15 +171,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
       UseBias: 1
       BiasSrc: D
-      Activation: 1
+      Activation: True
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
       # UseScaleAlphaVec: 1
@@ -202,7 +202,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -211,8 +211,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [1]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [true]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -233,15 +233,15 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
       UseBias: 1
       BiasSrc: D
-      Activation: 1
+      Activation: True
       ActivationType: hipblaslt_all
       ActivationNoGuard: False
       # UseScaleAlphaVec: 1
@@ -264,7 +264,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -273,8 +273,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [1]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [true]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

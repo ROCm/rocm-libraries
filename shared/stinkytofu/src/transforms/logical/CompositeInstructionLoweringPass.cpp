@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -111,8 +112,6 @@ class CompositeInstructionLoweringPassImpl : public Pass {
 
     std::vector<LogicalInstruction*> expandInstruction(LogicalInstruction* irInst, GfxArchID arch) {
         std::vector<LogicalInstruction*> result;
-
-        const std::string logicalName = irInst->getLogicalName();
 
         // ================================================================
         // VAddPKF32: Packed add F32

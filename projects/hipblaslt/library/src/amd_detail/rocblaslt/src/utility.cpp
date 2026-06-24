@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,11 +92,11 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E5M2";
     case HIP_R_8I:
         return "R_8I";
-    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "R_6F_E2M3";
-    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E3M2):
         return "R_6F_E3M2";
-    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+    case static_cast<hipDataType>(HIP_R_4F_E2M1):
         return "R_4F_E2M1";
     default:
         return "Invalid";
@@ -119,6 +119,10 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f32_r";
     case HIP_R_64F:
         return "f64_r";
+    case HIP_C_32F:
+        return "f32_c";
+    case HIP_C_64F:
+        return "f64_c";    
     case HIP_R_16F:
         return "f16_r";
     case HIP_R_16BF:
@@ -135,11 +139,11 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
-    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E2M3):
         return "f6_r";
-    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+    case static_cast<hipDataType>(HIP_R_6F_E3M2):
         return "bf6_r";
-    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+    case static_cast<hipDataType>(HIP_R_4F_E2M1):
         return "f4_r";
     default:
         return "invalid";
@@ -260,6 +264,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_A_SCALE_MODE";
     case ROCBLASLT_MATMUL_DESC_B_SCALE_MODE:
         return "MATMUL_DESC_B_SCALE_MODE";
+    case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+        return "MATMUL_DESC_SM_COUNT_TARGET";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
         return "MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT:
@@ -268,8 +274,12 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT";
     case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
         return "MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT";
+    case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
+        return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
+    case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+        return "MATMUL_DESC_BIAS_BATCH_STRIDE";
     default:
         return "Invalid";
     }
@@ -304,6 +314,16 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_UE8M0";
     case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
         return "Block_32_UE8M0_32_8_EXT";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
+        return "Block_16_UE8M0";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
+        return "Block_32_UE4M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
+        return "Block_16_UE4M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
+        return "Block_32_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
+        return "Block_16_UE5M3";
     default:
         return "Invalid";
     }

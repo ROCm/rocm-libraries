@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace asm_sdpa_engine
 {
@@ -21,6 +22,7 @@ struct SdpaFwdParams
     int64_t kUid;
     int64_t vUid;
     int64_t oUid;
+    int64_t lseUid = -1; // LSE output, -1 = disabled
 
     // Tensor dimensions
     unsigned int batchSize; // B
@@ -51,6 +53,19 @@ struct SdpaFwdParams
     unsigned int oStrideSeq;
     unsigned int oStrideHead;
     unsigned int oStrideBatch;
+
+    // LSE tensor stride (in elements).  The forward kernel args struct
+    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field.
+    unsigned int lseStrideHead = 0;
+
+    // Tile size
+    unsigned int tileSizeQo;
+
+    // Architecture
+    std::string archString;
+
+    // Mask type
+    bool noMask;
 
     // Attention scale
     float attnScale;

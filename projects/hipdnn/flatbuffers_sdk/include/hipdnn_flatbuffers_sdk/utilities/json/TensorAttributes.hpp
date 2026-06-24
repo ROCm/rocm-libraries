@@ -49,6 +49,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
         case data_objects::TensorValue::Float64Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Float64Value()->value();
             break;
+        case data_objects::TensorValue::BoolValue:
+            tensorAttrJson["value"] = tensorAttr.value_as_BoolValue()->value();
+            break;
         default:
             break;
         }
@@ -126,6 +129,13 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
             auto val = entry.at("value").get<double>();
             const data_objects::Float64Value doubleVal(val);
             valueOffset = builder.CreateStruct(doubleVal).Union();
+            break;
+        }
+        case data_objects::TensorValue::BoolValue:
+        {
+            auto val = entry.at("value").get<bool>();
+            const data_objects::BoolValue boolVal(val);
+            valueOffset = builder.CreateStruct(boolVal).Union();
             break;
         }
         default:

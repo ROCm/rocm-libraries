@@ -52,13 +52,44 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
+# Default to a ROCm Clang toolchain when the user hasn't supplied one. When we
+# provide the default, treat this as a standalone build and pull third-party
+# deps via FetchContent (see cmake/ThirdParty.cmake).
+#
+# CMake limitation: the toolchain file is processed *before* this CMakeLists.txt
+# is evaluated, so this assignment only takes effect on subsequent `cmake`
+# invocations (the cache value is then picked up). On the very first configure
+# run the toolchain file is not applied. Re-running `cmake` from the same build
+# directory (or passing -DCMAKE_TOOLCHAIN_FILE=... explicitly) activates it.
+if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file")
+    set(_MIOPEN_STANDALONE_DEFAULT ON)
+else()
+    set(_MIOPEN_STANDALONE_DEFAULT OFF)
+endif()
+option(MIOPEN_STANDALONE_BUILD
+    "Fetch third-party dependencies via FetchContent for a standalone build"
+    ${_MIOPEN_STANDALONE_DEFAULT})
+unset(_MIOPEN_STANDALONE_DEFAULT)
+
 project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(CTest)
+# When MIOpen is consumed via add_subdirectory in a parent superbuild, the parent
+# typically owns the CTest lifecycle. include(CTest) at the top of the project
+# would also unconditionally set BUILD_TESTING=ON, which may not be what the
+# parent wants.
+if(PROJECT_IS_TOP_LEVEL)
+    include(CTest)
+else()
+    if(NOT DEFINED BUILD_TESTING)
+        option(BUILD_TESTING "Build testing" ON)
+    endif()
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -72,6 +103,7 @@ include(CheckCXXCompilerFlag)
 include(ROCMHeaderWrapper)
 
 include(cmake/ClangCheck.cmake)
+include(cmake/CheckPreCommit.cmake)
 
 # Build library with Beta APIs
 add_definitions("-DMIOPEN_BETA_API=1")
@@ -85,7 +117,14 @@ set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 # By default build shared libraries
 option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
-list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+# PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
+# ClangCheck, etc.) take precedence over any same-named modules a parent
+# superbuild may have placed on CMAKE_MODULE_PATH before our subdirectory ran.
+list(PREPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
+if(MIOPEN_STANDALONE_BUILD)
+    include(cmake/ThirdParty.cmake)
+endif()
 
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen now depends on SQLite as well
@@ -116,7 +155,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.1)
+rocm_setup_version(VERSION 3.5.2)
 
 include(TargetFlags)
 
@@ -186,7 +225,7 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
-    
+
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
@@ -324,7 +363,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             include(cmake/Dependencies.cmake)
 
             execute_process (
-                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${CMAKE_SOURCE_DIR}/requirements.txt"
+                COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*\.\./composablekernel' ${PROJECT_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
             if(_match)
@@ -478,8 +517,7 @@ else()
     message(STATUS "clang-offload-bundler not found")
 endif()
 
-set_var_to_condition(MIOPEN_USE_MLIR_DEFAULT NOT (NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR}))
-option(MIOPEN_USE_MLIR "Use MLIR compilation backend" ${MIOPEN_USE_MLIR_DEFAULT})
+option(MIOPEN_USE_MLIR "Use MLIR compilation backend" OFF)
 
 if(MIOPEN_USE_MLIR)
     if(NOT ${BUILD_SHARED_LIBS} AND ${MIOPEN_USE_COMGR})
@@ -569,9 +607,9 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
 endif()
 
 if(WIN32)
-    set(KERNELS_BINARY_DIR ${PROJECT_BINARY_DIR}/bin)
+    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 else()
-    set(KERNELS_BINARY_DIR ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR})
+    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${DATABASE_INSTALL_DIR})
 endif()
 
 set(MIOPEN_GPU_SYNC Off CACHE BOOL "")
@@ -653,7 +691,12 @@ set(KERNELS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/src/kernels)
 find_program(UNZIPPER bzip2 REQUIRED)
 file(MAKE_DIRECTORY ${KERNELS_BINARY_DIR})
 
-add_custom_target(generate_kernels ALL)
+# Project-prefixed aggregator avoids collisions when included via add_subdirectory
+# in a superbuild. Unprefixed alias preserved for standalone back-compat.
+add_custom_target(miopen-generate-kernels ALL)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(generate_kernels DEPENDS miopen-generate-kernels)
+endif()
 
 set(MIOPEN_USE_SQLITE_PERFDB Off CACHE BOOL "Use sqlite perfdb instead of text-based.")
 if(MIOPEN_USE_SQLITE_PERFDB)
@@ -679,10 +722,10 @@ function(unpack_db db_bzip2_file)
                            COMMAND $<TARGET_FILE:sqlite2txt> ${KERNELS_BINARY_DIR}/${__fname} ${KERNELS_BINARY_DIR}/${__fname}.txt
         )
         add_custom_target(generate_${__tname}_txt ALL DEPENDS ${KERNELS_BINARY_DIR}/${__fname}.txt)
-        add_dependencies(generate_kernels generate_${__tname}_txt)
+        add_dependencies(miopen-generate-kernels generate_${__tname}_txt)
         set(__fname ${__fname}.txt)
     else()
-        add_dependencies(generate_kernels generate_${__tname})
+        add_dependencies(miopen-generate-kernels generate_${__tname})
     endif()
     set(__fname ${__fname} PARENT_SCOPE)
 endfunction()
@@ -710,7 +753,7 @@ function(install_gpu_databases gfx_target)
     if("${gfx_target}" IN_LIST _targets)
         message(FATAL_ERROR "AMDGPU target ${gfx_target} already defined")
     endif()
-    
+
     set(KDB_FILENAME "${gfx_target}.kdb.bz2")
     if(${KDB_FILENAME} IN_LIST KDB_BZ2_FILES)
         set(KDB_COMPONENT_NAME "${gfx_target}kdb")
@@ -733,7 +776,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030)
+set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project
@@ -757,13 +800,15 @@ if(NOT MIOPEN_TEST_DISCRETE)
 list(APPEND CPACK_COMPONENTS_ALL clients)
 endif()
 
-rocm_create_package(
-    NAME MIOpen-${MIOPEN_BACKEND}
-    DESCRIPTION "AMD DNN Library"
-    MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
-    LDCONFIG
-    # DEPENDS rocm-opencl hip-rocclr tinygemm
-)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    rocm_create_package(
+        NAME MIOpen-${MIOPEN_BACKEND}
+        DESCRIPTION "AMD DNN Library"
+        MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
+        LDCONFIG
+        # DEPENDS rocm-opencl hip-rocclr tinygemm
+    )
+endif()
 
 include(EnableCompilerWarnings)
 set(MIOPEN_TIDY_ERRORS ERRORS * -readability-inconsistent-declaration-parameter-name)
@@ -775,6 +820,7 @@ elseif(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
 endif()
 
 include(ClangTidy)
+# TODO: Remove the -nogpulib workaround once clang-tidy version is bumped to clang-tidy-23+
 enable_clang_tidy(
     CHECKS
         ${MIOPEN_TIDY_CHECKS}
@@ -784,6 +830,7 @@ enable_clang_tidy(
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
+        -nogpulib
 )
 
 include(CppCheck)
@@ -817,6 +864,12 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
+        # These are HIP kernel files compiled at runtime with -D defines; cppcheck
+        # evaluates undefined macros as 0, causing false array-size errors and
+        # division/modulo-by-zero in #if preprocessor conditions.
+        *:*src/kernels/MIOpenConvFwd_LxL_11.cpp
+        *:*src/kernels/MIOpenConvDirBatchNormActivHip.cpp
+        *:*src/kernels/MIOpenConvDirUniHip.cpp
         knownConditionTrueFalse:*src/kernels/static_composable_kernel/*/*
         redundantAssignment:*src/kernels/static_composable_kernel/*/*
         unreadVariable:*src/kernels/static_composable_kernel/*/*
@@ -884,9 +937,9 @@ enable_cppcheck(
 )
 
 
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)

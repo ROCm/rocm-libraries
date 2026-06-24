@@ -1,0 +1,155 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[tool.coverage.run]
+branch = true
+concurrency = ["multiprocessing"]
+omit = [
+    "*/Tests/*",
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/build_tmp/*",
+    "*/build/*",
+    "*/.tox/*",
+    "*/site-packages/*",
+    "*/conftest.py",
+    "*/setup.py",
+    "*/.eggs/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+skip_empty = true
+sort = "Cover"
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstract",
+    "@abstractmethod",
+    "pass",
+    "\\.\\.\\.",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "TensileLite Code Coverage Report"
+show_contexts = true
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+show_contexts = true
+
+[tool.pytest.ini_options]
+# You can also move pytest config here if desired
+testpaths = ["Tensile/Tests", "rocisa/test"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[project]
+name = "tensile"
+version = "5.0.0"
+requires-python = ">=3.10"
+description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
+license = {text = "MIT"}
+dependencies = [
+    "packaging",
+    "pyyaml",
+    "msgpack",
+    "joblib>=1.4.0",
+    "simplejson",
+    "ujson",
+    "orjson",
+    "yappi",
+    "setuptools",
+    "nanobind",
+    "cmake",
+    "numpy",
+    "hip-python",
+]
+
+[project.scripts]
+Tensile = "Tensile.Tensile:main"
+TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
+TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
+TensileGetPath = "Tensile:PrintTensileRoot"
+TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
+TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
+
+[dependency-groups]
+dev = [
+    "rocisa",
+    "pytest>=5.4.1",
+    "pytest-xdist>=1.32.0",
+    "pytest-cov",
+    "syrupy",
+    "filelock",
+    "invoke",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["Tensile*"]
+
+[tool.setuptools.package-data]
+Tensile = ["cmake/*"]
+
+[tool.uv.sources]
+rocisa = { workspace = true }
+
+[tool.uv.workspace]
+members = ["rocisa"]
+
+# Mutation testing (mutmut 3.x) — slice-1 pilot.
+# See the Mutation testing section of
+# Tensile/Tests/unit/characterization/README.md (full plan archived in the
+# internal TensileLiteQualityTools repo, evidence-archive/).
+# mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
+# tests there, so the WHOLE Tensile package is copied (for imports to resolve)
+# while `only_mutate` restricts which files are actually mutated to the slice.
+# `also_copy` must include pytest.ini (markers + config; not auto-copied).
+[tool.mutmut]
+source_paths = ["Tensile"]
+only_mutate = [
+    "Tensile/Common/Utilities.py",
+    "Tensile/TensileLogic/ValidChipId.py",
+    "Tensile/TensileLogic/ValidMatrixInstruction.py",
+    "Tensile/TensileLogic/ValidWorkGroup.py",
+    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py",
+]
+do_not_mutate = [
+    "Tensile/Tests/*",
+    "*/Tests/*",
+    "*/test_*.py",
+    "*/conftest.py",
+]
+pytest_add_cli_args_test_selection = [
+    "Tensile/Tests/unit/characterization/CommonUtilities",
+    "Tensile/Tests/unit/characterization/TensileLogic",
+]
+also_copy = ["pytest.ini"]
+# mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
+# in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
+# sys.modules; the later "Running stats" phase re-imports rocisa in the SAME
+# process -> nanobind duplicate registration -> SIGABRT (exit 134, no Python
+# traceback). Per-mutant runs are fork children (one rocisa import each) so they
+# are safe; only the in-process gather is the hazard. To re-enable covered-lines
+# later, pre-import rocisa at interpreter startup (e.g. a sitecustomize.py on the
+# path) so the unload snapshot keeps it loaded. Verified in-container 2026-06-07.
+mutate_only_covered_lines = false
+# max_stack_depth = 8  # report's stack-depth control (keeps broad char tests from
+                       # being "the relevant test" for everything); tune after the pilot.

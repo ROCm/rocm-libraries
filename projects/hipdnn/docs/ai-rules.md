@@ -4,6 +4,37 @@ alwaysApply: true
 
 # AI Rules for hipDNN Project
 
+## Project AI Skills
+
+Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below describe what each one does and when to suggest it.
+
+**To use a skill, follow this sequence — do not read `SKILL.md` and execute its steps directly.** That bypasses the install path the skill is meant to be invoked through, and misses the entire point of having skills.
+
+1. **Check whether the skill is loaded in this session.** Look at the available-skills list in the session's system reminder. The skill being present under `tools/ai/skills/` is *not* enough — it's invocable only after it is installed into the active host's skills directory and surfaced in the session's skill list.
+2. **If not loaded, ask the user which skill(s) to install and which host/scope.** Use `--codex` for Codex user-global skills (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`), `--claude` for Claude user-global skills (`~/.claude/skills`), or `--target <dir>` for an explicit workspace or user scope. Then run one of:
+   ```
+   python3 tools/ai/install-skills.py --codex <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --claude <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --target <target-skills-dir> <skill-name> [<skill-name> ...]
+   ```
+   Use `python3 tools/ai/install-skills.py --list` to see what's available. If the user names skills, pass them explicitly; if they ask for a full refresh, omit names to install all available skills. The installer copies skills as snapshots, updates stale copies by comparing content hashes, and skips existing symlinks rather than replacing them. After changing committed skill packages, run `python3 tools/ai/validate-skills.py` before offering or installing them.
+3. **Invoke via the active host's skill syntax.** In Codex, use `$hipdnn-superbuild`, `$hipdnn-review`, or the other `$skill-name` form. In Claude, use the slash-command adapters such as `/hipdnn-superbuild` or `/hipdnn-review`. The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
+
+When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
+
+- `tools/ai/skills/pr-summary/SKILL.md`
+  - Drafts or revises new or existing pull request titles and bodies with hipDNN's preferred summary, risk, testing, and technical-change format.
+  - Suggest this skill when the user asks for PR creation, PR body updates, PR summaries, risk summaries, testing sections, or review-ready PR descriptions.
+- `tools/ai/skills/hipdnn-review/SKILL.md`
+  - Reviews hipDNN pull requests or local diffs for correctness, public API compatibility, provider behavior, resource ownership, code reuse, and testing coverage/quality.
+  - Suggest this skill when the user asks for a hipDNN code review, PR review, merge-readiness assessment, or a focused review of testing quality and coverage.
+- `tools/ai/skills/hipdnn-superbuild/SKILL.md`
+  - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
+  - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
+- `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
+  - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
+  - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+
 ## Project Overview & Architecture
 
 hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
@@ -169,19 +200,19 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionPlannerNchwFp32   GpuTestActivationKernelNchwFp32
-GpuTestExecutionPlanBuilderFp32            IntegrationGraphFusion
+IntegrationGpuConvolutionPlannerNchwFp32   TestGpuActivationKernelNchwFp32
+TestGpuExecutionPlanBuilderFp32            IntegrationGraphFusion
 TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 ```
 

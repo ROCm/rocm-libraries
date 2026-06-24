@@ -15,6 +15,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -26,7 +32,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.3.0" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.4.1" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -59,10 +65,14 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
+option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
+option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
+       "Install TensileLite Python packages and test tools into the test artifact tree."
+       OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -88,6 +98,10 @@ if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
 
+# mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
+cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Use mxDataGenerator for MX format data generation (clients/tests)." ON "NOT WIN32" OFF)
+message(STATUS "Enable mxDataGenerator for MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
+
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
@@ -105,6 +119,7 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
@@ -241,18 +256,61 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
-    # Re-enable once origami is available in TheRock.
-    # if(HIPBLASLT_ENABLE_THEROCK)
-    #     find_package(origami REQUIRED)
-    if(FALSE)
-    else()
-        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(origami CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::origami)
         block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_INSTALL OFF)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+            set(ORIGAMI_ENABLE_FETCH ON)
+            set(ORIGAMI_BUILD_TESTING OFF)
+            set(ORIGAMI_ENABLE_PYTHON OFF)
+            set(BUILD_TESTING OFF)
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
         endblock()
     endif()
+endif()
+
+# INTERFACE library that owns the public hipblaslt API headers (the in-tree
+# `library/include` subtree plus its build-tree counterpart, where
+# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
+# include directories through a target lets consumers pick them up via the
+# build graph rather than via `target_include_directories(<tgt> BEFORE
+# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
+# link because the in-tree headers `#include <hip/...>`.
+add_library(hipblaslt-headers INTERFACE)
+add_library(hipblaslt::headers ALIAS hipblaslt-headers)
+target_include_directories(hipblaslt-headers
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
+)
+target_link_libraries(hipblaslt-headers INTERFACE hip::host)
+
+# `hipblaslt-version.h` is consumed by `library/include/hipblaslt/hipblaslt.h`
+# (only included when HIPBLASLT_ENABLE_HOST is ON). When HOST is ON, the
+# canonical `configure_file` call in `library/include/CMakeLists.txt`
+# regenerates the same file from the same template; this generation is
+# unconditional only because the file is cheap to produce.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
+)
+
+# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
+# only built when at least one consumer needs it. tensilelite/client and
+# tensilelite/tests reach for it on the same condition, so we drive the
+# subdir from here to keep the dependency wiring close to the gate that
+# decides whether to build it at all.
+set(_hipblaslt_mxdatagen_enabled FALSE)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR
+        AND (HIPBLASLT_ENABLE_CLIENT
+             OR TENSILELITE_ENABLE_CLIENT
+             OR TENSILELITE_BUILD_TESTING))
+    set(_hipblaslt_mxdatagen_enabled TRUE)
+endif()
+if(_hipblaslt_mxdatagen_enabled)
+    add_subdirectory(clients/common)
 endif()
 
 add_subdirectory(tensilelite)
@@ -519,6 +577,89 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     )
 endif()
 
+# Install TensileLite Python packages and test tools for artifact-based testing.
+# Produces:
+#   share/hipblaslt/tensilelite/Tensile/     — Tensile Python package
+#   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
+#   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
+    set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
+    set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+
+    # Tensile Python package
+    install(
+        DIRECTORY "${_tensilelite_src}/Tensile/"
+        DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN ".pytest_cache" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+
+    # Scripts used by unit tests
+    install(
+        FILES "${_tensilelite_src}/scripts/analyze_timing.py"
+        DESTINATION "${_tensilelite_install_dest}/scripts"
+        COMPONENT tests
+    )
+    # Preserve executable permissions on entry points
+    install(
+        PROGRAMS
+            "${_tensilelite_src}/Tensile/bin/Tensile"
+            "${_tensilelite_src}/Tensile/bin/TensileCreateLibrary"
+        DESTINATION "${_tensilelite_install_dest}/Tensile/bin"
+        COMPONENT tests
+    )
+
+    # rocisa Python package — normalize rocisa/rocisa/ to top-level rocisa/
+    install(
+        DIRECTORY "${_tensilelite_src}/rocisa/rocisa/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+    # rocisa native extension
+    if(TARGET _rocisa)
+        install(
+            TARGETS _rocisa
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+    endif()
+    # Co-install stinkytofu shared library next to _rocisa
+    if(TARGET stinkytofu AND NOT WIN32)
+        install(FILES $<TARGET_FILE:stinkytofu>
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+        install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+            DESTINATION "${_tensilelite_install_dest}/rocisa"
+            COMPONENT tests
+        )
+    endif()
+
+    # rocisa tests
+    install(
+        DIRECTORY "${_tensilelite_src}/rocisa/test/"
+        DESTINATION "${_tensilelite_install_dest}/rocisa_tests"
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
+
+    # pytest config (marker registration, xfail_strict)
+    install(
+        FILES "${_tensilelite_src}/pytest.ini"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+        OPTIONAL
+    )
+
+    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
+    # common/generator tests are enabled in CI.
+endif()
+
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     install(
         TARGETS
@@ -636,4 +777,24 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
+endif()
+
+if(HIPBLASLT_VALIDATE_INSTALL)
+    set(_hipblaslt_validate_py "${Python_EXECUTABLE}")
+    if(NOT _hipblaslt_validate_py)
+        set(_hipblaslt_validate_py python3)
+    endif()
+    install(CODE "
+        set(_root \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}\")
+        message(STATUS \"hipBLASLt: validating install tree at \${_root}\")
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/validate_library_layout.py\" \"\${_root}\"
+            RESULT_VARIABLE _layout_rc)
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_dat_integrity.py\" \"\${_root}/lib/hipblaslt/library\"
+            RESULT_VARIABLE _dat_rc)
+        if(NOT _layout_rc EQUAL 0 OR NOT _dat_rc EQUAL 0)
+            message(FATAL_ERROR \"hipBLASLt post-install validation failed (layout=\${_layout_rc} dat=\${_dat_rc})\")
+        endif()
+    ")
 endif()

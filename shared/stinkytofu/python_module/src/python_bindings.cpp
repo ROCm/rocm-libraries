@@ -22,22 +22,29 @@
  * ************************************************************************ */
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
+#include <cstdint>
 #include <sstream>
 
+#include "HardwareCaps.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -46,6 +53,7 @@ using namespace stinkytofu;
 void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
+    BackendRegistry::registerAllBackends();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
@@ -53,10 +61,48 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
         .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+        .def("setOutputName", &StinkyAsmModule::setOutputName,
+             "Set the name used for output files (e.g. cost file); use full kernel name to match "
+             ".o basename")
+        .def("getOutputName", &StinkyAsmModule::getOutputName,
+             "Get the output file basename; empty means use getName()")
+        .def("setOutputDir", &StinkyAsmModule::setOutputDir,
+             "Set output directory for cost file: comparison_output/<yaml_name>; file goes to "
+             "<outputDir>/<kernel_name>/aggregated_instruction_cost.txt")
+        .def("getOutputDir", &StinkyAsmModule::getOutputDir,
+             "Get the output directory; empty means current directory")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
+             "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module");
+             "Run the optimization pipeline on this module")
+        .def("setPluginDataI64", &StinkyAsmModule::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModule::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModule::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def(
+            "registerPassAtExtensionPoint",
+            [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
+                self.getPassBuilder().registerAtExtensionPoint(
+                    ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                        auto pass = PassBuilder::createPassByName(passName, module);
+                        if (pass) PM.addPass(std::move(pass));
+                    });
+            },
+            nb::arg("extensionPoint"), nb::arg("passName"),
+            "Register a named C++ pass at a pipeline extension point");
+
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     // ========================================================================
     // Register Types
@@ -182,6 +228,54 @@ NB_MODULE(_stinkytofu, m) {
     // Architecture IDs
     // ========================================================================
     nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+
+    // ========================================================================
+    // Toolchain capability probing (via comgr)
+    // ========================================================================
+    m.def("hasComgrSupport", &hasComgrSupport,
+          "Return True if this build was compiled with comgr support");
+
+    m.def(
+        "probeToolchainCaps",
+        [](std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
+            GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+            AsmCapsConfig caps = ToolchainCaps::probe(archId);
+            nb::dict result;
+            result["VgprMsbMode"] = static_cast<int>(caps.vgprMsbMode);
+            return result;
+        },
+        nb::arg("arch"),
+        "Probe toolchain capabilities for [major, minor, stepping]. Results are cached.");
+
+    m.def(
+        "tryAssemble",
+        [](const std::string& asmString, std::array<int, 3> arch) {
+            auto* info = ArchHelper::getInstance().getArchInfo(arch[0], arch[1], arch[2]);
+            if (!info)
+                throw nb::value_error(("Unsupported architecture: gfx" + std::to_string(arch[0]) +
+                                       std::to_string(arch[1]) + std::to_string(arch[2]))
+                                          .c_str());
+            // Build ISA name: amdgcn-amd-amdhsa--gfxMAJORMINORSTEPPING
+            static constexpr char kHex[] = "0123456789abcdef";
+            std::string isaName = "amdgcn-amd-amdhsa--gfx";
+            isaName += std::to_string(info->major);
+            isaName += std::to_string(info->minor);
+            isaName += kHex[info->stepping & 0xF];
+            return tryAssembleWithComgr(asmString, isaName, info->waveFrontSize);
+        },
+        nb::arg("asm_string"), nb::arg("arch"),
+        "Try to assemble the given string for [major, minor, stepping]. Returns True if assembly "
+        "succeeds.");
+
+    nb::enum_<VgprMsbMode>(m, "VgprMsbMode")
+        .value("NONE", VgprMsbMode::None)
+        .value("MSB8", VgprMsbMode::Msb8)
+        .value("MSB16", VgprMsbMode::Msb16);
 
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container
@@ -353,7 +447,7 @@ NB_MODULE(_stinkytofu, m) {
     // which provides validation and automatic argument reordering.
     m.def(
         "Intrinsic",
-        [](const std::string& name, nb::kwargs kwargs) {
+        [](const std::string& name, const nb::kwargs& kwargs) {
             // Convert kwargs to ordered vector of registers
             // Note: Python dicts maintain insertion order (Python 3.7+)
             std::vector<StinkyRegister> args;
@@ -397,6 +491,44 @@ NB_MODULE(_stinkytofu, m) {
         "    - float literals (0.0, 1.0, 3.14, etc.)\n"
         "    - string literals (for special values)\n\n"
         "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
+
+    // ========================================================================
+    // Architecture support query
+    // ========================================================================
+    m.def(
+        "isSupportedByStinkyTofu",
+        [](std::array<int, 3> arch) { return BackendRegistry::getArchPipeline(arch) != nullptr; },
+        nb::arg("arch"),
+        "Return True if the given architecture [major, minor, stepping] has a StinkyTofu backend");
+    m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
+          "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
+          "[\"gfx1250\"]).");
+
+    // ========================================================================
+    // Hardware capability dictionaries (replaces rocisa getAsmCaps/etc.)
+    // ========================================================================
+    m.def(
+        "getHardwareCaps",
+        [](std::array<int, 3> arch) {
+            auto caps = HardwareCaps::query(arch[0], arch[1], arch[2]);
+
+            nb::dict asmCaps, archCaps, regCaps, asmBugs;
+            for (auto& [k, v] : caps.asmCaps) asmCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.archCaps) archCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.regCaps) regCaps[k.c_str()] = v;
+            for (auto& [k, v] : caps.asmBugs) asmBugs[k.c_str()] = v;
+
+            nb::dict result;
+            result["asmCaps"] = asmCaps;
+            result["archCaps"] = archCaps;
+            result["regCaps"] = regCaps;
+            result["asmBugs"] = asmBugs;
+            return result;
+        },
+        nb::arg("arch"),
+        "Return hardware capability dicts for [major, minor, stepping].\n\n"
+        "Returns a dict with keys 'asmCaps', 'archCaps', 'regCaps', 'asmBugs',\n"
+        "matching the rocisa getAsmCaps()/getArchCaps()/getRegCaps()/getAsmBugs() API.");
 
     // ========================================================================
     // Logical Instruction Counting (ported from rocisa)

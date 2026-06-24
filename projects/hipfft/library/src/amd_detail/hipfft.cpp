@@ -20,12 +20,15 @@
 
 #include "hipfft/hipfft.h"
 #include "../../../shared/client_data_layout_helpers.h"
+#include "../../../shared/gpubuf.h"
 #include "../../../shared/hipfft_brick.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "hipfft/hipfftXt.h"
 #include "rocfft/rocfft.h"
+#include "rocfft_wrapper.h"
 #include <algorithm>
 #include <cstring> // std::memset
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -55,6 +58,24 @@
             return code;              \
         }                             \
     }
+
+// check plan creation - some might fail for specific placement, so
+// maintain a count of how many got created, and clean up the plans
+// if some failed.
+template <typename... Params>
+static void ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan_wrapper_t& plan,
+                                      unsigned int&          plans_created,
+                                      Params&&... params)
+{
+    if(plan.alloc_with_err(std::forward<Params>(params)...) == rocfft_status_success)
+    {
+        ++plans_created;
+    }
+    else
+    {
+        plan.free();
+    }
+}
 
 struct hipfftIOType
 {
@@ -336,10 +357,10 @@ struct hipfftHandle_t
 
     // Due to hipfftExec** compatibility to cuFFT, we have to reserve all 4 types
     // rocfft handle separately here.
-    rocfft_plan ip_forward = nullptr;
-    rocfft_plan op_forward = nullptr;
-    rocfft_plan ip_inverse = nullptr;
-    rocfft_plan op_inverse = nullptr;
+    rocfft_plan_wrapper_t ip_forward;
+    rocfft_plan_wrapper_t op_forward;
+    rocfft_plan_wrapper_t ip_inverse;
+    rocfft_plan_wrapper_t op_inverse;
 
     // Return true if the plans have been initialized - hipfftCreate
     // merely allocates a handle and a hipfftMakePlan* API initializes
@@ -349,11 +370,10 @@ struct hipfftHandle_t
         return ip_forward || op_forward || ip_inverse || op_inverse;
     }
 
-    rocfft_execution_info info                = nullptr;
-    void*                 workBuffer          = nullptr;
-    size_t                workBufferSize      = 0;
-    bool                  autoAllocate        = true;
-    bool                  workBufferNeedsFree = false;
+    rocfft_execution_info_wrapper_t info;
+    gpubuf                          workBuffer;
+    size_t                          workBufferSize = 0;
+    bool                            autoAllocate   = true;
 
     void** load_callback_ptrs       = nullptr;
     void** load_callback_data       = nullptr;
@@ -400,6 +420,10 @@ try
 catch(hipfftResult e)
 {
     return e;
+}
+catch(const DEVICEBUF_MEM_USAGE& e)
+{
+    return HIPFFT_ALLOC_FAILED;
 }
 catch(...)
 {
@@ -628,16 +652,22 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             return HIPFFT_NOT_IMPLEMENTED;
     }
 
-    const bool isrealcomplex = !iotype.is_complex_to_complex();
+    const bool                        isrealcomplex = !iotype.is_complex_to_complex();
+    rocfft_plan_description_wrapper_t ip_forward_desc;
+    rocfft_plan_description_wrapper_t op_forward_desc;
+    rocfft_plan_description_wrapper_t ip_inverse_desc;
+    rocfft_plan_description_wrapper_t op_inverse_desc;
+    ip_forward_desc.alloc();
+    op_forward_desc.alloc();
+    ip_inverse_desc.alloc();
+    op_inverse_desc.alloc();
 
-    rocfft_plan_description ip_forward_desc = nullptr;
-    rocfft_plan_description op_forward_desc = nullptr;
-    rocfft_plan_description ip_inverse_desc = nullptr;
-    rocfft_plan_description op_inverse_desc = nullptr;
-    rocfft_plan_description_create(&ip_forward_desc);
-    rocfft_plan_description_create(&op_forward_desc);
-    rocfft_plan_description_create(&ip_inverse_desc);
-    rocfft_plan_description_create(&op_inverse_desc);
+    std::reference_wrapper<rocfft_plan_description_wrapper_t> fwd_descs[]
+        = {ip_forward_desc, op_forward_desc};
+    std::reference_wrapper<rocfft_plan_description_wrapper_t> inverse_descs[]
+        = {ip_inverse_desc, op_inverse_desc};
+    std::reference_wrapper<rocfft_plan_description_wrapper_t> all_descs[]
+        = {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc};
 
     plan->lengths.assign(rm_lengths, rm_lengths + dim);
     const std::vector<size_t> cm_lengths_vec(plan->lengths.rbegin(), plan->lengths.rend());
@@ -736,70 +766,68 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
         // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
         // description:
-        auto hipBricks2Fields = [](std::vector<hipfft_brick>& hipBricks, rocfft_field& destField) {
-            for(const auto& brick : hipBricks)
-            {
-                // rm -> cm
-                auto cm_lower = brick.field_lower;
-                std::reverse(cm_lower.begin(), cm_lower.end());
-                auto cm_upper = brick.field_upper;
-                std::reverse(cm_upper.begin(), cm_upper.end());
-                auto cm_stride = brick.brick_stride;
-                std::reverse(cm_stride.begin(), cm_stride.end());
+        auto hipBricks2Fields
+            = [](std::vector<hipfft_brick>& hipBricks, rocfft_field_wrapper_t& destField) {
+                  for(const auto& brick : hipBricks)
+                  {
+                      // rm -> cm
+                      auto cm_lower = brick.field_lower;
+                      std::reverse(cm_lower.begin(), cm_lower.end());
+                      auto cm_upper = brick.field_upper;
+                      std::reverse(cm_upper.begin(), cm_upper.end());
+                      auto cm_stride = brick.brick_stride;
+                      std::reverse(cm_stride.begin(), cm_stride.end());
 
-                rocfft_brick rbrick = nullptr;
-                if(rocfft_brick_create(&rbrick,
-                                       cm_lower.data(),
-                                       cm_upper.data(),
-                                       cm_stride.data(),
-                                       cm_lower.size(),
-                                       brick.device)
-                   != rocfft_status_success)
-                    throw std::runtime_error("create brick failed");
-                if(rocfft_field_add_brick(destField, rbrick) != rocfft_status_success)
-                    throw std::runtime_error("add brick failed");
-                rocfft_brick_destroy(rbrick);
-            }
-        };
+                      rocfft_brick_wrapper_t rbrick;
+                      rbrick.alloc(cm_lower.data(),
+                                   cm_upper.data(),
+                                   cm_stride.data(),
+                                   cm_lower.size(),
+                                   brick.device);
+                      if(rocfft_field_add_brick(destField, rbrick) != rocfft_status_success)
+                          throw std::runtime_error("add brick failed");
+                  }
+              };
 
-        rocfft_field spaceField = nullptr;
-        if(rocfft_field_create(&spaceField) != rocfft_status_success)
-            throw std::runtime_error("space-time field create failed");
+        rocfft_field_wrapper_t spaceField;
+        spaceField.alloc();
         hipBricks2Fields(plan->spaceBricks, spaceField);
 
-        rocfft_field frequencyField = nullptr;
-        if(rocfft_field_create(&frequencyField) != rocfft_status_success)
-            throw std::runtime_error("space-time field create failed");
+        rocfft_field_wrapper_t frequencyField;
+        frequencyField.alloc();
         hipBricks2Fields(plan->freqBricks, frequencyField);
 
-        for(auto rocfft_desc : {ip_forward_desc, op_forward_desc})
+        for(auto& rocfft_desc : fwd_descs)
         {
-            rocfft_plan_description_add_infield(rocfft_desc, spaceField);
-            rocfft_plan_description_add_outfield(rocfft_desc, frequencyField);
+            ROC_FFT_CHECK_INVALID_VALUE(
+                rocfft_plan_description_add_infield(rocfft_desc.get(), spaceField));
+            ROC_FFT_CHECK_INVALID_VALUE(
+                rocfft_plan_description_add_outfield(rocfft_desc.get(), frequencyField));
         }
-        for(auto rocfft_desc : {ip_inverse_desc, op_inverse_desc})
+        for(auto& rocfft_desc : inverse_descs)
         {
-            rocfft_plan_description_add_infield(rocfft_desc, frequencyField);
-            rocfft_plan_description_add_outfield(rocfft_desc, spaceField);
+            ROC_FFT_CHECK_INVALID_VALUE(
+                rocfft_plan_description_add_infield(rocfft_desc.get(), frequencyField));
+            ROC_FFT_CHECK_INVALID_VALUE(
+                rocfft_plan_description_add_outfield(rocfft_desc.get(), spaceField));
         }
-
-        (void)rocfft_field_destroy(frequencyField);
-        (void)rocfft_field_destroy(spaceField);
     }
 
     if(plan->scale_factor != 1.0)
     {
-        for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
+        for(auto& rocfft_desc : all_descs)
         {
-            rocfft_plan_description_set_scale_factor(rocfft_desc, plan->scale_factor);
+            ROC_FFT_CHECK_INVALID_VALUE(
+                rocfft_plan_description_set_scale_factor(rocfft_desc.get(), plan->scale_factor));
         }
     }
 
     if(plan->comm_type != rocfft_comm_none)
     {
-        for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
+        for(auto& rocfft_desc : all_descs)
         {
-            rocfft_plan_description_set_comm(rocfft_desc, plan->comm_type, plan->comm_handle);
+            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_description_set_comm(
+                rocfft_desc.get(), plan->comm_type, plan->comm_handle));
         }
     }
 
@@ -818,23 +846,15 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             auto&      plan_desc = inplace ? (forward ? ip_forward_desc : ip_inverse_desc)
                                            : (forward ? op_forward_desc : op_inverse_desc);
             const auto placement = inplace ? rocfft_placement_inplace : rocfft_placement_notinplace;
-            const auto ret       = rocfft_plan_create(&plan_ptr,
-                                                placement,
-                                                t,
-                                                iotype.precision(),
-                                                dim,
-                                                cm_lengths_vec.data(),
-                                                number_of_transforms,
-                                                plan_desc);
-            if(ret == rocfft_status_success)
-            {
-                ++plans_created;
-            }
-            else
-            {
-                rocfft_plan_destroy(plan_ptr);
-                plan_ptr = nullptr;
-            }
+            ROC_FFT_CHECK_PLAN_CREATE(plan_ptr,
+                                      plans_created,
+                                      placement,
+                                      t,
+                                      iotype.precision(),
+                                      dim,
+                                      cm_lengths_vec.data(),
+                                      number_of_transforms,
+                                      plan_desc);
         }
     }
 
@@ -889,23 +909,12 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     {
         if(plan->autoAllocate)
         {
-            if(plan->workBuffer && plan->workBufferNeedsFree)
-            {
-                if(hipFree(plan->workBuffer) != hipSuccess)
-                    return HIPFFT_ALLOC_FAILED;
-            }
-            if(hipMalloc(&plan->workBuffer, workBufferSize) != hipSuccess)
+            if(plan->workBuffer.alloc(workBufferSize) != hipSuccess)
                 return HIPFFT_ALLOC_FAILED;
-            plan->workBufferNeedsFree = true;
             ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_set_work_buffer(
-                plan->info, plan->workBuffer, workBufferSize));
+                plan->info, plan->workBuffer.data(), workBufferSize));
         }
     }
-
-    rocfft_plan_description_destroy(ip_forward_desc);
-    rocfft_plan_description_destroy(op_forward_desc);
-    rocfft_plan_description_destroy(ip_inverse_desc);
-    rocfft_plan_description_destroy(op_inverse_desc);
 
     return HIPFFT_SUCCESS;
 }
@@ -925,7 +934,7 @@ try
                   "hipfftHandle type not wide enough for pointer");
     // cppcheck-suppress AssignmentAddressToInteger
     hipfftHandle h = new hipfftHandle_t;
-    ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_create(&h->info));
+    h->info.alloc();
     *plan = h;
     return HIPFFT_SUCCESS;
 }
@@ -1380,12 +1389,7 @@ try
     if(!plan)
         return HIPFFT_INVALID_PLAN;
 
-    if(plan->workBuffer && plan->workBufferNeedsFree)
-    {
-        if(hipFree(plan->workBuffer) != hipSuccess)
-            throw std::runtime_error("hipFree(plan->workBuffer) failed");
-    }
-    plan->workBufferNeedsFree = false;
+    plan->workBuffer.free();
     if(workArea)
     {
         ROC_FFT_CHECK_INVALID_VALUE(
@@ -1559,28 +1563,7 @@ catch(...)
 hipfftResult hipfftDestroy(hipfftHandle plan)
 try
 {
-    if(plan != nullptr)
-    {
-        if(plan->ip_forward != nullptr)
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_destroy(plan->ip_forward));
-        if(plan->op_forward != nullptr)
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_destroy(plan->op_forward));
-        if(plan->ip_inverse != nullptr)
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_destroy(plan->ip_inverse));
-        if(plan->op_inverse != nullptr)
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_destroy(plan->op_inverse));
-
-        if(plan->workBufferNeedsFree)
-        {
-            if(hipFree(plan->workBuffer) != hipSuccess)
-                throw std::runtime_error("hipFree(plan->workBuffer) failed");
-        }
-
-        ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_destroy(plan->info));
-
-        delete plan;
-    }
-
+    delete plan;
     return HIPFFT_SUCCESS;
 }
 catch(...)

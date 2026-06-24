@@ -6,7 +6,7 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
   NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   PruneSparseMode: 0
@@ -27,8 +27,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -46,21 +46,26 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 8, 4, 1, 1]
         - DepthU: [32]
         - WavefrontSize: [32]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - StaggerU: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
-        - 1LDSBuffer: [-1]
-        - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
+        - TDMInst: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -82,117 +87,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
-      UseBeta: True
-      Batched: True
-      SupportUserArgs: True
-      UseBias: 1
-      Activation: True
-      UseScaleAB: Scalar
-      UseScaleAlphaVec: 1
-      BiasDataTypeList: ['s', 'b']
-      ActivationType: hipblaslt_all
-    - # BenchmarkProblemSizeGroup - Standard
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
-        - DepthU: [32]
-        - WavefrontSize: [32]
-        - TransposeLDS: [-1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - StaggerU: [0]
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - GlobalReadVectorWidthA: [1,2]
-        - GlobalReadVectorWidthB: [1]
-        - 1LDSBuffer: [0]
-        - ScheduleIterAlg: [1]
-        - SourceSwap: [1]
-        - DirectToVgprA: [False]
-        - StoreVectorWidth: [-1]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [1, 1, 1, 1]
-          - Exact: [128, 128, 1, 128]
-          - Exact: [127, 127, 1, 127]
-        - BiasTypeArgs: ['s']
-        - ActivationArgs:
-          - [Enum: none]
-
-
-  ########################################
-  # F32X NN
-  ########################################
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: S
-      DestDataType: S
-      ComputeDataType: S
-      F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: True
-      Batched: True
-      SupportUserArgs: True
-      UseBias: 1
-      Activation: True
-      UseScaleAB: Scalar
-      UseScaleAlphaVec: 1
-      BiasDataTypeList: ['s', 'b']
-      ActivationType: hipblaslt_all
-    - # BenchmarkProblemSizeGroup - Standard
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
-          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - TransposeLDS: [-1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - StaggerU: [0]
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - GlobalReadVectorWidthA: [1]
-        - GlobalReadVectorWidthB: [1,2]
-        - 1LDSBuffer: [0]
-        - ScheduleIterAlg: [1]
-        - SourceSwap: [1]
-        - DirectToVgprA: [False]
-        - StoreVectorWidth: [-1]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [127, 127, 1, 127]
-          - Exact: [1, 1, 1, 1]
-        - BiasTypeArgs: ['s']
-        - ActivationArgs:
-          - [Enum: none]
-
-  ########################################
-  # F32X TT
-  ########################################
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: S
-      DestDataType: S
-      ComputeDataType: S
-      F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -210,6 +106,118 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
           - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1,2]
+        - GlobalReadVectorWidthB: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0, 1]
+        - SourceSwap: [true]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [512, 512, 1, 512]
+          - Exact: [127, 127, 1, 127]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+
+  ########################################
+  # F32X NN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 1
+      Activation: True
+      UseScaleAB: Scalar
+      UseScaleAlphaVec: 1
+      BiasDataTypeList: ['s', 'b']
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 8, 4, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1,2]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [1]
+        - SourceSwap: [true]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [127, 127, 1, 127]
+          - Exact: [1, 1, 1, 1]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################
+  # F32X TT
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 1
+      Activation: True
+      UseScaleAB: Scalar
+      UseScaleAlphaVec: 1
+      BiasDataTypeList: ['s', 'b']
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]
         - DepthU: [64]
         - WavefrontSize: [32]
         - TransposeLDS: [-1]
@@ -220,17 +228,18 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
-        - 1LDSBuffer: [1]
-        - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
+        - TDMInst: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [1, 1, 1, 1]
           - Exact: [127, 127, 1, 127]
-          - Exact: [128, 128, 1, 128]
+          - Exact: [512, 512, 1, 512]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
