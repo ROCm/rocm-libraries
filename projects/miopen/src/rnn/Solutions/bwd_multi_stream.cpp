@@ -27,7 +27,7 @@
 #include <miopen/env.hpp>
 #include <miopen/rnn/solvers.hpp>
 #include <miopen/rnn/multi_stream_utils.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_RNN_MS_STREAM_CNT)
 

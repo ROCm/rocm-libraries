@@ -30,7 +30,7 @@
 #include "driver.hpp"
 #include "gru_verify_gemm.hpp"
 #include "lstm_verify_gemm.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "rnn_verify_gemm.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"

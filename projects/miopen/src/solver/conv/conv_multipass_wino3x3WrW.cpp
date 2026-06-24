@@ -31,7 +31,7 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/gcn_asm_utils.hpp>
 #include <miopen/gemm_v2.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/env.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>

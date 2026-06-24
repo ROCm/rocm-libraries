@@ -30,10 +30,10 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
-#include <miopen/float_equal.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/float_equal.hpp>
+#include <common_utils/returns.hpp>
 #include <numeric>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 using half         = half_float::half;
 using hip_bfloat16 = bfloat16;
 #include <hip_float8.hpp>

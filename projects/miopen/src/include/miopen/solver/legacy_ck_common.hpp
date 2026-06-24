@@ -31,7 +31,7 @@
 
 #include <miopen/env.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LEGACY_CK_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LEGACY_CK_USE_AMD_BUFFER_ADDRESSING)

@@ -41,8 +41,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <miopen/rank.hpp>
-#include <miopen/type_name.hpp>
+#include <common_utils/rank.hpp>
+#include <common_utils/type_name.hpp>
 
 namespace args {
 

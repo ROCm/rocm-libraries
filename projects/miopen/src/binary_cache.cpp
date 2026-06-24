@@ -29,7 +29,7 @@
 #include <miopen/md5.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/env.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/filesystem_checker.hpp>
 #include <miopen/miopen.h>

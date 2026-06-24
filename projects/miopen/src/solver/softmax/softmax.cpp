@@ -12,7 +12,7 @@
 #include <miopen/softmax.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/target_properties.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 namespace miopen {
 

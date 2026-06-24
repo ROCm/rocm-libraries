@@ -37,7 +37,7 @@
 #include <stdexcept>
 #include <string>
 #include <miopen/miopen.h>
-#include <miopen/reduce_common.hpp>
+#include <common_utils/reduce_common.hpp>
 
 namespace reduce {
 

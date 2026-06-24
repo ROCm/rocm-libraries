@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <miopen/kernel.hpp>
-#include <miopen/rank.hpp>
+#include <common_utils/rank.hpp>
 #include <miopen/sequences.hpp>
 
 #include <driver.hpp>

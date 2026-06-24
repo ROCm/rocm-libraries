@@ -28,7 +28,7 @@
 
 #include <miopen/config.hpp>
 #include <miopen/db_record.hpp>
-#include <miopen/rank.hpp>
+#include <common_utils/rank.hpp>
 #include <miopen/filesystem.hpp>
 
 #include <chrono>

@@ -27,7 +27,7 @@
 #define GUARD_GEMM_HPP
 
 #include <iostream>
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 #include <miopen/errors.hpp>
 
 /*

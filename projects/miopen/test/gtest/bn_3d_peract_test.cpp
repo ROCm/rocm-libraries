@@ -12,9 +12,9 @@
 
 #include <miopen/activ.hpp>
 #include <miopen/batch_norm.hpp>
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 #include <miopen/miopen.h>
-#include <miopen/par_for.hpp>
+#include <common_utils/par_for.hpp>
 #include <miopen/tensor.hpp>
 
 #include "get_handle.hpp"

@@ -6,7 +6,7 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include <algorithm>
@@ -14,13 +14,13 @@
 #include <cstdlib>
 #include <memory>
 #include <miopen/miopen.h>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/tensor.hpp>
 #include <numeric>
 #include <vector>
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 
 #ifndef MLO_CATHOST_H_
 #define MLO_CATHOST_H_

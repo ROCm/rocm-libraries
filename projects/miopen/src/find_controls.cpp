@@ -31,7 +31,7 @@
 #include <miopen/env.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/solver_id.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #include <cstdlib>
 #include <cstring>

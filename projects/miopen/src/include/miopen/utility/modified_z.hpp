@@ -30,7 +30,7 @@
 #include <algorithm>
 #include <numeric>
 #include <miopen/errors.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 namespace miopen {
 

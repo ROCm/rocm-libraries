@@ -6,7 +6,7 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/filesystem_checker.hpp>
 #include <miopen/version.h>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include "gtest_common.hpp"

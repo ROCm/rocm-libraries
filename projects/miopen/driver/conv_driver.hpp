@@ -9,14 +9,14 @@
 #include "conv_common.hpp"
 #include "driver.hpp"
 #include "mloConvHost.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "rocrand_wrapper.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <miopen/algorithm.hpp>
+#include <common_utils/algorithm.hpp>
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/db_record.hpp>

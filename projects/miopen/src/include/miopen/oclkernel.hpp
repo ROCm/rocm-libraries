@@ -38,7 +38,7 @@
 #include <vector>
 
 #include <miopen/clhelper.hpp>
-#include <miopen/each_args.hpp>
+#include <common_utils/each_args.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/op_kernel_args.hpp>
 

@@ -13,7 +13,7 @@
 #include <miopen/db.hpp>
 #include <miopen/manage_ptr.hpp>
 #include <miopen/errors.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/lock_file.hpp>
 #include <miopen/env.hpp>
 

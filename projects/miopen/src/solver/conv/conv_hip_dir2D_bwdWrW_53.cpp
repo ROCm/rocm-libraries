@@ -28,7 +28,7 @@
 
 #include <miopen/conv/invokers/ocl_wrw_rdc.hpp>
 #include <miopen/mlo_internal.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/env.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53)

@@ -27,7 +27,7 @@
 #include <miopen/general_tensor_reorder_sol.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/magic_div.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <string>
 #include <vector>
 #include <limits>

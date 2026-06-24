@@ -8,7 +8,7 @@
 #include <miopen/db_path.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/legacy_exhaustive_search.hpp>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <half/half.hpp>
 

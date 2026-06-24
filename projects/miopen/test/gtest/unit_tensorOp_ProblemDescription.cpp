@@ -28,7 +28,7 @@
 #include <miopen/tensorOp/problem_description.hpp>
 
 #include "unit_TensorDescriptor.hpp"
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 namespace {
 

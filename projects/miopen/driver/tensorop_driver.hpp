@@ -29,12 +29,12 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "mloNeuronHost.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 #include "util_driver.hpp"
 
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 

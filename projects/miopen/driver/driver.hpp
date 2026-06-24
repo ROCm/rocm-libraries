@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_DRIVER_HPP
 
 #include <half/half.hpp>
-#include "../driver/random.hpp"
+#include <common_utils/random.hpp>
 
 #include "InputFlags.hpp"
 #include <algorithm>
@@ -37,7 +37,7 @@
 #include <memory>
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 #include <miopen/handle.hpp>
 #include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"

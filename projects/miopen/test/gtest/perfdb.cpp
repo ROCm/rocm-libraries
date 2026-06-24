@@ -33,7 +33,7 @@
 #include <miopen/process.hpp>
 #include <miopen/ramdb.hpp>
 #include <miopen/readonlyramdb.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/returns.hpp>
 #include <miopen/temp_file.hpp>
 
 #include <array>

@@ -27,7 +27,7 @@
 #include <array>
 #include <vector>
 
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/miopen.h>
 
 #include "gtest_common.hpp"

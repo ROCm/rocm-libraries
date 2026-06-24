@@ -5,7 +5,7 @@
 #include <miopen/check_numerics.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/find_solution.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/mlo_internal.hpp>
@@ -13,7 +13,7 @@
 #include <miopen/pooling/solvers.hpp>
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 #include "miopen/pooling/problem_description.hpp"
 
 #include <cassert>

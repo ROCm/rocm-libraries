@@ -27,7 +27,7 @@
 #include <miopen/reduceextreme.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/find_solution.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/reduce/invoke_params.hpp>
 #include <miopen/reduce/solvers.hpp>

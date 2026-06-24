@@ -33,7 +33,7 @@
 #include <miopen/execution_context.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/performance_config.hpp>
-#include <miopen/type_name.hpp>
+#include <common_utils/type_name.hpp>
 
 #include <string>
 #include <type_traits>

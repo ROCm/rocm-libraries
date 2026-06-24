@@ -28,7 +28,7 @@
 
 #include <miopen/env.hpp>
 #include <miopen/execution_context.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_STATIC_CK_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM)
 

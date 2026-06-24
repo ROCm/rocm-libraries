@@ -27,7 +27,7 @@
 
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 #include "gtest_common.hpp"
 #include "unit_conv_solver.hpp"

@@ -28,7 +28,7 @@
 
 #include "tensor_holder.hpp"
 
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 
 template <typename T>
 T sigmoid(T x)

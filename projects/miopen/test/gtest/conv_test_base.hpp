@@ -25,7 +25,7 @@
  *******************************************************************************/
 #pragma once
 
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 #include <miopen/miopen.h>
 #include <iostream>
 

@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <miopen/convolution.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 #include "../cpu_conv.hpp"
 #include "../random.hpp"

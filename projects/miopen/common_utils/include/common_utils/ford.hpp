@@ -31,9 +31,9 @@
 #include <cassert>
 #include <cmath>
 #include <functional>
-#include <miopen/par_for.hpp>
-#include <miopen/each_args.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/par_for.hpp>
+#include <common_utils/each_args.hpp>
+#include <common_utils/returns.hpp>
 #include <numeric>
 #include <vector>
 

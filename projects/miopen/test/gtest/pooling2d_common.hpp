@@ -13,7 +13,7 @@
 #include <numeric>
 #include <miopen/logger.hpp>
 #include <numeric>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 #include <sstream>
 #include <vector>
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1

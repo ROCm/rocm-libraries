@@ -31,7 +31,7 @@
 #include <miopen/kernel_warnings.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/mlir_build.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/tmp_dir.hpp>
 #include <miopen/target_properties.hpp>

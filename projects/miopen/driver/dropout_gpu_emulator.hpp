@@ -27,8 +27,8 @@
 #define GUARD_MIOPEN_DROPOUT_GPU_EMULATOR_HPP
 
 #include <miopen/dropout.hpp>
-#include <miopen/float_equal.hpp>
-#include <miopen/par_for.hpp>
+#include <common_utils/float_equal.hpp>
+#include <common_utils/par_for.hpp>
 
 #include <algorithm>
 #include <cassert>

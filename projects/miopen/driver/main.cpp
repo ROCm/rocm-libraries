@@ -6,7 +6,7 @@
 #include "sys_info.hpp"
 #include <miopen/config.h>
 #include <miopen/errors.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #include <cstdio>
 #include <iostream>

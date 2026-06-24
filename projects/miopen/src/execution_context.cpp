@@ -33,7 +33,7 @@
 #if MIOPEN_BACKEND_OPENCL
 #include <miopen/ocldeviceinfo.hpp>
 #endif
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/version.h>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OPENCL_CONVOLUTIONS)

@@ -28,7 +28,7 @@
 
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
-#include <miopen/algorithm.hpp>
+#include <common_utils/algorithm.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/tensor_ops.hpp>
 

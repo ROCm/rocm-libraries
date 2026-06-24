@@ -26,7 +26,7 @@
 
 #include "miopen/layernorm/problem_description.hpp"
 #include <miopen/find_solution.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/layernorm.hpp>
 #include <miopen/layernorm/invoke_params.hpp>

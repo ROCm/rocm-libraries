@@ -27,8 +27,8 @@
 #ifndef MIOPEN_GUARD_TEST_SERIALIZE_HPP
 #define MIOPEN_GUARD_TEST_SERIALIZE_HPP
 
-#include <miopen/rank.hpp>
-#include <miopen/each_args.hpp>
+#include <common_utils/rank.hpp>
+#include <common_utils/each_args.hpp>
 #include <half/half.hpp>
 #include <fstream>
 #include <string>

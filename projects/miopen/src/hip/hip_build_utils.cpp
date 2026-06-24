@@ -26,7 +26,7 @@
 
 #include <miopen/config.h>
 #include <miopen/hip_build_utils.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/exec_utils.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/env.hpp>

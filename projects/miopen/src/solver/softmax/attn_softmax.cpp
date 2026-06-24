@@ -32,7 +32,7 @@
 #include <miopen/softmax.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/target_properties.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_ATTN_SOFTMAX)
 

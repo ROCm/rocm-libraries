@@ -5,7 +5,7 @@
 #include <miopen/lock_file.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/md5.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace miopen {
 

@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_REDUCE_COMMON_HPP
 
 #include <half/half.hpp>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 
 namespace reduce {
 

@@ -34,7 +34,7 @@
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <algorithm>
 #include <vector>
 #include <string>

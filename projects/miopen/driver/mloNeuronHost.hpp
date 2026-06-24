@@ -36,7 +36,7 @@
 #include <iostream>
 #include <iomanip>
 
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 ////////////////////////////////////////////////////////////
 //

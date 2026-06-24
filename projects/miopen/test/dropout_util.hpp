@@ -37,7 +37,7 @@
 #include <utility>
 
 #include <miopen/dropout.hpp>
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 

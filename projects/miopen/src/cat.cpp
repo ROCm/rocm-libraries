@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/cat.hpp>
 #include <miopen/kernel_cache.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/check_numerics.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/datatype.hpp>

@@ -28,7 +28,7 @@
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace miopen {
 namespace solver {

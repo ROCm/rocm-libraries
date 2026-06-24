@@ -945,6 +945,11 @@ if(NOT MIOPEN_USE_SQLITE_PERFDB)
     add_subdirectory(tools/sqlite2txt)
 endif()
 add_subdirectory(addkernels)
+# common_utils (Core Utilities, header-only INTERFACE lib) must be added before
+# anything that consumes it. It needs MIOPEN_USE_RNE_BFLOAT16, which is declared
+# here so the value is available before src/ is configured.
+option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
+add_subdirectory(common_utils)
 add_subdirectory(src)
 if(MIOPEN_BUILD_DRIVER)
     add_subdirectory(driver)

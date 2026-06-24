@@ -31,7 +31,7 @@
 #include <memory>
 #include <miopen/activ.hpp>
 #include <miopen/miopen.h>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/tensor.hpp>
 #include <utility>
 #include <fusionHost.hpp>

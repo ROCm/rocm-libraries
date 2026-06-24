@@ -11,7 +11,7 @@
 #include <gtest/gtest.h>
 #include "../fusionHost.hpp"
 #include "compare_helper.hpp"
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace {
 constexpr double MIO_BN_TEST_EXPAVGFACTOR = 0.99;

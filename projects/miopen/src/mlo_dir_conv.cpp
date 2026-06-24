@@ -11,7 +11,7 @@
 #include <miopen/readonlyramdb.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/version.h>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/hip_build_utils.hpp>
 #include <miopen/any_solver.hpp>
 

@@ -13,7 +13,7 @@
 
 #include <miopen/logger.hpp>
 #include <numeric>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 #include "pooling2d_common.hpp"
 #include "pooling_gtest_common.hpp"

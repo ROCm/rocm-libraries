@@ -4,7 +4,7 @@
 #ifndef GUARD_MIOPEN_SEQUENCES_HPP_
 #define GUARD_MIOPEN_SEQUENCES_HPP_
 
-#include <miopen/rank.hpp>
+#include <common_utils/rank.hpp>
 
 #include <algorithm>
 #include <array>

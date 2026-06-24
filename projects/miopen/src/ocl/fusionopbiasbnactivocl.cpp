@@ -26,7 +26,7 @@
 
 #include <miopen/fusion.hpp>
 #include <miopen/any_solver.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace miopen {
 

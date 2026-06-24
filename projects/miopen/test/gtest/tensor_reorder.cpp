@@ -26,7 +26,7 @@
 
 #include <miopen/invoker.hpp>
 #include <miopen/tensor_reorder_util.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 #include "gtest_common.hpp"
 #include "random.hpp"

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <miopen/datatype.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/util.hpp>

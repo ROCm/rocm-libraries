@@ -29,7 +29,7 @@
 #include <miopen/config.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/hipoc_program.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/op_kernel_args.hpp>
 
 #include <array>

@@ -26,8 +26,8 @@
 #ifndef GUARD_MLOPEN_FUNCTIONAL_HPP
 #define GUARD_MLOPEN_FUNCTIONAL_HPP
 
-#include <miopen/each_args.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/each_args.hpp>
+#include <common_utils/returns.hpp>
 #include <utility>
 
 namespace miopen {

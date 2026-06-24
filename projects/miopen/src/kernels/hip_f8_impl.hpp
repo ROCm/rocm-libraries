@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-// #include <miopen/bfloat16.hpp>
+// #include <common_utils/bfloat16.hpp>
 // #include <half.hpp>
 
 #include "miopen_cstdint.hpp"

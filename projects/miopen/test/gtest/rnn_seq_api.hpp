@@ -38,7 +38,7 @@
 
 #include <miopen/rnn.hpp>
 #include <miopen/miopen.h>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 //
 // Native rnn tensor format

@@ -30,7 +30,7 @@
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/execution_context.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 #include <sstream>
 

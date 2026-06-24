@@ -31,14 +31,14 @@
 #if MIOPEN_USE_GEMM
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "util_driver.hpp"
 
 #include <../test/verify.hpp>
 
 #include <miopen/gemm_v2.hpp>
 #include <miopen/miopen.h>
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 
 #include <algorithm>
 #include <cstdlib>

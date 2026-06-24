@@ -28,14 +28,14 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "random.hpp"
+#include <common_utils/random.hpp>
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 
 #include "../test/verify.hpp"
 
-#include <miopen/float_equal.hpp>
-#include <miopen/ford.hpp>
+#include <common_utils/float_equal.hpp>
+#include <common_utils/ford.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 

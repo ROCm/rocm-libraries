@@ -26,7 +26,7 @@
 #ifndef GUARD_MIOPEN_HANDLE_HPP
 #define GUARD_MIOPEN_HANDLE_HPP
 
-#include <miopen/rank.hpp>
+#include <common_utils/rank.hpp>
 
 #if defined(MIOPEN_USE_CLANG_TIDY)
 #define MIOPEN_OBJECT_CAST reinterpret_cast

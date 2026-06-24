@@ -6,7 +6,7 @@
 
 #include <cstring>
 #include <gtest/gtest.h>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>

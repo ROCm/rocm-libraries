@@ -6,7 +6,7 @@
 
 #include <cmath>
 
-#include <miopen/ford.hpp>
+#include <common_utils/ford.hpp>
 
 ////////////////////////////////////////////////////////////
 //

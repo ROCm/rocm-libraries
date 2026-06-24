@@ -29,7 +29,7 @@
 #include <miopen/db.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/util.hpp>
@@ -37,7 +37,7 @@
 /// \todo Get rid of this during implementation of #1938 (60)
 #include <miopen/convolution.hpp>
 #include <miopen/mlo_internal.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/batchnorm/invoke_params.hpp>
 #include <miopen/batchnorm/solvers.hpp>
 #include <miopen/batchnorm/problem_description.hpp>

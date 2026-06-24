@@ -7,7 +7,7 @@
 #include <miopen/datatype.hpp>
 #include <miopen/op_kernel_args.hpp>
 #include <miopen/subbuffers.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 namespace miopen {
 namespace solver {

@@ -38,7 +38,7 @@
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/problem_description.hpp>
 #include <miopen/sequences.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #include <optional>
 #include <tuple>

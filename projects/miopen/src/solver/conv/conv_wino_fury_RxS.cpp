@@ -33,7 +33,7 @@
 #include <miopen/conv/kernel_interface/winograd_kernel_interface.hpp>
 #include <miopen/env.hpp>
 #include <miopen/kernel_build_params.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/fusion/utils.hpp>
 
 #define WORKAROUND_SWDEV_453577 1

@@ -17,7 +17,7 @@
 #include <miopen/batchnorm/solvers.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/solver_id.hpp>
-#include <miopen/type_name.hpp>
+#include <common_utils/type_name.hpp>
 
 namespace miopen {
 namespace fin_interface {

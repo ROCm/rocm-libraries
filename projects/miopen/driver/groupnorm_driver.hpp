@@ -41,7 +41,7 @@
 #include <numeric>
 #include <vector>
 #include <../test/tensor_holder.hpp>
-#include "random.hpp"
+#include <common_utils/random.hpp>
 
 template <typename Tgpu, typename Tref>
 class GroupNormDriver : public Driver

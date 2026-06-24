@@ -30,7 +30,7 @@
 #include <string>
 #include <tuple>
 #include <stdexcept>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 #define WORKAROUND_ISSUE_3001 1

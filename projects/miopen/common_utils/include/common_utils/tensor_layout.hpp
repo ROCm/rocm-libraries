@@ -26,9 +26,10 @@
 #ifndef GUARD_TENSOR_LAYOUT_HPP
 #define GUARD_TENSOR_LAYOUT_HPP
 
-#include <miopen/errors.hpp>
+#include <common_utils/errors.hpp>
 #include <map>
 #include <algorithm>
+#include <numeric>
 #include <vector>
 #include <string>
 #include <iterator>
@@ -58,7 +59,7 @@ void tensor_layout_to_strides(const std::vector<T>& len,
                        auto pos = layout.find(cur_layout_char);
                        if(pos == std::string::npos)
                        {
-                           MIOPEN_THROW(std::string("mismatched layout string - ").append(layout));
+                           COMMON_THROW(std::string("mismatched layout string - ").append(layout));
                        }
                        return std::accumulate(layout.begin() + pos + 1,
                                               layout.end(),
@@ -98,7 +99,7 @@ void tensor_layout_to_strides(const std::vector<T>& len,
             auto pos = base_layout.find(cur_layout_char);
             if(pos == std::string::npos)
             {
-                MIOPEN_THROW(std::string("mismatched layout string - ").append(base_layout));
+                COMMON_THROW(std::string("mismatched layout string - ").append(base_layout));
             }
             return std::accumulate(
                 base_layout.begin() + pos + 1,

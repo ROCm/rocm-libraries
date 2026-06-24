@@ -33,7 +33,7 @@
 #include <cfloat>
 #include <vector>
 
-#include <miopen/par_for.hpp>
+#include <common_utils/par_for.hpp>
 
 #define NEGATIVE_CUTOFF_VAL (-1e20)
 

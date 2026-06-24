@@ -12,7 +12,7 @@
 #include <miopen/invoker.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/timer.hpp>
 #include <miopen/unique_path.hpp>

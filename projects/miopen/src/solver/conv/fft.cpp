@@ -26,7 +26,7 @@
 
 #include <miopen/conv/solvers.hpp>
 
-#include <miopen/algorithm.hpp>
+#include <common_utils/algorithm.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv_solution.hpp>
 #include <miopen/convolution_fft.hpp>

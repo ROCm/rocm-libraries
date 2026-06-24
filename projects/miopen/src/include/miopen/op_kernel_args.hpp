@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <half/half.hpp>
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 
 struct OpKernelArg
 {

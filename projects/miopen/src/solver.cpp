@@ -25,8 +25,8 @@
 #include <miopen/db.hpp>
 #include <miopen/env.hpp>
 #include <miopen/solver_id.hpp>
-#include <miopen/par_for.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/par_for.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/any_solver.hpp>
 #include <miopen/timer.hpp>
 

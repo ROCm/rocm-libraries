@@ -26,7 +26,7 @@
 
 #include <miopen/datatype.hpp>
 #include <miopen/find_solution.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/softmarginloss/invoke_params.hpp>
 #include <miopen/softmarginloss/solvers.hpp>

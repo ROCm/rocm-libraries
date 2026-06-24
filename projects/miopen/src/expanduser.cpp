@@ -34,7 +34,7 @@
 #endif
 
 #ifdef __linux__
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_STR(HOME)

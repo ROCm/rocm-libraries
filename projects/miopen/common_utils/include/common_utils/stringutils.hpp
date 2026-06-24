@@ -26,8 +26,8 @@
 #ifndef GUARD_MIOPEN_STRINGUTILS_HPP
 #define GUARD_MIOPEN_STRINGUTILS_HPP
 
-#include <miopen/algorithm.hpp>
-#include <miopen/errors.hpp>
+#include <common_utils/algorithm.hpp>
+#include <common_utils/errors.hpp>
 #include <algorithm>
 #include <iterator>
 #include <numeric>
@@ -140,7 +140,7 @@ inline std::vector<std::string> SplitSpaceSeparated(const std::string& in,
                 rv.push_back(s);
                 continue;
             }
-            MIOPEN_THROW("Error parsing string: '" + in + '\'');
+            COMMON_THROW("Error parsing string: '" + in + '\'');
         }
         rv.push_back(s);
     }

@@ -4,9 +4,9 @@
 #include <miopen/tensor.hpp>
 
 #include <miopen/errors.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/datatype.hpp>

@@ -37,8 +37,8 @@
 #include <utility>
 
 #include "tensor_holder.hpp"
-#include <miopen/stringutils.hpp>
-#include <miopen/functional.hpp>
+#include <common_utils/stringutils.hpp>
+#include <common_utils/functional.hpp>
 #include <hip_float8.hpp>
 
 template <class T, class... Ts>

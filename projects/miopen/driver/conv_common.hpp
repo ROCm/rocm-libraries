@@ -34,9 +34,9 @@
 /// >>> defined at conv3.cpp
 /// >>>            CMakeFiles/MIOpenDriver.dir/conv3.cpp.o:(.text+0x10)
 
-#include "../driver/random.hpp"
+#include <common_utils/random.hpp>
 
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 
 #include <cstdint>
 #include <half/half.hpp>

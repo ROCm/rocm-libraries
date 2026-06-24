@@ -34,7 +34,7 @@
 #include <miopen/gcn_asm_utils.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/gemm_v2.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/miopen.h>
 #include <miopen/generic_search.hpp>
 #include <miopen/conv/invokers/impl_gemm.hpp>

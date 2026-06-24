@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/groupnorm.hpp>
 #include <miopen/kernel_cache.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/groupnorm/invoke_params.hpp>
 #include <miopen/groupnorm/solvers.hpp>

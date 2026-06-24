@@ -27,7 +27,7 @@
 #pragma once
 
 #include <miopen/handle.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace miopen {
 namespace solver {

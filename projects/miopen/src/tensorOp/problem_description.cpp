@@ -26,7 +26,7 @@
 
 #include <miopen/tensorOp/problem_description.hpp>
 #include <miopen/names.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 namespace miopen {
 

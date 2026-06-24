@@ -31,7 +31,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/returns.hpp>
 #include <miopen/sysinfo_utils.hpp>
 #include <string>
 #include <tuple>

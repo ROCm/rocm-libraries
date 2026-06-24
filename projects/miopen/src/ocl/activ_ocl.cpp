@@ -26,7 +26,7 @@
 #include <miopen/activ.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/mlo_internal.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/visit_float.hpp>
 #include <miopen/activ/invoke_params.hpp>
 #include <miopen/activ/solvers.hpp>

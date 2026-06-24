@@ -40,7 +40,7 @@
 #include <type_traits>
 
 #include "calcerr.hpp"
-#include <miopen/bfloat16.hpp>
+#include <common_utils/bfloat16.hpp>
 
 #if 0
 template<typename _T>

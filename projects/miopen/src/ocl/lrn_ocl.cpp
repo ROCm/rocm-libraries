@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/lrn.hpp>
 #include <miopen/mlo_internal.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/visit_float.hpp>
 
 namespace miopen {

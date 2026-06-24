@@ -4,8 +4,18 @@
 #ifndef BFLOAT16_H_
 #define BFLOAT16_H_
 
+#include <cstdint>
+#include <functional>
 #include <iostream>
-#include <miopen/config.h>
+#include <limits>
+
+// MIOPEN_USE_RNE_BFLOAT16 selects the rounding scheme and is supplied as an
+// INTERFACE compile definition by the common_utils CMake target (it used to be
+// pulled in via miopen/config.h). Guard against it being undefined: an absent
+// macro would evaluate to 0 below and silently flip the rounding scheme.
+#ifndef MIOPEN_USE_RNE_BFLOAT16
+#error "MIOPEN_USE_RNE_BFLOAT16 is not defined. Link against miopen_common_utils (MIOpen::common_utils) so the compile definition is propagated."
+#endif
 
 class bfloat16
 {

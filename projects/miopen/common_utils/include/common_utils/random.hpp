@@ -1,41 +1,41 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#ifndef GUARD_RANDOM_GEN_
-#define GUARD_RANDOM_GEN_
-
-#include <miopen/env.hpp>
-#include <miopen/kernel_tuning_mode.hpp>
+#ifndef GUARD_COMMON_UTILS_RANDOM_HPP
+#define GUARD_COMMON_UTILS_RANDOM_HPP
 
 #include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <limits>
 #include <random>
-
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_DRIVER_PRNG_SEED, 12345678)
-
-namespace env = miopen::env;
+#include <type_traits>
 
 namespace prng {
 namespace details {
 using glibc_gen = std::linear_congruential_engine<std::uint32_t, 1103515245, 12345, 2147483648>;
 
+// Default seed when MIOPEN_DEBUG_DRIVER_PRNG_SEED is unset (matches the former
+// MIOPEN_DECLARE_ENV_VAR_UINT64 default). A value of 0 selects std::random_device.
+inline std::uint64_t get_external_seed()
+{
+    const char* const env = std::getenv("MIOPEN_DEBUG_DRIVER_PRNG_SEED");
+    if(env == nullptr || env[0] == '\0')
+        return 12345678ULL;
+    return std::strtoull(env, nullptr, 10);
+}
+
 inline std::random_device::result_type get_default_seed()
 {
     static std::random_device::result_type seed{[] {
-        auto external_seed = env::value(MIOPEN_DEBUG_DRIVER_PRNG_SEED);
+        auto external_seed = get_external_seed();
 
         auto seed_ = external_seed == 0
                          ? std::random_device{}()
                          : static_cast<std::random_device::result_type>(external_seed);
 
-        // Check if JSON mode is enabled in MIOPEN_PERFORMANCE_LOGS
-        if(miopen::IsPerformanceLoggingEnabled())
-        {
-            std::cout << "{\"prng_seed\":" << seed_ << "}" << std::endl;
-        }
-        else
-        {
-            std::cout << "PRNG seed: " << seed_ << "\n";
-        }
+        std::cout << "PRNG seed: " << seed_ << "\n";
         return seed_;
     }()};
     return seed;
@@ -143,4 +143,4 @@ inline T gen_subnorm()
     return denorm_val;
 }
 } // namespace prng
-#endif // GUARD_RANDOM_GEN_
+#endif // GUARD_COMMON_UTILS_RANDOM_HPP

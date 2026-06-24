@@ -32,7 +32,7 @@
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include "../tensor_holder.hpp"
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 
 #include "driver.hpp"
 

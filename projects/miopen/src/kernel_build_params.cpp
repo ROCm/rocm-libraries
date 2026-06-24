@@ -5,7 +5,7 @@
 #include <sstream>
 
 #include <miopen/kernel_build_params.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 namespace miopen {
 

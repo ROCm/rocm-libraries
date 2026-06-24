@@ -12,7 +12,7 @@
 #include <miopen/env.hpp>
 #include <miopen/find_db.hpp>
 #include <miopen/find_controls.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/generic_search_controls.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>

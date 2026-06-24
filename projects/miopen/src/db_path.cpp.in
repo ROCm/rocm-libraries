@@ -26,7 +26,7 @@
 
 #include <miopen/db_path.hpp>
 #include <miopen/env.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/expanduser.hpp>
 #include <miopen/filesystem_checker.hpp>
 #include <miopen/logger.hpp>

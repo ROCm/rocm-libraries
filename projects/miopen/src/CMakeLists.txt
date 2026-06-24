@@ -927,6 +927,9 @@ target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
 target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
+# Header-only Core Utilities. BUILD_INTERFACE genex keeps this non-installed
+# INTERFACE target out of MIOpen's exported usage requirements.
+target_link_libraries(MIOpen PRIVATE $<BUILD_INTERFACE:miopen_common_utils>)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)

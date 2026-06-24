@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include <miopen/config.h>
 #include <miopen/kernel_warnings.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #include <iterator>
 #include <numeric>

@@ -35,7 +35,7 @@
 #include <miopen/convolution.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/solution.hpp>
@@ -49,9 +49,9 @@
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "verify.hpp"
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include "tensor_util.hpp"
-#include <miopen/algorithm.hpp>
+#include <common_utils/algorithm.hpp>
 #include "cpu_conv.hpp"
 #include "gpu_conv.hpp"
 #include "network_data.hpp"

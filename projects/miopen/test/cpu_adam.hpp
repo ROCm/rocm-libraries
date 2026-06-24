@@ -28,7 +28,7 @@
 
 #include "tensor_holder.hpp"
 
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 
 template <typename T1, typename T2>
 void cpu_adam(tensor<T1>& params,

@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include <miopen/type_name.hpp>
+#include <common_utils/type_name.hpp>
 #include <gtest/gtest.h>
 
 struct global_class

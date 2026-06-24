@@ -15,8 +15,8 @@
 #include <miopen/mlo_internal.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/tensor_layout.hpp>
-#include <miopen/algorithm.hpp>
+#include <common_utils/tensor_layout.hpp>
+#include <common_utils/algorithm.hpp>
 
 #include <nlohmann/json.hpp>
 

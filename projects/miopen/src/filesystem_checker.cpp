@@ -5,7 +5,7 @@
 #include <miopen/logger.hpp>
 
 #ifdef __linux__
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <errno.h>
 #include <string.h>
 #include <sys/vfs.h>

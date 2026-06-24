@@ -38,9 +38,9 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/tensor_layout.hpp>
+#include <common_utils/tensor_layout.hpp>
 #include <utility>
 
 // #include "network_data.hpp"

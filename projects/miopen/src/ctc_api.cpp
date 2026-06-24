@@ -28,7 +28,7 @@
 #include <miopen/errors.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/tensor_ops.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 #include <vector>
 
 extern "C" miopenStatus_t miopenCreateCTCLossDescriptor(miopenCTCLossDescriptor_t* ctcLossDesc)

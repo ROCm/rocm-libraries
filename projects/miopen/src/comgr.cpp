@@ -27,14 +27,14 @@
 #include <miopen/config.h>
 
 #include <miopen/comgr.hpp>
-#include <miopen/algorithm.hpp>
+#include <common_utils/algorithm.hpp>
 #include <miopen/env.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/hip_build_utils.hpp>
 #include <miopen/gcn_asm_utils.hpp>
 #include <miopen/kernel.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/stringutils.hpp>
+#include <common_utils/stringutils.hpp>
 
 #include <amd_comgr/amd_comgr.h>
 #include <hip/hip_runtime_api.h>

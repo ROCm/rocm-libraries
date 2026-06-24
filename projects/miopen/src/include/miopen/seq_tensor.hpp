@@ -29,11 +29,11 @@
 #include <miopen/miopen.h>
 
 #include <miopen/common.hpp>
-#include <miopen/each_args.hpp>
+#include <common_utils/each_args.hpp>
 #include <miopen/errors.hpp>
-#include <miopen/functional.hpp>
+#include <common_utils/functional.hpp>
 #include <miopen/object.hpp>
-#include <miopen/returns.hpp>
+#include <common_utils/returns.hpp>
 
 #include <nlohmann/json_fwd.hpp>
 

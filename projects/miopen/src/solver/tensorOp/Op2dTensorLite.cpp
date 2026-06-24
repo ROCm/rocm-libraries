@@ -29,7 +29,7 @@
 #include <miopen/tensorOp/invoke_params.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/kernel_build_params.hpp>
-#include <miopen/float_equal.hpp>
+#include <common_utils/float_equal.hpp>
 #include <miopen/datatype.hpp>
 
 namespace miopen {
