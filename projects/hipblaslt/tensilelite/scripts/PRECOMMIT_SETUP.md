@@ -72,9 +72,10 @@ rocisa is a HIP native extension: it will **not** build or import on the bare
 host (no HIP cmake config, host Python often lacks dev headers). Use a ROCm
 container that has `/opt/rocm` + a headered Python.
 
-#### Verified path: `hipblaslt-tpls:local`
-This image has HIP cmake config, Pythons 3.10–3.13 with headers, uv, cmake, g++.
-Confirmed working end-to-end (build + import):
+#### Use a ROCm dev container
+Any ROCm dev image works that provides HIP cmake config at `/opt/rocm`, a Python
+with dev headers (3.10–3.13), and `uv` + `cmake` + a C++ compiler.
+
 Mount the repo at the **same absolute path** inside the container as on the
 host. This is required for git worktrees: the worktree's `.git` file holds an
 absolute `gitdir:` pointer into `<repo>/.git/worktrees/<name>`, so a different
@@ -84,12 +85,13 @@ parity also keeps the venv's embedded editable-install paths valid — build and
 run under the **same** mount, or the `.venv` must be rebuilt.
 
 ```bash
-# host: launch with the repo mounted at its real path
-REPO=/home/davdixon/projects/rocm-libraries
+# host: launch with the repo mounted at its real path (identical in and out)
+REPO=/path/to/rocm-libraries   # checkout root; for a worktree, the MAIN repo root
 docker run -it --rm \
   -v "$REPO":"$REPO" \
-  -w "$REPO"/<path-to-worktree>/projects/hipblaslt/tensilelite \
-  hipblaslt-tpls:local bash
+  -w "$REPO"/projects/hipblaslt/tensilelite \
+  <rocm-dev-image> bash
+# for a git worktree, point -w at the worktree's tensilelite dir instead
 
 # inside container:
 rm -rf .venv                 # drop any stale/host-built venv
