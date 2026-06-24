@@ -20,10 +20,6 @@ from rocisa.code import Label, Module
 from rocisa.container import sgpr
 from rocisa.instruction import SBarrier, SCBranchSCC0, SCmpEQU32
 
-# The cluster signal must land after the workgroup *wait*, so key on
-# ``s_barrier_wait -1``: this matches the combined ``SBarrier()`` (which renders
-# ``s_barrier_signal -1``/``s_barrier_wait -1``) and a standalone wait, while
-# skipping a standalone ``s_barrier_signal -1`` and the cluster (``-3``) barriers.
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
 
 
@@ -36,9 +32,7 @@ def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
     """
     mod = Module("subtile_cluster_barrier_signal")
     skipPreSignal = Label(writer.labels.getUniqueNamePrefix("skipCBPreSignal"), "", 16)
-    # Elect wave 0 to issue the single cluster_barrier signal. sgpr("WaveIdx")
-    # holds the wave index (wId = fTid // wavelen), initialized for every TDM
-    # kernel, so wave 0 is simply WaveIdx == 0.
+    # Elect wave 0 to issue the single cluster_barrier signal.
     mod.add(SCmpEQU32(sgpr("WaveIdx"), 0, "wave 0?"))
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
@@ -73,8 +67,7 @@ def insertClusterBarrier(module, writer, kernel):
     signalItems = subtileClusterBarrierSignal(writer, kernel).flatitems()
     waitItems = subtileClusterBarrierWait(writer, kernel).flatitems()
 
-    # Signal: immediately after the workgroup wait (no cluster -3 barriers exist
-    # in the module yet, so the first match is the workgroup one).
+    # Signal: immediately after the workgroup wait.
     result = Module(module.name)
     done = False
     for inst in module.flatitems():
