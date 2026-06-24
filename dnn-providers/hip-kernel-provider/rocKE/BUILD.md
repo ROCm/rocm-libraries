@@ -1,183 +1,125 @@
-# Building the ck_dsl engine + ck-dsl-provider
+# Building the rocKE engine
 
-This is the canonical build and artifact-hygiene reference for:
+This is the canonical build and artifact-hygiene reference for the **rocKE C++
+engine**: the tree rooted at this `rocKE/` directory whose sources live under
+`Cpp/` and which compiles to a static archive `libckc_core.a`. The engine lowers
+the ck_dsl IR to LLVM IR and is consumed by a hipDNN provider plugin (which links
+the archive and loads it at runtime).
 
-- the **ck_dsl C engine** (`projects/composablekernel/python/Cpp`), which
-  lowers the ck_dsl IR to LLVM and is compiled into a static archive
-  `libckc_core.a`; and
-- the **ck-dsl-provider** hipDNN plugin
-  (`dnn-providers/ck-dsl-provider`), which links that archive and is loaded by
-  hipDNN at runtime.
+All paths below are relative to the `rocKE/` root (written `<rocKE>`), so they
+are correct wherever this tree lives.
 
-There is **one supported build path**. Use it. The historical failures it
+There is **one supported engine build path**. Use it. The historical failures it
 prevents are all variations of "a stale or mis-flagged build product was used
 silently".
 
-## TL;DR: the canonical build script
+## TL;DR: build the engine + prove it
 
 ```bash
-projects/composablekernel/python/tools/check_byte_identity.py
+# build the engine fresh AND run the byte-identity gate (the definition-of-done):
+python <rocKE>/tools/check_byte_identity.py
 ```
 
-This single script:
-
-1. builds the engine fresh as a Release static archive (`libckc_core.a`);
-2. builds the provider plugin, **pointed at that fresh archive** (never a
-   checked-in one); and
-3. builds the hipDNN graph demos (GEMM, conv, SDPA) with the complete include
-   set and compile flags baked in.
-
-Everything is written under a single build root (default
-`/tmp/ck_dsl_build`); nothing is written back into the source tree.
+`check_byte_identity.py` builds the engine fresh as a Release static archive
+(`libckc_core.a`) and then proves its LLVM-IR emission is byte-identical to the
+Python engine across every kernel family. A green run means the dual-engine
+contract holds. It writes everything under a build root (default
+`$TMPDIR/ckc_verify`); nothing is written back into the source tree.
 
 Common options:
 
 | Option | Meaning |
 |---|---|
-| `--build-root DIR` | Where build output goes (use a local disk; never NFS). |
-| `--hipdnn-root DIR` | hipDNN source tree (default: in-repo `projects/hipdnn`). |
-| `--hipdnn-build DIR` | hipDNN build dir (default: `<root>/build[/release]`). |
-| `--rocm DIR` | ROCm prefix (default `/opt/rocm`). |
-| `--arch GFX` | GPU arch for the demos (default `gfx950`). |
-| `--sanitize` | Build the engine with AddressSanitizer + UBSan. |
-| `--no-demos` | Engine + provider only. |
-| `--run-gemm [M N K]` | Also run the GEMM demo (needs a GPU). |
+| `--build-root DIR` | Where the engine is built (use local disk; never NFS). |
+| `--only SUBSTR` | Restrict the gate to families containing SUBSTR (comma-separated). |
+| `--ir` | Also run the IR-canonical diff (diagnostic). |
+| `--ref-pyroot DIR` / `--ref-shim DIR` | Compare against another tree's Python engine. |
 
 > Build on a **local filesystem**. NFS makes the compiler and `comgr`
 > pathologically slow.
 
-## What the build actually needs (the flags that get forgotten)
-
-If you build a piece by hand instead of using the script, these are the
-non-obvious requirements that have each caused a phantom "it doesn't build /
-it's broken" before:
-
-### Engine
+To run the full validation suite (relative-path guard + byte-identity gate +
+pytest, plus the optional multi-arch sweep), use the test runner:
 
 ```bash
-cmake -S projects/composablekernel/python/Cpp -B <build> -DCMAKE_BUILD_TYPE=Release
-cmake --build <build> --target ckc_core -j$(nproc)
-# -> <build>/libckc_core.a   (this is the ONLY archive the provider should link)
+python <rocKE>/tests/run_all.py                       # guard + gate + pytest
+python <rocKE>/tests/run_all.py --arch-sweep gfx942   # also sweep common families at gfx942
 ```
 
-Optional sanitizer build for diagnostics (not for shipping):
-`-DCKC_SANITIZE=ON`.
+## Building the engine archive by hand
+
+```bash
+cmake -S <rocKE> -B <build> -DCMAKE_BUILD_TYPE=Release
+cmake --build <build> --target ckc_core -j$(nproc)
+# -> <build>/libckc_core.a   (the archive a provider links)
+```
+
+The top-level `<rocKE>/CMakeLists.txt` globs `Cpp/**/*.cpp` (excluding
+`Cpp/bindings/`) into `ckc_core`, with the public ABI headers at `Cpp/include`.
+
+Optional sanitizer build for diagnostics (not for shipping): `-DCKC_SANITIZE=ON`.
 
 > **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
 > emitted IR flavor must match it: set `CK_DSL_LLVM_FLAVOR=llvm22` for a ROCm 7.2
 > `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
-> Full flag list: [`../ck_dsl/dsl_docs/reference/env_flags.md`](../ck_dsl/dsl_docs/reference/env_flags.md).
+> Full flag list: [`Python/ck_dsl/dsl_docs/reference/env_flags.md`](Python/ck_dsl/dsl_docs/reference/env_flags.md).
 > The two engines must stay byte-identical — see the parity rule in
-> [`../ck_dsl/dsl_docs/development/engine_parity.md`](../ck_dsl/dsl_docs/development/engine_parity.md).
+> [`Python/ck_dsl/dsl_docs/development/engine_parity.md`](Python/ck_dsl/dsl_docs/development/engine_parity.md).
 
-### Provider plugin
+## The ckc_engine Python binding (optional)
+
+The `cpp` backend of the Python frontend reaches the engine through the
+`ckc_engine` pybind module, built from `Cpp/bindings/` against a prebuilt
+archive:
 
 ```bash
-cmake -S dnn-providers/ck-dsl-provider -B <build> \
-  -DCMAKE_CXX_COMPILER=hipcc \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DHIPDNN_ROOT=<repo>/projects/hipdnn \
-  -DHIPDNN_BUILD_DIR=<repo>/projects/hipdnn/build \
-  -DCK_DSL_PROVIDER_C_JIT=ON \
-  -DCKC_LIB=<build>/libckc_core.a      # the FRESH engine archive
-cmake --build <build> -j$(nproc)
+cmake -S <rocKE>/Cpp/bindings -B <bld> -DCMAKE_BUILD_TYPE=Release \
+  -DCKC_ENGINE_ARCHIVE=<build>/libckc_core.a \
+  -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
+  -DPYTHON_EXECUTABLE="$(which python)"
+cmake --build <bld> -j$(nproc)
+# put <bld> on PYTHONPATH so `import ckc_engine` works; otherwise the cpp
+# backend falls back to the Python lowerer (see core/backend.py).
 ```
 
-`CKC_LIB` resolution in the provider CMake (see "The CKC_LIB freshness rule"
-below) is deliberately strict: it either uses the explicit fresh archive you
-pass, or it builds the engine fresh itself. It will **never** silently fall
-back to a checked-in archive.
+## Consuming the engine from a provider plugin
 
-### hipDNN graph demos
+A hipDNN provider links `libckc_core.a` `--whole-archive` and resolves it
+strictly to avoid stale-archive failures:
 
-The demos (`integration_tests/EndToEnd{Gemm,Conv,Sdpa}Demo.cpp`) are
-standalone programs that include the hipDNN frontend and load the plugin at
-runtime. They need the **complete** include set, including generated headers
-that live in the hipDNN *build* tree:
+- **`-DCKC_LIB=/path/to/libckc_core.a`** — use that specific archive. If the file
+  does not exist, configuration **fails immediately** (it never searches for a
+  fallback).
+- **no `-DCKC_LIB`** — the engine is built **fresh** as an isolated sub-build and
+  that archive is linked, so the linked archive is always in lockstep with the
+  engine source.
 
-- `-D__HIP_PLATFORM_AMD__`
-- `-I<hipdnn>/frontend/include` and `-I<hipdnn_build>/frontend/include`
-- `-I<hipdnn>/backend/include`
-- `-I<hipdnn_build>/backend/src/backend/include` (the generated
-  `hipdnn_backend_export.h` lives here)
-- `-I<hipdnn>/data_sdk/include` and `-I<hipdnn_build>/data_sdk/include`
-- `-I<hipdnn>/flatbuffers_sdk/include`
-- `-I<hipdnn>/plugin_sdk/include`
-- `-I<hipdnn_build>/_deps/spdlog-src/include`
-- `-I<hipdnn_build>/_deps/json-src/include`
-- `-I<hipdnn_build>/_deps/flatbuffers-src/include`
-- the provider's `runtime/include` and `src`
-- link: `-L<hipdnn_build>/lib -lhipdnn_backend`
-- the SDPA demo additionally needs `-DHIPDNN_ENABLE_SDPA`.
-
-Missing any one of these produces a confusing "demos don't compile". The
-canonical script bakes all of them in.
+There is intentionally no path that uses a checked-in `build/` archive.
 
 ## Artifact hygiene (do not commit build products)
 
-Build products are regenerated by every build. A stale one checked into the
-tree silently shadows a fresh build and produces failures that look like code
-bugs. **Never commit build artifacts.**
+Build products are regenerated by every build. A stale one checked into the tree
+silently shadows a fresh build and produces failures that look like code bugs.
+**Never commit build artifacts.**
 
 This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 `CMakeCache.txt`, `_deps/`, `__pycache__/`, `*.a`, `*.o`, `*.so`, `*.dylib`,
-`*.dll`, `*.lib`, `*.cpython-*.so`.
-
-Two layers enforce this:
-
-1. **`.gitignore`** — the engine tree
-   (`projects/composablekernel/.gitignore`) and the provider tree
-   (`dnn-providers/ck-dsl-provider/.gitignore`) ignore all of the above.
-2. **A pre-commit guard** — `ck-dsl-reject-build-artifacts` (wired into the
-   root and the composablekernel `.pre-commit-config.yaml`) fails the commit if
-   any such artifact under either tree is staged. The script is
-   `dnn-providers/ck-dsl-provider/tools/reject_build_artifacts.sh`.
-
-### The exception: shipped kernel bundles
-
-`dnn-providers/ck-dsl-provider/kernels/<arch>/` is **committed on purpose**. It
-holds the prebuilt kernel bundles consumed at runtime:
-
-- `*.hsaco` — prebuilt kernels (fast path, ~0 cold start);
-- `*.ll` — kernel source for the in-process `comgr` JIT fallback;
-- `*.json` — manifests;
-- `*.lgbm` — trained kernel-selection models.
-
-These are versioned binaries, **regeneratable** from the engine (via the
-offline kernel generator) but checked in so the provider runs without a build
-step. They are explicitly exempt from both the `.gitignore` artifact rules and
-the pre-commit guard. Treat them as data, not as build output: regenerate and
-re-commit them deliberately when kernels change.
-
-## The CKC_LIB freshness rule (provider CMake)
-
-The provider links the engine archive `--whole-archive`. To make a
-stale-archive failure impossible, the provider CMake resolves the archive in
-exactly two ways:
-
-- **`-DCKC_LIB=/path/to/libckc_core.a`** — use that specific archive. If the
-  file does not exist, configuration **fails immediately** with a clear
-  message (it never searches for a fallback).
-- **no `-DCKC_LIB`** — the engine is built **fresh** as an isolated sub-build
-  and that archive is linked. The sub-build always rebuilds, so the linked
-  archive is always in lockstep with the engine source.
-
-There is intentionally no path that uses a checked-in `build/` archive.
+`*.dll`, `*.lib`, `*.cpython-*.so`. A pre-commit guard rejects committing such
+artifacts under the engine tree (`files: ^...rocKE/Cpp/`).
 
 ## Freshness stamps
 
 The engine carries an explicit freshness stamp so a consumer can *detect* a
 mismatch rather than rely on rebuild discipline. At CMake configure time
-`cmake/ckc_build_id.cmake` computes a deterministic, git-independent content
-hash of the engine sources and injects it (plus a human `engine_version`) into
-`src/core/ckc_build_id.cpp` as compile definitions — scoped to that single TU
-so no emission object is touched (the `.ll` byte-identity contract holds). The
+`cmake/ckc_build_id.cmake` computes a deterministic, git-independent content hash
+of the engine sources (`Cpp/**`) and injects it (plus a human `engine_version`)
+into `Cpp/core/ckc_build_id.cpp` as compile definitions — scoped to that single
+TU so no emission object is touched (the `.ll` byte-identity contract holds). The
 stamp is exposed by `ckc_build_id()` / `ckc_engine_version()`
-(`include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.py` on
-every run, and surfaced through the pybind `build_id` attribute. The change to
-any tracked source byte changes the build-id, so a stale or mixed-build archive
-is detectable.
+(`Cpp/include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.py` on
+every run, and surfaced through the pybind `build_id` attribute. Changing any
+tracked source byte changes the build-id, so a stale or mixed-build archive is
+detectable.
 
 Remaining follow-on: a manifest/bundle version + provider-side validation that a
-loaded prebuilt-HSACO bundle matches the engine build-id it was built against
-(today the C-JIT path sidesteps this by building from the engine on demand).
+loaded prebuilt-HSACO bundle matches the engine build-id it was built against.
