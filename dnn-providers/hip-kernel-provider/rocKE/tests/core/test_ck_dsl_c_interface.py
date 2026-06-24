@@ -39,7 +39,7 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _run(cmd: list[str | os.PathLike[str]], *, cwd: Path = _CK_ROOT, timeout: int = 240):
+def _run(cmd: list[str | os.PathLike[str]], *, cwd: Path = _ROCKE, timeout: int = 240):
     proc = subprocess.run(
         [str(x) for x in cmd],
         cwd=str(cwd),

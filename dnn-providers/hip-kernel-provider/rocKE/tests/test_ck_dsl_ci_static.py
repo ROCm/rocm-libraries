@@ -15,8 +15,13 @@ Run:
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
+
+# The representative-IR parity harness lives in the instances test layer; make
+# it importable from this root-level CI test (run via pytest or directly).
+sys.path.insert(0, str(Path(__file__).resolve().parents[0] / "instances"))
 
 from ck_dsl.benchmark.gemm.fp16_rcr_sweep import (
     GemmSweepConfig,
@@ -24,7 +29,7 @@ from ck_dsl.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from ck_dsl.core.arch import known_arches
-from ck_dsl_ir_parity_harness import cases
+from ck_dsl_ir_parity_harness import cases  # noqa: E402 -- after sys.path shim
 
 _PY_ROOT = Path(__file__).resolve().parents[1] / "Python"
 _EXAMPLES = _PY_ROOT / "ck_dsl" / "examples"
