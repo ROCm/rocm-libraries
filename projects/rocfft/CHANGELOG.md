@@ -12,6 +12,7 @@ Documentation for rocFFT is available at
 ### Changed
 
 * Relaxed the usage requirements for `rocfft_setup` and `rocfft_cleanup`.
+* Removed the ROCFFT_RTC_PROCESS_HELPER debug environment variable.
 
 ### Resolved issues
 

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -585,6 +585,15 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
 
+  # On Windows, to run rocfft_aot_helper we need to be able to find
+  # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH
+  # when we launch that exe.
+  if( WIN32 )
+    set( aot_exec_path "$ENV{PATH};${hiprtc_BIN_INSTALL_DIR};${hip_BIN_INSTALL_DIR}" )
+  else()
+    set( aot_exec_path "$ENV{PATH}" )
+  endif()
+
   # build separate kernel cache for each target
   foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
     # cache file should go next to the shared object - on Windows this
@@ -597,7 +606,9 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
 
     add_custom_command(
       OUTPUT rocfft_kernel_cache_${arch}.db
-      COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
+      COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=$<SHELL_PATH:${aot_exec_path}>"
+        "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
       DEPENDS rocfft_aot_helper rocfft_rtc_helper
       COMMENT "Compile ${arch} kernels into shipped cache file"
     )
