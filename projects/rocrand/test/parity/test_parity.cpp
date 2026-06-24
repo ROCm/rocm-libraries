@@ -87,8 +87,7 @@ static void
         }
         else if(rocrand_results[i] != curand_results[i])
         {
-            std::cout << "Expected failure: "
-                      << "mismatch at index " << i << std::endl;
+            std::cout << "Expected failure: " << "mismatch at index " << i << std::endl;
             return;
         }
     }
@@ -117,17 +116,16 @@ class ParityTest : public ::testing::TestWithParam<generator_type>
 
 TEST_P(ParityTest, BasicParity)
 {
-    constexpr long long      seeds[]   = {-1ll, 12345ll};
-    constexpr int            dims[]    = {1, 3};
-    constexpr long long      offsets[] = {-1ll, 112121116104111110ll};
-    constexpr generator_type excpected_parity[]
-        = {generator_type::SOBOL32, generator_type::SOBOL64};
+    constexpr long long      seeds[]           = {-1ll, 12345ll};
+    constexpr int            dims[]            = {1, 3};
+    constexpr long long      offsets[]         = {-1ll, 112121116104111110ll};
+    constexpr generator_type expected_parity[] = {generator_type::SOBOL32, generator_type::SOBOL64};
 
     const generator_type rng_type = GetParam();
 
     const bool should_match
-        = std::find(std::begin(excpected_parity), std::end(excpected_parity), rng_type)
-          != std::end(excpected_parity);
+        = std::find(std::begin(expected_parity), std::end(expected_parity), rng_type)
+          != std::end(expected_parity);
 
     for(const long long offset : offsets)
     {
