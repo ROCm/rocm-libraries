@@ -48,42 +48,60 @@ stinkytofu::AsmEmitterOptions normalizedEmitterOptions(
     emitterOptions.useSymbolicNames = false;
     return emitterOptions;
 }
-}  // namespace
 
-namespace stinkytofu {
-char DumpStinkyModulePass::ID = 0;
+void dumpAssembly(const std::vector<const stinkytofu::Function*>& functions,
+                  const std::string& fallbackName,
+                  const stinkytofu::DumpStinkyModulePassConfig& config) {
+    if (!config.emitAsm) return;
 
-static void dumpFunctions(const std::vector<const Function*>& functions,
-                          const std::string& fallbackName,
-                          const DumpStinkyModulePassConfig& config) {
+    std::string asmPath = config.asmPath;
+    if (asmPath.empty()) {
+        if (!config.stirPath.empty())
+            asmPath = pathWithSuffix(config.stirPath, ".s");
+        else
+            asmPath = fallbackName.empty() ? "dump.s" : fallbackName + ".s";
+    }
+
+    std::ofstream out(asmPath, std::ios::out | std::ios::trunc);
+    assert(out && "[DumpStinkyModulePass] Failed to open asmPath");
+
+    stinkytofu::StinkyAsmEmitter emitter(normalizedEmitterOptions(config.emitterOptions));
+    for (const stinkytofu::Function* function : functions) emitter.emit(out, *function);
+}
+
+void dumpFunctions(const std::vector<const stinkytofu::Function*>& functions,
+                   const std::string& fallbackName,
+                   const stinkytofu::DumpStinkyModulePassConfig& config) {
     if (!config.stirPath.empty()) {
         std::ofstream out(config.stirPath, std::ios::out | std::ios::trunc);
 
         // use assert
         assert(out && "[DumpStinkyModulePass] Failed to open stirPath");
-        AsmPrinter printer(out, config.printerOptions);
+        stinkytofu::AsmPrinter printer(out, config.printerOptions);
         for (size_t i = 0; i < functions.size(); ++i) {
             if (i > 0) out << "\n";
             printer.print(*functions[i]);
         }
     }
 
-    if (config.emitAsm) {
-        std::string asmPath = config.asmPath;
-        if (asmPath.empty()) {
-            if (!config.stirPath.empty())
-                asmPath = pathWithSuffix(config.stirPath, ".s");
-            else
-                asmPath = fallbackName.empty() ? "dump.s" : fallbackName + ".s";
-        }
-
-        std::ofstream out(asmPath, std::ios::out | std::ios::trunc);
-        assert(out && "[DumpStinkyModulePass] Failed to open asmPath");
-
-        StinkyAsmEmitter emitter(normalizedEmitterOptions(config.emitterOptions));
-        for (const Function* function : functions) emitter.emit(out, *function);
-    }
+    dumpAssembly(functions, fallbackName, config);
 }
+
+void dumpModule(const stinkytofu::StinkyAsmModule& module,
+                const stinkytofu::DumpStinkyModulePassConfig& config) {
+    if (!config.stirPath.empty()) {
+        std::ofstream out(config.stirPath, std::ios::out | std::ios::trunc);
+        assert(out && "[DumpStinkyModulePass] Failed to open stirPath");
+        stinkytofu::AsmPrinter printer(out, config.printerOptions);
+        printer.print(module);
+    }
+
+    dumpAssembly(module.getFunctions(), module.getName(), config);
+}
+}  // namespace
+
+namespace stinkytofu {
+char DumpStinkyModulePass::ID = 0;
 
 PreservedAnalyses DumpStinkyModulePass::run(Function& func, PassContext& passCtx,
                                             AnalysisManager& AM) {
@@ -96,7 +114,7 @@ PreservedAnalyses DumpStinkyModulePass::run(Function& func, PassContext& passCtx
 
 PreservedAnalyses DumpStinkyModulePass::run(const StinkyAsmModule& module, PassContext&,
                                             AnalysisManager& /*AM*/) {
-    dumpFunctions(module.getFunctions(), module.getName(), config_);
+    dumpModule(module, config_);
     return PreservedAnalyses::all();
 }
 

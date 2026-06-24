@@ -160,8 +160,10 @@ TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallees) {
     ASSERT_TRUE(fs::exists(stirPath));
     std::ifstream stirFile(stirPath);
     std::string stirContent((std::istreambuf_iterator<char>(stirFile)), {});
-    EXPECT_NE(stirContent.find("st.func @entry_func()"), std::string::npos);
-    EXPECT_NE(stirContent.find("st.func @callee_func()"), std::string::npos);
+    EXPECT_EQ(stirContent.find("st.module @dump_module_test {\n"), 0u);
+    EXPECT_NE(stirContent.find("  st.func @entry_func()"), std::string::npos);
+    EXPECT_NE(stirContent.find("  st.func @callee_func()"), std::string::npos);
+    EXPECT_NE(stirContent.rfind("}\n"), std::string::npos);
 
     ASSERT_TRUE(fs::exists(asmPath));
     std::ifstream asmFile(asmPath);
