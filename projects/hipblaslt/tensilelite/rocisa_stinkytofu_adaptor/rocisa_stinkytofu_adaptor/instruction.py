@@ -3702,12 +3702,12 @@ def _inst_type_to_str(it: Any) -> str:
 class MFMAInstruction(Instruction):
     """``v_mfma_*`` shim (rocisa ``MFMAInstruction``)."""
 
-    __slots__ = ("accType", "variant", "mfma1k", "acc", "a", "b", "acc2", "neg")
+    __slots__ = ("accType", "variant", "mfma1k", "acc", "a", "b", "acc2", "acc2_imm", "neg")
 
     def __init__(self, instType: Any = None, accType: Any = None,
                  variant: Any = None, mfma1k: bool = False,
                  acc: Any = None, a: Any = None, b: Any = None,
-                 acc2: Any = None, neg: bool = False,
+                 acc2: Any = None, acc2_imm: Any = None, neg: bool = False,
                  comment: str = "", **kw):
         _ = kw
         super().__init__(instType, comment)
@@ -3718,6 +3718,7 @@ class MFMAInstruction(Instruction):
         self.a = a
         self.b = b
         self.acc2 = acc2
+        self.acc2_imm = acc2_imm
         self.neg = neg
 
     def to_stinky_logical(self) -> Any:
@@ -3726,6 +3727,11 @@ class MFMAInstruction(Instruction):
         n = self.variant[1] if len(self.variant) > 1 else 0
         k = self.variant[2] if len(self.variant) > 2 else 0
         blocks = self.variant[3] if len(self.variant) > 3 else 1
+        acc2_reg = None
+        if self.acc2_imm is not None:
+            acc2_reg = _to_stinky_register(self.acc2_imm)
+        elif self.acc2 is not None:
+            acc2_reg = _to_stinky_register(self.acc2)
         return _st.MFMA(
             _inst_type_to_str(self.instType),
             _inst_type_to_str(self.accType),
@@ -3733,6 +3739,7 @@ class MFMAInstruction(Instruction):
             _to_stinky_register(self.acc),
             _to_stinky_register(self.a),
             _to_stinky_register(self.b),
+            acc2=acc2_reg,
             comment=self.comment)
 
     def getParams(self):
@@ -3763,6 +3770,7 @@ class MFMAInstruction(Instruction):
         clone.a = _deepcopy(self.a, memo) if self.a is not None else None
         clone.b = _deepcopy(self.b, memo) if self.b is not None else None
         clone.acc2 = _deepcopy(self.acc2, memo) if self.acc2 is not None else None
+        clone.acc2_imm = self.acc2_imm
         clone.neg = self.neg
         return clone
 

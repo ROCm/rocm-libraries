@@ -120,6 +120,18 @@ def getCaps(key: IsaKey) -> Tuple[Dict, Dict, Dict, Dict]:
     arch_caps = raw.get("archCaps") or {}
     reg_caps = raw.get("regCaps") or {}
     asm_bugs = raw.get("asmBugs") or {}
+
+    # Inject caps that the stinkytofu binding does not yet probe but that
+    # gfx1250 hardware supports.  Native rocisa discovers these via llvm-mc
+    # assembly probes (tryAssembler); we hard-code them here until the
+    # binding adds the probes itself.
+    if key == (12, 5, 0):
+        asm_caps.setdefault("HasWMMA_AccImmZero", 1)
+        asm_caps.setdefault("HasClusterBarrier", 1)
+        asm_caps.setdefault("s_add_u64", 1)
+        asm_caps.setdefault("v_add_nc_u64", 1)
+        reg_caps.setdefault("GlobalPrefetchSize", 256)
+
     return (
         {str(k): int(v) for k, v in asm_caps.items()},
         {str(k): int(v) for k, v in arch_caps.items()},

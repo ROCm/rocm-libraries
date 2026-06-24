@@ -69,9 +69,16 @@ class TestGetCapsDynamic(unittest.TestCase):
 
         direct = stinkytofu.getHardwareCaps(list(_GFX1250))
         via_caps = caps.getCaps(_GFX1250)
-        self.assertEqual(via_caps[0], dict(direct["asmCaps"]))
+        # getCaps() may inject supplemental caps (e.g. HasWMMA_AccImmZero)
+        # that the binding does not yet probe; verify the binding's own caps
+        # are a subset of the returned dict.
+        self.assertTrue(
+            dict(direct["asmCaps"]).items() <= via_caps[0].items(),
+            "getCaps asmCaps must be a superset of stinkytofu raw caps")
         self.assertEqual(via_caps[1], dict(direct["archCaps"]))
-        self.assertEqual(via_caps[2], dict(direct["regCaps"]))
+        self.assertTrue(
+            dict(direct["regCaps"]).items() <= via_caps[2].items(),
+            "getCaps regCaps must be a superset of stinkytofu raw caps")
         self.assertEqual(via_caps[3], dict(direct["asmBugs"]))
 
     def test_returns_fresh_copies(self):
