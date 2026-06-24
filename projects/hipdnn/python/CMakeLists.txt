@@ -101,6 +101,10 @@ else()
     # (__init__.py) and its tests live under LIBDIR/python; `import
     # hipdnn_frontend` then loads the ext via its top-level name with LIBDIR on
     # PYTHONPATH.
+    # NOTE: Nanobind on Windows produces a .pyd - It is classified as 
+    # a LIBRARY modules instead of a RUNTIME module. dlls are classified as RUNTIME.
+    # So the .pyd was incorrectly landing in the lib directory instead of the bin directory on Windows.
+    # we need this CMake $<IF:$<PLATFORM_ID:Windows>> magic to make it land in the correct directory.
     install(TARGETS hipdnn_frontend_python
             LIBRARY DESTINATION $<IF:$<PLATFORM_ID:Windows>,${CMAKE_INSTALL_BINDIR},${CMAKE_INSTALL_LIBDIR}>)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
