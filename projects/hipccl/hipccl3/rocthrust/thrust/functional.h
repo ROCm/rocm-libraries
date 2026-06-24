@@ -305,17 +305,13 @@ struct project2nd<void, void>
 #ifdef THRUST_DOXYGEN_INVOKED
 using _THRUST_STD::not_fn;
 #else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
-THRUST_TEMPLATE(class _Fn)
-requires (_THRUST_STD::is_constructible_v<_THRUST_STD::decay_t<_Fn>, _Fn> &&
-          _THRUST_STD::is_move_constructible_v<_THRUST_STD::decay_t<_Fn>>)
+template <class _Fn>
 THRUST_DEPRECATED_BECAUSE("Use hip::std::not_fn instead")
 [[nodiscard]]
-_LIBCUDACXX_HIDE_FROM_ABI
-constexpr auto not_fn(_Fn&& __f)
+_LIBCUDACXX_HIDE_FROM_ABI constexpr auto not_fn(_Fn&& __f)
 {
   return _THRUST_STD::not_fn(_THRUST_STD::forward<_Fn>(__f));
 }
-
 #endif // !THRUST_DOXYGEN_INVOKED
 /*! \}
  */
