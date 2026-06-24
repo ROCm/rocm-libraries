@@ -218,30 +218,9 @@ option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_B
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
 # OpenCL 1.2
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(MIOPEN_BACKEND_OPENCL 1)
-    find_package( OpenCL REQUIRED )
-    find_program(MIOPEN_HIP_COMPILER clang++
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm/llvm
-            ${CMAKE_INSTALL_PREFIX}/llvm
-    )
-    if(MIOPEN_HIP_COMPILER)
-        message(STATUS "hip compiler: ${MIOPEN_HIP_COMPILER}")
-    else()
-        message(FATAL_ERROR "hip compiler not found")
-    endif()
-
-    # TODO (priority_low) Use to build HIP and ASM kernels.
-    if(MIOPEN_USE_COMGR)
-        message(FATAL_ERROR "comgr cannot be used with OpenCL backend")
-    endif()
-
-    # This is to pass all necessary build flags to HIP compiler
-    # for device code compilation. Used within "find_package(hip...".
-    # See https://github.com/ROCm-Developer-Tools/HIP/pull/2035#issuecomment-616861118.
-    set (HIP_CXX_COMPILER ${MIOPEN_HIP_COMPILER})
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(WARNING "The OpenCL backend has been removed. Falling back to HIP.")
+    set(MIOPEN_BACKEND "HIP")
 endif()
 
 # HIP SDK on Windows does not detect platform correctly, defaulting to "amd"

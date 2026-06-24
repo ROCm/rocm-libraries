@@ -329,7 +329,7 @@ std::string LoggingPrefix()
         ss << sysinfo::GetSystemHostname() << ' ';
         ss << GetProcessAndThreadId() << ' ';
     }
-    ss << "MIOpen(HIP)";
+    ss << "MIOpen";
     if(env::enabled(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME))
     {
         ss << std::fixed << std::setprecision(3) << std::setw(8) << GetTimeDiff();
@@ -349,7 +349,7 @@ std::string LoggingPrefixMinimal()
     // and is used for buffer-only logs when actual logging is disabled.
     static const std::string prefix = []() {
         std::stringstream ss;
-        ss << "MIOpen(HIP): ";
+        ss << "MIOpen: ";
         return ss.str();
     }();
     return prefix;

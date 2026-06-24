@@ -192,10 +192,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP``
-        | Controls OpenCL Wave64 without workgroup behavior.
-      - | 0: Disable
-        | 1: Enable
 
 Solution selection
 ==================
