@@ -382,8 +382,14 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip
     attrs.set_generate_index(true);
 
     auto [y, index] = graph->resample(x, attrs);
-    y->set_output(true).set_data_type(DataType::HALF).set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID);
-    index->set_output(true).set_data_type(DataType::INT8).set_uid(K_RESAMPLE_FWD_TENSOR_INDEX_UID);
+    y->set_output(true)
+        .set_data_type(DataType::HALF)
+        .set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID)
+        .set_name("y");
+    index->set_output(true)
+        .set_data_type(DataType::INT8)
+        .set_uid(K_RESAMPLE_FWD_TENSOR_INDEX_UID)
+        .set_name("index");
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -416,14 +422,17 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, TensorTypesPreservedInRoundTrip
     ASSERT_NE(tensorMap.count(K_RESAMPLE_FWD_TENSOR_Y_UID), 0u);
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_Y_UID]->data_type,
               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_Y_UID]->name, "y");
 
     ASSERT_NE(tensorMap.count(K_RESAMPLE_FWD_TENSOR_X_UID), 0u);
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_X_UID]->data_type,
               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_X_UID]->name, "x");
 
     ASSERT_NE(tensorMap.count(K_RESAMPLE_FWD_TENSOR_INDEX_UID), 0u);
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->data_type,
               hipdnn_flatbuffers_sdk::data_objects::DataType::INT8);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->name, "index");
 }
 
 TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
@@ -454,7 +463,37 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
     EXPECT_EQ(index, nullptr);
 
     auto result = graph->validate();
-    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Retrieve serialized graph
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(serializedSize, 0u);
+
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+
+    auto& node = graphT.nodes[0];
+    EXPECT_EQ(node->attributes.type, NodeAttrType::ResampleFwdAttributes);
+
+    auto* opNode = node->attributes.AsResampleFwdAttributes();
+    ASSERT_NE(opNode, nullptr);
+
+    ASSERT_TRUE(opNode->generate_index.has_value());
+    EXPECT_EQ(opNode->generate_index.value(), true);
+    ASSERT_FALSE(opNode->index_tensor_uid.has_value());
+    ASSERT_EQ(opNode->resample_mode,
+              hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 }
 
 } // namespace

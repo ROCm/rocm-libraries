@@ -37,7 +37,9 @@ public:
                     "ResampleFwdNode missing output Y for pre-validation"};
         }
 
-        if(attributes.get_generate_index() && !attributes.get_index())
+        const bool generateIndex = attributes.get_generate_index().value_or(false);
+        if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL
+           && !attributes.get_index())
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET,
                     "ResampleFwdNode missing output Index when index generation requested"};
@@ -66,7 +68,7 @@ public:
                 break;
             default:
                 return {ErrorCode::INVALID_VALUE,
-                        "ResampleFwdNode output Index must be a signed integer data type"};
+                        "ResampleFwdNode output Index type must be Int8 or Int32"};
             }
         }
 
@@ -128,7 +130,8 @@ public:
             }
             else
             {
-                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims));
+                auto strideOrder = hipdnn_data_sdk::utilities::strideOrderNhwc(yDims.size());
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims, strideOrder));
             }
         }
 
