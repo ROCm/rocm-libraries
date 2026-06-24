@@ -104,14 +104,13 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [1024, 4096, 1, 512]
           - Exact: [1536, 1536, 1, 65536]
           - Exact: [3072, 3072, 1, 7168]
           - Exact: [4096, 4096, 1, 16384]
           - Exact: [7168, 4, 1, 4]
-          - Exact: [7168, 512, 1, 512]
-          - Exact: [7168, 1024, 1, 512]
-          - Exact: [7168, 129408, 1, 512]         
+          - Exact: [7168, 1024, 1, 4096]
+          - Exact: [7168, 129408, 1, 4096]
+
 LibraryLogic:
     ScheduleName: "gfx1250"
     DeviceNames: ["Device 0073"]

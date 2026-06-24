@@ -104,12 +104,12 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [4, 512, 1, 28672]
-          - Exact: [24, 512, 1, 28672]
-          - Exact: [48, 512, 1, 7168]
-          - Exact: [96, 512, 1, 7168]
-          - Exact: [192, 512, 1, 7168]
-          - Exact: [384, 512, 1, 7168]
+          - Exact: [4, 4096, 1, 28672]
+          - Exact: [24, 4096, 1, 28672]
+          - Exact: [48, 4096, 1, 7168]
+          - Exact: [96, 4096, 1, 7168]
+          - Exact: [192, 4096, 1, 7168]
+          - Exact: [384, 4096, 1, 7168]
 
 LibraryLogic:
     ScheduleName: "gfx1250"
