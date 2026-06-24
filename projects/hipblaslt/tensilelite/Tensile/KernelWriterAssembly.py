@@ -978,8 +978,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("tdmABGlobalSplitIncs", 1))
         module.add(self.defineSgpr("tdmABLdsSplitIncs", 1))
-        module.add(self.defineSgpr("tdmABSplitDim1H0", 1))
-        module.add(self.defineSgpr("tdmABSplitDim1H1", 1))
+        # dim1 half boundaries (H0/H1) are recomputed in globalReadDo, not persisted.
 
       if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
@@ -11159,11 +11158,38 @@ class KernelWriterAssembly(KernelWriter):
         imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
         imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
         if numWaves > 1:
-          imod.middle.add(comp.setTensorDim1(f"tdm{tc}Group1", "tdmABSplitDim1H1", self))
-        comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
-        imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
-        if numWaves > 1:
-          imod.middle.add(comp.setTensorDim1(f"tdm{tc}Group1", "tdmABSplitDim1H0", self))
+          # Recompute the two per-half dim1 boundaries from the live descriptor
+          # instead of persisting them (saves 2 SGPRs). halfRows is per-wave: even
+          # waves load A (MacroTile0//2), odd load B (MacroTile1//2).
+          group1 = f"tdm{tc}Group1"
+          halfRowsA = kernel["MacroTile0"] // 2
+          halfRowsB = kernel["MacroTile1"] // 2
+          wavelen = kernel["WavefrontSize"]
+          with self.allocTmpSgpr(3, tag="tdmSplitDim1Recompute") as tmpSgprRes:
+            h0 = tmpSgprRes.idx
+            h1 = tmpSgprRes.idx + 1
+            hr = tmpSgprRes.idx + 2
+            if halfRowsA == halfRowsB:
+              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
+            else:
+              # WaveIdx is not live in the loop; recompute parity from Serial.
+              with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
+                imod.middle.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
+                imod.middle.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), src=sgpr(waveIdTmp.idx), comment="waveId"))
+                imod.middle.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="wave parity"))
+              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
+            imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
+            imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
+            imod.middle.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
+            imod.middle.add(SSubU32(sgpr(h1), sgpr(h0), sgpr(hr), "H1 = H0 - halfRows"))
+            imod.middle.add(SCSelectB32(sgpr(h1), 0, sgpr(h1), "clamp H1 to 0"))
+            imod.middle.add(comp.setTensorDim1(group1, h1, self))
+            comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
+            imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
+            imod.middle.add(comp.setTensorDim1(group1, h0, self))
+        else:
+          comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][1]])
+          imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
@@ -19009,11 +19035,8 @@ class KernelWriterAssembly(KernelWriter):
             mod.add(SSubU32(sgpr(dim1), sgpr(dim1), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim1), 0, "set to 0 for waves that no enough data to load"))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, 0, False, isSparseTrack if not unrolledMajor else False, isMetadata if not unrolledMajor else False))
-          if unrolledMajor and kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]:
-            halfRows = round(mt) // dim1Divisor
-            mod.add(SMovB32(sgpr("tdmABSplitDim1H0"), sgpr(dim1), "save half-0 dim1"))
-            mod.add(SSubU32(sgpr(tmpSgprWaveOffset), sgpr(dim1), halfRows, f"half-1 dim1 = dim1 - {halfRows}"))
-            mod.add(SCSelectB32(sgpr("tdmABSplitDim1H1"), 0, sgpr(tmpSgprWaveOffset), "clamp to 0"))
+          # The descriptor now holds the full per-wave dim1; TDMSplit recomputes
+          # the half boundaries from it in globalReadDo.
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
