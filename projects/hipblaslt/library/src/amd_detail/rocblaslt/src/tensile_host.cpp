@@ -3225,6 +3225,12 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     if(isFp4A && isFp4B && isShuffledScale)
         return false;
 
+    // Do not use rocRoller for FP8 E4M3 A + FP8 E4M3 B with pre-swizzled (shuffled) scale layout
+    bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    if(isFp8A && isFp8B && isShuffledScale)
+        return false;
+
     return handle->useRocRoller == 1
            || (handle->useRocRoller == -1
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
