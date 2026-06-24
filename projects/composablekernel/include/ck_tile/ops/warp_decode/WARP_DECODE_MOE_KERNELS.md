@@ -585,6 +585,33 @@ slice; warps (when >1) handle adjacent output rows; the activation is broadcast.
 - **Accuracy gating:** fp4 weights are an accuracy/product decision; gate behind a
   model-quality check before enabling MXFP4 weights in production.
 
+### 10.1 External baselines — AITER fmoe ASM (incl. the flat sorting-free kernel)
+
+Two apples-to-apples comparisons against AITER's fused MoE exist (same shapes /
+routing / process, gfx950):
+
+- **Counter-level profile of the real ASM all-fused, *sorting-free* kernel**
+  `aiter::fmoe_bf16_blockscaleFp8_g1u1_flat_vs_ps_silu_1x128` vs the split
+  warp-decode pair (`docs/issues/warp_decode_profiling/2026-06-04-asm-fmoe-profiling.md`).
+  The ASM kernel is **MFMA-only on 1/16-filled decode-M tiles**, never
+  memory-stalled, but **occupancy-starved (1.2–11.7%)**. Crossover by wall time:
+  split **wins B=1** (qwen 14.6 vs 16.3 µs; deepseek 72.9 vs 85.6 µs), ASM **wins
+  B≥~8** (qwen 50.9 vs 63.9; deepseek 450 vs 513) once it fills the machine and
+  avoids the split's BF16 round-trip. `down` is the chronic weak point on every
+  shape (16 / 34 / 55 / 61 % of peak HBM).
+- **End-to-end MoE-block timing** (topk + quant + GEMM) vs `aiter.fused_moe`
+  per-1×128 FP8 blockscale, best of {default heuristic, exhaustive tune}
+  (`docs/reviews/warp-decode-bench-results.md`, 2026-04-21). The tuned AITER path
+  dispatches to the 1-stage ASM flat kernels
+  (`fmoe_bf16_blockscaleFp8_g1u1_vs_pf2_silu_16x128`, `..._vs_silu_1tg_32x256`).
+  Warp-decode wins only **B=1 on MiniMax (WD-BF16, 1.21×)**; AITER wins B=1
+  DeepSeek and all B≥2 (1.2–3.2×) via `moe_sorting` weight reuse + single launch.
+
+Both predate the MXFP4 `down` + H2 work in this branch (which narrows the `down`
+gap at B≥2), so a refreshed head-to-head with `down_fp4_h2` is the natural next
+measurement. Note AITER itself uses split-K (`ksplit ∈ {2,3}`) for occupancy at
+very small B — the same lever as the cross-block split-K item in §12.
+
 ---
 
 ## 11. Tried and dropped (with caveats)
@@ -628,15 +655,33 @@ vs the 64 B the counters assume). Cross-check with the EA counter
    (borrow the ASM kernel's micro/macro pipelining) could approach the full 2×.
 3. **Fuse input-side bf16→fp8 quant into gate_up** (when the fp8 path is selected)
    to drop the separate quant kernel (~2 µs at B=1).
-4. **8-warp / double-buffered chunked LDS down** — the untried follow-up that
+4. **Cross-block split-K (`k_batch`) on the `down` weak point — portable from
+   GEMM decode.** `down` is the chronic low-BW stage (16–61% of peak) and at small
+   grids (Qwen short-INTER, low B) it is *occupancy-bound*, not at the HBM wall.
+   The `gemm_decode` kernels add a **cross-block K split**: a second grid axis
+   `k_batch`, where each shard computes a partial dot over a K-slice and the
+   epilogue is either `atomicAdd` (non-deterministic, one extra op) or a
+   scratch-reduce (deterministic / batch-invariant). It kicks in when
+   `grid · k_batch ≤ CuCount`, i.e. only when the grid under-fills the GPU — exactly
+   the `down`/Qwen-B1 regime. The same axis maps onto `down` (split INTER) and
+   `gate_up` (split HIDDEN). The atomic path needs a **zeroed output**; fold that
+   zero-init into the `gate_up` epilogue / a cheap prologue rather than a standalone
+   fill kernel — the same trick as the vLLM `blockscale_splitk_zero_init` fusion
+   that made split-K free for the blockscale GEMM. *Caveat: in GEMM decode the
+   `k_batch` sweep was null on the **compute-bound** M≥5 leg; decode `down` is
+   memory/occupancy-bound at small grids (where split-K should pay), but this is
+   untested for MoE. AITER's fmoe also uses `ksplit ∈ {2,3}` for the same reason at
+   very small B. See `docs/gemm_decode_design.md` §10 and
+   `docs/reviews/vllm-zero-init-splitk-review.md`.*
+5. **8-warp / double-buffered chunked LDS down** — the untried follow-up that
    would actually create the cross-wave reuse staging needs.
-5. **Chunk-swept XCD swizzle on small-grid Qwen INTER=512** — the only swizzle
+6. **Chunk-swept XCD swizzle on small-grid Qwen INTER=512** — the only swizzle
    regime not yet falsified.
-6. **kVector autotuning** per shape/dtype (size to ~one 128-bit transaction;
+7. **kVector autotuning** per shape/dtype (size to ~one 128-bit transaction;
    going wider only helps when issue-bound).
-7. **Cooperative top-k / standalone topk producer** — deferred; topk is a small
+8. **Cooperative top-k / standalone topk producer** — deferred; topk is a small
    fixed ~3 µs.
-8. **V5 single-stage** (per-CTA full-INTER + coarse atomic-merge + HIDDEN-half
+9. **V5 single-stage** (per-CTA full-INTER + coarse atomic-merge + HIDDEN-half
    pipeline) — only build after a cost model shows it clears the CTA-count bar V4
    failed.
 
