@@ -170,39 +170,6 @@ def _rmsnorm_layout(
     return _rmsnorm_layout_from_shapes(x.shape, scale.shape)
 
 
-def _stored_shape_planned(
-    tensors: Dict[int, torch.Tensor],
-    uid: int,
-    graph_shape: Optional[Tuple[int, ...]],
-) -> Optional[Tuple[int, ...]]:
-    """Mirror ``_stored_tensor_shape`` with the declared shape captured at plan
-    time: a live tensor already present in ``tensors`` wins over the plan-time
-    graph shape, so the closure never re-walks ``graph_json``."""
-    existing = tensors.get(uid)
-    if existing is not None:
-        return tuple(int(dim) for dim in existing.shape)
-    return graph_shape
-
-
-def _store_planned(
-    tensors: Dict[int, torch.Tensor],
-    uid: int,
-    value: torch.Tensor,
-    graph_shape: Optional[Tuple[int, ...]],
-) -> None:
-    """Mirror ``_store_tensor_for_uid`` with the declared shape captured at plan
-    time, so the replay closure performs no ``graph_json`` re-parse."""
-    shape = _stored_shape_planned(tensors, uid, graph_shape)
-    if shape is not None and tuple(value.shape) != shape:
-        if _numel(shape) != value.numel():
-            raise ValueError(
-                f"Cannot store tensor UID {uid} with shape {tuple(value.shape)} "
-                f"as graph shape {shape}"
-            )
-        value = value.reshape(shape)
-    _store_tensor(tensors, uid, value)
-
-
 @register_handler("LayernormAttributes")
 def compile_layernorm(
     node: Dict[str, Any],
@@ -397,8 +364,11 @@ def compile_rmsnorm_backward(
         _store_planned(tensors, dscale_uid, dscale, dscale_shape)
 
         if dbias_uid is not None:
-            dbias_shape = _stored_shape_planned(
-                tensors, int(dbias_uid), dbias_graph_shape
+            _existing = tensors.get(int(dbias_uid))
+            dbias_shape = (
+                tuple(int(d) for d in _existing.shape)
+                if _existing is not None
+                else dbias_graph_shape
             )
             if dbias_shape is None:
                 dbias_shape = tuple(int(dim) for dim in scale.shape)

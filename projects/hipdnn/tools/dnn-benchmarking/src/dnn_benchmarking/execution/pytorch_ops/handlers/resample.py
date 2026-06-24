@@ -127,28 +127,6 @@ def _resolve_spatial(
     return raw
 
 
-def _store_resampled(
-    tensors: Dict[int, torch.Tensor],
-    uid: int,
-    declared_shape: Optional[Tuple[int, ...]],
-    value: torch.Tensor,
-) -> None:
-    existing = tensors.get(uid)
-    shape = (
-        tuple(int(dim) for dim in existing.shape)
-        if existing is not None
-        else declared_shape
-    )
-    if shape is not None and tuple(value.shape) != shape:
-        if _numel(shape) != value.numel():
-            raise ValueError(
-                f"Cannot store tensor UID {uid} with shape {tuple(value.shape)} "
-                f"as graph shape {shape}"
-            )
-        value = value.reshape(shape)
-    _store_tensor(tensors, uid, value)
-
-
 @register_handler("ResampleFwdAttributes")
 def compile_resample_fwd(
     node: Dict[str, Any],
@@ -219,10 +197,10 @@ def compile_resample_fwd(
                 )
             if return_indices:
                 y, indices = pooled
-                _store_resampled(tensors, y_uid, y_shape, y)
-                _store_resampled(tensors, index_uid_int, index_shape, indices)
+                _store_planned(tensors, y_uid, y, y_shape)
+                _store_planned(tensors, index_uid_int, indices, index_shape)
             else:
-                _store_resampled(tensors, y_uid, y_shape, pooled)
+                _store_planned(tensors, y_uid, pooled, y_shape)
             return
 
         if mode not in ("AVGPOOL_EXCLUDE_PADDING", "AVGPOOL_INCLUDE_PADDING"):
@@ -276,6 +254,6 @@ def compile_resample_fwd(
                 )
                 y = sums / counts.clamp_min(1.0).to(dtype=sums.dtype)
 
-        _store_resampled(tensors, y_uid, y_shape, y)
+        _store_planned(tensors, y_uid, y, y_shape)
 
     return run

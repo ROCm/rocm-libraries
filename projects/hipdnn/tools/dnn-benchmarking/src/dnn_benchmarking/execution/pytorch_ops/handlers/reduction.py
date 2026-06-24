@@ -143,15 +143,6 @@ def compile_reduction(
         if promote:
             result = result.to(dtype=x.dtype)
 
-        # Inline _store_tensor_for_uid with the declared shape captured at plan
-        # time so the closure never re-parses graph_json.
-        if out_shape is not None and tuple(result.shape) != out_shape:
-            if _numel(out_shape) != result.numel():
-                raise ValueError(
-                    f"Cannot store tensor UID {out_uid} with shape "
-                    f"{tuple(result.shape)} as graph shape {out_shape}"
-                )
-            result = result.reshape(out_shape)
-        _store_tensor(tensors, out_uid, result)
+        _store_planned(tensors, out_uid, result, out_shape)
 
     return run

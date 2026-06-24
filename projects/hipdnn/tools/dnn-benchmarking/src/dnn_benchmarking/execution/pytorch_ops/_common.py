@@ -30,8 +30,7 @@ __all__ = [
     "_channel_broadcast",
     "_scalar_value",
     "_numel",
-    "_stored_tensor_shape",
-    "_store_tensor_for_uid",
+    "_store_planned",
     "_strip_leading_singletons",
     "_sum_to_shape",
     "ReplayTensors",
@@ -247,22 +246,23 @@ def _numel(shape: Sequence[int]) -> int:
     return prod(int(dim) for dim in shape)
 
 
-def _stored_tensor_shape(
-    tensors: Dict[int, torch.Tensor], graph_json: Dict[str, Any], uid: int
-) -> Optional[Tuple[int, ...]]:
-    existing = tensors.get(uid)
-    if existing is not None:
-        return tuple(int(dim) for dim in existing.shape)
-    return _tensor_shape(graph_json, uid)
-
-
-def _store_tensor_for_uid(
+def _store_planned(
     tensors: Dict[int, torch.Tensor],
-    graph_json: Dict[str, Any],
     uid: int,
     value: torch.Tensor,
+    declared_shape: Optional[Tuple[int, ...]],
 ) -> None:
-    shape = _stored_tensor_shape(tensors, graph_json, uid)
+    """Store ``value`` for ``uid``, reshaping to the shape declared at plan time.
+
+    A live tensor already present in ``tensors`` wins over ``declared_shape``.
+    Reshape is guarded by a numel-equality check that raises on a true mismatch.
+    """
+    existing = tensors.get(uid)
+    shape = (
+        tuple(int(dim) for dim in existing.shape)
+        if existing is not None
+        else declared_shape
+    )
     if shape is not None and tuple(value.shape) != shape:
         if _numel(shape) != value.numel():
             raise ValueError(
