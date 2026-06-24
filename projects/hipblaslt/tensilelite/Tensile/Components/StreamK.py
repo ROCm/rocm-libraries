@@ -224,9 +224,12 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         return module
 
     def acquireFence(self, writer) -> Module:
+        # Drop stale dev-scope cache lines so the next dependent read (the flag
+        # word in getFlagValue, or the partials after the flag is observed) is
+        # re-fetched from the L2-coherent point.
         module = Module("StreamK acquire fence (dev-scope)")
         module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate partials after flag"))
+            comment="acquire: invalidate before dependent dev-scope read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
 
@@ -1363,7 +1366,10 @@ class StreamK(Component):
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
         module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
                                   mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        # Release the flag store: drain the store and (on dev-scope arches) global_wb
+        # the flag word to the L2-coherent point so a peer's acquire can observe it.
+        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
+        module.add(memOrder.releaseFence(writer))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
@@ -1379,6 +1385,8 @@ class StreamK(Component):
         """
         module = Module("Buffer Load Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
+        # Acquire before the read so this (and every spin re-read) sees device memory.
+        module.add(memOrder.acquireFence(writer))
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_getFlagValue_tmpSgprBuffer", preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
