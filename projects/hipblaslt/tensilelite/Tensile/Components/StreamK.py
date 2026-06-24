@@ -283,22 +283,32 @@ class StreamK(Component):
 
     @staticmethod
     def _depthUForTc(kernel, tc):
-        """Return the per-tensor-character DepthU (element count along unroll).
+        """Return the per-StreamK-iteration K-stride (element count) for a tensor.
 
-        For MX scale tensors, DepthU is divided by the MX block size because
-        there is one scale element per MXBlock data elements.
+        StreamK counts iterations in full DepthU units, so non-sparse data
+        tensors always use DepthU even in multi-DU mode (where _DepthU{A,B} is
+        the smaller per-uid swizzle sub-stride, not a compression).
+
         For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
         is 32 * 256 so an additional *32 multiplier is needed.
+
+        For Sparse problems the compressed data operand and the Metadata
+        tensor genuinely hold fewer elements per DepthU of computation, so
+        they advance by their per-tensor _DepthU{A,B,Metadata} stride (the
+        develop behavior); using full DepthU there would over-advance the SRD.
         """
-        key = "_DepthU%s" % tc
-        if key in kernel:
-            _DepthU = kernel[key]
-            if tc in ("MXSA", "MXSB") and kernel.get("UseSubtileImpl"):
-                # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
-                # so the effective K stride for the scale tensor is DepthU * 32.
-                # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
-                _DepthU = (_DepthU * 32)
-            return _DepthU
+        if tc in ("MXSA", "MXSB"):
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                _DepthU = kernel[key]
+                if kernel.get("UseSubtileImpl"):
+                    _DepthU = (_DepthU * 32)
+                return _DepthU
+            return kernel["DepthU"]
+        if kernel["ProblemType"]["Sparse"]:
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                return kernel[key]
         return kernel["DepthU"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
