@@ -4,8 +4,8 @@
     dict({
       'basename': 'Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAB_SAV_UserArgsqilRk36jOuWZWGOWS9uiKxEE9gZgpXZAO4oE69gsGs8=',
       'err': 0,
-      'tail_lr_reset_a': False,
-      'tail_lr_reset_b': False,
+      'tail_lr_reset_a': True,
+      'tail_lr_reset_b': True,
     }),
   ])
 # ---
