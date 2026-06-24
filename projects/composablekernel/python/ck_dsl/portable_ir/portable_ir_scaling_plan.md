@@ -39,10 +39,10 @@ for the directory map and how to run each piece):
 - **Reorg.** `portable_ir/` is split into `src/` (engine + runtime binding),
   `utils/` (device-free oracle), `examples/` (demo kernels), `drivers/`
   (harnesses), `tests/`.
-- **CBOR codec + bundle** (`src/recipe_bundle.py`, C `cbor_dom.c`): recipes/bundles
+- **CBOR codec + bundle** (`src/recipe_bundle.py`, C++ `cbor_dom.cpp`): recipes/bundles
   (`ck.dsl.bundle/v1`) ship as compact CBOR the C VM decodes into the same DOM as
   JSON. ~3× smaller than JSON; the bundle packs many recipes keyed by `(key,arch)`.
-- **Online in-process path** (`src/online.py` ctypes ↔ C `online.c`): the Python
+- **Online in-process path** (`src/online.py` ctypes ↔ C++ `online.cpp`): the Python
   builder hands a serialized recipe/IR to the C backend and gets `.ll` back, no
   subprocess, no pybind build step.
 - **Recipe `.ll` is now byte-identical, not just HSACO-equivalent.** Concrete
@@ -211,7 +211,7 @@ hits a non-affine LDS-sizing case.
 
 ## C recipe VM — parametric surface complete (on-device JIT)
 
-`ck_dsl_c/src/recipe_vm.c` now expands the rolled recipes on-device (no CPython),
+`ck_dsl_c/src/portable_ir/recipe_vm.cpp` now expands the rolled recipes on-device (no CPython),
 at parity with the Python `recipe_expand` oracle:
 - **format register names** (`{var}`/`{spec}` substitution),
 - **rolled lists** for `scf_for` iter-args/results and emit operands (the

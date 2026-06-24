@@ -25,7 +25,7 @@ mkdir -p "$OUT"
 
 BIN="$OUT/roundtrip"
 echo ">> compiling C roundtrip driver"
-cc -std=c99 -I "$CKC/include" "$CKC"/src/*.c "$HERE/roundtrip.c" -o "$BIN" -lm || {
+cc -std=c99 -I "$CKC/include" "$CKC"/src/portable_ir/*.c "$HERE/roundtrip.c" -o "$BIN" -lm || {
     echo "C roundtrip compile FAILED"; exit 1; }
 
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"

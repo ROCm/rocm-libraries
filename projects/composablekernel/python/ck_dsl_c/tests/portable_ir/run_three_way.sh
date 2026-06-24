@@ -19,7 +19,7 @@ mkdir -p "$OUT"
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 echo ">> building"
-( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || { echo lib FAIL; exit 1; }
+( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/portable_ir/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || { echo lib FAIL; exit 1; }
 g++ -std=c++17 -O2 -I "$CKC/include" -I "$ROCM/include" "$HERE/bench_compare.cpp" "$OUT/libckc.a" -L"$ROCM/lib" -lamd_comgr -o "$OUT/bench_compare" 2>/dev/null || { echo bench_compare FAIL; exit 1; }
 g++ -std=c++17 -O2 -I "$CKC/include" -I "$ROCM/include" "$HERE/bench_recipe.cpp"  "$OUT/libckc.a" -L"$ROCM/lib" -lamd_comgr -o "$OUT/bench_recipe"  2>/dev/null || { echo bench_recipe FAIL; exit 1; }
 

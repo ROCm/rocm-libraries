@@ -18,7 +18,7 @@ mkdir -p "$OUT"
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 echo ">> building shared libckc.so (incl online.c) + comgr tool"
-cc -std=c99 -O2 -fPIC -shared -I "$CKC/include" "$CKC"/src/*.c -lm -o "$OUT/libckc.so" 2>/dev/null || {
+cc -std=c99 -O2 -fPIC -shared -I "$CKC/include" "$CKC"/src/portable_ir/*.c -lm -o "$OUT/libckc.so" 2>/dev/null || {
     echo "libckc.so build FAILED"; exit 1; }
 if cc -std=c99 -O2 -I "$ROCM/include" "$HERE/comgr_compile_ll.c" -L"$ROCM/lib" -lamd_comgr -o "$OUT/comgr" 2>/dev/null; then
     export COMGR="$OUT/comgr"

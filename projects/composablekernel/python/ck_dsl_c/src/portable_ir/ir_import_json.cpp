@@ -644,21 +644,21 @@ static const ckc_type_t* import_type(importer_t* im, const jval_t* t)
             const ckc_type_t* elem = import_type(im, jobj_get(t, "elem"));
             jval_t* cnt = jobj_get(t, "count");
             if (!elem || !cnt || cnt->kind != J_NUM)
-                return im->failed ? NULL : (imp_fail(im, "bad vector type"), NULL);
+                return im->failed ? nullptr : (imp_fail(im, "bad vector type"), nullptr);
             return ckc_vector_type(im->b, elem, (int)cnt->num);
         }
         if (strcmp(kind, "ptr") == 0) {
             const ckc_type_t* pointee = import_type(im, jobj_get(t, "pointee"));
             const char* space = jstr(jobj_get(t, "space"));
             if (!pointee || !space)
-                return im->failed ? NULL : (imp_fail(im, "bad ptr type"), NULL);
+                return im->failed ? nullptr : (imp_fail(im, "bad ptr type"), nullptr);
             return ckc_ptr_type(im->b, pointee, space);
         }
         if (strcmp(kind, "smem") == 0) {
             const ckc_type_t* elem = import_type(im, jobj_get(t, "elem"));
             jval_t* shp = jobj_get(t, "shape");
             if (!elem || !shp || shp->kind != J_ARR)
-                return im->failed ? NULL : (imp_fail(im, "bad smem type"), NULL);
+                return im->failed ? nullptr : (imp_fail(im, "bad smem type"), nullptr);
             int rank = shp->arr_len;
             int dims[16];
             if (rank > 16) {

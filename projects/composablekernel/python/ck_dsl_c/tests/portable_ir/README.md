@@ -13,7 +13,7 @@ scalar MHA/SDPA kernel (the kernel benchmarked in
 | File | Role |
 |------|------|
 | `python/ck_dsl/core/ir_export.py` | Python: `KernelDef` → portable-IR dict / JSON |
-| `include/ckc/ir_import.h`, `src/ir_import_json.c` | C: JSON → `ckc_kernel_def_t` (generic-op path + scf.for/scf.if via real builders) |
+| `include/ckc/ir_import.h`, `src/portable_ir/ir_import_json.cpp` | C++: JSON → `ckc_kernel_def_t` (generic-op path + scf.for/scf.if via real builders) |
 | `roundtrip.c` | C: import IR → `ckc_lower_kernel_to_llvm` → print `.ll` |
 | `bench_compile.cpp` | C++: import + lower + `libamd_comgr` → gfx950 HSACO, timed |
 | `export_parity.py` / `export_mha.py` | export the micro-parity kernels / the MHA kernel |
@@ -21,8 +21,8 @@ scalar MHA/SDPA kernel (the kernel benchmarked in
 | `run_mha_parity.sh` | byte-parity on 6 MHA families + shape-polymorphism analysis |
 | `run_compile_bench.sh` | compile-time table across the comparison's MHA variants |
 | `run_compare.sh` | pure C-interface vs portable-IR import compile-time comparison |
-| `include/ckc/json_dom.h`, `src/json_dom.c` | shared arena-backed JSON DOM parser |
-| `include/ckc/recipe_vm.h`, `src/recipe_vm.c` | C "builder recipe" VM (compile-time control flow + spec params) |
+| `include/ckc/json_dom.h`, `src/portable_ir/json_dom.cpp` | shared arena-backed JSON DOM parser |
+| `include/ckc/recipe_vm.h`, `src/portable_ir/recipe_vm.cpp` | C++ "builder recipe" VM (compile-time control flow + spec params) |
 | `recipe_toy.py` | authoring: Python reference kernel + the compact recipe artifact |
 | `recipe_run.c` / `comgr_compile_ll.c` | run a recipe to `.ll` / compile `.ll` to HSACO |
 | `run_recipe_demo.sh` | one recipe -> D64/D128/D256, HSACO byte-identical to the Python reference |

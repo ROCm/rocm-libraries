@@ -26,7 +26,7 @@ mkdir -p "$OUT"
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 echo ">> building ckc lib (incl cbor_dom.c) + recipe_run + comgr tool"
-( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || {
+( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/portable_ir/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || {
     echo "ckc lib build FAILED"; exit 1; }
 cc -std=c99 -O2 -I "$CKC/include" "$HERE/recipe_run.c" "$OUT/libckc.a" -lm -o "$OUT/recipe_run" || {
     echo "recipe_run build FAILED"; exit 1; }

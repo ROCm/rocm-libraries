@@ -425,14 +425,14 @@ static const ckc_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             const ckc_type_t* pointee = rv_type(vm, ckc_jget(t, "pointee"));
             const char* space = ckc_jstr(ckc_jget(t, "space"));
             if (!pointee || !space)
-                return vm->failed ? NULL : (rv_fail(vm, "bad ptr type"), NULL);
+                return vm->failed ? nullptr : (rv_fail(vm, "bad ptr type"), nullptr);
             return ckc_ptr_type(vm->b, pointee, space);
         }
         if (kind && strcmp(kind, "vector") == 0) {
             const ckc_type_t* elem = rv_type(vm, ckc_jget(t, "elem"));
             const jd_val_t* cnt = ckc_jget(t, "count");
             if (!elem || !cnt)
-                return vm->failed ? NULL : (rv_fail(vm, "bad vector type"), NULL);
+                return vm->failed ? nullptr : (rv_fail(vm, "bad vector type"), nullptr);
             int n = (int)rv_int(vm, cnt);   /* count may be an intexpr */
             return vm->failed ? NULL : ckc_vector_type(vm->b, elem, n);
         }
@@ -440,7 +440,7 @@ static const ckc_type_t* rv_type(rvm_t* vm, const jd_val_t* t)
             const ckc_type_t* elem = rv_type(vm, ckc_jget(t, "elem"));
             const jd_val_t* shape = ckc_jget(t, "shape");
             if (!elem || !shape || shape->kind != JD_ARR)
-                return vm->failed ? NULL : (rv_fail(vm, "bad smem type"), NULL);
+                return vm->failed ? nullptr : (rv_fail(vm, "bad smem type"), nullptr);
             int rank = shape->arr_len;
             if (rank > 8) {
                 rv_fail(vm, "smem rank > 8");

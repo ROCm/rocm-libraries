@@ -25,7 +25,7 @@ export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 BIN="$OUT/roundtrip"
 echo ">> compiling C roundtrip driver"
-cc -std=c99 -I "$CKC/include" "$CKC"/src/*.c "$HERE/roundtrip.c" -o "$BIN" -lm 2>/dev/null || {
+cc -std=c99 -I "$CKC/include" "$CKC"/src/portable_ir/*.c "$HERE/roundtrip.c" -o "$BIN" -lm 2>/dev/null || {
     echo "compile FAILED"; exit 1; }
 
 rc=0

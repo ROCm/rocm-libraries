@@ -33,7 +33,7 @@ architecture + directory map.
         └───────────────┬───────────────────────────────┘
                         ▼  REPLAY (pure C, no CPython)
         ┌───────────────────────────────────────────────┐
-        │ recipe VM (recipe_vm.c)  |  IR import (ir_import_json.c) │
+        │ recipe VM (recipe_vm.cpp) | IR import (ir_import_json.cpp)│
         │            → ckc_lower_kernel_to_llvm → comgr → HSACO     │
         └───────────────────────────────────────────────┘
 ```
@@ -82,12 +82,13 @@ portable_ir/
 └── portable_ir_scaling_plan.md
 ```
 
-The C side lives in `../../ck_dsl_c`:
-- `src/recipe_vm.c` (+ `include/ckc/recipe_vm.h`) — the recipe VM.
-- `src/ir_import_json.c` (+ `ckc/ir_import.h`) — the portable-IR importer.
-- `src/cbor_dom.c`, `src/json_dom.c` — DOM decoders.
-- `src/online.c` (+ `ckc/online.h`) — one-call wrappers (recipe/bundle/IR → `.ll`).
-- `tests/portable_ir/run_*.sh` — build + comgr demos and the parity matrix.
+The C++ side lives in `../../ck_dsl_c/src/portable_ir/` (C++20, part of
+`libckc_core.a`; see that dir's `README.md`):
+- `recipe_vm.cpp` (+ `include/ckc/recipe_vm.h`) — the recipe VM.
+- `ir_import_json.cpp` (+ `ckc/ir_import.h`) — the portable-IR importer.
+- `cbor_dom.cpp`, `json_dom.cpp` — DOM decoders.
+- `online.cpp` (+ `ckc/online.h`) — one-call wrappers (recipe/bundle/IR → `.ll`).
+- `tests/portable_ir/run_*.sh` — build + comgr demos, parity matrix, unit tests.
 
 ## Record architecture
 

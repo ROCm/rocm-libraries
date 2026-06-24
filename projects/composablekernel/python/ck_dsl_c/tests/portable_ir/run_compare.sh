@@ -24,7 +24,7 @@ mkdir -p "$OUT"
 export PYTHONPATH="$PYROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 echo ">> building ckc static lib + bench"
-( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || {
+( cd "$OUT" && cc -std=c99 -O2 -I "$CKC/include" -c "$CKC"/src/portable_ir/*.c 2>/dev/null && ar rcs libckc.a ./*.o ) || {
     echo "ckc lib build FAILED"; exit 1; }
 g++ -std=c++17 -O2 -I "$CKC/include" -I "$ROCM/include" "$HERE/bench_compare.cpp" \
     "$OUT/libckc.a" -L"$ROCM/lib" -lamd_comgr -o "$OUT/bench" || {
