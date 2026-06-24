@@ -1,0 +1,5 @@
+outs:
+- md5: d7c2ccc24668edf3e86135baaaf5f632
+  size: 534250
+  hash: md5
+  path: aiter.tar.gz

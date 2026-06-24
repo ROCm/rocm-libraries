@@ -31,9 +31,13 @@
                 "relu_lower_clip": 0.0,
                 "relu_upper_clip": 6.0,
                 "relu_lower_clip_slope": 0.0,
+                "axis_tensor_uid": null,
                 "in_0_tensor_uid": 1,
                 "in_1_tensor_uid": null,
-                "in_2_tensor_uid": null
+                "in_2_tensor_uid": null,
+                "swish_beta": null,
+                "elu_alpha": null,
+                "softplus_beta": null
             },
             "outputs": {
                 "out_0_tensor_uid": 2

@@ -1,0 +1,5 @@
+outs:
+- md5: 6a083c8c7126a682224a2b54c0796fef
+  size: 1681
+  hash: md5
+  path: dsv3.tar.gz

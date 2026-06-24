@@ -1,0 +1,5 @@
+outs:
+- md5: 792afd99d64336c83c9557f9c182b717
+  size: 5708
+  hash: md5
+  path: manifests.tar.gz

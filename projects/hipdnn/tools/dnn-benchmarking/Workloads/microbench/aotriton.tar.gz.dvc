@@ -1,0 +1,5 @@
+outs:
+- md5: 2b63423ad1cd91da68842fffa55fd4d1
+  size: 9083
+  hash: md5
+  path: aotriton.tar.gz

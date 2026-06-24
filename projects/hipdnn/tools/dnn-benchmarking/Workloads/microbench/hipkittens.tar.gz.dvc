@@ -1,0 +1,5 @@
+outs:
+- md5: ee46d23300d53e7867bc2fe760aed3c3
+  size: 9466
+  hash: md5
+  path: hipkittens.tar.gz

@@ -1,0 +1,5 @@
+outs:
+- md5: eed3ba59b4379198169c6ab1622cee64
+  size: 1243
+  hash: md5
+  path: qwen35.tar.gz

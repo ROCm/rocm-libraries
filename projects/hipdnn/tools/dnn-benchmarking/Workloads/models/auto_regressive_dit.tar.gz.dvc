@@ -1,0 +1,5 @@
+outs:
+- md5: 757ec7d6282fbec0f93c6b1eca612fa8
+  size: 1183
+  hash: md5
+  path: auto_regressive_dit.tar.gz

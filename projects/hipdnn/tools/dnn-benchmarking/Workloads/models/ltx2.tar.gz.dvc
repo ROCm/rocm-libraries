@@ -1,0 +1,5 @@
+outs:
+- md5: 70edc4fac59c9423fb1c4f9bd1ed4836
+  size: 1217
+  hash: md5
+  path: ltx2.tar.gz
