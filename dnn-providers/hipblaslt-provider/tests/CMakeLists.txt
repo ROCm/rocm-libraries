@@ -18,8 +18,8 @@ add_executable(
     hipblaslt_plugin_tests
     engines/plans/TestHipblasltMatmulPlan.cpp
     engines/plans/TestHipblasltMatmulPlanBuilder.cpp
-    engines/plans/TestHipblasltMxMatmulPlan.cpp
-    engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
     engines/TestHipblasltEngine.cpp
     main.cpp
     TestHipblasltEngineManager.cpp

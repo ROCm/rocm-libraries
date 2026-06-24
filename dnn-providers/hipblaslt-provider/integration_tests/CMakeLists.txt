@@ -19,8 +19,8 @@ add_executable(
     IntegrationGpuMatmulActiv.cpp
     IntegrationGpuMatmulBias.cpp
     IntegrationGpuMatmulBiasActiv.cpp
-    IntegrationGpuMxMatmul.cpp
-    IntegrationGpuMxMatmulUnsupported.cpp
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmul.cpp>
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmulUnsupported.cpp>
     TestTestWorkarounds.cpp
 )
 

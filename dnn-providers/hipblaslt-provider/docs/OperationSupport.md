@@ -23,6 +23,11 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 
 This is a hipDNN graph of two `BlockScaleDequantize` nodes feeding a `Matmul` node — an OCP FP8 block-scaled matrix multiplication. The plugin recognizes the pattern and executes it as a single fused GEMM, mapping the block-scale dequantization onto hipBLASLt's `VEC32_UE8M0` scale mode.
 
+> **Build-time feature flag.** This path is gated behind the CMake option
+> `HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
+> reports these graphs as unsupported. Build with
+> `-DHIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM=ON` to enable it.
+
 **Graph topology:**
 ```
 BlockScaleDequantize(x_a: FP8 OCP, scale_a: UE8M0) → a (virtual)
