@@ -14,9 +14,10 @@ if(NOT ROCmCMakeBuildTools_FOUND)
     include(FetchContent)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
     # pinned-dep rocm-cmake: immutable commit (was the mutable "develop" branch).
-    # Corresponds to the therock-7.13 tag. Bump at each ROCm release cut.
-    # grep "pinned-dep" to find every pin that needs bumping.
-    set(rocm_cmake_tag "10155d7272ea1bf79f6b5a9dbc339657af1aa372" CACHE STRING "rocm-cmake commit to download (therock-7.13)")
+    # Fallback only, used when rocm-cmake isn't already installed at /opt/rocm, so the exact
+    # version rarely matters. Pinned to the rocm-6.4.0 commit the other ROCm libs use.
+    # Bump when the fallback actually needs a newer rocm-cmake. grep "pinned-dep" to find all pins.
+    set(rocm_cmake_tag "ecc716b97c2239cff00422ed7a43cd52a0839a0e" CACHE STRING "rocm-cmake commit to download (rocm-6.4.0)")
     FetchContent_Declare(
       rocm-cmake
       GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
