@@ -37,7 +37,7 @@ public:
     /// A32 constructor: requires all 3 kernels (ODO, DQDKDV, DQ_CONVERT).
     SdpaBwdPlan(CachedModule odoKernel,
                 CachedModule dqdkdvKernel,
-                CachedModule postKernel,
+                std::optional<CachedModule> postKernel,
                 SdpaBwdParams params);
 
     /// A16 constructor: requires only 2 kernels (ODO, DQDKDV).

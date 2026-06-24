@@ -387,7 +387,7 @@ namespace asm_sdpa_engine
 
 SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
                          CachedModule dqdkdvKernel,
-                         CachedModule postKernel,
+                         std::optional<CachedModule> postKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
