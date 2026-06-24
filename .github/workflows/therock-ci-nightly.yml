@@ -97,11 +97,8 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx1151"
-          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
-          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          CI_CONFIG_PATH: ci-config
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
