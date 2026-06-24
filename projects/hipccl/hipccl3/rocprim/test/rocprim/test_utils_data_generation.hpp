@@ -521,6 +521,33 @@ inline auto get_random_value(typename T::value_type min,
     return T{result};
 }
 
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    generate_random_data_n(keys_input,
+                           size,
+                           rocprim::numeric_limits<key_type>::min(),
+                           rocprim::numeric_limits<key_type>::max(),
+                           rng_engine);
+    add_special_values(keys_input, size, rng_engine);
+}
+
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    generate_random_data_n(keys_input,
+                           size,
+                           rocprim::numeric_limits<key_type>::min(),
+                           rocprim::numeric_limits<key_type>::max(),
+                           rng_engine);
+}
+
 template<class T>
 inline std::vector<T> get_random_data01(size_t size, float p, seed_type seed_value)
 {

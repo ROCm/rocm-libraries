@@ -351,4 +351,10 @@ The ``docs/`` directory contains the ``.rst`` files that form this website. Thes
 
 Algorithms should be documented in their appropriate ``docs/`` subdirectories, like ``block_ops/`` and ``device_ops/``, based on their scope. :ref:`dev-nth_element` for example is a :ref:`device-wide operation <dev-index>`, documented in ``docs/device_ops/nth_element.rst``.
 
+There are several pages that link to the :ref:`dev-nth_element` documentation:
+
+- ``docs/device_ops/index.rst``, which adds :ref:`dev-nth_element` to :ref:`dev-index`.
+- ``docs/sphinx/_toc.yml.in``, which adds :ref:`dev-nth_element` to Sphinx its `Table Of Contents <https://github.com/ROCm/rocPRIM/blob/develop/docs/sphinx/_toc.yml.in>`_, and ``docs/sphinx/_toc.yml`` is automatically generated from this file.
+
+>>>>>>> 2a3a9f163f (Resolve "Fix doxygen errors and warnings and add documentation for device_topk")
 Any newly added algorithm should also update these files. As one can easily forget to update one of them, it is recommended to `build and preview the documentation locally <https://github.com/ROCm/rocPRIM/blob/develop/README.md#building-the-documentation-locally>`_.

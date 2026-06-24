@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -82,6 +82,9 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_scan.hpp"
 #include "device/device_select.hpp"
+#ifdef ROCPRIM_WITH_TOPK
+    #include "device/device_topk.hpp"
+#endif // ROCPRIM_WITH_TOPK
 #include "device/device_transform.hpp"
 
 /// \brief The top level rocPRIM namespace.
