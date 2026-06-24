@@ -411,6 +411,7 @@ struct MxGemmKernel
             number<NumBTensor>{});
     }
 
+    template <memory_operation_enum DstInMemOp>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
@@ -419,7 +420,8 @@ struct MxGemmKernel
                                        KernelArgs kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
-                                       const index_t block_idx_n)
+                                       const index_t block_idx_n,
+                                       const index_t k_elem_offset = 0)
     {
         std::array<ScalePtrType, NumATensor> as_scale_ptr;
         std::array<const ADataType*, NumATensor> as_ptr_;
@@ -467,13 +469,6 @@ struct MxGemmKernel
                 return;
         }
 
-        // This k_id's logical K-element start. For row-major A, as_k_split_offset[0] is exactly
-        // that offset, so reuse it rather than recomputing the split formula; the packed-scale
-        // and flat-B K offsets are derived from it. Split-K with non-row-major A is rejected in
-        // IsSupportedArgument; for k_batch == 1 this value is 0 and unused for any layout.
-        const index_t k_elem_offset =
-            amd_wave_read_first_lane(splitk_batch_offset.as_k_split_offset[number<0>{}]);
-
         // The preshuffle A async-load (MakeMX_AAsyncLoadBytesDramWindow) rebuilds the A
         // view with a packed descriptor, i.e. it assumes the leading (M) stride equals
         // the view's K extent. That only holds when the extent equals stride_A, which is
@@ -518,8 +513,6 @@ struct MxGemmKernel
         const index_t num_loop =
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 
-        const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
-
         const auto& c_block_tile = MxGemmPipeline{}.template operator()(as_block_window,
                                                                         AElementWise{},
                                                                         bs_block_window,
@@ -533,22 +526,52 @@ struct MxGemmKernel
         // the same C tile, so we need atomic add (universal_gemm_kernel pattern). The
         // fp16/bf16 even-vector-size precondition is captured once in kSplitKAtomicAddSupported
         // and also rejected up front in IsSupportedArgument.
-        if(k_batch == 1)
+        // if(k_batch == 1)
+        auto c_block_window = BaseKernel::template MakeCBlockWindows<DstInMemOp>(
+            e_ptr, kargs, block_idx_m_, block_idx_n);
+        EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+    }
+
+    CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
+                                       const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                                       const std::array<const void*, NumDTensor>& ds_ptr,
+                                       EDataType* e_ptr,
+                                       void* smem_ptr,
+                                       const KernelArgs& kargs,
+                                       const SplitKBatchOffset& splitk_batch_offset,
+                                       const index_t block_idx_m,
+                                       const index_t block_idx_n)
+    {
+        if(kargs.k_batch == 1)
         {
-            auto c_block_window =
-                BaseKernel::template MakeCBlockWindows<memory_operation_enum::set>(
-                    e_ptr, kargs, block_idx_m_, block_idx_n);
-            EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            RunGemm<memory_operation_enum::set>(as_ptr,
+                                                bs_ptr,
+                                                ds_ptr,
+                                                e_ptr,
+                                                smem_ptr,
+                                                kargs,
+                                                splitk_batch_offset,
+                                                block_idx_m,
+                                                block_idx_n);
         }
         else
         {
-            if constexpr(kSplitKAtomicAddSupported)
-            {
-                auto c_block_window =
-                    BaseKernel::template MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                        e_ptr, kargs, block_idx_m_, block_idx_n);
-                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
-            }
+            // This k_id's logical K-element start. For row-major A, as_k_split_offset[0] is exactly
+            // that offset, so reuse it rather than recomputing the split formula; the packed-scale
+            // and flat-B K offsets are derived from it. Split-K with non-row-major A is rejected in
+            // IsSupportedArgument; for k_batch == 1 this value is 0 and unused for any layout.
+            const index_t k_elem_offset =
+                amd_wave_read_first_lane(splitk_batch_offset.as_k_split_offset[number<0>{}]);
+            RunGemm<memory_operation_enum::atomic_add>(as_ptr,
+                                                       bs_ptr,
+                                                       ds_ptr,
+                                                       e_ptr,
+                                                       smem_ptr,
+                                                       kargs,
+                                                       splitk_batch_offset,
+                                                       block_idx_m,
+                                                       block_idx_n,
+                                                       k_elem_offset);
         }
     }
 };
