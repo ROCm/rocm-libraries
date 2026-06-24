@@ -113,8 +113,6 @@ namespace rocisa
     {
         std::string labelName = label.getLabelName();
         auto        module    = std::make_shared<Module>("SGetPositivePCOffset " + labelName);
-        module->pcOffsetDestSgpr    = sgprIdx;
-        module->pcOffsetTargetLabel = labelName;
         if(tmpSgprRes.size < 1)
         {
             throw std::runtime_error("ContinuousRegister size must be at least 1.");

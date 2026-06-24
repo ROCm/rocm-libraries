@@ -25,6 +25,7 @@
 #include "instruction/common.hpp"
 #include "pass.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -77,13 +78,8 @@ namespace rocisa
         auto canonicalizeDuplicateActivationLabel = [&labels](const std::string& name) {
             if(labels.empty())
                 return name;
-            for(auto it = labels.begin() + 1; it != labels.end(); ++it)
-            {
-                if(name == *it)
-                {
-                    return labels[0];
-                }
-            }
+            if(std::find(labels.begin() + 1, labels.end(), name) != labels.end())
+                return labels[0];
             if(name.rfind("label_Activation_", 0) != 0)
                 return name;
 
