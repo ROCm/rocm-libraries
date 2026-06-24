@@ -28,6 +28,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   KernelTime: True
+  BoundsCheck: 4
   # PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -62,7 +63,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -78,8 +79,8 @@ BenchmarkProblems:
           ##- [ 3, 5 ]
           # - [ 2, 2 ]
           # - [ 8, 8 ]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
         # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -157,7 +158,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -169,8 +170,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -242,7 +243,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -254,8 +255,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -327,7 +328,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -339,8 +340,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -412,7 +413,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -424,8 +425,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -497,7 +498,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -509,8 +510,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -582,7 +583,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -594,8 +595,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -667,7 +668,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -679,8 +680,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -752,7 +753,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -764,8 +765,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -839,7 +840,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -855,8 +856,8 @@ BenchmarkProblems:
           ##- [ 3, 5 ]
           # - [ 2, 2 ]
           # - [ 8, 8 ]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
         # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -934,7 +935,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -946,8 +947,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -1019,7 +1020,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1031,8 +1032,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -1104,7 +1105,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1116,8 +1117,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -1191,7 +1192,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1207,8 +1208,8 @@ BenchmarkProblems:
           ##- [ 3, 5 ]
           # - [ 2, 2 ]
           # - [ 8, 8 ]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
         # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -1286,7 +1287,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1298,8 +1299,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -1371,7 +1372,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1383,8 +1384,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -1456,7 +1457,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        # - MIArchVgpr: [0, 1]
+        # - MIArchVgpr: [False, True]
         # - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -1468,8 +1469,8 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
-        - BufferLoad: [0, 1]
-        - BufferStore: [0, 1]
+        - BufferLoad: [False, True]
+        - BufferStore: [False, True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

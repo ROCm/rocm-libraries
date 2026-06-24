@@ -1379,9 +1379,16 @@ class GlobalWriteBatchWriter:
       # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
       # - Store should read from WMMA output directly
       # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
-      if self.skipRearrangement:
-        # WMMA output index = elementSumIdx - elementSumIdx[0] (relative offset from first element)
-        sumIdx = self.ss.elementSumIdx[elementIdx] - self.ss.elementSumIdx[0]
+      #
+      # skipRearrangement requires elementSumIdx to be contiguous so that
+      # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
+      # returns non-contiguous blocks (gaps in the pool), the relative offset
+      # no longer matches the sequential MFMA output layout, causing stores
+      # to read from wrong VGPRs.
+      esIdx = self.ss.elementSumIdx
+      contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
+      if self.skipRearrangement and contiguous:
+        sumIdx = esIdx[elementIdx] - esIdx[0]
       else:
         sumIdx = self.ss.elementSumIdx[elementIdx]
 
