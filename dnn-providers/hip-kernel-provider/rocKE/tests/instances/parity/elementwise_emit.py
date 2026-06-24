@@ -27,6 +27,13 @@ def _spec(idx: int) -> ElementwiseSpec:
         return ElementwiseSpec(op="silu", dtype="bf16", block_size=64, vec=8)
     if idx == 5:
         return ElementwiseSpec(op="gelu_tanh", dtype="f16", block_size=1024, vec=4)
+    if idx == 6:
+        # gfx1151 (RDNA3.5) coverage: elementwise has no MMA/wave dependence, so
+        # the same kernel is lowered for the RDNA datalayout/triple/waitcnt.
+        return (ElementwiseSpec(op="relu", dtype="f16", block_size=256, vec=8), "gfx1151")
+    if idx == 7:
+        # gfx1201 (RDNA4) coverage.
+        return (ElementwiseSpec(op="relu", dtype="f16", block_size=256, vec=8), "gfx1201")
     raise SystemExit(f"unknown config index {idx}")
 
 

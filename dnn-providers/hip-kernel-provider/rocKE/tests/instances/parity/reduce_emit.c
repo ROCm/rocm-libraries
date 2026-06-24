@@ -48,15 +48,27 @@ static int make_spec(int idx, ckc_reduce2d_spec_t *spec) {
         spec->n_per_block = 3072; spec->op = "max"; spec->block_size = 256;
         spec->vec = 8; spec->dtype = "bf16"; spec->wave_size = 64;
         break;
+    case 6: /* gfx1151 (RDNA3.5): wave32 reduce */
+    case 7: /* gfx1201 (RDNA4): wave32 reduce */
+        spec->n_per_block = 4096; spec->op = "sum"; spec->block_size = 256;
+        spec->vec = 4; spec->dtype = "f16"; spec->wave_size = 32;
+        break;
     default:
         return -1;
     }
     return 0;
 }
 
+/* Configs 6/7 exercise RDNA (wave32); all others use the gfx950 baseline. */
+static const char *arch_for(int idx) {
+    if (idx == 6) return "gfx1151";
+    if (idx == 7) return "gfx1201";
+    return "gfx950";
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <config_index 0..5> [mode]\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..7> [mode]\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
@@ -68,7 +80,7 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    const char *arch = "gfx950";
+    const char *arch = arch_for(idx);
 
     /* Validate the spec (mirrors is_valid_spec). */
     char reason[CKC_ERR_MSG_CAP];

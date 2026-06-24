@@ -41,10 +41,21 @@ static int make_spec(int idx, ckc_elementwise_spec_t *spec) {
     case 5:
         spec->op = "gelu_tanh"; spec->dtype = "f16"; spec->block_size = 1024; spec->vec = 4;
         break;
+    case 6: /* gfx1151 (RDNA3.5) coverage: same kernel, RDNA lowering */
+    case 7: /* gfx1201 (RDNA4) coverage */
+        spec->op = "relu"; spec->dtype = "f16"; spec->block_size = 256; spec->vec = 8;
+        break;
     default:
         return -1;
     }
     return 0;
+}
+
+/* Configs 6/7 exercise RDNA; all others use the gfx950 baseline. */
+static const char *arch_for(int idx) {
+    if (idx == 6) return "gfx1151";
+    if (idx == 7) return "gfx1201";
+    return "gfx950";
 }
 
 int main(int argc, char **argv) {
@@ -54,6 +65,7 @@ int main(int argc, char **argv) {
     }
     int idx = atoi(argv[1]);
     const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char *arch = arch_for(idx);
 
     ckc_elementwise_spec_t spec;
     if (make_spec(idx, &spec) != 0) {
@@ -66,7 +78,7 @@ int main(int argc, char **argv) {
         char err[CKC_ERR_MSG_CAP];
         err[0] = 0;
         ckc_status_t st = ckc_elementwise_lower_to_llvm(
-            &spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+            &spec, arch, CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
         if (st != CKC_OK || !llvm_text) {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
             return 1;
