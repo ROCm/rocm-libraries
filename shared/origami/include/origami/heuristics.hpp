@@ -100,7 +100,6 @@ struct heuristic_defaults_t {
   static constexpr size_t EXACT_ONE_ITER_K_MIN           = 64;
   static constexpr double EPILOGUE_OCC_SATURATION         = 2.0;
   static constexpr double SCALAR_STORE_EXPOSED_PENALTY    = 4.0;
-  static constexpr double PARTIAL_TILE_WAVE_COST          = 0.5;
 };
 
 /**

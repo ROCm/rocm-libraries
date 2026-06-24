@@ -2465,42 +2465,12 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("scalar_store_mult: " << scalar_store_mult);
   }
 
-  // ---------------------------------------------------------------------------
-  // 4. Partial-M-tile MIWG inefficiency
-  //
-  // When M overflows into a partial last tile, the wave-rows of an
-  // MIWG_M-heavy layout do mostly-masked work on that tile.  Only fires
-  // when there is more than one M-tile (single-tile partial-M is captured
-  // by the existing utilization term).  Multiplies L_mainloop and
-  // L_epilogue by a gentle factor proportional to the wave-row waste.
-  // ---------------------------------------------------------------------------
-  double partial_m_tile_waste = 0.0;
-  double m_overflow_inflation = 1.0;
-  {
-    const size_t M_problem    = problem.size.m;
-    const size_t MT_M_local   = config.mt.m;
-    const size_t ceil_M_tiles = math::safe_ceil_div(M_problem, MT_M_local);
-    if (ceil_M_tiles > 1 && (M_problem % MT_M_local) != 0) {
-      const size_t last_tile_M       = M_problem % MT_M_local;
-      const size_t MI_M_active       = std::max<size_t>(config.mi.m, 1);
-      const size_t miwg_m            = std::max<size_t>(tparams(config).wave_group_m, 1);
-      const size_t miwt_m_for_waste  = std::max<size_t>(MT_M_local / (MI_M_active * miwg_m), 1);
-      const size_t rows_per_wave_row = MI_M_active * miwt_m_for_waste;
-      const size_t wave_rows_needed  = math::safe_ceil_div(last_tile_M, rows_per_wave_row);
-      partial_m_tile_waste = std::max(
-          0.0,
-          1.0 - static_cast<double>(wave_rows_needed) / static_cast<double>(miwg_m));
-      // Empirical: a partial-tile wave-row that does masked work costs
-      // ~50% of a fully-useful wave-row in wall time (MFMA + ds_read still
-      // execute, but predicated stores / branch-skip recover some cycles).
-      // Averaged over ceil_M_tiles (only the last is partial).
-      m_overflow_inflation = 1.0
-          + heuristic_defaults_t::PARTIAL_TILE_WAVE_COST * partial_m_tile_waste
-                / static_cast<double>(ceil_M_tiles);
-    }
-  }
-  const double L_mainloop_eff = L_mainloop * m_overflow_inflation;
-  const double L_epilogue_eff = L_epilogue * m_overflow_inflation;
+  // Partial-M-tile MIWG inefficiency term removed: the epilogue model now
+  // prices the partial m-edge tile explicitly (weighted by 1/grid_m) and
+  // applies the NTD partial-M store penalty, while ETP already captures the
+  // (layout-blind) area waste -- so the old mainloop+epilogue inflation
+  // double-counted the epilogue side and added a questionable M-heavy-penalising
+  // mainloop term.
 
   // ---------------------------------------------------------------------------
   // 5. Total tile latency
@@ -2508,8 +2478,22 @@ double compute_tile_latency(const problem_t& problem,
   const double L_tile_fixed = heuristic.tile_fixed_overhead;
   // weight_tile_total discounts hand-optimized kernels (e.g. TF32 256x256x32)
   // that beat the analytical model (set by apply_tf32_heuristics); 1.0 otherwise.
+  //
+  // That hand-tuned speedup was characterised in a clean, XCD-aligned split-K
+  // regime.  When the split factor and the XCD count don't divide each other
+  // (e.g. SF=14 on 8 XCDs), the split-K work lands unevenly across XCDs and the
+  // kernel doesn't realise its measured speedup -- so the discount over-credits
+  // it (it was flipping shapes like xf32 NT 2246x512x4096 onto a 256x256x32
+  // split-K pick that is ~2.7x slower in HW).  Suppress the discount there.
+  double weight_tile_total = heuristic.weight_tile_total;
+  if (weight_tile_total < 1.0) {  // a hand-opt discount is in effect
+    const size_t sf  = std::max<size_t>(context.splitting_factor, 1);
+    const size_t xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+    const bool xcd_aligned = (sf % xcd == 0) || (xcd % sf == 0);
+    if (!xcd_aligned) weight_tile_total = 1.0;
+  }
   const double L_tile_total =
-      (L_prologue + L_mainloop_eff + L_epilogue_eff + L_tile_fixed) * heuristic.weight_tile_total;
+      (L_prologue + L_mainloop + L_epilogue + L_tile_fixed) * weight_tile_total;
 
   if (debug) {
     OLOG_DEBUG("utilization: " << utilization);
@@ -2541,10 +2525,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_du_waste: " << L_du_waste);
     OLOG_DEBUG("L_mainloop: " << L_mainloop);
     OLOG_DEBUG("L_epilogue_hbm: " << L_epilogue_hbm);
-    OLOG_DEBUG("partial_m_tile_waste: " << partial_m_tile_waste);
-    OLOG_DEBUG("m_overflow_inflation: " << m_overflow_inflation);
-    OLOG_DEBUG("L_mainloop_eff: " << L_mainloop_eff);
-    OLOG_DEBUG("L_epilogue_eff: " << L_epilogue_eff);
+    OLOG_DEBUG("L_epilogue: " << L_epilogue);
     OLOG_DEBUG("L_tile_fixed: " << L_tile_fixed);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
