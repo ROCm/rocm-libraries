@@ -14,7 +14,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   DataInitTypeScaleAlphaVec: 2
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200

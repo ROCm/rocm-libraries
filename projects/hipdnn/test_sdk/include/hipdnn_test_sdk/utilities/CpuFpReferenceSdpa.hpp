@@ -181,29 +181,16 @@ public:
                 }
             }
 
-            // Step 3: Apply sliding-window mask.
-            // For topLeftAlignment, the diagonal is at skv == sq.
-            // For bottomRightAlignment, the diagonal is at skv == sq + (seqKv - seqQ),
-            // which is negative (i.e. nothing visible) for early query positions when seqKv < seqQ.
-            if(rightBound >= 0)
+            // Step 3: Apply sliding-window / causal mask.
+            if(leftBound >= 0 || rightBound >= 0)
             {
-                // Offset to account for bottomRightAlignment
-                const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
-                const int64_t startKv = std::max<int64_t>(sq + 1 + offset + rightBound, 0);
-                for(int64_t skv = startKv; skv < seqKv; ++skv)
+                for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
-                    scores[static_cast<size_t>(skv)]
-                        = -std::numeric_limits<ComputeDataType>::infinity();
-                }
-            }
-            if(leftBound >= 0)
-            {
-                // Offset to account for bottomRightAlignment
-                const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
-                for(int64_t skv = 0; skv < sq + offset - leftBound; ++skv)
-                {
-                    scores[static_cast<size_t>(skv)]
-                        = -std::numeric_limits<ComputeDataType>::infinity();
+                    if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                    {
+                        scores[static_cast<size_t>(skv)]
+                            = -std::numeric_limits<ComputeDataType>::infinity();
+                    }
                 }
             }
 
@@ -304,6 +291,51 @@ public:
         forward(q, k, v, o, attnScaleValue, attnMask, leftBound, rightBound, topLeftAlignment, lse);
     }
 
+    /// SDPA backward convenience overload: accepts a simple causalMask flag.
+    /// Maps causalMask=true to leftBound=-1, rightBound=0, topLeftAlignment=true
+    /// (TOP_LEFT_CAUSAL), matching the forward convenience overload.
+    template <class QDataType,
+              class KDataType,
+              class VDataType,
+              class ODataType,
+              class DODataType,
+              class DQDataType,
+              class DKDataType,
+              class DVDataType,
+              class ComputeDataType = float>
+    static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                         const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                         const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+                         hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+                         hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+                         hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+                         std::optional<float> attnScaleValue,
+                         const hipdnn_data_sdk::utilities::TensorBase<float>* lse,
+                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
+                         bool causalMask)
+    {
+        const int64_t leftBound = -1;
+        const int64_t rightBound = (causalMask) ? 0 : -1;
+        const bool topLeftAlignment = true;
+
+        backward(q,
+                 k,
+                 v,
+                 o,
+                 dO,
+                 dQ,
+                 dK,
+                 dV,
+                 attnScaleValue,
+                 lse,
+                 attnMask,
+                 leftBound,
+                 rightBound,
+                 topLeftAlignment);
+    }
+
     /// SDPA backward: computes dQ, dK, dV from upstream gradient dO
     ///
     /// Implements Flash Attention backward pass algorithm. Recomputes attention
@@ -311,20 +343,22 @@ public:
     /// Optionally uses LSE (log-sum-exp) from forward pass for efficient softmax
     /// recomputation.
     ///
-    /// @param q              Query tensor [B, H_q, Sq, D]
-    /// @param k              Key tensor   [B, H_k, Skv, D]
-    /// @param v              Value tensor [B, H_v, Skv, Dv]
-    /// @param o              Output from forward pass [B, H_q, Sq, Dv]
-    /// @param dO             Upstream gradient [B, H_q, Sq, Dv]
-    /// @param dQ             Output: gradient w.r.t. Q [B, H_q, Sq, D]
-    /// @param dK             Output: gradient w.r.t. K [B, H_k, Skv, D]
-    /// @param dV             Output: gradient w.r.t. V [B, H_v, Skv, Dv]
-    /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
-    /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
-    ///                       When provided, enables efficient softmax recomputation.
-    ///                       When nullptr, recomputes softmax from scratch.
-    /// @param attnMask       Optional additive attention mask (same as forward)
-    /// @param causalMask     When true, applies causal masking (same as forward)
+    /// @param q                Query tensor [B, H_q, Sq, D]
+    /// @param k                Key tensor   [B, H_k, Skv, D]
+    /// @param v                Value tensor [B, H_v, Skv, Dv]
+    /// @param o                Output from forward pass [B, H_q, Sq, Dv]
+    /// @param dO               Upstream gradient [B, H_q, Sq, Dv]
+    /// @param dQ               Output: gradient w.r.t. Q [B, H_q, Sq, D]
+    /// @param dK               Output: gradient w.r.t. K [B, H_k, Skv, D]
+    /// @param dV               Output: gradient w.r.t. V [B, H_v, Skv, Dv]
+    /// @param attnScaleValue   Optional scale factor; defaults to 1/sqrt(D)
+    /// @param lse              Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
+    ///                         When provided, enables efficient softmax recomputation.
+    ///                         When nullptr, recomputes softmax from scratch.
+    /// @param attnMask         Optional additive attention mask (same as forward)
+    /// @param leftBound        Number of KV positions to the left that are unmasked (-1 = no mask)
+    /// @param rightBound       Number of KV positions to the right that are unmasked (-1 = no mask)
+    /// @param topLeftAlignment If true, diagonal at skv==sq; if false, at skv==sq+(seqKv-seqQ)
     ///
     /// Note: For GQA (H_q > H_kv), multiple query heads accumulate gradients to
     /// the same KV heads. This implementation is sequential to ensure correctness.
@@ -349,7 +383,9 @@ public:
                          const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                          const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
                          = nullptr,
-                         bool causalMask = false)
+                         int64_t leftBound = -1,
+                         int64_t rightBound = -1,
+                         bool topLeftAlignment = true)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -550,8 +586,9 @@ public:
 
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
-                            // Apply causal mask
-                            if(causalMask && skv > sq)
+                            // Apply sliding-window / causal mask
+                            if(isMasked(
+                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -595,8 +632,9 @@ public:
 
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
-                            // Apply causal mask
-                            if(causalMask && skv > sq)
+                            // Apply sliding-window / causal mask
+                            if(isMasked(
+                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -668,7 +706,7 @@ public:
                     // and accumulate gradients
                     for(int64_t skv = 0; skv < seqKv; ++skv)
                     {
-                        if(causalMask && skv > sq)
+                        if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                         {
                             continue;
                         }
@@ -767,6 +805,30 @@ public:
     }
 
 private:
+    /// Returns true if position (sq, skv) should be masked given the window bounds.
+    /// leftBound = -1 means no left mask; rightBound = -1 means no right mask.
+    /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at
+    /// skv==sq+(seqKv-seqQ).
+    static bool isMasked(int64_t sq,
+                         int64_t skv,
+                         int64_t seqQ,
+                         int64_t seqKv,
+                         int64_t leftBound,
+                         int64_t rightBound,
+                         bool topLeftAlignment)
+    {
+        const int64_t offset = topLeftAlignment ? 0 : seqKv - seqQ;
+        if(rightBound >= 0 && skv >= sq + 1 + offset + rightBound)
+        {
+            return true;
+        }
+        if(leftBound >= 0 && skv < sq + offset - leftBound)
+        {
+            return true;
+        }
+        return false;
+    }
+
     /// Compute broadcastable mask indices by right-aligning mask dims to [b, h, sq, skv].
     /// Dimensions of size 1 are broadcast (index clamped to 0).
     static std::vector<int64_t> computeMaskIndex(
