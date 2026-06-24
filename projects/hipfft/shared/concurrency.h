@@ -19,8 +19,9 @@
 // THE SOFTWARE.
 
 #pragma once
-
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include <thread>
 
 #ifndef _WIN32
@@ -36,7 +37,18 @@ static unsigned int rocfft_concurrency()
 #ifndef _WIN32
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
+    {
+#ifdef _OPENMP
         return std::min(CPU_COUNT(&cpuset), omp_get_max_threads());
+#else
+        return CPU_COUNT(&cpuset);
 #endif
+    }
+#endif
+
+#ifdef _OPENMP
     return std::min<unsigned int>(std::thread::hardware_concurrency(), omp_get_max_threads());
+#else
+    return std::thread::hardware_concurrency();
+#endif
 }
