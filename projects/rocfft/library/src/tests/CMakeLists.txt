@@ -18,15 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# GTest must be pre-installed; skip the suite if it isn't.
-find_package( GTest QUIET )
-if( NOT GTest_FOUND )
-  message( WARNING
-    "GTest not found - skipping rocfft-internal-test "
-    "(ROCFFT_BUILD_INTERNAL_TESTS requires a pre-installed GTest)." )
-  return()
-endif()
-
 add_executable( rocfft-internal-test
   function_pool_test.cpp
 )
@@ -44,14 +35,29 @@ set_target_properties( rocfft-internal-test PROPERTIES
   CXX_STANDARD_REQUIRED ON
 )
 
+# Hold the test to the same warning bar as the rest of the library.
+target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
+
 # Link rocfft-function-pool directly (not roc::rocfft, which would
 # duplicate the function_pool_data singleton).
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
   hip::host
-  GTest::gtest
-  GTest::gtest_main
 )
+
+# Use a pre-installed GTest if available, otherwise download and build
+# it (gives BUILD_GTEST=ON support and a PIC build that links cleanly).
+if( NOT BUILD_GTEST )
+  find_package( GTest QUIET )
+endif()
+if( GTest_FOUND )
+  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
+else()
+  include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
+  add_dependencies( rocfft-internal-test gtest )
+  target_include_directories( rocfft-internal-test PRIVATE ${GTEST_INCLUDE_DIRS} )
+  target_link_libraries( rocfft-internal-test PRIVATE ${GTEST_LIBRARIES} )
+endif()
 
 include( GoogleTest )
 gtest_discover_tests( rocfft-internal-test )

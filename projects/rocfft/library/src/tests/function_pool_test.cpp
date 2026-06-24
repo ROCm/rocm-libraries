@@ -43,6 +43,6 @@ TEST(rocfft_internal, function_pool_runtime_paths)
     // PPFMKey overload, never populated at runtime.
     PPFMKey pp_key(
         99991, 1, 1, rocfft_precision_single, rocfft_transform_type_complex_forward, CS_3D_PP);
-    EXPECT_FALSE(pool.has_function(pp_key));
-    EXPECT_THROW(pool.get_kernel(pp_key, CS_3D_PP), std::out_of_range);
+    EXPECT_FALSE(pool.has_function(pp_key, 1));
+    EXPECT_THROW(pool.get_kernel(pp_key, CS_3D_PP, 1), std::out_of_range);
 }
