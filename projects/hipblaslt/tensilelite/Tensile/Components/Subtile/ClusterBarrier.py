@@ -3,15 +3,9 @@
 
 """Cluster-scope barrier handshake for the subtile mainloop.
 
-Subtile-specific equivalent of the StinkyTofu InsertClusterBarrierPass (which
-does not run at OptLevel 0 / ScheduleIterAlg=3). Free functions take the writer
-explicitly to keep cluster logic in Subtile/ rather than KernelWriterAssembly.
-
 The handshake is split into a *signal* half and a *wait* half so the wait can be
-moved away from the signal: the cluster barrier's cross-CU latency is then hidden
-behind the WMMAs that issue in between instead of being exposed as a stall.
-``insertClusterBarrier`` splices both halves against the final post-schedule
-order.
+moved away from the signal, hiding the cluster barrier's cross-CU latency behind
+the WMMAs that issue in between instead of exposing it as a stall.
 """
 
 from __future__ import annotations
