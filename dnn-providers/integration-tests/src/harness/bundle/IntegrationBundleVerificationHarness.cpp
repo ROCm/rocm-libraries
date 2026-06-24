@@ -27,6 +27,7 @@
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -489,6 +490,9 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
+    tolerance::warnIfMultipleOutputs(_bundle->outputTensorUids.size(),
+                                     "IntegrationBundleVerificationHarness");
+
     for(const int64_t uid : _bundle->outputTensorUids)
     {
         auto& actualTensor = *engineOutputs.at(uid);
@@ -499,9 +503,7 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
 
         float atol = 0.0f;
         float rtol = 0.0f;
-        resolveTolerances(wrapper, dataType, atol, rtol);
-
-        applyTomlToleranceOverride(currentTestName(), atol, rtol);
+        tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
 
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
@@ -627,98 +629,6 @@ std::string IntegrationBundleVerificationHarness::dataTypeName(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-}
-
-void IntegrationBundleVerificationHarness::resolveTolerances(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    float& atol,
-    float& rtol)
-{
-    const float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
-    atol = defaultTolerance;
-    rtol = defaultTolerance;
-}
-
-template <typename T>
-float IntegrationBundleVerificationHarness::toleranceForNodeAttributes(
-    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
-{
-    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    namespace tol = hipdnn_test_sdk::utilities;
-
-    switch(attrType)
-    {
-    case NA::ConvolutionFwdAttributes:
-        return tol::conv::getToleranceFwd<T>();
-    case NA::ConvolutionBwdAttributes:
-        return tol::conv::getToleranceBwd<T>();
-    case NA::ConvolutionWrwAttributes:
-        return tol::conv::getToleranceWrw<T>();
-    case NA::BatchnormInferenceAttributes:
-        return tol::batchnorm::getToleranceInference<T>();
-    case NA::BatchnormInferenceAttributesVarianceExt:
-        return tol::batchnorm::getToleranceInferenceWithVariance<T>();
-    case NA::BatchnormAttributes:
-        return tol::batchnorm::getToleranceTraining<T>();
-    case NA::BatchnormBackwardAttributes:
-        return tol::batchnorm::getToleranceBackward<T>();
-    case NA::MatmulAttributes:
-        return tol::matmul::getTolerance<T>();
-    case NA::ReductionAttributes:
-        return tol::reduction::getTolerance<T>();
-    case NA::RMSNormAttributes:
-        return tol::rmsnorm::getTolerance<T>();
-    case NA::PointwiseAttributes:
-        return tol::pointwise::getTolerance<T>();
-    case NA::LayernormAttributes:
-        return tol::layernorm::getTolerance<T>();
-    case NA::SdpaAttributes:
-    case NA::SdpaBackwardAttributes:
-        return tol::sdpa::getToleranceFwd<T>();
-    default:
-        return 1e-3f;
-    }
-}
-
-float IntegrationBundleVerificationHarness::deriveDefaultTolerance(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    const auto nodeCount = wrapper.nodeCount();
-
-    bool found = false;
-    float maxTolerance = 0.0f;
-    for(uint32_t i = 0; i < nodeCount; ++i)
-    {
-        const auto attrType = wrapper.getNode(i).attributes_type();
-        const float nodeTolerance = toleranceForDataType(attrType, dataType);
-        maxTolerance = found ? std::max(maxTolerance, nodeTolerance) : nodeTolerance;
-        found = true;
-    }
-
-    return found ? maxTolerance : 1e-3f;
-}
-
-float IntegrationBundleVerificationHarness::toleranceForDataType(
-    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    using hipdnn_data_sdk::types::bfloat16;
-    using hipdnn_data_sdk::types::half;
-
-    switch(dataType)
-    {
-    case DT::FLOAT:
-        return toleranceForNodeAttributes<float>(attrType);
-    case DT::HALF:
-        return toleranceForNodeAttributes<half>(attrType);
-    case DT::BFLOAT16:
-        return toleranceForNodeAttributes<bfloat16>(attrType);
-    default:
-        return 1e-3f;
-    }
 }
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const

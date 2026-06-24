@@ -197,30 +197,9 @@ private:
     static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
     // ── tolerances ──────────────────────────────────────────────────────
-    // Two-level lookup: per-operation default from TestTolerances.hpp,
-    // then TOML per-engine override (if a [[tolerance_overrides]] filter
-    // matches the current gtest name).
-    //
-    //   resolveTolerances        entry point — sets atol/rtol for one output tensor
-    //     deriveDefaultTolerance  max tolerance across all graph nodes (priority 2)
-    //       toleranceForDataType    dispatches on DataType → typed template
-    //         toleranceForNodeAttributes<T>  maps NodeAttributes → TestTolerances.hpp
-    static void
-        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                          float& atol,
-                          float& rtol);
-
-    static float deriveDefaultTolerance(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    template <typename T>
-    static float
-        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
+    // Default tolerance derivation (max-across-nodes, per-op/per-dtype lookup)
+    // is shared with the graph harness via harness/tolerance/ToleranceResolver.hpp;
+    // the TOML per-test override is layered on top in compareEach.
 
     // ── comparison ──────────────────────────────────────────────────────
     void compareAgainstGolden(OutputTensors& engineOutputs);
