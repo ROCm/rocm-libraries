@@ -163,7 +163,7 @@ rocblas_status rocsolver_sytrd_hetrd_template(rocblas_handle handle,
                                               E, strideE, tau, strideP, batch_count, scalars,
                                               work_Acpy, norms, tmptau_W, workArr);
 
-    // everything must be executed with scalars on the device
+    // everything must be executed with scalars on the host
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     const T minone = T(-1);

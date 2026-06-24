@@ -35,6 +35,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
+#include "exceptions.hpp"
 #include "roclapack_syconv.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -1132,9 +1133,16 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         // everything must be executed with scalars on the host
         rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
-        istat_sytrs1 = sytrs2_inner_template<T, I>(handle, is_upper, n, nrhs, A, shiftA, lda,
-                                                   strideA, ipiv, strideP, E, strideE, B, shiftB,
-                                                   ldb, strideB, batch_count, pfree, size_remain);
+        try
+        {
+            istat_sytrs1 = sytrs2_inner_template<T, I>(
+                handle, is_upper, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, E, strideE, B,
+                shiftB, ldb, strideB, batch_count, pfree, size_remain);
+        }
+        catch(...)
+        {
+            istat_sytrs1 = exception2hip_status();
+        }
 
         pfree = pfree_save;
     }
