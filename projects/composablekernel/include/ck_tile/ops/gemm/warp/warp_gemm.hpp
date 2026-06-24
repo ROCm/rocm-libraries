@@ -394,11 +394,13 @@ using WarpGemmMfma_f32_32x32x32_fp8_fp8 = WarpGemmImpl<WarpGemmAttributeMfmaIter
 #endif
 
 #if defined(__gfx950__)
-template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmMfma_f32_16x16x64_fp8_fp8 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImpl_f32_16x16x32_fp8_fp8<WGAttrCtlEnum::Default_>,
     2,
-    AttrNumAccess>>;
+    AttrNumAccessA,
+    AttrNumAccessB>>;
 #else
 template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_16x16x64_fp8_fp8 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
@@ -462,9 +464,13 @@ using WarpGemmMfma_f32_16x16x32_bf8_bf8_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8<WGAttrCtlEnum::Default_>>>;
 
+template <WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmMfma_f32_16x16x64_bf8_bf8 = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
     WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8<WGAttrCtlEnum::Default_>,
-    2>>;
+    2,
+    AttrNumAccessA,
+    AttrNumAccessB>>;
 
 using WarpGemmMfma_f32_16x16x64_fp8_fp8_CTransposed =
     WarpGemmImpl<WarpGemmAttributeMfmaIterateKAndTransposedCDistribution<
