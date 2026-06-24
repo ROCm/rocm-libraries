@@ -40,11 +40,11 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[5]  # projects/composablekernel
-sys.path.insert(0, str(ROOT / "python"))
+ROOT = Path(__file__).resolve().parents[5]  # rocKE root
+sys.path.insert(0, str(ROOT / "Python"))
 
 # Root of the in-tree optimization utilities (replaces the old external MLSE checkout).
-_DSL_DOCS = ROOT / "python" / "ck_dsl" / "dsl_docs" / "optimization" / "utilities"
+_DSL_DOCS = ROOT / "dsl_docs" / "optimization" / "utilities"
 DEFAULT_SHAPE_UTILS = _DSL_DOCS / "tools" / "stage1_benchmark"
 DEFAULT_SHAPES = DEFAULT_SHAPE_UTILS / "tests" / "aiter_ua_prefill2d_allbf16.json"
 DEFAULT_TRITON_CSV = DEFAULT_SHAPE_UTILS / "results" / "triton_ua_prefill2d_bf16.csv"

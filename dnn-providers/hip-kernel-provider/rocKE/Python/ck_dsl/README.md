@@ -6,7 +6,7 @@
 > autofix **deletes the op and silently changes the kernel**. Lint with `ruff
 > check` (no `--fix`), use `# noqa: F841` for intentional handles, and re-run the
 > byte-identity gate after any lint/format pass. See
-> [`dsl_docs/development/invariants.md`](dsl_docs/development/invariants.md) rule 9.
+> [`dsl_docs/development/invariants.md`](../../dsl_docs/development/invariants.md) rule 9.
 
 ## Why
 CK Tile kernels are expressive and fast, but editing them through C++
@@ -41,7 +41,7 @@ build_<op>(spec)
 
 ## Layout
 ```text
-python/ck_dsl/
+rocKE/Python/ck_dsl/
 ├── core/         # IR, printing, optimization passes, LLVM/HIP lowering
 ├── helpers/      # authoring helpers: manifests, MFMA atoms, epilogues, layouts
 ├── instances/    # spec-driven CK Tile parity kernels
@@ -49,10 +49,11 @@ python/ck_dsl/
 ├── analysis/     # LLVM/ISA/resource inspection helpers
 ├── benchmark/    # repeated-run benchmark summaries
 ├── examples/     # maintained Python examples and parity harnesses
-├── dsl_docs/     # detailed architecture, runtime, and development docs
 ├── run_manifest.py
 ├── sweep.py
 └── sweep_bench.py
+
+# architecture/runtime/development docs live at the engine root: rocKE/dsl_docs/
 ```
 
 ## Quick Start
@@ -148,7 +149,7 @@ Static IR and lowering tests do not require a GPU. Runtime, parity, and
 benchmark paths do.
 
 **Full setup (venv, building the C++ engine, env-variable flags, Linux &
-Windows):** see [`dsl_docs/development/setup_guide.md`](dsl_docs/development/setup_guide.md).
+Windows):** see [`dsl_docs/development/setup_guide.md`](../../dsl_docs/development/setup_guide.md).
 
 ## More Documentation
 - `dsl_docs/development/setup_guide.md` — prerequisites, venv, env flags (Linux & Windows)
