@@ -3401,7 +3401,7 @@ Tests:
   ldc: 256
   ldd: 256
   batch_mode: 1
-  batch_count: 2
+  batch_count: 3
   batch_offset_a: 128
   batch_offset_b: 128
   batch_offset_c: 128
@@ -3422,7 +3422,7 @@ Tests:
   N: 128
   K: 64
   batch_mode: 1
-  batch_count: 2
+  batch_count: 4
   batch_offset_a: 64
   batch_offset_b: 64
   batch_offset_c: 64
@@ -3446,7 +3446,7 @@ Tests:
   ldc: 1024
   ldd: 1024
   batch_mode: 1
-  batch_count: 4
+  batch_count: 2
   batch_offset_a: 4294967296
   batch_offset_b: 4294967297
   batch_offset_c: 4294967298
@@ -3456,5 +3456,30 @@ Tests:
   unit_check: 1
   norm_check: 1
   gpu_arch: '9(42|50)'
+
+# Test all solutions with batch offsets and all transpose combinations
+- name: matmul_batch_offset_all_solutions
+  category: nightly
+  function: matmul_batch_offset
+  precision: *real_precisions
+  transA_transB: *transA_transB_range
+  M: 256
+  N: 256
+  K: 128
+  lda: 256
+  ldb: 256
+  ldc: 256
+  ldd: 256
+  batch_mode: 1
+  batch_count: 2
+  batch_offset_a: 256
+  batch_offset_b: 128
+  batch_offset_c: 512
+  batch_offset_d: 256
+  alpha: 1.0
+  beta: 1.0
+  algo_method: [0,1]
+  requested_solution_num: -1
+  unit_check: 1
 
 ...

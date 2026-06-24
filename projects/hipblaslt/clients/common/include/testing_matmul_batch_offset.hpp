@@ -40,6 +40,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
 
 /* ============================================================================================ */
 /*! \brief  Test for 64-bit batch offset support in general batched GEMM                        */
@@ -238,15 +239,21 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     // Find algorithm
     hipblasLtMatmulPreference_t pref;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
-    size_t maxWorkspaceSize = 128 * 1024 * 1024;  // 128 MB
+    size_t prefMaxWorkspaceSize = 128 * 1024 * 1024;  // 128 MB
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceSetAttribute(
-        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWorkspaceSize, sizeof(maxWorkspaceSize)));
+        pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &prefMaxWorkspaceSize, sizeof(prefMaxWorkspaceSize)));
 
-    int                                   numAlgos      = 0;
-    const int                             requestedAlgos = 1;
-    hipblasLtMatmulHeuristicResult_t heuristicResult[requestedAlgos];
+    // Support testing multiple solutions via requested_solution_num parameter
+    // Default to 1 (test only best solution) for backward compatibility
+    // Use HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM when -1 to get all available solutions
+    int32_t requestedAlgos = (arg.requested_solution_num < 0) ? HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM
+                           : (arg.requested_solution_num == 0) ? 1
+                           : arg.requested_solution_num;
+
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult(requestedAlgos);
+    int                                           numAlgos = 0;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(
-        handle, matmul_desc, matA, matB, matC, matD, pref, requestedAlgos, heuristicResult, &numAlgos));
+        handle, matmul_desc, matA, matB, matC, matD, pref, requestedAlgos, heuristicResult.data(), &numAlgos));
 
     if(numAlgos == 0)
     {
@@ -254,50 +261,23 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         GTEST_SKIP() << "No algorithm found for this configuration";
     }
 
+    // Find maximum workspace size across all solutions
+    size_t maxWorkspaceSize = 0;
+    for(int i = 0; i < numAlgos; i++)
+    {
+        maxWorkspaceSize = std::max(maxWorkspaceSize, heuristicResult[i].workspaceSize);
+    }
+
     // Allocate workspace
-    size_t workspaceSize = heuristicResult[0].workspaceSize;
-    void*  d_workspace   = nullptr;
-    if(workspaceSize > 0)
+    void* d_workspace = nullptr;
+    if(maxWorkspaceSize > 0)
     {
-        CHECK_HIP_ERROR(hipMalloc(&d_workspace, workspaceSize));
+        CHECK_HIP_ERROR(hipMalloc(&d_workspace, maxWorkspaceSize));
     }
-
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
-                                          matmul_desc,
-                                          &h_alpha,
-                                          d_batch_A,
-                                          matA,
-                                          d_batch_B,
-                                          matB,
-                                          &h_beta,
-                                          d_batch_C,
-                                          matC,
-                                          d_batch_D,
-                                          matD,
-                                          &heuristicResult[0].algo,
-                                          d_workspace,
-                                          workspaceSize,
-                                          0));
-
-    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
-
-    // Ensure kernel completes before reading result
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
-
-    if(d_workspace)
-    {
-        CHECK_HIP_ERROR(hipFree(d_workspace));
-    }
-
-    // Copy GPU result
-    CHECK_HIP_ERROR(hipMemcpy(h_D_full.data(),
-                              d_D_full,
-                              sizeof(To) * size_D_full * batch_count,
-                              hipMemcpyDeviceToHost));
 
     // ========================================
     // CPU Reference: D = alpha * A * B + beta * C
-    // Simple manual GEMM for testing (avoids cblas_gemm complexity)
+    // Computed once before testing any solutions
     // ========================================
     for(int b = 0; b < batch_count; b++)
     {
@@ -333,49 +313,107 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         }
     }
 
-    // ========================================
-    // VALIDATION: Compare GPU vs CPU
-    // ========================================
-    double max_error = 0.0;
-    for(int b = 0; b < batch_count; b++)
-    {
-        // GPU result is at (base + offset) within each batch's buffer
-        To* result_gpu = h_D_full.data() + b * size_D_full + offset_d;
-        To* result_cpu = h_D_gold.data() + b * size_D_sub;
+    // Tolerance: epsilon * factor * K (accumulation over K elements)
+    double tol = std::numeric_limits<Tc>::epsilon() * 100 * K;
 
-        for(size_t i = 0; i < size_D_sub; i++)
+    // Track validation results across all solutions
+    int numPassed = 0;
+    int numFailed = 0;
+
+    // Test each solution
+    for(int algoIdx = 0; algoIdx < numAlgos; algoIdx++)
+    {
+        // Reset only D output buffer to sentinel values before testing each solution
+        // A, B, C are inputs and don't change, so we can reuse them
+        CHECK_HIP_ERROR(hipMemcpy(d_D_full,
+                                  h_D_full.data(),
+                                  sizeof(To) * size_D_full * batch_count,
+                                  hipMemcpyHostToDevice));
+
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
+                                              matmul_desc,
+                                              &h_alpha,
+                                              d_batch_A,
+                                              matA,
+                                              d_batch_B,
+                                              matB,
+                                              &h_beta,
+                                              d_batch_C,
+                                              matC,
+                                              d_batch_D,
+                                              matD,
+                                              &heuristicResult[algoIdx].algo,
+                                              d_workspace,
+                                              heuristicResult[algoIdx].workspaceSize,
+                                              0));
+
+        // Ensure kernel completes before reading result
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+        // Copy GPU result back for verification
+        CHECK_HIP_ERROR(hipMemcpy(h_D_full.data(),
+                                  d_D_full,
+                                  sizeof(To) * size_D_full * batch_count,
+                                  hipMemcpyDeviceToHost));
+
+        // ========================================
+        // VALIDATION: Compare GPU vs CPU
+        // ========================================
+        double max_error = 0.0;
+        for(int b = 0; b < batch_count; b++)
         {
-            double diff = std::abs(double(result_gpu[i]) - double(result_cpu[i]));
-            max_error   = std::max(max_error, diff);
+            // GPU result is at (base + offset) within each batch's buffer
+            To* result_gpu = h_D_full.data() + b * size_D_full + offset_d;
+            To* result_cpu = h_D_gold.data() + b * size_D_sub;
+
+            for(size_t i = 0; i < size_D_sub; i++)
+            {
+                double diff = std::abs(double(result_gpu[i]) - double(result_cpu[i]));
+                max_error   = std::max(max_error, diff);
+            }
+        }
+
+        // Check and count per-solution results
+        if(arg.unit_check)
+        {
+            if(max_error >= tol)
+            {
+                numFailed++;
+                EXPECT_LT(max_error, tol)
+                    << "Solution " << algoIdx << "/" << numAlgos
+                    << " FAILED (error: " << max_error << ", tol: " << tol << ")";
+            }
+            else
+            {
+                numPassed++;
+            }
         }
     }
 
+    // Report summary when testing multiple solutions
+    if(numAlgos > 1 && arg.unit_check)
+    {
+        hipblaslt_cout << "Tested " << numAlgos << " solutions: "
+                       << numPassed << " passed, " << numFailed << " failed" << std::endl;
+    }
+
     // Cleanup
+    if(d_workspace)
+    {
+        CHECK_HIP_ERROR(hipFree(d_workspace));
+    }
     CHECK_HIP_ERROR(hipFree(d_batch_A));
     CHECK_HIP_ERROR(hipFree(d_batch_B));
     CHECK_HIP_ERROR(hipFree(d_batch_C));
     CHECK_HIP_ERROR(hipFree(d_batch_D));
 
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_desc));
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
-
-    // Tolerance: epsilon * factor * K (accumulation over K elements)
-    double tol = std::numeric_limits<Tc>::epsilon() * 100 * K;
-
-    // Report results
-    if(arg.unit_check)
-    {
-        EXPECT_LT(max_error, tol) << "GPU vs CPU mismatch (error: " << max_error << ", tol: " << tol << ")";
-    }
-
-    if(arg.norm_check && max_error >= tol)
-    {
-        hipblaslt_cout << "GPU vs CPU max error: " << max_error << " (tol: " << tol << ")" << std::endl;
-    }
 }
 
 // Type dispatcher based on Arguments
