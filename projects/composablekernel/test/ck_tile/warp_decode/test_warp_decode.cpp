@@ -580,6 +580,215 @@ template <typename XDataType,
     return ::testing::AssertionSuccess() << oss.str();
 }
 
+// Validate the fast packed-FP4 down-reduce path (kUseDot2 = true). Unlike the
+// shared RunPositiveCase fp4 coverage (which stores one full byte per FP4 and is
+// only a functional dequant check), this exercises the real MX layout: INTER/2
+// bytes per weight row, two FP4 per byte, K-index i -> byte i/2 nibble i%2 --
+// the layout the cvt_scalef32_pk_bf16_fp4 intrinsic and production mxfp4 use.
+template <typename WScaleDataType, typename WScaleLayout, index_t kVector, index_t kHPerWarp = 1>
+::testing::AssertionResult RunDownReducePackedFp4Case(const std::string& test_name,
+                                                      float atol,
+                                                      const WarpDecodeShape& shape)
+{
+    using IntermediateDataType = bf16_t;
+    using WDataType            = pk_fp4_t;
+    using ComputeDataType      = float;
+    using YDataType            = bf16_t;
+
+    static_assert(kVector % 8 == 0, "packed FP4 down path requires kVector % 8 == 0.");
+
+    using reference::RefScaleMode;
+    constexpr bool w_per_tensor = std::is_same_v<WScaleLayout, WarpDecodeScaleLayout::PerTensor>;
+    constexpr bool w_per_token  = std::is_same_v<WScaleLayout, WarpDecodeScaleLayout::PerToken>;
+    constexpr bool w_block2d    = ScaleLayoutTraits<WScaleLayout>::is_block2d;
+
+    constexpr index_t w_block_n = [] {
+        if constexpr(w_block2d)
+            return ScaleLayoutTraits<WScaleLayout>::block_n;
+        else
+            return index_t{1};
+    }();
+    constexpr index_t w_block_k = [] {
+        if constexpr(w_block2d)
+            return ScaleLayoutTraits<WScaleLayout>::block_k;
+        else
+            return index_t{1};
+    }();
+
+    constexpr RefScaleMode ref_w_mode = w_block2d    ? RefScaleMode::Block2D
+                                        : w_per_token ? RefScaleMode::PerToken
+                                        : w_per_tensor ? RefScaleMode::PerTensor
+                                                       : RefScaleMode::None;
+
+    if(shape.INTER % 2 != 0)
+        return ::testing::AssertionFailure() << test_name << ": INTER must be even for packed FP4.";
+
+    const index_t inter_bytes = shape.INTER / 2; // two FP4 packed per byte
+
+    HostTensor<IntermediateDataType> intermediate({shape.B, shape.TOP_K, shape.INTER});
+    // pk_fp4_t HostTensor allocates (product of lens)/PackedSize bytes, so declare
+    // the logical FP4 element count (INTER) to get inter_bytes bytes per row. The
+    // flat mData layout then matches the kernel's byte view: row (e,out_j) starts at
+    // (e*HIDDEN + out_j)*inter_bytes, with stride_w_down = inter_bytes.
+    HostTensor<WDataType> w_down({shape.E, shape.HIDDEN, shape.INTER});
+    HostTensor<int32_t> router_ids({shape.B, shape.TOP_K});
+    HostTensor<float> router_wts({shape.B, shape.TOP_K});
+    HostTensor<YDataType> y_host({shape.B, shape.HIDDEN});
+    HostTensor<YDataType> y_dev({shape.B, shape.HIDDEN});
+
+    FillRandom(intermediate, -1.0f, 1.0f, 77);
+    FillRandom(w_down, 0.0f, 0.0f, 88); // pk_fp4_t specialization ignores the range
+    FillRouterData(router_ids, router_wts, shape.B, shape.TOP_K, shape.E);
+
+    const bool dbg_const = std::getenv("WD_FP4_DBG") != nullptr;
+    if(dbg_const)
+    {
+        // All activations = 1.0, all FP4 nibbles = 2 (-> value 1.0): expect
+        // y[out_j] = sum_k wt[k] * INTER = INTER (router weights sum to 1).
+        for(auto& v : intermediate.mData)
+            v = type_convert<IntermediateDataType>(1.0f);
+        for(auto& v : w_down.mData)
+            v = pk_fp4_t(static_cast<uint8_t>(0x22));
+    }
+
+    std::vector<WScaleDataType> w_down_scale_buf;
+    const WScaleDataType* p_w_down_scale = nullptr;
+    if constexpr(w_per_tensor)
+    {
+        FillScaleRandom(w_down_scale_buf, 1, 202);
+        p_w_down_scale = w_down_scale_buf.data();
+    }
+    else if constexpr(w_per_token)
+    {
+        FillScaleRandom(w_down_scale_buf, static_cast<std::size_t>(shape.E) * shape.HIDDEN, 202);
+        p_w_down_scale = w_down_scale_buf.data();
+    }
+    else if constexpr(w_block2d)
+    {
+        const std::size_t cnt = static_cast<std::size_t>(shape.E * shape.HIDDEN / w_block_n) *
+                                (shape.INTER / w_block_k);
+        FillScaleRandom(w_down_scale_buf, cnt, 202);
+        p_w_down_scale = w_down_scale_buf.data();
+    }
+
+    if(dbg_const)
+    {
+        for(auto& v : w_down_scale_buf)
+            v = type_convert<WScaleDataType>(1.0f);
+    }
+
+    for(index_t b = 0; b < shape.B; ++b)
+    {
+        for(index_t out_j = 0; out_j < shape.HIDDEN; ++out_j)
+        {
+            float acc = 0.0f;
+            for(index_t k = 0; k < shape.TOP_K; ++k)
+            {
+                const index_t e = router_ids(b, k);
+                const float wt  = router_wts(b, k);
+                for(index_t i = 0; i < shape.INTER; ++i)
+                {
+                    const float xval = type_convert<float>(intermediate(b, k, i));
+                    const std::size_t w_byte_off =
+                        (static_cast<std::size_t>(e) * shape.HIDDEN + out_j) * inter_bytes +
+                        (i / 2);
+                    const float wval =
+                        reference::unpack_weight<pk_fp4_t>(w_down.mData[w_byte_off], i % 2);
+                    const float s = reference::lookup_scale<WScaleDataType>(
+                        p_w_down_scale, ref_w_mode, e * shape.HIDDEN + out_j, i, shape.INTER,
+                        w_block_n, w_block_k);
+                    acc += wt * xval * wval * s;
+                }
+            }
+            y_host(b, out_j) = type_convert<YDataType>(acc);
+        }
+    }
+
+    DeviceMem inter_buf(intermediate.get_element_space_size_in_bytes());
+    DeviceMem w_down_buf(w_down.get_element_space_size_in_bytes());
+    DeviceMem router_ids_buf(router_ids.get_element_space_size_in_bytes());
+    DeviceMem router_wts_buf(router_wts.get_element_space_size_in_bytes());
+    DeviceMem y_buf(y_dev.get_element_space_size_in_bytes());
+
+    inter_buf.ToDevice(intermediate.mData.data());
+    w_down_buf.ToDevice(w_down.mData.data());
+    router_ids_buf.ToDevice(router_ids.mData.data());
+    router_wts_buf.ToDevice(router_wts.mData.data());
+
+    DeviceMem w_down_scale_dbuf(w_down_scale_buf.size() * sizeof(WScaleDataType));
+    void* p_w_down_scale_dev = nullptr;
+    if(!w_down_scale_buf.empty())
+    {
+        w_down_scale_dbuf.ToDevice(w_down_scale_buf.data());
+        p_w_down_scale_dev = w_down_scale_dbuf.GetDeviceBuffer();
+    }
+
+    using DownProblem = WarpDecodeDownReduceProblem<IntermediateDataType,
+                                                    WDataType,
+                                                    ComputeDataType,
+                                                    YDataType,
+                                                    WScaleDataType,
+                                                    WScaleLayout,
+                                                    kVector,
+                                                    /*kUseDot2=*/true,
+                                                    /*kUsePackedFp32=*/false,
+                                                    /*kWarpsPerBlock=*/1,
+                                                    /*kHPerWarp=*/kHPerWarp>;
+    using DownKernel  = WarpDecodeDownReduceKernel<DownProblem, WarpDecodePolicy>;
+
+    typename DownKernel::Kargs down_args{inter_buf.GetDeviceBuffer(),
+                                         w_down_buf.GetDeviceBuffer(),
+                                         p_w_down_scale_dev,
+                                         static_cast<int32_t*>(router_ids_buf.GetDeviceBuffer()),
+                                         static_cast<float*>(router_wts_buf.GetDeviceBuffer()),
+                                         y_buf.GetDeviceBuffer(),
+                                         shape.B,
+                                         shape.HIDDEN,
+                                         shape.INTER,
+                                         shape.TOP_K,
+                                         shape.E,
+                                         shape.INTER,
+                                         inter_bytes,
+                                         shape.HIDDEN};
+
+    if(!DownKernel::IsSupportedArgument(down_args))
+    {
+        return ::testing::AssertionFailure()
+               << test_name << ": packed-FP4 down Kargs rejected by IsSupportedArgument().";
+    }
+
+    const auto s = stream_config{nullptr, false};
+    launch_warp_decode_down_reduce<DownKernel>(down_args, s);
+    y_buf.FromDevice(y_dev.mData.data());
+
+    if(dbg_const)
+    {
+        std::cout << "[WD_FP4_DBG] INTER=" << shape.INTER << " kVector=" << kVector
+                  << " expect y=" << shape.INTER << "\n";
+        for(index_t j = 0; j < std::min<index_t>(4, shape.HIDDEN); ++j)
+            std::cout << "  y_host[" << j << "]=" << type_convert<float>(y_host.mData[j])
+                      << " y_dev[" << j << "]=" << type_convert<float>(y_dev.mData[j]) << "\n";
+    }
+
+    float y_max_diff = 0.0f;
+    for(index_t i = 0; i < static_cast<index_t>(y_host.get_element_space_size()); ++i)
+    {
+        const float host_val = type_convert<float>(y_host.mData[i]);
+        const float dev_val  = type_convert<float>(y_dev.mData[i]);
+        const float diff     = std::abs(host_val - dev_val);
+        y_max_diff           = std::max(y_max_diff, diff);
+        if(diff > atol)
+        {
+            return ::testing::AssertionFailure()
+                   << test_name << ": output mismatch at " << i << " host=" << host_val
+                   << " dev=" << dev_val << " diff=" << diff << " atol=" << atol;
+        }
+    }
+
+    return ::testing::AssertionSuccess()
+           << test_name << " passed with y_diff=" << y_max_diff << " atol=" << atol;
+}
+
 template <typename GateUpKernel>
 typename GateUpKernel::Kargs MakeValidGateUpArgs()
 {
@@ -799,6 +1008,64 @@ TEST(WarpDecodePositive, Fp8Mxfp4PerTokenBlock2DOneBy32E8m0Scale)
                                  WarpDecodeScaleLayout::PerToken,
                                  WarpDecodeScaleLayout::Block2D<1, 32>>(
         "FP8xMXFP4 per-token/block2d<1,32> e8m0 scale", 1.0f)));
+}
+
+// Fast packed-FP4 down path (kUseDot2): real MX layout, INTER/2 bytes per row.
+TEST(WarpDecodePositive, DownPackedFp4Qwen512PerTensorFloatScale)
+{
+    const WarpDecodeShape shape{2, 128, 512, 4, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<float, WarpDecodeScaleLayout::PerTensor, 8>(
+        "packed-FP4 down INTER=512 kV=8 per-tensor float", 2.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4Qwen512Block2DOneBy32E8m0Scale)
+{
+    const WarpDecodeShape shape{2, 128, 512, 4, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<e8m0_t, WarpDecodeScaleLayout::Block2D<1, 32>, 8>(
+        "packed-FP4 down INTER=512 kV=8 block2d<1,32> e8m0", 2.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4DeepSeek2048Block2DOneBy32E8m0Scale)
+{
+    const WarpDecodeShape shape{1, 256, 2048, 8, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<e8m0_t, WarpDecodeScaleLayout::Block2D<1, 32>, 32>(
+        "packed-FP4 down INTER=2048 kV=32 block2d<1,32> e8m0", 5.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4DeepSeek2048PerTokenScale)
+{
+    const WarpDecodeShape shape{1, 256, 2048, 8, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<float, WarpDecodeScaleLayout::PerToken, 32>(
+        "packed-FP4 down INTER=2048 kV=32 per-token float", 5.0f, shape)));
+}
+
+// FP4 H2 (two hidden outputs per wave, kHPerWarp=2): same MX layouts as above.
+TEST(WarpDecodePositive, DownPackedFp4H2Qwen512PerTensorFloatScale)
+{
+    const WarpDecodeShape shape{2, 128, 512, 4, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<float, WarpDecodeScaleLayout::PerTensor, 8, 2>(
+        "packed-FP4 H2 down INTER=512 kV=8 per-tensor float", 2.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4H2Qwen512Block2DOneBy32E8m0Scale)
+{
+    const WarpDecodeShape shape{2, 128, 512, 4, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<e8m0_t, WarpDecodeScaleLayout::Block2D<1, 32>, 8, 2>(
+        "packed-FP4 H2 down INTER=512 kV=8 block2d<1,32> e8m0", 2.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4H2DeepSeek2048Block2DOneBy32E8m0Scale)
+{
+    const WarpDecodeShape shape{1, 256, 2048, 8, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<e8m0_t, WarpDecodeScaleLayout::Block2D<1, 32>, 32, 2>(
+        "packed-FP4 H2 down INTER=2048 kV=32 block2d<1,32> e8m0", 5.0f, shape)));
+}
+
+TEST(WarpDecodePositive, DownPackedFp4H2DeepSeek2048PerTokenScale)
+{
+    const WarpDecodeShape shape{1, 256, 2048, 8, 8};
+    EXPECT_TRUE((RunDownReducePackedFp4Case<float, WarpDecodeScaleLayout::PerToken, 32, 2>(
+        "packed-FP4 H2 down INTER=2048 kV=32 per-token float", 5.0f, shape)));
 }
 
 TEST(WarpDecodePositive, Bf16Fp8PerTensorBlock2DFourBy32FloatScale)

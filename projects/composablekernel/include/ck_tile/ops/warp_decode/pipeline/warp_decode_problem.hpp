@@ -46,7 +46,9 @@ template <typename XDataType_,
           typename Activation_ = ck_tile::element_wise::Silu,
           index_t kVector_ = 1,
           bool kUseDot2_ = false,
-          bool kUsePackedFp32_ = false>
+          bool kUsePackedFp32_ = false,
+          index_t kWarpsPerBlock_ = 1,
+          index_t kNPerWarp_ = 1>
 struct WarpDecodeGateUpProblem
 {
     using XDataType            = remove_cvref_t<XDataType_>;
@@ -59,10 +61,12 @@ struct WarpDecodeGateUpProblem
     using WScaleLayout         = remove_cvref_t<WScaleLayout_>;
     using Activation           = remove_cvref_t<Activation_>;
 
-    static constexpr index_t kBlockSize = get_warp_size();
-    static constexpr index_t kVector    = kVector_;
-    static constexpr bool kUseDot2      = kUseDot2_;
-    static constexpr bool kUsePackedFp32 = kUsePackedFp32_;
+    static constexpr index_t kWarpsPerBlock = kWarpsPerBlock_;
+    static constexpr index_t kBlockSize     = kWarpsPerBlock * get_warp_size();
+    static constexpr index_t kVector         = kVector_;
+    static constexpr index_t kNPerWarp       = kNPerWarp_;
+    static constexpr bool kUseDot2           = kUseDot2_;
+    static constexpr bool kUsePackedFp32  = kUsePackedFp32_;
 };
 
 template <typename IntermediateDataType_,
@@ -73,7 +77,10 @@ template <typename IntermediateDataType_,
           typename WScaleLayout_ = WarpDecodeScaleLayout::PerTensor,
           index_t kVector_ = 1,
           bool kUseDot2_ = false,
-          bool kUsePackedFp32_ = false>
+          bool kUsePackedFp32_ = false,
+          index_t kWarpsPerBlock_ = 1,
+          index_t kHPerWarp_ = 1,
+          index_t kLanesPerOutput_ = get_warp_size()>
 struct WarpDecodeDownReduceProblem
 {
     using IntermediateDataType = remove_cvref_t<IntermediateDataType_>;
@@ -83,10 +90,13 @@ struct WarpDecodeDownReduceProblem
     using WScaleDataType       = remove_cvref_t<WScaleDataType_>;
     using WScaleLayout         = remove_cvref_t<WScaleLayout_>;
 
-    static constexpr index_t kBlockSize = get_warp_size();
-    static constexpr index_t kVector    = kVector_;
-    static constexpr bool kUseDot2      = kUseDot2_;
-    static constexpr bool kUsePackedFp32 = kUsePackedFp32_;
+    static constexpr index_t kWarpsPerBlock = kWarpsPerBlock_;
+    static constexpr index_t kBlockSize     = kWarpsPerBlock * get_warp_size();
+    static constexpr index_t kVector         = kVector_;
+    static constexpr bool kUseDot2           = kUseDot2_;
+    static constexpr bool kUsePackedFp32  = kUsePackedFp32_;
+    static constexpr index_t kHPerWarp       = kHPerWarp_;
+    static constexpr index_t kLanesPerOutput = kLanesPerOutput_;
 };
 
 } // namespace ck_tile
