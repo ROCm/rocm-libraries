@@ -41,6 +41,32 @@
 
 namespace stinkytofu {
 
+namespace {
+
+#ifdef STINKYTOFU_HAVE_EXAMPLE_PLUGIN
+// Absolute path of the loaded libstinkytofu, via a symbol known to live in it.
+// Mirrors IntrinsicRegistry::getLibraryPath() — see that file for rationale.
+std::string thisLibraryPath() {
+#ifndef _WIN32
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&PassBuilder::loadPlugin), &info) && info.dli_fname) {
+        return info.dli_fname;
+    }
+#else
+    HMODULE hModule = nullptr;
+    if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(&PassBuilder::loadPlugin), &hModule)) {
+        char result[MAX_PATH];
+        if (GetModuleFileNameA(hModule, result, MAX_PATH) != 0) return result;
+    }
+#endif
+    return "";
+}
+#endif  // STINKYTOFU_HAVE_EXAMPLE_PLUGIN
+
+}  // namespace
+
 void PassBuilder::registerAtExtensionPoint(PipelineExtensionPoint EP, ExtensionCallback CB) {
     callbacks_[static_cast<int>(EP)].push_back(std::move(CB));
 }
@@ -147,6 +173,23 @@ void PassBuilder::loadPluginsFromDirectory(const std::string& dirPath) {
             loadPlugin(entry.path().string());
         }
     }
+}
+
+std::string PassBuilder::examplePluginPath() {
+#ifdef STINKYTOFU_HAVE_EXAMPLE_PLUGIN
+    // The plugin is installed next to libstinkytofu at a known relative path
+    // (STINKYTOFU_PLUGIN_INSTALL_RELDIR, kept in lockstep with the install rule).
+    // Resolve it from the loaded library's own location so it works regardless
+    // of the install prefix (ROCm tree, dev wheel, etc.).
+    namespace fs = std::filesystem;
+    const std::string self = thisLibraryPath();
+    if (self.empty()) return "";
+    fs::path candidate = fs::path(self).parent_path() / STINKYTOFU_PLUGIN_INSTALL_RELDIR /
+                         STINKYTOFU_EXAMPLE_PLUGIN_FILENAME;
+    std::error_code ec;
+    if (fs::exists(candidate, ec)) return candidate.string();
+#endif
+    return "";
 }
 
 void PassBuilder::unloadPlugins() {

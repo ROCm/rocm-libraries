@@ -3,16 +3,14 @@
 
 include(CMakePackageConfigHelpers)
 
-# Version handling
+# Version handling: independent component version from frontend/version.json.
 hipdnn_setup_version(hipdnn_frontend)
-
-# Set project with version
 project(hipdnn_frontend VERSION ${HIPDNN_FRONTEND_VERSION} LANGUAGES CXX)
 
 # Read data_sdk version for minimum requirement
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
 
-# Read backend version for minimum requirement
+# Minimum compatible backend version, read from backend/version.json.
 hipdnn_get_component_version(hipdnn_backend HIPDNN_FRONTEND_BACKEND_MIN_VERSION)
 
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -125,7 +123,7 @@ install(EXPORT hipdnn_frontend_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
 # Generate package version file for find_package version checking
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfigVersion.cmake"
-    VERSION ${HIPDNN_FRONTEND_VERSION}
+    VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 

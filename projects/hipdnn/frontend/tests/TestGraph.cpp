@@ -174,6 +174,7 @@ protected:
         ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
             .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
     }
+
     void TearDown() override
     {
         detail::IHipdnnBackend::resetInstance();
@@ -2134,6 +2135,28 @@ TEST_F(TestGraph, ExecutionPlanisFinalizedAfterBuildPlans)
     result = graph.build_plans();
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(result.get_message(), "");
+}
+
+TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
+{
+    const Graph graph;
+    int64_t engineId = -1;
+    auto result = graph.get_execution_plan_engine_id(engineId);
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(engineId, -1);
+}
+
+TEST_F(TestGraph, GetExecutionPlanEngineIdReturnsSelectedEngine)
+{
+    // get_execution_plan_engine_id returns the cached engine selected for the
+    // plan (_selectedEngineId), set when the engine config is built.
+    GraphTestUtils graph;
+    graph.setSelectedEngineId(4242);
+
+    int64_t engineId = -1;
+    auto result = graph.get_execution_plan_engine_id(engineId);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(engineId, 4242);
 }
 
 TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
