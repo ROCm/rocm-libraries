@@ -1,14 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Standalone microbench: time GemmDecodeUniversalKernel with and without
-// the XCD-aware workgroup swizzle on the same inputs, across a small
-// shape grid. Build target: bench_gemm_decode_chiplet_swizzle.
+// Standalone microbench for the two A1/A3 levers on GemmDecodeUniversalKernel:
+//   - A1: kNPerWarp N-tile register reuse (load the shared A row once, reuse
+//         across kNPerWarp B rows).
+//   - A3: the XCD-aware workgroup swizzle (chiplet chunk_size sweep).
+// For each shape it times the (kNPerWarp, chiplet chunk_size) grid against the
+// kNPerWarp=1 / swizzle-off baseline and reports the best cell.
+// Build target: bench_gemm_decode_chiplet_swizzle.
 
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -38,7 +41,7 @@ void fill_random(HostTensor<T>& t, unsigned seed)
     }
 }
 
-template <bool kChipletSwizzle, index_t kChipletNumXcds, index_t kChipletChunk>
+template <index_t kNPerWarp, bool kChipletSwizzle, index_t kChipletNumXcds, index_t kChipletChunk>
 float bench_one(const Shape& s, int warmup, int repeat,
                 const DeviceMem& a_buf, const DeviceMem& b_buf, DeviceMem& c_buf)
 {
@@ -57,7 +60,7 @@ float bench_one(const Shape& s, int warmup, int repeat,
                                         /*kUseDot2=*/false,
                                         /*kUsePackedFp32=*/false,
                                         /*kMPerWarp=*/1,
-                                        /*kNPerWarp=*/1,
+                                        kNPerWarp,
                                         GemmDecodeOutputAxis::SmallM,
                                         /*kHasBias=*/false,
                                         /*kWarpsPerBlock=*/1,
@@ -76,7 +79,6 @@ float bench_one(const Shape& s, int warmup, int repeat,
                                         /*stride_c=*/s.N,
                                         /*k_batch=*/1);
 
-    // Warmup.
     {
         const stream_config sc{nullptr, /*time_kernel=*/false};
         for(int i = 0; i < warmup; ++i)
@@ -90,6 +92,38 @@ float bench_one(const Shape& s, int warmup, int repeat,
                                  /*cold_niters=*/0,
                                  /*nrepeat=*/repeat};
     return launch_gemm_decode_universal<Kernel>(kargs, sc_timed);
+}
+
+struct Best
+{
+    float    t_us      = 1.0e30f;
+    index_t  n_per_warp = 1;
+    bool     swizzle    = false;
+    index_t  chunk      = 8;
+};
+
+// Sweep the five chiplet chunk sizes for a fixed compile-time kNPerWarp and
+// fold the results (plus the swizzle-off point) into `best`. Returns the
+// swizzle-off time for this kNPerWarp so the caller can show N-reuse alone.
+template <index_t kNPerWarp>
+float sweep_np(const Shape& s, int warmup, int repeat,
+               const DeviceMem& a_buf, const DeviceMem& b_buf, DeviceMem& c_buf,
+               Best& best)
+{
+    auto consider = [&](float t, bool swz, index_t chunk) {
+        if(t < best.t_us)
+            best = Best{t, kNPerWarp, swz, chunk};
+    };
+
+    const float t_off = bench_one<kNPerWarp, false, 8, 8>(s, warmup, repeat, a_buf, b_buf, c_buf);
+    consider(t_off, /*swz=*/false, /*chunk=*/8);
+
+    consider(bench_one<kNPerWarp, true, 8, 4>(s, warmup, repeat, a_buf, b_buf, c_buf), true, 4);
+    consider(bench_one<kNPerWarp, true, 8, 8>(s, warmup, repeat, a_buf, b_buf, c_buf), true, 8);
+    consider(bench_one<kNPerWarp, true, 8, 16>(s, warmup, repeat, a_buf, b_buf, c_buf), true, 16);
+    consider(bench_one<kNPerWarp, true, 8, 32>(s, warmup, repeat, a_buf, b_buf, c_buf), true, 32);
+    consider(bench_one<kNPerWarp, true, 8, 64>(s, warmup, repeat, a_buf, b_buf, c_buf), true, 64);
+    return t_off;
 }
 
 void run_shape(const Shape& s, int warmup, int repeat)
@@ -106,42 +140,28 @@ void run_shape(const Shape& s, int warmup, int repeat)
     a_buf.ToDevice(a.mData.data());
     b_buf.ToDevice(b.mData.data());
 
-    const float t_off =
-        bench_one</*kChipletSwizzle=*/false, 8, 8>(s, warmup, repeat, a_buf, b_buf, c_buf);
-
-    struct Cfg { index_t num_xcds; index_t chunk; };
-    const std::vector<Cfg> cfgs{
-        {8, 4}, {8, 8}, {8, 16}, {8, 32}, {8, 64},
+    const auto bw = [&](float t_us) {
+        return 2.0f * float(s.M) * float(s.N) * float(s.K) / (t_us * 1.0e-6f) / 1.0e12f;
     };
 
-    std::printf("M=%4d N=%5d K=%5d  off=%7.2f us",
-                s.M, s.N, s.K, t_off * 1000.0f);
+    // Baseline: kNPerWarp=1, swizzle off.
+    const float t_base =
+        bench_one<1, false, 8, 8>(s, warmup, repeat, a_buf, b_buf, c_buf) * 1000.0f;
 
-    // num_xcds is compile-time, so we iterate via if/else on chunk.
-    auto run_cfg = [&](index_t chunk_size, float t) {
-        const float bw   = 2.0f * float(s.M) * float(s.N) * float(s.K) /
-                           (t * 1.0e-3f) / 1.0e12f;
-        const float spd  = t_off / t;
-        std::printf("   chunk=%2d  on=%7.2f us  spd=%5.3fx  (%5.2f TF/s)",
-                    int(chunk_size), t * 1000.0f, spd, bw);
-    };
+    Best best;
+    // N must be divisible by kNPerWarp; the bench shapes are all multiples of
+    // 4, so the {1,2,4} fan-out is always legal here.
+    const float np1_off = sweep_np<1>(s, warmup, repeat, a_buf, b_buf, c_buf, best) * 1000.0f;
+    const float np2_off = sweep_np<2>(s, warmup, repeat, a_buf, b_buf, c_buf, best) * 1000.0f;
+    const float np4_off = sweep_np<4>(s, warmup, repeat, a_buf, b_buf, c_buf, best) * 1000.0f;
+    const float best_us = best.t_us * 1000.0f;
 
-    for(const auto& cfg : cfgs)
-    {
-        float t = 0.0f;
-        if(cfg.chunk == 4)
-            t = bench_one<true, 8, 4>(s, warmup, repeat, a_buf, b_buf, c_buf);
-        else if(cfg.chunk == 8)
-            t = bench_one<true, 8, 8>(s, warmup, repeat, a_buf, b_buf, c_buf);
-        else if(cfg.chunk == 16)
-            t = bench_one<true, 8, 16>(s, warmup, repeat, a_buf, b_buf, c_buf);
-        else if(cfg.chunk == 32)
-            t = bench_one<true, 8, 32>(s, warmup, repeat, a_buf, b_buf, c_buf);
-        else if(cfg.chunk == 64)
-            t = bench_one<true, 8, 64>(s, warmup, repeat, a_buf, b_buf, c_buf);
-        run_cfg(cfg.chunk, t);
-    }
-    std::printf("\n");
+    std::printf("M=%4d N=%5d K=%5d  base=%7.2fus  Nreuse-only[np2=%7.2f np4=%7.2f]  "
+                "best=%7.2fus (np%d %s chunk=%d) spd=%5.3fx  %5.2fTF/s\n",
+                s.M, s.N, s.K, t_base, np2_off, np4_off, best_us,
+                int(best.n_per_warp), best.swizzle ? "swz" : "off", int(best.chunk),
+                t_base / best_us, bw(best_us));
+    (void)np1_off;
 }
 
 } // namespace
@@ -154,18 +174,17 @@ int main(int argc, char** argv)
     if(argc > 2) repeat = std::atoi(argv[2]);
 
     const std::vector<Shape> shapes{
-        // (1, N, 7168) sweep across N to span chunk*num_xcds boundaries.
         {1, 1024, 7168},
         {1, 2048, 7168},
         {1, 4096, 7168},
         {1, 8192, 7168},
-        // Multi-row M to exercise (m, n_block) flatten/unflatten.
         {2, 4096, 7168},
         {4, 4096, 7168},
+        {8, 8192, 7168},
     };
 
-    std::printf("--- gemm_decode chiplet swizzle bench, BF16 unscaled "
-                "(num_xcds=8 fixed) ---\n");
+    std::printf("--- gemm_decode A1+A3 sweep: kNPerWarp x chiplet chunk_size, "
+                "BF16 unscaled (num_xcds=8) ---\n");
     for(const auto& s : shapes)
         run_shape(s, warmup, repeat);
 
