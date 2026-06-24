@@ -3306,16 +3306,6 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
-        clusterBarrierSignal = None
-        clusterBarrierWait = None
-        if kernel.get("ClusterBarrier"):
-            from Tensile.Components.Subtile.ClusterBarrier import (
-                subtileClusterBarrierSignal, subtileClusterBarrierWait)
-            # Both halves are spliced in below against the final post-schedule
-            # order: the signal right after the mainloop's existing workgroup
-            # barrier (reusing that sync), the wait later to hide cluster latency.
-            clusterBarrierSignal = subtileClusterBarrierSignal(writer, kernel, label=label)
-            clusterBarrierWait = subtileClusterBarrierWait(writer, kernel, label=label)
         use_pap_preloop_skip = (
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
@@ -3370,20 +3360,9 @@ class LogicalScheduler:
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
-        # that sync); the wait is placed later to hide its cross-CU latency.
-        if clusterBarrierSignal is not None:
-            from Tensile.Components.Subtile.ClusterBarrier import (
-                spliceClusterBarrierSignal)
-            module = spliceClusterBarrierSignal(module, clusterBarrierSignal)
-        if clusterBarrierWait is not None:
-            # TESTING: max delay - append the cluster_barrier wait at the very end
-            # of the section instead of splicing it `gap` WMMAs after the signal.
-            for inst in clusterBarrierWait.flatitems():
-                module.add(inst)
-            # from Tensile.Components.Subtile.ClusterBarrier import (
-            #     spliceClusterBarrierWait, CLUSTER_BARRIER_WMMA_GAP)
-            # gap = kernel.get("ClusterBarrierWmmaGap", CLUSTER_BARRIER_WMMA_GAP)
-            # module = spliceClusterBarrierWait(module, clusterBarrierWait, gap)
+        # that sync); the wait is appended at the end to hide its cross-CU latency.
+        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        module = insertClusterBarrier(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
