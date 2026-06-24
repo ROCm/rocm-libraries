@@ -19,8 +19,8 @@ Binary data is stored in S3 via [DVC](https://dvc.org) — git only tracks small
 ```
 integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # graph description (committed to git)
-    {Name}.tensors.dvc       # DVC pointer tracking all of this bundle's .bin files (committed to git)
-    {Name}.tensor0.bin       # binary tensor data (DVC-tracked)
+    {Name}.tensors.dvc       # optional DVC pointer when the bundle tracks .bin files
+    {Name}.tensor0.bin       # optional binary tensor data (DVC-tracked when present)
     {Name}.tensor1.bin
     ...
 ```
@@ -60,9 +60,9 @@ python dnn-providers/integration-tests/reference_data_scripts/verify_golden_bund
 ```
 
 The verifier checks graph JSON parsing, tensor byte sizes, metadata sidecars, and
-output-tensor NaN/Inf rejection. DVC tensor data must be present locally for the
-byte-size and NaN/Inf checks. If `.bin` files are absent, run `dvc pull` for the
-bundle first.
+output-tensor NaN/Inf rejection. Real `.bin` payloads are optional unless the
+bundle includes `<Name>.tensors.dvc`; when that pointer exists, run `dvc pull`
+if only the pointer file is present.
 
 For `quick/BatchnormFwdInference/nchw/fp32/Small/Small.json`, the verifier
 prints the advisory test name

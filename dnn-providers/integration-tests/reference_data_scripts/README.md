@@ -28,15 +28,17 @@ Hard errors:
 - graph JSON must parse and include non-empty `nodes` and `tensors`
 - tensor entries must declare valid `uid`, `dims`, `strides`, and `data_type`
 - duplicate tensor UIDs are rejected
-- every declared tensor must have a matching `<Name>.tensor<uid>.bin`
-- tensor file size must match `element_space * element_size`
-- output tensors with floating dtypes must not contain NaN or Inf
+- when a bundle carries a companion `<Name>.tensors.dvc`, every declared tensor must have a matching `<Name>.tensor<uid>.bin`
+- present tensor files must match `element_space * element_size`
+- present output tensors with floating dtypes must not contain NaN or Inf
+- bundle total size must not exceed 2 MiB; larger bundles fail because they would quickly explode test artifact sizes
 - discovered metadata sidecars (`meta.json` or `*.meta.json`) must parse and contain non-empty string fields `generator` and `reference_source`
 - advisory naming must be derivable as `{Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json`
 
 Warnings only:
 - stray non-graph `.json` files are ignored
 - unexpected top-level directories under an `integration_test_bundles/`-style root are reported
+- bundle total size above 1 MiB emits a warning
 - missing tier segment falls back to `--default-tier`
 
 ### Output
@@ -56,9 +58,10 @@ full_test_name: quick_BatchnormFwdInference_nchw_fp32_Small.Small
 
 ### Data requirements
 
-The verifier needs real `.bin` tensor payloads for byte-size and NaN/Inf checks.
-Most committed bundles track those files through DVC, so run `dvc pull` first if
-only the pointer files are present.
+Real `.bin` tensor payloads are optional unless the bundle carries a companion
+`<Name>.tensors.dvc`. When that pointer exists, the payloads must also be
+present locally for byte-size and NaN/Inf checks; run `dvc pull` if only the
+pointer file is present.
 
 ### Tests
 
@@ -83,3 +86,5 @@ The unittest file covers:
 - stray JSON warning
 - unexpected top-level directory warning
 - FP16 and BF16 non-finite detection
+- bundle size warning/error thresholds
+- optional tensors without a DVC companion pointer

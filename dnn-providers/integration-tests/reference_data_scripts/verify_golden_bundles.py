@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
+BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
+BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
+
 
 DTYPE_BYTE_SIZE = {
     "float": 4,
@@ -145,6 +148,10 @@ def is_graph_candidate(path: Path) -> bool:
     )
 
 
+def bundle_has_tensor_manifest(path: Path) -> bool:
+    return path.with_suffix(".tensors.dvc").is_file()
+
+
 def iter_json_files(root: Path) -> list[Path]:
     if root.is_file():
         if root.suffix != ".json":
@@ -197,6 +204,35 @@ def is_integer_list(value: object) -> bool:
 
 def element_space(dims: list[int], strides: list[int]) -> int:
     return 1 + sum((dim - 1) * stride for dim, stride in zip(dims, strides))
+
+
+def validate_bundle_size(path: Path, result: VerificationResult) -> None:
+    bundle_size_bytes = 0
+    try:
+        for child in path.parent.rglob("*"):
+            if child.is_file():
+                bundle_size_bytes += child.stat().st_size
+    except OSError as error:
+        result.error(path, f"could not stat bundle contents: {error}")
+        return
+
+    if bundle_size_bytes > BUNDLE_SIZE_ERROR_BYTES:
+        result.error(
+            path,
+            "bundle totals "
+            f"{bundle_size_bytes} bytes (> {BUNDLE_SIZE_ERROR_BYTES} bytes); "
+            "cannot have bundles larger than 2 MiB because they would quickly "
+            "explode our test artifact sizes",
+        )
+        return
+
+    if bundle_size_bytes > BUNDLE_SIZE_WARNING_BYTES:
+        result.warning(
+            path,
+            "bundle totals "
+            f"{bundle_size_bytes} bytes (> {BUNDLE_SIZE_WARNING_BYTES} bytes); "
+            "keep bundles at or below 1 MiB when possible",
+        )
 
 
 def extract_output_tensor_uids(
@@ -321,6 +357,7 @@ def validate_graph_bundle(
     advisory = derive_advisory(path, result, default_tier)
     if advisory is not None:
         result.advisories.append(advisory)
+    validate_bundle_size(path, result)
 
     try:
         graph = json.loads(path.read_text())
@@ -396,6 +433,7 @@ def validate_graph_bundle(
             "data_type": data_type,
         }
 
+    bundle_has_manifest = bundle_has_tensor_manifest(path)
     base_path = path.with_suffix("")
     for uid, tensor_spec in tensor_specs.items():
         dims = tensor_spec["dims"]
@@ -414,9 +452,10 @@ def validate_graph_bundle(
             continue
 
         if not tensor_path.exists():
-            result.error(
-                tensor_path, f"missing tensor file; expected {tensor_path}", uid
-            )
+            if bundle_has_manifest:
+                result.error(
+                    tensor_path, f"missing tensor file; expected {tensor_path}", uid
+                )
             continue
 
         try:

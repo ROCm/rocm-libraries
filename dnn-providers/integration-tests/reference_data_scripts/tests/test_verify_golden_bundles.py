@@ -33,6 +33,9 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             return struct.pack("<H", 0x3F80)
         raise ValueError(f"Unsupported test dtype {data_type}")
 
+    def filled_bytes(self, data_type: str, elements: int) -> bytes:
+        return self.default_bytes(data_type) * elements
+
     def write_bundle(
         self,
         root: Path,
@@ -46,12 +49,21 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         output_bytes: bytes | None = None,
         write_input_tensor: bool = True,
         write_output_tensor: bool = True,
+        write_tensor_manifest: bool = False,
         metadata: dict[str, object] | None = None,
     ) -> Path:
         bundle_dir = root / relative_dir
         bundle_dir.mkdir(parents=True)
         name = bundle_dir.name
         graph_path = bundle_dir / f"{name}.json"
+        input_payload = (
+            input_bytes if input_bytes is not None else self.default_bytes(input_dtype)
+        )
+        output_payload = (
+            output_bytes
+            if output_bytes is not None
+            else self.default_bytes(output_dtype)
+        )
 
         graph = {
             "nodes": [{"outputs": {"y_tensor_uid": 1}}],
@@ -79,16 +91,21 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         graph_path.write_text(json.dumps(graph))
 
         if write_input_tensor:
-            (bundle_dir / f"{name}.tensor0.bin").write_bytes(
-                input_bytes
-                if input_bytes is not None
-                else self.default_bytes(input_dtype)
-            )
+            (bundle_dir / f"{name}.tensor0.bin").write_bytes(input_payload)
         if write_output_tensor:
-            (bundle_dir / f"{name}.tensor1.bin").write_bytes(
-                output_bytes
-                if output_bytes is not None
-                else self.default_bytes(output_dtype)
+            (bundle_dir / f"{name}.tensor1.bin").write_bytes(output_payload)
+        if write_tensor_manifest:
+            (bundle_dir / f"{name}.tensors.dvc").write_text(
+                "\n".join(
+                    [
+                        "outs:",
+                        f"- path: {name}.tensor0.bin",
+                        f"  size: {len(input_payload)}",
+                        f"- path: {name}.tensor1.bin",
+                        f"  size: {len(output_payload)}",
+                    ]
+                )
+                + "\n"
             )
         if metadata is not None:
             (bundle_dir / f"{name}.meta.json").write_text(json.dumps(metadata))
@@ -148,13 +165,70 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn("file has", completed.stderr)
             self.assertIn("graph expects", completed.stderr)
 
-    def test_missing_output_tensor_file_fails(self) -> None:
+    def test_bundle_over_1mib_warns(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output_elements = 1024 * 1024 // 4
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/LargeWarn"),
+                output_dims=(output_elements,),
+                output_bytes=self.filled_bytes("float", output_elements),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("WARNING", completed.stderr)
+            self.assertIn("bundle totals", completed.stderr)
+            self.assertIn(
+                "keep bundles at or below 1 MiB when possible", completed.stderr
+            )
+
+    def test_bundle_over_2mib_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output_elements = 2 * 1024 * 1024 // 4
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/LargeFail"),
+                output_dims=(output_elements,),
+                output_bytes=self.filled_bytes("float", output_elements),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("bundle totals", completed.stderr)
+            self.assertIn(
+                "cannot have bundles larger than 2 MiB because they would quickly explode our test artifact sizes",
+                completed.stderr,
+            )
+
+    def test_missing_output_tensor_file_is_optional_without_tensor_manifest(
+        self,
+    ) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self.write_bundle(
                 root,
                 Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
                 write_output_tensor=False,
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertNotIn("missing tensor file", completed.stderr)
+
+    def test_missing_output_tensor_file_fails_with_tensor_manifest(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
+                write_output_tensor=False,
+                write_tensor_manifest=True,
             )
 
             completed = self.run_verifier(root)
