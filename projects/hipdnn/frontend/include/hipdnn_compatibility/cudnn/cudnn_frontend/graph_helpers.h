@@ -2,29 +2,14 @@
 // SPDX-License-Identifier:  MIT
 //
 // Portions derived from NVIDIA cuDNN frontend (include/cudnn_frontend/graph_helpers.h
-// and include/cudnn_frontend_Logging.h), used under the MIT license. The error
-// type names, error-code enum, and error/log macro names below intentionally
-// mirror cuDNN frontend so hipified v9 consumers compile unchanged.
+// and include/cudnn_frontend_Logging.h), used under the MIT license.
 
 /**
  * @file graph_helpers.h
  * @brief Error-type aliases and error/log macros for the hipDNN cuDNN shim.
  *
- * cuDNN frontend's `error_object` / `error_t` / `error_code_t` (defined upstream
- * in `cudnn_frontend/graph_helpers.h`) are structurally identical to
- * hipDNN's `Error` / `ErrorCode`, and hipDNN's error-code enum is a
- * name-superset of cuDNN's (RFC 0012 §4.6). This header therefore **aliases**
- * the hipDNN types into `<shim_ns>` with `using` declarations rather than
- * wrapping them — `cudnn_frontend::error_t` *is* `hipdnn_frontend::error_t`, so
- * an error returned by a wrapped hipDNN call flows out unchanged, with no cast
- * between enum families (RFC 0012 §4.3).
- *
- * It also re-exports the cuDNN frontend error/log macros
- * (`CHECK_CUDNN_FRONTEND_ERROR`, `RETURN_CUDNN_FRONTEND_ERROR_IF`,
- * `CUDNN_FE_LOG*`) — PyTorch's `AT_CUDNN_FRONTEND_CHECK` expands to them. The
- * log macros delegate to hipDNN's frontend logging (off by default, gated by
- * `HIPDNN_LOG_LEVEL`); the full cuDNN-FE log env-var bridge (RFC 0012 §4.6)
- * lands in a later phase.
+ * Contains aliases for cuDNN-compatible types from hipDNN, and
+ * re-exports the cuDNN frontend error/log macros.
  *
  * @note Internal-to-shim; pulled in by the umbrella `cudnn_frontend.h`.
  */
@@ -37,23 +22,11 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend
 {
 
-// Error types aliased 1:1 (RFC 0012 §4.6). hipDNN's `error_code_t` is a
-// name-superset of cuDNN's 16 codes, and `error_object` / `error_t` share
-// cuDNN FE's public surface (code, err_msg, get_code/get_message/is_good/
-// is_bad/operator==/!=), so the alias is exact.
 using hipdnn_frontend::error_code_t;
 using hipdnn_frontend::error_object;
 using hipdnn_frontend::error_t;
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend
-
-// ===========================================================================
-// Error/log macros (RFC 0012 §4.6) — re-exported with the cuDNN FE names.
-// ===========================================================================
-// These are global (un-namespaced), exactly as upstream ships them, because
-// consumer code (e.g. PyTorch's AT_CUDNN_FRONTEND_CHECK) uses the bare names.
-// `error_t` / `error_code_t` referenced inside expand against whatever
-// `cudnn_frontend` alias the consumer has in scope, matching upstream behavior.
 
 // The log macros forward their `<<`-streamed argument straight into hipDNN's
 // frontend INFO logger. HIPDNN_FE_LOG_INFO gates on HIPDNN_LOG_LEVEL (off by
