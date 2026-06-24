@@ -148,9 +148,212 @@ def convert_text_variables_to_registers(module: _code.Module) -> None:
 # insertDelayAlu — insert_delay_alu.cpp
 # ---------------------------------------------------------------------------
 
+# DelayALU type constants (mirrors rocisa::DelayALUType)
+_DELAY_VALU = 0
+_DELAY_TRANS = 1
+_DELAY_SALU = 2
+_DELAY_OTHER = 3
+
+_ALU_DEP_MAX = {
+    _DELAY_VALU: 4,
+    _DELAY_SALU: 1,
+    _DELAY_TRANS: 3,
+    _DELAY_OTHER: 0,
+}
+
+_DELAY_TYPE_NAME = {
+    _DELAY_VALU: "VALU",
+    _DELAY_TRANS: "TRANS",
+    _DELAY_SALU: "SALU",
+}
+
+_SKIP_MAX = 5
+
+
+def _delay_alu_type(inst: _inst.Instruction) -> int:
+    pre = inst.preStr()
+    if pre.startswith("v_s_"):
+        return _DELAY_TRANS
+    if pre.startswith("v_"):
+        return _DELAY_VALU
+    if pre.startswith("s_"):
+        return _DELAY_SALU
+    return _DELAY_OTHER
+
+
+def _get_dst_src_regs(inst: _inst.Instruction):
+    """Return (set_of_dst_RegisterContainers, set_of_src_RegisterContainers)."""
+    dsts: set = set()
+    srcs: set = set()
+    try:
+        for p in inst.getDstParams():
+            if isinstance(p, RegisterContainer):
+                dsts.add(p)
+    except (NotImplementedError, AttributeError):
+        pass
+    try:
+        for p in inst.getSrcParams():
+            if isinstance(p, RegisterContainer):
+                srcs.add(p)
+    except (NotImplementedError, AttributeError):
+        pass
+    return dsts, srcs
+
+
+def _format_dep_str(alu_type: int, cnt: int) -> str:
+    if cnt == 0:
+        return "NO_DEP"
+    name = _DELAY_TYPE_NAME.get(alu_type)
+    if name is None:
+        return ""
+    if alu_type == _DELAY_SALU:
+        return f"SALU_CYCLE_{cnt}"
+    return f"{name}_DEP_{cnt}"
+
+
+def _make_delay_alu_inst(instid0type: int, instid0cnt: int) -> _inst.Instruction:
+    """Create an SDelayAlu instruction with the proper formatted immediate."""
+    dep_str = _format_dep_str(instid0type, instid0cnt)
+    from .instruction import SDelayAlu as _SDelayAlu  # noqa: WPS433
+
+    # The SDelayAlu class stores a raw integer. We need the instruction to
+    # render as "s_delay_alu instid0(VALU_DEP_N)" in toString().
+    # Override: build a minimal Instruction that renders correctly.
+    inst = _SDelayAluFormatted(instid0type, instid0cnt)
+    return inst
+
+
+class _SDelayAluFormatted(_inst.Instruction):
+    """SDelayAlu with human-readable encoding matching native rocisa output."""
+
+    __slots__ = ("instid0type", "instid0cnt", "instskipCnt",
+                 "instid1type", "instid1cnt")
+
+    def __init__(self, instid0type: int, instid0cnt: int, comment: str = ""):
+        super().__init__(_inst.InstType.INST_NOTYPE, comment)
+        self.instid0type = instid0type
+        self.instid0cnt = instid0cnt
+        self.instskipCnt = None
+        self.instid1type = None
+        self.instid1cnt = None
+        self.setInst("s_delay_alu")
+
+    def hasInstID1(self) -> bool:
+        return (self.instskipCnt is not None or self.instid1type is not None
+                or self.instid1cnt is not None)
+
+    def setInstID1(self, skip_cnt: int, instid1type: int, instid1cnt: int) -> bool:
+        if self.hasInstID1():
+            return False
+        self.instskipCnt = skip_cnt
+        self.instid1type = instid1type
+        self.instid1cnt = instid1cnt
+        return True
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        result = " instid0(" + _format_dep_str(self.instid0type, self.instid0cnt) + ")"
+        if not self.hasInstID1():
+            return self.formatWithComment(self.instStr + result)
+        _SKIP_NAMES = {0: "SAME", 1: "NEXT", 2: "SKIP_1", 3: "SKIP_2",
+                       4: "SKIP_3", 5: "SKIP_4"}
+        result += " | instskip(" + _SKIP_NAMES.get(self.instskipCnt, "") + ")"
+        result += " | instid1(" + _format_dep_str(self.instid1type, self.instid1cnt) + ")"
+        return self.formatWithComment(self.instStr + result)
+
+    def to_stinky_logical(self):
+        # stinkytofu's Python SDelayAlu binding does not properly initialize
+        # SDelayAluData during lowering, causing an assertion failure in the
+        # emitter.  Return None to opt-out of logical IR conversion; the
+        # s_delay_alu will be re-inserted via post-processing on the final asm.
+        return None
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = _SDelayAluFormatted(self.instid0type, self.instid0cnt, self.comment)
+        if self.hasInstID1():
+            dup.setInstID1(self.instskipCnt, self.instid1type, self.instid1cnt)
+        memo[id(self)] = dup
+        return dup
+
+
+def _insert_delay_alu_recursive(module: _code.Module) -> None:
+    """Walk Module tree, inserting s_delay_alu where register deps are close."""
+    for item in module.items():
+        if isinstance(item, _code.Module):
+            _insert_delay_alu_recursive(item)
+
+    items = module.items()
+    if len(items) < 2:
+        return
+
+    last_dst_inst_idx: Dict[Any, int] = {}
+    inst_idx_delay_info: Dict[int, Tuple[int, int, int]] = {}  # idx -> (type, type_count, total)
+    delay_type_counts: Dict[int, int] = {_DELAY_VALU: 0, _DELAY_TRANS: 0,
+                                          _DELAY_SALU: 0, _DELAY_OTHER: 0}
+    dep_idxs: Dict[int, _SDelayAluFormatted] = {}
+    total_count = 0
+
+    for i, item in enumerate(items):
+        if not isinstance(item, _inst.Instruction):
+            continue
+
+        alu_type = _delay_alu_type(item)
+        delay_type_counts[alu_type] = delay_type_counts.get(alu_type, 0) + 1
+        total_count += 1
+        inst_idx_delay_info[i] = (alu_type, delay_type_counts[alu_type], total_count)
+
+        dsts, srcs = _get_dst_src_regs(item)
+
+        # Find most-recently-written source register
+        best_src = None
+        best_idx = -1
+        for src in srcs:
+            idx = last_dst_inst_idx.get(src)
+            if idx is not None and idx > best_idx:
+                best_idx = idx
+                best_src = src
+
+        if best_src is not None:
+            last_idx = best_idx
+            dep_alu_type, dep_type_count, _ = inst_idx_delay_info[last_idx]
+            inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
+            max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
+            if inst_cnt <= max_dep and inst_cnt > 0:
+                skip_cnt = -1
+                if not dep_idxs or list(dep_idxs.values())[-1].hasInstID1():
+                    dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
+                else:
+                    dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
+
+        for dst in dsts:
+            last_dst_inst_idx[dst] = i
+
+    # Insert in reverse order so indices stay valid
+    for idx in sorted(dep_idxs.keys(), reverse=True):
+        module.add(dep_idxs[idx], idx)
+
 
 def insert_delay_alu(module: _code.Module) -> None:
-    """Mirror ``rocisa::insertDelayAlu``. Deferred — gfx1250 scheduling."""
+    """Mirror ``rocisa::insertDelayAlu`` (insert_delay_alu.cpp).
+
+    This is intentionally a no-op in the adaptor path.  The stinkytofu Python
+    binding for ``SDelayAlu`` does not correctly initialize ``SDelayAluData``
+    during lowering, causing an assertion failure in the emitter.  Instead,
+    ``s_delay_alu`` insertion is performed as a text-level post-processing pass
+    in ``_PostProcessModule.emitAssembly()`` (see ``_postprocess_delay_alu``
+    in ``code.py``), which operates on the final assembly after stinkytofu
+    emission.
+    """
     del module
 
 
