@@ -18,7 +18,7 @@ class TestPyTorchOpsErrorPaths:
         """Test that unsupported operation raises ValueError."""
         graph_json = {"nodes": [{"type": "UnknownOperation"}]}
 
-        with pytest.raises(ValueError, match="Unsupported operation type"):
+        with pytest.raises(UnsupportedGraphError, match="Unsupported operation type"):
             pytorch_ops.execute_graph(graph_json, {})
 
     def test_conv_missing_x_tensor_uid_raises(self) -> None:

@@ -98,18 +98,23 @@ def execute_graph(
         tensors: Mapping of tensor UID to torch.Tensor.
 
     Raises:
-        ValueError: If graph contains unsupported operations.
+        UnsupportedGraphError: If the graph contains an operation, attribute, or
+            parameter the PyTorch reference does not support.
     """
     for node in graph_json.get("nodes", []):
         op_type = node.get("type")
         handler = _OP_HANDLERS.get(op_type)
         if handler is None:
-            raise ValueError(f"Unsupported operation type: {op_type}")
+            raise UnsupportedGraphError(f"Unsupported operation type: {op_type}")
         try:
             handler(node, tensors, graph_json)
         except UnsupportedGraphError:
             raise
-        except Exception as e:
+        except ValueError as e:
+            # Handlers raise ValueError to signal a graph feature they cannot
+            # represent (unsupported attribute/param/operation); normalize it to
+            # UnsupportedGraphError so callers skip it. Any other exception is an
+            # unexpected failure and propagates as an error rather than a skip.
             raise UnsupportedGraphError(
                 f"PyTorch reference could not execute {op_type!r} with the provided "
                 f"dtypes/parameters: {e}"
