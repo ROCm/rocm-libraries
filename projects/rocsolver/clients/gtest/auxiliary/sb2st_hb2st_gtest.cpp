@@ -49,12 +49,12 @@ const vector<vector<int>> matrix_size_range = {
     // quick return
     {0, 1, 2},
     // invalid
-    {-1, 1, 2},
-    {1, 0, 1},
-    {20, 5, 13}, // ldab >= 14
+    {-1, 1, 2}, // n invalid
+    {1, 0, 1}, // kd invalid
+    {20, 5, 13}, // ldab invalid, ldab >= 14
     // normal (valid) samples
-    {10, 2, 5},
-    {20, 20, 59},
+    {10, 2, 5}, // ldab >= 5
+    {20, 20, 59}, // ldab >= 59
     {128, 32, 96}, // ldab >= 95
     {128, 40, 120}, // ldab >= 119
 };
@@ -63,12 +63,12 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
     {0, 1, 2},
     // invalid
-    {-1, 1, 2},
-    {1, 0, 1},
-    {20, 5, 13}, // ldab >= 14
+    {-1, 1, 2}, // n invalid
+    {1, 0, 1}, // kd invalid
+    {20, 5, 13}, // ldab invalid, ldab >= 14
     // normal (valid) samples
-    {10, 2, 5},
-    {20, 20, 59},
+    {10, 2, 5}, // ldab >= 5
+    {20, 20, 59}, // ldab >= 59
     {128, 32, 96}, // ldab >= 95
     {128, 40, 120}, // ldab >= 119
 };

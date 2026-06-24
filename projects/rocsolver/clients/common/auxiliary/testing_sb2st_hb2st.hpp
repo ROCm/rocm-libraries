@@ -96,7 +96,7 @@ void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
                                                 3 * kd - 2, dD, dE, dV, ldv, dTau),
                           rocblas_status_invalid_size);
     EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd, dAband, ldab, dD,
-                                                dE, dV, 3 * kd - 1, dTau),
+                                                dE, dV, 2 * kd - 1, dTau),
                           rocblas_status_invalid_size);
 
     // pointers
@@ -123,6 +123,7 @@ void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_success);
 }
 
+//------------------------------------------------------------------------------
 template <typename T, typename I>
 void testing_sb2st_hb2st_bad_arg()
 {
@@ -249,6 +250,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     // Orthogonality of V and backward error checked in unmtr_hb2st tester.
 }
 
+//------------------------------------------------------------------------------
 template <typename T, typename I, typename Td, typename Ud, typename Uh>
 void sb2st_hb2st_getPerfData(const rocblas_handle handle,
                              const rocblas_fill uplo,
@@ -323,6 +325,7 @@ void sb2st_hb2st_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
+//------------------------------------------------------------------------------
 template <typename T, typename I>
 void testing_sb2st_hb2st(Arguments& argus)
 {
@@ -337,7 +340,9 @@ void testing_sb2st_hb2st(Arguments& argus)
     I ldv = argus.get<I>("ldv", 2 * kd);
 
     // V is ldv x nv
-    I nt = ceildiv(n - 1, kd);
+    I nt = 0;
+    if(kd > 0)
+        nt = ceildiv(n - 1, kd);
     I nv_blocks = nt * (nt + 1) / 2;
     I nv = nv_blocks * kd;
 
@@ -357,6 +362,21 @@ void testing_sb2st_hb2st(Arguments& argus)
     size_t size_Dres = (argus.unit_check || argus.norm_check) ? size_D : 0;
     size_t size_Eres = (argus.unit_check || argus.norm_check) ? size_E : 0;
     size_t size_Vres = 0; // todo: not yet checked
+
+    // check unimplemented uplo
+    bool not_implemented = (uplo == rocblas_fill_upper);
+    if(not_implemented)
+    {
+        EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, uplo, n, kd, (T*)nullptr, ldab,
+                                                    (S*)nullptr, (S*)nullptr, (T*)nullptr, ldv,
+                                                    (T*)nullptr),
+                              rocblas_status_not_implemented);
+
+        if(argus.timing)
+            rocsolver_bench_inform(inform_invalid_args);
+
+        return;
+    }
 
     // check invalid sizes
     bool invalid_size = (n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd);
