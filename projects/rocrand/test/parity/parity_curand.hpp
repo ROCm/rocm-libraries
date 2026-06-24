@@ -117,6 +117,6 @@ std::vector<unsigned long long> test_generate_long_long(const test_case& test_ca
 }
 
 #undef CUDA_CHECK
-#undef ROCRAND_CHECK
+#undef CURAND_CHECK
 
 } // namespace curand_parity
