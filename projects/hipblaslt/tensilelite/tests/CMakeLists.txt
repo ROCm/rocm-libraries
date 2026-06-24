@@ -36,6 +36,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
@@ -61,6 +62,7 @@ target_link_libraries(tensilelite-tests
         tensilelite::tensilelite-host
     PRIVATE
         hip::device
+        tensilelite::client-common
         ${CMAKE_DL_LIBS}
         ${hipblaslt_msgpack_target}
         ZLIB::ZLIB

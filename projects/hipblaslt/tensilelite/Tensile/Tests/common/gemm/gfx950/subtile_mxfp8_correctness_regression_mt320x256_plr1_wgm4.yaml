@@ -1,0 +1,162 @@
+########################################
+# MXFP8 correctness regression — MT320x256x128 / PLR1 / WGM4, multi-DU path.
+#
+# Renamed from PR 7767's `subtile_mxfp8_correctness_regression_depthumx.yaml`
+# (the "depthumx" token was tied to the dropped DepthUMX parameter).
+#
+# Ported to PR 7781's auto-detected multi-DU path (DepthU=256 +
+# MXScaleFormat=HostPreSwizzle → dataDU=128).  PGR=2 → PGR=1 because PR
+# 7781 rejects PGR>1 once multi-DU triggers.  Source cluster: PR 7767's
+# bench-with-verify snapshot at 144/1100 rows (see MXFP8_BUG_HANDOFF.md):
+#
+#     MT320x256x128 / MIWT=[10,8] / MIWG=[2,2] / PLR1 / WGM4
+#                  → 17/40 bench fail (42.5%)   ; geomean(norm_err)=0.51
+#
+# This file pins the WGM=4 scheduler bucket; the companion
+# `subtile_mxfp8_correctness_regression.yaml` pins the WGM=1 bucket.
+#
+# Sizes drawn from the source cluster.  The 4.27e+18 catastrophic case at
+# (488448, 5376, 7936) is excluded for workspace reasons (per the original
+# YAML).  We keep 3 finite-norm fails spanning K ∈ [1024, 7168] plus 2
+# small controls.  Very-large-M fails (>=200000) and K>16384 cases are
+# dropped to keep iteration costs bounded.
+#
+# Pinned ForkParameter values:
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 10, 8, 2, 2]
+#                                  → MT320x256, MIWT=[10,8], MIWG=[2,2]
+#   PrefetchGlobalRead:   [1]      → PGR1 (multi-DU constraint)
+#   PrefetchLocalRead:    [1]      → PLR1
+#   DepthU:               [256]    → dataDU=128 auto-derived
+#   ScheduleIterAlg:      [3]
+#   DirectToLds:          [1]
+#   StreamK:              [3]
+#   StaggerU:             [0]
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [4]      → WGM4
+#
+# PR 7781 verification status (gfx950):
+#   * Pre-fix (HEAD 0a9b6367693): initial run hung at giant-M first
+#     size (M=77312).  Reduced probe on smoke-PASS shape (7680,5248,
+#     1,6144) FAILed with ~46% sampled values wrong.  Same drift
+#     under TENSILE_STREAMK_DYNAMIC_GRID=4, isolating the bug to a
+#     code path other than StreamK partial-K.
+#   * Post StreamK partial-K _depthUForTc fix (author commit 05522601062
+#     "Fix StreamK multi-DU pre-advance, gate multi-DU on macro tile size"):
+#     0/5 PASS (no change).  All 5 sizes still FAIL ~22-46% wrong.
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): **5/5 PASS.**
+#     The bug was that with MIWT[i]=10 the scheduler picks
+#     numPartitions=5 (5 partitions of 2 MMA tiles each, the smallest
+#     candidate that fits the VGPR budget), and `_consolidate_uid_grs`
+#     moves uid>0 GRs to the last partition's last subIterK slot.
+#     The wait-count for the wrap-LR (= LR for next iter's data at
+#     end of body iter) was computed by walking the schedule from the
+#     consumer back to the dep, which counted only 8 atoms inflight
+#     for MIWT=10 -- but the consolidated uid 1 GRs and the late
+#     uid 0 GRs in partitions 3-4 were all still outstanding when
+#     copy 1 of the unrolled body iter started, so the LR for next
+#     iter's A[0] read uninitialised LDS.  Empirical fingerprint:
+#     K=256/512 (1-2 body iters) PASSed, K>=768 starts to fail with
+#     a wrong rate that scales linearly with body-iter count.
+#     PGR=0 cleared the bug (no prefetch -> no race).  Fix forces
+#     vmcnt(0) drain for any wrap-LR or cross-body-iter LR-GR dep
+#     under multi-DU + multi-partition.  Per-size results:
+#       (77312,2816,1,1024):  PASS
+#       (71936,4096,1,7168):  PASS
+#       (209536,2048,1,1280): PASS
+#       (7680,5248,1,6144):   PASS
+#       (7808,4864,1,6656):   PASS
+#
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8_correctness_regression_mt320x256_plr1_wgm4.yaml — 5/5 PASS.
+#
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # MT320x256x128 / MIWT=[10,8] / MIWG=[2,2] / PLR1 / WGM4 — dominant
+  # failing tile in the PLR1/WGM4 multi-DU regime in the PR 7767 snapshot.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8], MIWG=[2,2]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead:  [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (PR 7767 snapshot norm_err annotations) =====
+          - Exact: [   77312,   2816, 1,  1024]   # snapshot norm_error = 0.0494   (smallest work in the fail set, K=4*DU)
+          - Exact: [   71936,   4096, 1,  7168]   # snapshot norm_error = 0.0973   (largest finite-norm fail; K=28*DU)
+          - Exact: [  209536,   2048, 1,  1280]   # snapshot norm_error = 0.0744   (skinny, K=5*DU)
+          # ===== Control sizes (PASS in PR 7767 snapshot) =====
+          - Exact: [    7680,   5248, 1,  6144]   # snapshot PASS, norm_error ~ 6.0e-05 (K=24*DU)
+          - Exact: [    7808,   4864, 1,  6656]   # snapshot PASS, norm_error ~ 5.8e-05 (K=26*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:
