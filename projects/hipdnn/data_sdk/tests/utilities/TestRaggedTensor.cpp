@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
 
@@ -218,6 +219,69 @@ TEST(TestRaggedTensor, ValidationBadElementSizeThrows)
     // int8_t aux -> elementSize 1.
     auto aux8 = std::make_shared<Tensor<int8_t>>(std::vector<int64_t>{3, 1, 1, 1});
     EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux8), std::invalid_argument);
+}
+
+// ============================================================================
+// Offset-content validation at construction (all build modes, ALMIOPEN-2124 §2.2)
+// ============================================================================
+
+TEST(TestRaggedTensor, ValidationOffsetZeroNotZeroThrows)
+{
+    // ragged_offset[0] must be 0.
+    auto aux = makeOffsetAux<int32_t>({4, 8, 12});
+    EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux), std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, ValidationNonMonotonicThrows)
+{
+    // off[2] < off[1] -> negative block.
+    auto aux = makeOffsetAux<int32_t>({0, 8, 4});
+    EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux), std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, ValidationBlockNotDivisibleThrows)
+{
+    // seqStride = H*D = 4; a per-batch block of 2 is not a whole number of rows.
+    auto aux = makeOffsetAux<int32_t>({0, 2, 4});
+    EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux), std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, ValidationExtentExceedsSmaxThrows)
+{
+    // seqStride = 4, S_max = dims[1] = 3; block 16 -> extent 4 > 3.
+    auto aux = makeOffsetAux<int32_t>({0, 16, 32});
+    EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux), std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, ValidationExplicitPhysicalElementCountMismatchThrows)
+{
+    // Explicit physicalElementCount must equal ragged_offset[B] (20).
+    auto aux = makeOffsetAux<int32_t>(kOffsets);
+    EXPECT_THROW(const RaggedTensor<float> tensor(kDims, kStrides, aux, static_cast<size_t>(24)),
+                 std::invalid_argument);
+}
+
+// ============================================================================
+// elementCount() reports ragged_offset[B]; iteration is per-batch ascending (BSHD)
+// ============================================================================
+
+TEST(TestRaggedTensor, IterationIsPerBatchAscendingForBshd)
+{
+    auto aux = makeOffsetAux<int32_t>(kOffsets);
+    RaggedTensor<float> tensor(kDims, kStrides, aux);
+    tensor.fillWithValue(0.0f);
+
+    const auto* base = static_cast<const float*>(tensor.memory().hostData());
+    std::vector<int64_t> visited;
+    for(auto it = tensor.begin(); it != tensor.end(); ++it)
+    {
+        visited.push_back(static_cast<const float*>(*it) - base);
+    }
+
+    // Physical-BSHD buffer: visit order is the contiguous ascending [0, off[B]).
+    std::vector<int64_t> expected(static_cast<size_t>(kOffsets.back()));
+    std::iota(expected.begin(), expected.end(), int64_t{0});
+    EXPECT_EQ(visited, expected);
 }
 
 // ============================================================================

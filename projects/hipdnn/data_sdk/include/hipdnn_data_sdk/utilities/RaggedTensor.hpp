@@ -11,6 +11,7 @@
 #include <optional>
 #include <random>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
@@ -50,20 +51,24 @@ public:
         , _strides(std::move(strides))
         , _raggedOffset(std::move(raggedOffset))
     {
+        // Structural checks first, so readOffset below only sees a supported element size.
         validateRaggedStructure();
 
-        if(physicalElementCount.has_value())
+        // Snapshot and validate the B+1 offset table (RFC 0014 §4.5, plan §2.2). Reading
+        // the aux may trigger a device->host sync if it lives in device memory.
+        const std::vector<int64_t> offsets = collectRowOffsets();
+        validateRaggedOffsets(offsets);
+
+        _iteratedElementCount = static_cast<size_t>(offsets.back());
+
+        // An explicit physicalElementCount is a redundant confirmation and must match.
+        if(physicalElementCount.has_value() && *physicalElementCount != _iteratedElementCount)
         {
-            _physicalElementCount = *physicalElementCount;
+            throw std::invalid_argument(
+                "physicalElementCount (" + std::to_string(*physicalElementCount)
+                + ") must equal ragged_offset[B] (" + std::to_string(_iteratedElementCount) + ")");
         }
-        else
-        {
-            // Inference reads ragged_offset[B] from the aux. When the aux lives in
-            // device memory this host read may trigger a device->host sync; pass
-            // physicalElementCount explicitly to skip it (RFC 0014 §4.6).
-            _physicalElementCount =
-                static_cast<size_t>(readOffset(static_cast<size_t>(_paddedDims[0])));
-        }
+        _physicalElementCount = _iteratedElementCount;
     }
 
     const std::vector<int64_t>& dims() const override
@@ -76,14 +81,13 @@ public:
         return _strides;
     }
 
-    // Number of iterated elements == ragged_offset[B]. The buffer is sized to exactly
-    // ragged_offset[B] elements, so this coincides with elementSpace() (RFC §4.5.6).
+    // Iterated elements == ragged_offset[B] (RFC §4.5.6).
     size_t elementCount() const override
     {
-        return _physicalElementCount;
+        return _iteratedElementCount;
     }
 
-    // Size of the allocated buffer == physicalElementCount.
+    // Allocated buffer size; sized to ragged_offset[B], so normally == elementCount().
     size_t elementSpace() const override
     {
         return _physicalElementCount;
@@ -99,14 +103,7 @@ public:
 
     std::vector<int64_t> raggedRowOffsets() const override
     {
-        const auto batchCount = static_cast<size_t>(_paddedDims[0]);
-        std::vector<int64_t> offsets;
-        offsets.reserve(batchCount + 1);
-        for(size_t b = 0; b <= batchCount; ++b)
-        {
-            offsets.push_back(readOffset(b));
-        }
-        return offsets;
+        return collectRowOffsets();
     }
 
     const ITensor* raggedOffset() const
@@ -173,9 +170,90 @@ protected:
         }
     }
 
+    // Reads the B+1 offset table from the aux, each widened to int64_t.
+    std::vector<int64_t> collectRowOffsets() const
+    {
+        const auto batchCount = static_cast<size_t>(_paddedDims[0]);
+        std::vector<int64_t> offsets;
+        offsets.reserve(batchCount + 1);
+        for(size_t b = 0; b <= batchCount; ++b)
+        {
+            offsets.push_back(readOffset(b));
+        }
+        return offsets;
+    }
+
+    // Sequence (ragged) axis == the non-batch axis with the largest stride (plan §2.2).
+    std::pair<int, int64_t> sequenceAxisAndStride() const
+    {
+        int seqAxis = 1;
+        for(int j = 2; j < static_cast<int>(_strides.size()); ++j)
+        {
+            if(_strides[static_cast<size_t>(j)] > _strides[static_cast<size_t>(seqAxis)])
+            {
+                seqAxis = j;
+            }
+        }
+        const int64_t seqStride =
+            _strides.size() < 2 ? int64_t{1} : _strides[static_cast<size_t>(seqAxis)];
+        return {seqAxis, seqStride};
+    }
+
+    // Validates offset contents: offset[0] == 0, monotonic non-decreasing, each per-batch
+    // block a whole number of sequence rows, and per-batch extent <= S_max (RFC §4.5,
+    // plan §2.2; mirrored as debug asserts in RaggedCompositeIndex).
+    void validateRaggedOffsets(const std::vector<int64_t>& offsets) const
+    {
+        if(offsets.empty())
+        {
+            return;
+        }
+        if(offsets.front() != 0)
+        {
+            throw std::invalid_argument("ragged_offset[0] must be 0 (got "
+                                        + std::to_string(offsets.front()) + ")");
+        }
+
+        const auto [seqAxis, seqStride] = sequenceAxisAndStride();
+        const bool haveSeqAxis = _strides.size() >= 2;
+        if(haveSeqAxis && seqStride <= 0)
+        {
+            throw std::invalid_argument("sequence-axis stride must be positive");
+        }
+        const int64_t sMax = haveSeqAxis ? _paddedDims[static_cast<size_t>(seqAxis)] : int64_t{0};
+
+        const int64_t batchCount = static_cast<int64_t>(offsets.size()) - 1;
+        for(int64_t b = 0; b < batchCount; ++b)
+        {
+            const auto bIdx = static_cast<size_t>(b);
+            const int64_t block = offsets[bIdx + 1] - offsets[bIdx];
+            if(block < 0)
+            {
+                throw std::invalid_argument("ragged_offset must be monotonic non-decreasing (batch "
+                                            + std::to_string(b) + ")");
+            }
+            if(haveSeqAxis)
+            {
+                if(block % seqStride != 0)
+                {
+                    throw std::invalid_argument(
+                        "per-batch block must be a whole number of sequence rows (batch "
+                        + std::to_string(b) + ")");
+                }
+                if(block / seqStride > sMax)
+                {
+                    throw std::invalid_argument(
+                        "per-batch sequence extent exceeds dims()[seqAxis] / S_max (batch "
+                        + std::to_string(b) + ")");
+                }
+            }
+        }
+    }
+
     std::vector<int64_t> _paddedDims;
     std::vector<int64_t> _strides;
-    size_t _physicalElementCount{0};
+    size_t _iteratedElementCount{0}; ///< ragged_offset[B]
+    size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B])
     std::shared_ptr<ITensor> _raggedOffset; ///< non-null, fixed at construction, never reseated
 };
 

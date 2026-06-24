@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowRaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <memory>
 #include <numeric>
+#include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
 
@@ -492,6 +494,26 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
     EXPECT_EQ(indices[3], 0);
 
     // Visits exactly off[B] == 20 elements.
+    int count = 0;
+    for(auto walk = tensor.begin(); walk != tensor.end(); ++walk)
+    {
+        ++count;
+    }
+    EXPECT_EQ(count, 20);
+}
+
+TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
+{
+    // Same geometry, over a borrowed buffer.
+    auto aux = makeRaggedOffsetAux({0, 8, 20});
+    std::vector<float> backing(20, 0.0f);
+    ShallowRaggedTensor<float> tensor(backing.data(), {2, 3, 2, 2}, {12, 4, 2, 1}, aux);
+
+    auto it = tensor.begin();
+
+    // The iterator resolves to a RaggedCompositeIndex for the shallow type too.
+    EXPECT_NO_THROW(std::get<ITensorIterator<false>::RaggedCompositeIndex>(it.index()));
+
     int count = 0;
     for(auto walk = tensor.begin(); walk != tensor.end(); ++walk)
     {
