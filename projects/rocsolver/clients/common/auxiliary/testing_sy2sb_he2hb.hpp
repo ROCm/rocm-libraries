@@ -36,6 +36,7 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
+#include "rocblas_utility.hpp"
 
 //------------------------------------------------------------------------------
 template <typename T, typename I>
