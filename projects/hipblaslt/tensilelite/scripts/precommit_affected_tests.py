@@ -20,6 +20,7 @@ hook for a single commit, use ``git commit --no-verify``.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 import shutil
@@ -122,6 +123,22 @@ def tests_for_module(module: str, index: dict[Path, set[str]]) -> set[Path]:
                 hits.add(tf)
                 break
     return hits
+
+
+def failed_test_files(tl_root: Path) -> list[str]:
+    """Test files that just failed, from pytest's last-failed cache.
+
+    Keys are ``path::nodeid`` relative to the pytest rootdir (the tensilelite
+    directory), so the bare paths are exactly what a follow-up ``uv run pytest``
+    from that directory expects. Returns ``[]`` if the cache is absent or
+    unreadable, so callers can fall back to the full run set.
+    """
+    cache = tl_root / ".pytest_cache" / "v" / "cache" / "lastfailed"
+    try:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return sorted({str(nodeid).split("::", 1)[0] for nodeid in data})
 
 
 def main() -> int:
@@ -229,7 +246,8 @@ def main() -> int:
         return 0
 
     bar = "=" * 64
-    update_cmd = "uv run pytest --snapshot-update " + " ".join(nodes)
+    update_targets = failed_test_files(tl_root) or nodes
+    update_cmd = "uv run pytest --snapshot-update " + " ".join(update_targets)
     log("")
     log(bar)
     log("  X  TENSILELITE TESTS FAILED (rc=%d) -- COMMIT BLOCKED" % rc)
