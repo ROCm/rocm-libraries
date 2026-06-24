@@ -31,7 +31,7 @@ if(NOT CKC_ENGINE_ARCHIVE OR NOT EXISTS "${CKC_ENGINE_ARCHIVE}")
   message(FATAL_ERROR
     "CKC_ENGINE_ARCHIVE must point to a prebuilt libckc_core.a "
     "(got: '${CKC_ENGINE_ARCHIVE}'). Build the engine first:\n"
-    "  cmake -S <repo>/ck_dsl_c -B <bld>/engine -DCMAKE_BUILD_TYPE=Release\n"
+    "  cmake -S <rocKE> -B <bld>/engine -DCMAKE_BUILD_TYPE=Release\n"
     "  cmake --build <bld>/engine -j")
 endif()
 

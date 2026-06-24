@@ -504,10 +504,11 @@ def main():
     if not cli.exists():
         sys.exit(
             f"ir_lower_cli not found: {cli}\n"
-            "build it: cmake -S <ck_dsl_c> -B /tmp/ckc_irart -DCMAKE_BUILD_TYPE="
-            "Release && cmake --build /tmp/ckc_irart -j && "
-            "c++ -std=c++20 -I <ck_dsl_c>/include <ck_dsl_c>/tests/ir_lower_cli."
-            "cpp /tmp/ckc_irart/libckc_core.a -lm -o /tmp/ckc_irart/ir_lower_cli\n"
+            "build it: cmake -S <rocKE> -B /tmp/ckc_irart -DCMAKE_BUILD_TYPE="
+            "Release && cmake --build /tmp/ckc_irart --target ckc_core -j && "
+            "c++ -std=c++20 -I <rocKE>/Cpp/include <rocKE>/tests/core/"
+            "ir_lower_cli.cpp /tmp/ckc_irart/libckc_core.a -lm "
+            "-o /tmp/ckc_irart/ir_lower_cli\n"
             "or pass --cli <path>"
         )
 

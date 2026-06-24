@@ -346,7 +346,7 @@ def _import_engine():
     except ImportError as e:
         raise BackendError(
             "the C++ engine extension 'ckc_engine' is not importable: "
-            f"{e}. Build it from ck_dsl_c/bindings/ (see its README) and put "
+            f"{e}. Build it from Cpp/bindings/ (see its README) and put "
             "the resulting build directory on sys.path, then retry with "
             "backend='cpp' or backend='both'."
         ) from e

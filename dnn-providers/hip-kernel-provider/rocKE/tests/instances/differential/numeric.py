@@ -31,8 +31,8 @@
 #
 # NOTE: launching a kernel needs GPU access. If plain python cannot see the
 # GPU, run under passwordless sudo with -E so PYTHONPATH survives, e.g.
-#     sudo -n -E "$(command -v python)" -m \
-#         ck_dsl_c.tests.differential.numeric
+#     sudo -n -E "$(command -v python)" \
+#         <rocKE>/tests/instances/differential/numeric.py
 # (build/compile via comgr does NOT need the GPU; only the launch does.)
 #
 # Build artifacts / dashboards go to /tmp.  No git operations.
