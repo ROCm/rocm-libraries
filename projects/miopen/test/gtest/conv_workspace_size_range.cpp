@@ -19,6 +19,35 @@
 
 #include <hip/hip_runtime_api.h>
 
+// These functions are exported from libMIOpen but intentionally not declared
+// in the public miopen.h header. Declare the prototypes locally.
+extern "C" {
+miopenStatus_t miopenConvolutionForwardGetWorkSpaceSizeRange(
+    miopenHandle_t,
+    const miopenTensorDescriptor_t,
+    const miopenTensorDescriptor_t,
+    const miopenConvolutionDescriptor_t,
+    const miopenTensorDescriptor_t,
+    size_t*,
+    size_t*);
+miopenStatus_t miopenConvolutionBackwardDataGetWorkSpaceSizeRange(
+    miopenHandle_t,
+    const miopenTensorDescriptor_t,
+    const miopenTensorDescriptor_t,
+    const miopenConvolutionDescriptor_t,
+    const miopenTensorDescriptor_t,
+    size_t*,
+    size_t*);
+miopenStatus_t miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(
+    miopenHandle_t,
+    const miopenTensorDescriptor_t,
+    const miopenTensorDescriptor_t,
+    const miopenConvolutionDescriptor_t,
+    const miopenTensorDescriptor_t,
+    size_t*,
+    size_t*);
+}
+
 namespace {
 
 // ---------------------------------------------------------------------------
