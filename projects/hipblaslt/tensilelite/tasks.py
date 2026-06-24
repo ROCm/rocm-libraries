@@ -122,6 +122,9 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
         f"-DROCM_PATH={rocm_s}",
         f"-DCMAKE_CXX_COMPILER={_cxx}",
         f"-DCMAKE_C_COMPILER={_cc}",
+        # amd_comgr lives in the SDK venv (off the loader path), so bake its dir
+        # into the installed libstinkytofu RPATH for this dev/standalone build.
+        "-DSTINKYTOFU_INSTALL_RPATH_USE_LINK_PATH=ON",
         # tests/python OFF for the rocisa integration build; examples ON (default).
         *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
     ]
@@ -162,11 +165,17 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     cmake_args = (
         f"-DROCM_PATH={rocm}"
         f" -DROCISA_INCLUDE_BUILD_INFO=ON"
-        f" -DCMAKE_PREFIX_PATH={prefix}"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    # Append (don't clobber) the stinkytofu install prefix so find_package
+    # resolves it, while preserving the CMAKE_PREFIX_PATH that scikit-build-core
+    # injects for nanobind. find_package searches the env var and the cache var.
+    _existing_prefix = env.get("CMAKE_PREFIX_PATH")
+    env["CMAKE_PREFIX_PATH"] = (
+        f"{prefix}{os.pathsep}{_existing_prefix}" if _existing_prefix else str(prefix)
+    )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
