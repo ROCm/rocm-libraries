@@ -30,6 +30,19 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 import manifest as mf
+import sdpa_cases
+
+
+def _torch_fp8_dtype(dtype: str) -> Any:
+    """Map an fp8 case dtype string to the corresponding torch fp8 dtype."""
+    import torch
+
+    return {
+        "fp8_e4m3": torch.float8_e4m3fn,
+        "fp8_e5m2": torch.float8_e5m2,
+        "fp8_e4m3_fnuz": torch.float8_e4m3fnuz,
+        "fp8_e5m2_fnuz": torch.float8_e5m2fnuz,
+    }[dtype]
 
 
 def _load_qkv(path: str, dtype: str, device: Any) -> Any:
@@ -42,6 +55,9 @@ def _load_qkv(path: str, dtype: str, device: Any) -> Any:
         t = torch.from_numpy(arr).view(torch.bfloat16)
     elif dtype == "fp16":
         t = torch.from_numpy(arr)  # float16 already
+    elif dtype in sdpa_cases.FP8_DTYPES:
+        # uint8 raw bits -> fp8 view.
+        t = torch.from_numpy(arr).view(_torch_fp8_dtype(dtype))
     else:
         raise ValueError(f"unsupported dtype for qkv load: {dtype!r}")
     return t.to(device)
@@ -143,6 +159,78 @@ def _save_f32(path: str, tensor: Any) -> None:
     np.save(path, arr.astype("<f4", copy=False))
 
 
+def _run_case_fp8(
+    man: dict,
+    q: Any,
+    k: Any,
+    v: Any,
+    attn_mask: Optional[Any],
+    *,
+    is_causal: bool,
+    scale: Optional[float],
+    Hq: int,
+    Hkv: int,
+) -> dict:
+    """Compute the references for an fp8 case using the fp32-MATH oracle.
+
+    torch SDPA rejects fp8 on every backend (flash / efficient / math) and cannot
+    even run native-fp8 MATH, so AOTriton is unavailable. The oracle of record is
+    therefore torch's MATH backend on fp8 inputs upcast to fp32 (a lossless widen),
+    and the low-precision budget leg uses fp16 (the smallest precision torch MATH
+    will run). Since the candidate and the oracle consume the identical fp8 bits,
+    the comparison measures the gpu_ref fp32 compute against torch's fp32 compute.
+    """
+    import torch
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
+    files = man["files"]
+    status = man.setdefault("status", {})
+
+    q32, k32, v32 = q.float(), k.float(), v.float()
+    q16, k16, v16 = q32.half(), k32.half(), v32.half()
+    if attn_mask is not None:
+        mask_hp = attn_mask.float()
+        mask_lp = attn_mask.to(torch.float16)
+    else:
+        mask_hp = None
+        mask_lp = None
+
+    # fp32 MATH: both the oracle of record and the high-precision reference.
+    with sdpa_kernel(SDPBackend.MATH):
+        out_hp = _sdpa(
+            q32,
+            k32,
+            v32,
+            attn_mask=mask_hp,
+            is_causal=is_causal,
+            scale=scale,
+            Hq=Hq,
+            Hkv=Hkv,
+        )
+        torch.cuda.synchronize()
+    _save_f32(files["aotriton_o"], out_hp)
+    _save_f32(files["math_hp_o"], out_hp)
+
+    # fp16 MATH: low-precision reference for the independent precision-gap budget.
+    with sdpa_kernel(SDPBackend.MATH):
+        out_lp = _sdpa(
+            q16,
+            k16,
+            v16,
+            attn_mask=mask_lp,
+            is_causal=is_causal,
+            scale=scale,
+            Hq=Hq,
+            Hkv=Hkv,
+        )
+        torch.cuda.synchronize()
+    _save_f32(files["math_lp_o"], out_lp)
+
+    status["state"] = "ok"
+    status["backend_used"] = "math-fp32"
+    return man
+
+
 def _run_case(man: dict) -> dict:
     """Compute and save the three references for one case; update its status."""
     import torch
@@ -158,6 +246,11 @@ def _run_case(man: dict) -> dict:
     k = _load_qkv(man["files"]["k"], dtype, device)
     v = _load_qkv(man["files"]["v"], dtype, device)
     attn_mask = _build_attn_mask(man, device)  # fp32 base, or None
+
+    if dtype in sdpa_cases.FP8_DTYPES:
+        return _run_case_fp8(
+            man, q, k, v, attn_mask, is_causal=is_causal, scale=scale, Hq=Hq, Hkv=Hkv
+        )
 
     # Per-path mask precision: flash rejects any bias, so masked/windowed cases
     # fall through to the mem-efficient backend, which requires the bias in the

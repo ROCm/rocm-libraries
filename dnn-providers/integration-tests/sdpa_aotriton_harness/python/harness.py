@@ -210,7 +210,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--tier",
-        choices=("quick", "full", "irregular"),
+        choices=("quick", "medium", "large", "irregular"),
         default="quick",
         help="case tier (default: quick)",
     )

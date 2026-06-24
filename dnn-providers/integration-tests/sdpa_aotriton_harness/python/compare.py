@@ -3,6 +3,13 @@
 Framing: **AOTriton** (flash / mem-efficient via PyTorch SDPA) is the oracle /
 reference of record; the **gpu_ref** kernel is the candidate under test.
 
+For **fp8** dtypes AOTriton is unavailable (torch SDPA rejects fp8 on every
+backend), so the oracle of record is torch's fp32-MATH reference instead: run_torch
+writes that into ``aotriton_o`` (and ``math_hp_o``) and the low-precision budget leg
+(``math_lp_o``) uses fp16. The methodology below is otherwise unchanged; for fp8 the
+candidate and oracle share the identical fp8 input bits, so ``err`` reflects fp32
+compute agreement and several diagnostic columns coincide.
+
 Methodology (adaptive tolerance with an independent precision-gap budget):
 
   * ``math_hp_o`` (torch MATH backend, inputs upcast to fp32) and ``math_lp_o``
@@ -16,7 +23,7 @@ For each non-skipped case, all in float32::
 
     err            = max(abs(gpuref_o - aotriton_o))   # candidate vs oracle
     budget         = max(abs(math_hp_o - math_lp_o))    # fp32-vs-LP gap (torch math)
-    atol_floor     = {"bf16": 1e-2, "fp16": 1e-3}[dtype]
+    atol_floor     = {"bf16": 1e-2, "fp16": 1e-3, fp8: 1e-3}[dtype]
     threshold      = max(atol_floor, fudge * budget)    # rtol = 0
     passed         = err <= threshold
     # diagnostics (report-only):
@@ -45,7 +52,16 @@ import numpy as np
 
 import manifest as mf
 
-ATOL_FLOOR = {"bf16": 1e-2, "fp16": 1e-3}
+# fp8 err is fp32-compute-level: the candidate and oracle consume the identical fp8
+# bits (the quantization is shared, not part of err), so the floor matches fp16.
+ATOL_FLOOR = {
+    "bf16": 1e-2,
+    "fp16": 1e-3,
+    "fp8_e4m3": 1e-3,
+    "fp8_e5m2": 1e-3,
+    "fp8_e4m3_fnuz": 1e-3,
+    "fp8_e5m2_fnuz": 1e-3,
+}
 DIAG_WARN = 1e-2  # warn threshold for the report-only diagnostics
 
 

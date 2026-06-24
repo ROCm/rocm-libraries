@@ -4,6 +4,10 @@ A forward-only numerical comparison harness that validates this branch's fp32
 SDPA **gpu_ref** kernel against **AOTriton** (reached via PyTorch's
 `torch.nn.functional.scaled_dot_product_attention` on ROCm).
 
+For **fp8** inputs AOTriton is unavailable (torch SDPA rejects fp8 on every
+backend), so fp8 cases are validated against torch's **fp32-MATH** reference
+instead — see [fp8 datatypes](#fp8-datatypes).
+
 ## What it does and why
 
 - **AOTriton** (the flash / mem-efficient backends behind PyTorch SDPA on ROCm)
@@ -23,7 +27,7 @@ For each case, all math in float32:
 ```
 err            = max(abs(gpuref_o - aotriton_o))   # candidate vs oracle (judged)
 budget         = max(abs(math_hp_o - math_lp_o))    # independent fp32-vs-LP gap
-atol_floor     = {bf16: 1e-2, fp16: 1e-3}
+atol_floor     = {bf16: 1e-2, fp16: 1e-3, fp8_*: 1e-3}
 threshold      = max(atol_floor, fudge * budget)    # rtol = 0, fudge default 4.0
 passed         = err <= threshold
 # diagnostics (report-only):
@@ -112,9 +116,17 @@ python harness.py \
 
 Tiers:
 
-- `quick` (default) — bf16 only, small shapes, all four modes (~12-20 cases).
-- `full` — adds fp16, a head-dim sweep (16…256), longer / NPOT seqlens,
-  GQA/MQA pairs, both window alignments, and an explicit-scale case.
+- `quick` (default) — bf16 small shapes across all four modes, plus a small fp8
+  presence (plain + causal for each of the four fp8 formats) (~28 cases).
+- `medium` — adds fp16, a head-dim sweep (16…256), longer / NPOT seqlens,
+  GQA/MQA pairs, both window alignments, an explicit-scale case, and a per-format
+  fp8 sweep (plain + causal at two head dims, window, mask).
+- `large` — opt-in, **slow** (~10 min, 72 cases): larger tensors stressing
+  AOTriton at scale — square seqlens up to 16384, head dims up to 256, bigger
+  batch/head counts, GQA/MQA, long NPOT pairs, and large window/mask cases, in
+  both bf16 and fp16. Every shape is AOTriton-serviceable (no SKIPs); batch and
+  head counts are bounded where seqlen is long so the torch MATH oracle fits in
+  memory.
 - `irregular` — opt-in, **slow**: a small prime/NPOT sample. The gpu_ref kernel
   recomputes QKᵀ per output element, so large/odd shapes are expensive — keep
   this tier small.
@@ -151,9 +163,31 @@ python compare.py   --run-dir runs/manual --fudge 4.0
 - **ERROR** means the C++ driver or the torch step failed for that case.
 - The process exits non-zero if any case is `FAIL` or `ERROR` (skips are OK).
 
+## fp8 datatypes
+
+The harness also covers four fp8 input formats: `fp8_e4m3`, `fp8_e5m2` (OCP) and
+`fp8_e4m3_fnuz`, `fp8_e5m2_fnuz` (FNUZ / MI300-native). They are stored on disk as
+raw 8-bit patterns (`|u1`).
+
+Because PyTorch's SDPA front-end hard-rejects fp8 on **every** backend
+(`flash` / `efficient` / `math`) and cannot even run native-fp8 MATH, AOTriton
+cannot be the oracle for fp8. Instead, fp8 cases use torch's **fp32-MATH** backend
+as the oracle of record (fp8 inputs upcast losslessly to fp32), with the
+low-precision budget leg computed in **fp16** (the smallest precision torch MATH
+will run). In the results table the `backend` column shows `math-fp32` for these
+cases.
+
+Since the gpu_ref candidate and the oracle consume the *identical* fp8 bit
+patterns, `err` measures the candidate's fp32 attention compute against torch's
+fp32 compute (the fp8 quantization is shared, not part of `err`); the tolerance
+floor is therefore `1e-3`, the same as fp16. The gpu_ref kernel decodes fp8 to
+float in software inside the HIPRTC kernel, so this path is not gated on native
+fp8 hardware support.
+
 ## Scope and limitations
 
-- **Forward only**; dtypes **bf16** and **fp16**.
+- **Forward only**; dtypes **bf16**, **fp16**, and **fp8** (`e4m3` / `e5m2` and
+  their `fnuz` variants; fp8 validated against the fp32-MATH oracle, not AOTriton).
 - Feature scope is the intersection of what the gpu_ref and AOTriton-via-PyTorch
   both support: plain MHA, causal (top-left, **square only**), additive float
   mask (full rank-4, no broadcasting), sliding window (gpu_ref native bounds vs

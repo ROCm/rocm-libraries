@@ -2,7 +2,8 @@
 
 A :class:`Case` describes a single forward SDPA configuration: shapes, dtype,
 masking mode, optional custom scale, and a deterministic seed. Cases are grouped
-into tiers (``quick``, ``full``, ``irregular``) of increasing cost / coverage.
+into tiers (``quick``, ``medium``, ``large``, ``irregular``) of increasing cost /
+coverage.
 
 Scope (intersection of what the gpu_ref kernel and AOTriton-via-PyTorch both
 support, forward-only):
@@ -14,6 +15,11 @@ support, forward-only):
   * GQA / MQA (Hkv divides Hq; the same Hkv is used for both K and V)
   * custom scale
 
+Dtypes: bf16 and fp16 are validated against the AOTriton oracle. fp8 (e4m3, e5m2
+and their fnuz variants) cannot use AOTriton (torch SDPA rejects fp8 on every
+backend), so fp8 cases are validated against torch's fp32 MATH reference instead;
+see run_torch.py and compare.py.
+
 This module has no third-party dependencies so it always imports cleanly.
 """
 
@@ -21,6 +27,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional
+
+# fp8 inputs cannot use the AOTriton oracle (torch SDPA rejects fp8 on every
+# backend), so fp8 cases are compared against torch's fp32 MATH reference instead
+# (see run_torch.py / compare.py). bf16 / fp16 use AOTriton as the oracle.
+FP8_DTYPES = ("fp8_e4m3", "fp8_e5m2", "fp8_e4m3_fnuz", "fp8_e5m2_fnuz")
+VALID_DTYPES = ("bf16", "fp16") + FP8_DTYPES
 
 
 @dataclass
@@ -34,7 +46,7 @@ class Case:
     """
 
     name: str
-    dtype: str  # "bf16" | "fp16"
+    dtype: str  # one of VALID_DTYPES (bf16 | fp16 | fp8_e4m3 | fp8_e5m2 | *_fnuz)
 
     B: int
     Hq: int
@@ -58,7 +70,7 @@ class Case:
 
     def validate(self) -> None:
         """Raise ``ValueError`` if the case violates a scope constraint."""
-        if self.dtype not in ("bf16", "fp16"):
+        if self.dtype not in VALID_DTYPES:
             raise ValueError(f"{self.name}: unsupported dtype {self.dtype!r}")
         if self.mode not in ("plain", "causal", "window", "mask"):
             raise ValueError(f"{self.name}: unsupported mode {self.mode!r}")
@@ -232,10 +244,16 @@ def quick_cases(seed_base: int = 0) -> List[Case]:
     # One additive-mask case.
     cases.append(_make("bf16", 1, 4, 4, 128, 128, 64, "mask", seed_base))
 
+    # A small fp8 presence (one plain + one causal per format) so the default tier
+    # exercises the fp32-MATH oracle path as well as the AOTriton path.
+    for dtype in FP8_DTYPES:
+        cases.append(_make(dtype, 1, 4, 4, 128, 128, 64, "plain", seed_base))
+        cases.append(_make(dtype, 1, 4, 4, 128, 128, 64, "causal", seed_base))
+
     return cases
 
 
-def full_cases(seed_base: int = 0) -> List[Case]:
+def medium_cases(seed_base: int = 0) -> List[Case]:
     """Comprehensive tier: bf16 + fp16, wide head dims, GQA, all modes, scale."""
     cases: List[Case] = []
 
@@ -299,6 +317,30 @@ def full_cases(seed_base: int = 0) -> List[Case]:
             _make(dtype, 1, 4, 4, 128, 128, 64, "plain", seed_base, scale=0.125)
         )
 
+    # fp8 sweep (validated against the fp32-MATH oracle). Per format: plain + causal
+    # at two head dims, plus one window and one mask case to cover those code paths.
+    for dtype in FP8_DTYPES:
+        for D in (64, 128):
+            cases.append(_make(dtype, 1, 4, 4, 128, 128, D, "plain", seed_base))
+            cases.append(_make(dtype, 1, 4, 4, 128, 128, D, "causal", seed_base))
+        cases.append(
+            _make(
+                dtype,
+                1,
+                4,
+                4,
+                128,
+                128,
+                64,
+                "window",
+                seed_base,
+                left=32,
+                right=0,
+                top_left=True,
+            )
+        )
+        cases.append(_make(dtype, 1, 4, 4, 128, 128, 64, "mask", seed_base))
+
     return cases
 
 
@@ -316,9 +358,101 @@ def irregular_cases(seed_base: int = 0) -> List[Case]:
     return cases
 
 
+def large_cases(seed_base: int = 0) -> List[Case]:
+    """Opt-in slow tier (~10 min): larger tensors stressing AOTriton at scale.
+
+    The reference kernel recomputes QK^T per output element, so cost grows with
+    B * Hq * Sq * Skv * D. Seqlens reach 16384, head dims up to 256, plus bigger
+    batch/head counts, long NPOT pairs, and large window/mask cases. Every shape
+    here is serviceable by AOTriton (flash for plain/causal/GQA/scale, mem-
+    efficient for window/mask) — empirically verified to produce no SKIPs.
+    Batch and head counts are kept modest where the sequence length is long so a
+    single case does not dominate, and the torch MATH oracle stays within memory.
+    """
+    cases: List[Case] = []
+
+    for dtype in ("bf16", "fp16"):
+        # Square seqlen x head-dim sweep (plain + causal) -> flash backend.
+        for Sq in (2048, 4096, 8192):
+            for D in (64, 128, 256):
+                cases.append(_make(dtype, 1, 4, 4, Sq, Sq, D, "plain", seed_base))
+                cases.append(_make(dtype, 1, 4, 4, Sq, Sq, D, "causal", seed_base))
+
+        # Longest seqlen at the smaller head dims (plain + causal).
+        for D in (64, 128):
+            cases.append(_make(dtype, 1, 4, 4, 16384, 16384, D, "plain", seed_base))
+            cases.append(_make(dtype, 1, 4, 4, 16384, 16384, D, "causal", seed_base))
+
+        # Long non-square / NPOT (plain).
+        cases.append(_make(dtype, 1, 4, 4, 4096, 8192, 64, "plain", seed_base))
+        cases.append(_make(dtype, 1, 4, 4, 2048, 8192, 128, "plain", seed_base))
+
+        # GQA / MQA at scale (Hkv divides Hq).
+        cases.append(_make(dtype, 1, 32, 8, 4096, 4096, 64, "causal", seed_base))
+        cases.append(_make(dtype, 1, 16, 4, 8192, 8192, 64, "plain", seed_base))
+
+        # Larger batch and head count.
+        cases.append(_make(dtype, 4, 8, 8, 4096, 4096, 64, "plain", seed_base))
+
+        # Large sliding-window (top-left and bottom-right) -> mem-efficient.
+        cases.append(
+            _make(
+                dtype,
+                1,
+                4,
+                4,
+                8192,
+                8192,
+                64,
+                "window",
+                seed_base,
+                left=1024,
+                right=0,
+                top_left=True,
+            )
+        )
+        cases.append(
+            _make(
+                dtype,
+                1,
+                4,
+                4,
+                4096,
+                8192,
+                64,
+                "window",
+                seed_base,
+                left=512,
+                right=512,
+                top_left=False,
+            )
+        )
+
+        # Large additive mask (square + non-square) -> mem-efficient.
+        cases.append(_make(dtype, 1, 4, 4, 4096, 4096, 64, "mask", seed_base))
+        cases.append(_make(dtype, 1, 4, 4, 2048, 4096, 64, "mask", seed_base))
+
+        # Scale-up block: more batch/heads at already-verified head dims and
+        # seqlens. Flash support depends on dtype + head dim, not batch/head
+        # count, so these stay SKIP-free; B*Hq is held so the fp32 MATH oracle
+        # scores tensor stays within memory.
+        cases.append(_make(dtype, 2, 8, 8, 8192, 8192, 64, "plain", seed_base))
+        cases.append(_make(dtype, 4, 8, 8, 4096, 4096, 128, "plain", seed_base))
+        cases.append(_make(dtype, 2, 16, 8, 4096, 4096, 128, "causal", seed_base))
+        cases.append(_make(dtype, 1, 8, 8, 8192, 8192, 256, "plain", seed_base))
+
+        # Explicit custom scale at a long sequence length.
+        cases.append(
+            _make(dtype, 1, 4, 4, 8192, 8192, 64, "plain", seed_base, scale=0.125)
+        )
+
+    return cases
+
+
 _TIERS = {
     "quick": quick_cases,
-    "full": full_cases,
+    "medium": medium_cases,
+    "large": large_cases,
     "irregular": irregular_cases,
 }
 

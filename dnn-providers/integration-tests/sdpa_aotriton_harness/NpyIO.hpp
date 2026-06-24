@@ -7,9 +7,10 @@
 // Minimal, dependency-free NumPy .npy v1.0 reader/writer for the standalone
 // SDPA gpu_ref vs AOTriton comparison driver.
 //
-// Reader: parses C-contiguous, little-endian arrays of dtype '<f4', '<f2' or
-// '<u2' and returns the raw bytes plus shape. No dtype conversion is performed;
-// the caller reinterprets the raw bytes (e.g. '<u2' bits as bf16).
+// Reader: parses C-contiguous, little-endian arrays of dtype '<f4', '<f2',
+// '<u2' or '|u1' and returns the raw bytes plus shape. No dtype conversion is
+// performed; the caller reinterprets the raw bytes (e.g. '<u2' bits as bf16,
+// '|u1' bits as fp8).
 //
 // Writer: emits a C-contiguous, little-endian '<f4' (fp32) array. The header is
 // a v1.0 header dict padded with spaces so that the total header length is a
@@ -32,7 +33,8 @@ enum class DType
 {
     F4, // '<f4' little-endian fp32
     F2, // '<f2' little-endian fp16
-    U2 // '<u2' little-endian uint16 (raw bf16 bits)
+    U2, // '<u2' little-endian uint16 (raw bf16 bits)
+    U1 // '|u1' single-byte uint8 (raw fp8 bits)
 };
 
 // Result of reading an .npy file: raw little-endian bytes, logical shape and dtype.
@@ -68,6 +70,8 @@ inline size_t dtypeSize(DType dtype)
         return 2;
     case DType::U2:
         return 2;
+    case DType::U1:
+        return 1;
     default:
         throw std::runtime_error("NpyIO: unknown dtype");
     }
@@ -88,8 +92,13 @@ inline DType parseDescr(const std::string& descr)
     {
         return DType::U2;
     }
+    // Single-byte dtype has no meaningful byte order; numpy emits '|u1'.
+    if(descr == "|u1" || descr == "<u1" || descr == "u1")
+    {
+        return DType::U1;
+    }
     throw std::runtime_error("NpyIO: unsupported descr '" + descr
-                             + "' (only '<f4', '<f2', '<u2' are supported)");
+                             + "' (only '<f4', '<f2', '<u2', '|u1' are supported)");
 }
 
 // Extract the value of a single-quoted string field (e.g. 'descr':'<f4') from

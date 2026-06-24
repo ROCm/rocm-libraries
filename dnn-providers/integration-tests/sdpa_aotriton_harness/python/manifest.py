@@ -11,7 +11,8 @@ and ``harness.py`` can use it without a torch install.
 
 === Integration contract (the C++ driver obeys the same; keep in sync) ===
 .npy files are standard NumPy v1.0, little-endian, C-contiguous.
-  fp32 -> '<f4', fp16 -> '<f2', bf16 -> '<u2' (raw 16-bit bf16 bit patterns).
+  fp32 -> '<f4', fp16 -> '<f2', bf16 -> '<u2' (raw 16-bit bf16 bit patterns),
+  fp8 (e4m3/e5m2 and their fnuz variants) -> '|u1' (raw 8-bit fp8 bit patterns).
   Q: [B, Hq, Sq, D]; K, V: [B, Hkv, Skv, D];
   mask (optional): fp32 '<f4' full rank-4 [B, Hq, Sq, Skv] (additive bias,
   no broadcasting); O (output): fp32 '<f4' [B, Hq, Sq, D].
@@ -32,6 +33,11 @@ NPY_DTYPE = {
     "fp32": "<f4",
     "fp16": "<f2",
     "bf16": "<u2",  # raw bf16 bit patterns stored as uint16
+    # fp8 formats: raw 8-bit bit patterns stored as uint8 (numpy emits '|u1').
+    "fp8_e4m3": "|u1",
+    "fp8_e5m2": "|u1",
+    "fp8_e4m3_fnuz": "|u1",
+    "fp8_e5m2_fnuz": "|u1",
 }
 
 # Filenames within a case directory.

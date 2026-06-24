@@ -12,7 +12,8 @@
 //
 // Integration contract (must match the Python side):
 //   - .npy v1.0, little-endian, C-contiguous.
-//   - fp32 -> '<f4'; fp16 -> '<f2'; bf16 -> '<u2' (raw 16-bit bf16 bit patterns).
+//   - fp32 -> '<f4'; fp16 -> '<f2'; bf16 -> '<u2' (raw 16-bit bf16 bit patterns);
+//     fp8 (e4m3/e5m2 and their fnuz variants) -> '|u1' (raw 8-bit fp8 bit patterns).
 //   - Q = [B, Hq, Sq, D], K = [B, Hkv, Skv, D], V = [B, Hkv, Skv, Dv].
 //   - Mask (optional) is always '<f4'.
 //   - Output O = '<f4' [B, Hq, Sq, Dv]; LSE (optional) = '<f4' [B, Hq, Sq].
@@ -40,7 +41,11 @@ enum class ElementDType
 {
     Bf16,
     Fp16,
-    Fp32
+    Fp32,
+    Fp8E4m3,
+    Fp8E5m2,
+    Fp8E4m3Fnuz,
+    Fp8E5m2Fnuz
 };
 
 struct Options
@@ -65,8 +70,9 @@ struct Options
     throw std::runtime_error(
         message
         + "\nUsage: sdpa_aotriton_ref_driver --q Q.npy --k K.npy --v V.npy [--mask MASK.npy]"
-          " --o O.npy [--lse LSE.npy] --dtype {bf16|fp16|fp32} [--scale FLOAT]"
-          " [--left INT] [--right INT] [--top-left|--bottom-right]");
+          " --o O.npy [--lse LSE.npy]"
+          " --dtype {bf16|fp16|fp32|fp8_e4m3|fp8_e5m2|fp8_e4m3_fnuz|fp8_e5m2_fnuz}"
+          " [--scale FLOAT] [--left INT] [--right INT] [--top-left|--bottom-right]");
 }
 
 // Fetch the value that must follow a value-taking flag.
@@ -129,9 +135,27 @@ Options parseArgs(int argc, char** argv)
             {
                 opts.dtype = ElementDType::Fp32;
             }
+            else if(value == "fp8_e4m3")
+            {
+                opts.dtype = ElementDType::Fp8E4m3;
+            }
+            else if(value == "fp8_e5m2")
+            {
+                opts.dtype = ElementDType::Fp8E5m2;
+            }
+            else if(value == "fp8_e4m3_fnuz")
+            {
+                opts.dtype = ElementDType::Fp8E4m3Fnuz;
+            }
+            else if(value == "fp8_e5m2_fnuz")
+            {
+                opts.dtype = ElementDType::Fp8E5m2Fnuz;
+            }
             else
             {
-                usageError("unknown --dtype '" + value + "' (expected bf16|fp16|fp32)");
+                usageError("unknown --dtype '" + value
+                           + "' (expected bf16|fp16|fp32|fp8_e4m3|fp8_e5m2|fp8_e4m3_fnuz|"
+                             "fp8_e5m2_fnuz)");
             }
             dtypeSet = true;
         }
@@ -188,6 +212,11 @@ sdpa_harness::npy::DType expectedInputDtype(ElementDType dtype)
         return sdpa_harness::npy::DType::F2;
     case ElementDType::Fp32:
         return sdpa_harness::npy::DType::F4;
+    case ElementDType::Fp8E4m3:
+    case ElementDType::Fp8E5m2:
+    case ElementDType::Fp8E4m3Fnuz:
+    case ElementDType::Fp8E5m2Fnuz:
+        return sdpa_harness::npy::DType::U1;
     default:
         throw std::runtime_error("driver: unknown element dtype");
     }
@@ -203,6 +232,14 @@ const char* dtypeName(ElementDType dtype)
         return "fp16";
     case ElementDType::Fp32:
         return "fp32";
+    case ElementDType::Fp8E4m3:
+        return "fp8_e4m3";
+    case ElementDType::Fp8E5m2:
+        return "fp8_e5m2";
+    case ElementDType::Fp8E4m3Fnuz:
+        return "fp8_e4m3_fnuz";
+    case ElementDType::Fp8E5m2Fnuz:
+        return "fp8_e5m2_fnuz";
     default:
         return "?";
     }
@@ -218,6 +255,8 @@ const char* descrName(sdpa_harness::npy::DType dtype)
         return "<f2";
     case sdpa_harness::npy::DType::U2:
         return "<u2";
+    case sdpa_harness::npy::DType::U1:
+        return "|u1";
     default:
         return "?";
     }
@@ -346,6 +385,18 @@ void run(const Options& opts)
         break;
     case ElementDType::Fp32:
         runTyped<float>(opts, qArr, kArr, vArr, maskPtr);
+        break;
+    case ElementDType::Fp8E4m3:
+        runTyped<hipdnn_data_sdk::types::fp8_e4m3>(opts, qArr, kArr, vArr, maskPtr);
+        break;
+    case ElementDType::Fp8E5m2:
+        runTyped<hipdnn_data_sdk::types::fp8_e5m2>(opts, qArr, kArr, vArr, maskPtr);
+        break;
+    case ElementDType::Fp8E4m3Fnuz:
+        runTyped<hipdnn_data_sdk::types::fp8_e4m3_fnuz>(opts, qArr, kArr, vArr, maskPtr);
+        break;
+    case ElementDType::Fp8E5m2Fnuz:
+        runTyped<hipdnn_data_sdk::types::fp8_e5m2_fnuz>(opts, qArr, kArr, vArr, maskPtr);
         break;
     default:
         throw std::runtime_error("driver: unhandled dtype " + std::string(dtypeName(opts.dtype)));

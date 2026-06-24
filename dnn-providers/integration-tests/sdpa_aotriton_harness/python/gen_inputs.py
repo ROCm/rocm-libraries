@@ -27,6 +27,24 @@ import manifest as mf
 import sdpa_cases
 
 
+def _torch_dtype(dtype: str) -> Any:
+    """Map a case dtype string to the corresponding torch dtype."""
+    import torch  # local import; runtime only
+
+    mapping = {
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+        "fp8_e4m3": torch.float8_e4m3fn,
+        "fp8_e5m2": torch.float8_e5m2,
+        "fp8_e4m3_fnuz": torch.float8_e4m3fnuz,
+        "fp8_e5m2_fnuz": torch.float8_e5m2fnuz,
+    }
+    try:
+        return mapping[dtype]
+    except KeyError as exc:
+        raise ValueError(f"unsupported dtype: {dtype!r}") from exc
+
+
 def _save_qkv(path: str, tensor_native: Any, dtype: str) -> None:
     """Save a Q/K/V tensor (already cast to the case dtype) per the contract.
 
@@ -41,6 +59,11 @@ def _save_qkv(path: str, tensor_native: Any, dtype: str) -> None:
     elif dtype == "fp16":
         arr = tensor_native.half().cpu().numpy()  # float16 '<f2'
         np.save(path, arr)
+    elif dtype in sdpa_cases.FP8_DTYPES:
+        # Raw 8-bit fp8 bit patterns -> uint8 '|u1'. The tensor is already the
+        # target fp8 dtype, so a uint8 view reinterprets the bytes losslessly.
+        bits = tensor_native.view(torch.uint8).cpu().numpy()
+        np.save(path, bits)
     else:
         raise ValueError(f"unsupported dtype for qkv save: {dtype!r}")
 
@@ -56,7 +79,7 @@ def _generate_case(case: sdpa_cases.Case, run_dir: str) -> dict:
     k_f32 = torch.randn(case.B, case.Hkv, case.Skv, case.D, dtype=torch.float32)
     v_f32 = torch.randn(case.B, case.Hkv, case.Skv, case.D, dtype=torch.float32)
 
-    target = torch.bfloat16 if case.dtype == "bf16" else torch.float16
+    target = _torch_dtype(case.dtype)
     q = q_f32.to(target)
     k = k_f32.to(target)
     v = v_f32.to(target)
@@ -79,11 +102,13 @@ def _generate_case(case: sdpa_cases.Case, run_dir: str) -> dict:
         bias = (
             torch.randn(case.B, case.Hq, case.Sq, case.Skv, dtype=torch.float32) * 0.5
         )
-        # gpu_ref reads fp32; AOTriton reads a dtype-cast of this. Rounding the
-        # bias through the case dtype here makes them identical (the torch-side
-        # fp32->dtype cast is then lossless).
-        target = torch.bfloat16 if case.dtype == "bf16" else torch.float16
-        bias = bias.to(target).to(torch.float32)
+        # gpu_ref reads fp32; AOTriton reads a dtype-cast of this. For bf16/fp16,
+        # rounding the bias through the case dtype here makes them identical (the
+        # torch-side fp32->dtype cast is then lossless). fp8 cases use the fp32-MATH
+        # oracle (no AOTriton mem-efficient path to match), so the bias stays fp32.
+        if case.dtype in ("bf16", "fp16"):
+            target = torch.bfloat16 if case.dtype == "bf16" else torch.float16
+            bias = bias.to(target).to(torch.float32)
         np.save(files["mask"], bias.cpu().numpy().astype("<f4", copy=False))
 
     return man
