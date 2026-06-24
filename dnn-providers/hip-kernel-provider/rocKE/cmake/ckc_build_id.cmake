@@ -1,0 +1,44 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# ckc_build_id.cmake -- compute a deterministic, git-independent content hash of
+# the engine source tree. The hash changes if and only if a tracked source byte
+# changes; it is stable across rebuilds of the same sources, across machines,
+# and regardless of any version-control state.
+#
+# ckc_compute_build_id(<out_var> <root_dir>)
+#   Hashes the sorted concatenation of every src/**/*.cpp and include/**/*.h*
+#   under <root_dir>. Each file contributes its repo-relative path followed by a
+#   SHA-256 of its bytes; the per-file lines are sorted (locale-independent) and
+#   the whole list is hashed once more to yield the build-id. Including the path
+#   means a rename alone changes the id; including per-file content means an edit
+#   to any byte changes it.
+
+function(ckc_compute_build_id out_var root_dir)
+  # Collect the tracked source surface. GLOB (not GLOB_RECURSE with
+  # CONFIGURE_DEPENDS) is fine here: this runs at configure time, and the
+  # top-level CMakeLists already re-globs sources with CONFIGURE_DEPENDS, so a
+  # newly added file triggers a reconfigure and thus a recompute.
+  file(GLOB_RECURSE _ckc_src
+       "${root_dir}/Cpp/*.cpp")
+  file(GLOB_RECURSE _ckc_hdr
+       "${root_dir}/Cpp/include/*.h"
+       "${root_dir}/Cpp/include/*.hpp")
+  set(_ckc_all ${_ckc_src} ${_ckc_hdr})
+
+  set(_ckc_lines "")
+  foreach(_f IN LISTS _ckc_all)
+    file(RELATIVE_PATH _rel "${root_dir}" "${_f}")
+    file(SHA256 "${_f}" _fh)
+    list(APPEND _ckc_lines "${_rel}:${_fh}")
+  endforeach()
+
+  # Sort for a stable, filesystem-order-independent digest.
+  list(SORT _ckc_lines)
+  string(REPLACE ";" "\n" _ckc_blob "${_ckc_lines}")
+  string(SHA256 _ckc_digest "${_ckc_blob}")
+
+  # 16 hex chars is plenty to distinguish builds while staying readable in logs.
+  string(SUBSTRING "${_ckc_digest}" 0 16 _ckc_short)
+  set(${out_var} "${_ckc_short}" PARENT_SCOPE)
+endfunction()
