@@ -90,7 +90,7 @@ BenchmarkProblems:
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - WorkGroupMapping: [1, 8]
+        - WorkGroupMapping: [1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -147,7 +147,7 @@ BenchmarkProblems:
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - WorkGroupMapping: [1, 8]
+        - WorkGroupMapping: [1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -203,7 +203,7 @@ BenchmarkProblems:
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - WorkGroupMapping: [1, 8]
+        - WorkGroupMapping: [1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -260,7 +260,7 @@ BenchmarkProblems:
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - WorkGroupMapping: [1, 8]
+        - WorkGroupMapping: [1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
