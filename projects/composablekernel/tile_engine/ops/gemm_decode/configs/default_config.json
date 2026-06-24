@@ -1,17 +1,23 @@
 {
-    "_comment": "P0/P0b default sweep matrix for gemm_decode universal SmallM. Hand-translated into universal/gemm_decode_universal_single_default.hpp (BF16/FP16) and universal/gemm_decode_universal_fp8_smallm_pertensor.hpp (FP8 PerTensor). gemm_decode_instance_builder.py will consume this file directly once the multi-config sweep lands in P1+.",
+    "_comment": "P0/P0b/P1 + A1/A3/A4/A5 sweep matrix for gemm_decode universal SmallM. The instance headers (universal/gemm_decode_universal_single_default.hpp, universal/gemm_decode_universal_fp8_smallm_pertensor.hpp) are macro-parameterized on the register-tile and swizzle knobs (GEMM_DECODE_M_PER_WARP / _N_PER_WARP / _VECTOR / _CHIPLET_SWIZZLE / _NUM_XCDS / _CHUNK), so gemm_decode_instance_builder.py --gen_single emits one self-contained variant per (m_per_warp, n_per_warp, vector_size, chiplet_swizzle, chiplet_chunk_size) point by writing a header that #defines those knobs and #includes the blueprint. The mp*np<=16 register-footprint prune is enforced in gemm_decode_validation_utils.is_tile_config_valid.",
     "tile_config": {
         "tile_m":         {"values": [1]},
         "tile_n":         {"values": [1]},
         "tile_k":         {"values": [512, 1024]},
-        "m_per_warp":     {"values": [1]},
-        "n_per_warp":     {"values": [1]},
+        "m_per_warp":     {"values": [1, 2, 4, 8]},
+        "n_per_warp":     {"values": [1, 2, 4]},
         "vector_size":    {"values": [8, 16]},
         "lanes_per_output": {"values": [64]},
-        "warps_per_block":  {"values": [1]},
+        "warps_per_block":  {"values": [1, 8]},
         "output_axis":    {"values": ["smallM"]},
         "use_dot2":       {"values": [false, true]},
-        "use_packed_fp32": {"values": [false]}
+        "use_packed_fp32": {"values": [false]},
+        "chiplet_swizzle":    {"values": [false, true]},
+        "chiplet_num_xcds":   {"values": [8]},
+        "chiplet_chunk_size": {"values": [4, 8, 16, 32]},
+        "stage_a_in_lds": {"values": [false, true]},
+        "stream_b":       {"values": [false, true]},
+        "persistent":     {"values": [false, true]}
     },
     "trait_config": {
         "pipeline":  {"values": ["decode"]},
@@ -19,9 +25,8 @@
         "epilogue":  {"values": ["default", "atomic_add"]},
         "split_k":   {"values": [1, 2, 4]},
         "pad_k":     {"values": [false]},
-        "persistent": {"values": [false]},
         "has_bias":   {"values": [false, true]},
-        "x_scale_layout": {"values": ["void", "PerTensor"]},
+        "x_scale_layout": {"values": ["void", "PerTensor", "PerToken"]},
         "w_scale_layout": {"values": ["void", "PerTensor"]}
     },
     "datatypes": [

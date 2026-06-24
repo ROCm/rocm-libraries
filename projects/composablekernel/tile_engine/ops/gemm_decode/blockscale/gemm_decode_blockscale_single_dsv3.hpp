@@ -14,6 +14,20 @@
 
 #define GEMM_DECODE_BLOCKSCALE_KERNEL_DEFINED 1
 
+// The blockscale kernel fixes kMPerWarp=kNPerWarp=kWarpsPerBlock=1 (static_assert)
+// and pins kVector=16 to the dot2 contract, so the only codegen-tunable axis is
+// the XCD chiplet swizzle. The builder overrides these via -D per config; the
+// defaults reproduce the original DSV3 single instance.
+#ifndef GEMM_DECODE_CHIPLET_SWIZZLE
+#define GEMM_DECODE_CHIPLET_SWIZZLE false
+#endif
+#ifndef GEMM_DECODE_CHIPLET_NUM_XCDS
+#define GEMM_DECODE_CHIPLET_NUM_XCDS 8
+#endif
+#ifndef GEMM_DECODE_CHIPLET_CHUNK
+#define GEMM_DECODE_CHIPLET_CHUNK 8
+#endif
+
 #ifdef CK_TILE_USE_OCP_FP8
 using SelectedADataType = ck_tile::fp8_t;
 using SelectedBDataType = ck_tile::fp8_t;
@@ -49,7 +63,11 @@ using SelectedGemmDecodeProblem =
                                /*kNPerWarp=*/1,
                                ck_tile::GemmDecodeOutputAxis::SmallM,
                                /*kHasBias=*/false,
-                               /*kWarpsPerBlock=*/1>;
+                               /*kWarpsPerBlock=*/1,
+                               /*kBPreshuffle=*/false,
+                               /*kChipletSwizzle=*/GEMM_DECODE_CHIPLET_SWIZZLE,
+                               /*kChipletNumXcds=*/GEMM_DECODE_CHIPLET_NUM_XCDS,
+                               /*kChipletChunkSize=*/GEMM_DECODE_CHIPLET_CHUNK>;
 
 using SelectedGemmDecodeBlockscaleKernel =
     ck_tile::GemmDecodeBlockscaleKernel<SelectedGemmDecodeProblem, ck_tile::GemmDecodePolicy>;

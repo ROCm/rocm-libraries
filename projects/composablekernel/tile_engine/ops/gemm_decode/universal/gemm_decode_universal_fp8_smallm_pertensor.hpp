@@ -16,6 +16,39 @@
 
 #define GEMM_DECODE_UNIVERSAL_KERNEL_DEFINED 1
 
+// Sweep knobs the codegen / benchmark driver overrides per config via -D.
+// kVector is fixed by the dot2 contract on this path (16 for the FP8 dot2
+// K-loop, 8 for the BF16 fallback), so it is not a -D knob here.
+#ifndef GEMM_DECODE_M_PER_WARP
+#define GEMM_DECODE_M_PER_WARP 1
+#endif
+#ifndef GEMM_DECODE_N_PER_WARP
+#define GEMM_DECODE_N_PER_WARP 1
+#endif
+#ifndef GEMM_DECODE_CHIPLET_SWIZZLE
+#define GEMM_DECODE_CHIPLET_SWIZZLE false
+#endif
+#ifndef GEMM_DECODE_CHIPLET_NUM_XCDS
+#define GEMM_DECODE_CHIPLET_NUM_XCDS 8
+#endif
+#ifndef GEMM_DECODE_CHIPLET_CHUNK
+#define GEMM_DECODE_CHIPLET_CHUNK 8
+#endif
+// P0 wvSplitKQ-recipe knobs (default off). The builder overrides these for the
+// multi-warp / fat-WG sweep rows.
+#ifndef GEMM_DECODE_WARPS_PER_BLOCK
+#define GEMM_DECODE_WARPS_PER_BLOCK 1
+#endif
+#ifndef GEMM_DECODE_STAGE_A_IN_LDS
+#define GEMM_DECODE_STAGE_A_IN_LDS false
+#endif
+#ifndef GEMM_DECODE_STREAM_B
+#define GEMM_DECODE_STREAM_B false
+#endif
+#ifndef GEMM_DECODE_PERSISTENT
+#define GEMM_DECODE_PERSISTENT false
+#endif
+
 #ifdef CK_TILE_USE_OCP_FP8
 using SelectedADataType = ck_tile::fp8_t;
 using SelectedBDataType = ck_tile::fp8_t;
@@ -47,11 +80,19 @@ using SelectedGemmDecodeProblem =
                                /*kUseDot2=*/false,
 #endif
                                /*kUsePackedFp32=*/false,
-                               /*kMPerWarp=*/1,
-                               /*kNPerWarp=*/1,
+                               /*kMPerWarp=*/GEMM_DECODE_M_PER_WARP,
+                               /*kNPerWarp=*/GEMM_DECODE_N_PER_WARP,
                                ck_tile::GemmDecodeOutputAxis::SmallM,
                                /*kHasBias=*/false,
-                               /*kWarpsPerBlock=*/1>;
+                               /*kWarpsPerBlock=*/GEMM_DECODE_WARPS_PER_BLOCK,
+                               /*kBPreshuffle=*/false,
+                               /*kChipletSwizzle=*/GEMM_DECODE_CHIPLET_SWIZZLE,
+                               /*kChipletNumXcds=*/GEMM_DECODE_CHIPLET_NUM_XCDS,
+                               /*kChipletChunkSize=*/GEMM_DECODE_CHIPLET_CHUNK,
+                               /*kBias2D=*/false,
+                               /*kStageAInLds=*/GEMM_DECODE_STAGE_A_IN_LDS,
+                               /*kStreamB=*/GEMM_DECODE_STREAM_B,
+                               /*kPersistent=*/GEMM_DECODE_PERSISTENT>;
 
 using SelectedGemmDecodeUniversalKernel =
     ck_tile::GemmDecodeUniversalKernel<SelectedGemmDecodeProblem, ck_tile::GemmDecodePolicy>;

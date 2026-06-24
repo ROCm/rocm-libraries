@@ -1,0 +1,35 @@
+{
+    "_comment": "P3 blockscale (DeepSeek-V3 a8w8) sweep for gemm_decode. The GemmDecodeBlockscaleKernel static_asserts kMPerWarp=kNPerWarp=kWarpsPerBlock=1 and pins kVector=16 to the dot2 contract, so the only codegen-tunable axis is the XCD chiplet swizzle (chunk_size / num_xcds). Scales are Block2D<1,128> (X, per-token on M / blocked on K) and Block2D<128,128> (W); the single blueprint universal/../blockscale/gemm_decode_blockscale_single_dsv3.hpp fixes those dims and is macro-parameterized only on GEMM_DECODE_CHIPLET_*. Build with --family blockscale.",
+    "tile_config": {
+        "tile_m":         {"values": [1]},
+        "tile_n":         {"values": [1]},
+        "tile_k":         {"values": [512]},
+        "m_per_warp":     {"values": [1]},
+        "n_per_warp":     {"values": [1]},
+        "vector_size":    {"values": [16]},
+        "lanes_per_output": {"values": [64]},
+        "warps_per_block":  {"values": [1]},
+        "output_axis":    {"values": ["smallM"]},
+        "use_dot2":       {"values": [true]},
+        "use_packed_fp32": {"values": [false]},
+        "chiplet_swizzle":    {"values": [false, true]},
+        "chiplet_num_xcds":   {"values": [8]},
+        "chiplet_chunk_size": {"values": [4, 8, 16, 32]},
+        "stage_a_in_lds": {"values": [false]},
+        "stream_b":       {"values": [false]},
+        "persistent":     {"values": [false]}
+    },
+    "trait_config": {
+        "pipeline":  {"values": ["decode"]},
+        "scheduler": {"values": ["intrawave"]},
+        "epilogue":  {"values": ["default", "atomic_add"]},
+        "split_k":   {"values": [1, 2, 4]},
+        "pad_k":     {"values": [false]},
+        "has_bias":   {"values": [false]},
+        "x_scale_layout": {"values": ["Block2D<1, 128>"]},
+        "w_scale_layout": {"values": ["Block2D<128, 128>"]}
+    },
+    "datatypes": [
+        {"a": "fp8",  "b": "fp8",  "c": "bf16", "acc": "fp32"}
+    ]
+}

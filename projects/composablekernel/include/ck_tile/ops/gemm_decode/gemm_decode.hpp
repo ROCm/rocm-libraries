@@ -8,6 +8,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/stream_config.hpp"
+#include "ck_tile/host/stream_utils.hpp"
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_problem.hpp"
 #include "ck_tile/ops/gemm_decode/pipeline/gemm_decode_policy.hpp"
 #include "ck_tile/ops/gemm_decode/kernel/gemm_decode_universal_kernel.hpp"
@@ -29,8 +30,25 @@ float launch_gemm_decode_universal(const typename Kernel::Kargs& args, const str
         throw std::invalid_argument("GemmDecodeUniversalKernel arguments are not supported.");
     }
 
-    return launch_kernel(s,
-                         make_kernel(Kernel{}, Kernel::GridSize(args), Kernel::BlockSize(), 0, args));
+    dim3 grid = Kernel::GridSize(args);
+    if constexpr(Kernel::kPersistent)
+    {
+        // wvSplitK* "1 WG/CU": launch one fat workgroup per CU (capped at the
+        // logical work count so we never over-subscribe) and let each grid-stride
+        // over the tile space. GridSize(args) above is the logical tile count.
+        const index_t num_work =
+            static_cast<index_t>(grid.x) * static_cast<index_t>(grid.y) *
+            static_cast<index_t>(grid.z);
+        const index_t num_cu = get_available_compute_units(s);
+        index_t persistent   = num_work < num_cu ? num_work : num_cu;
+        if(persistent < 1)
+        {
+            persistent = 1;
+        }
+        grid = dim3(static_cast<uint32_t>(persistent), 1, 1);
+    }
+
+    return launch_kernel(s, make_kernel(Kernel{}, grid, Kernel::BlockSize(), 0, args));
 }
 
 // Same shape as the universal launcher but for GemmDecodeBlockscaleKernel.

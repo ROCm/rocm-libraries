@@ -28,7 +28,10 @@ namespace ck_tile {
 //   - kMPerWarp >= 1, kNPerWarp >= 1: each warp computes a kMPerWarp x
 //     kNPerWarp output tile. kMPerWarp > 1 reuses each B row across the M
 //     rows held in registers (B-reuse), the dual of the kNPerWarp A-reuse.
-//   - kWarpsPerBlock = 1
+//   - kWarpsPerBlock >= 1: kWarpsPerBlock > 1 packs that many independent
+//     warps per workgroup (each owning one output column) to raise
+//     wavefronts/CU on the small M=1 grid (§15.F occupancy probe); wired for
+//     mp=np=1, k_batch=1 only.
 //   - kBPreshuffle = false                (P4 hook reserved)
 //   - kHasBias is honoured: when true, the [N] bias vector is added in
 //     the epilogue (k_id = 0 only when split-K is active, see
@@ -55,11 +58,44 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
     static constexpr index_t kNPerWarp     = Problem::kNPerWarp;
     static constexpr GemmDecodeOutputAxis kOutputAxis = Problem::kOutputAxis;
     static constexpr bool    kHasBias      = Problem::kHasBias;
+    // 2D modular-broadcast bias (wvSplitK* Bx/By). Only meaningful with bias.
+    static constexpr bool    kBias2D       = Problem::kBias2D;
+    // Stage the shared A row in LDS (wvSplitK* A-in-LDS). Multi-warp only.
+    static constexpr bool    kStageAInLds  = Problem::kStageAInLds;
+
+    // Non-temporal coherence for the streamed B loads (wvSplitK* cache-bypass).
+    // DEVICE_NT1 sets the gfx94x/gfx950 non-temporal bit at device-cache scope;
+    // on other archs the enum maps it to the legacy glc hint. coherence_default
+    // keeps B cacheable. Applied only to the B view (A is reused / LDS-staged).
+    static constexpr amd_buffer_coherence_enum kBCoherence =
+        Problem::kStreamB ? amd_buffer_coherence_enum::DEVICE_NT1
+                          : amd_buffer_coherence_enum::coherence_default;
+
+    // Persistent fat-WG launch (wvSplitK* "1 WG/CU"). When set, the launcher
+    // caps the grid at the CU count and each workgroup grid-strides over the
+    // logical (m_block, n_block, k_id) tile space (see operator()).
+    static constexpr bool    kPersistent   = Problem::kPersistent;
+
+    // Max K (in A elements) the A-in-LDS staging path will hold per workgroup.
+    // 8192 covers the decode K range (e.g. 7168) at 8 KB (FP8) / 16 KB (BF16)
+    // of LDS, well under the 64 KB/CU budget. IsSupportedArgument rejects a
+    // larger runtime K when kStageAInLds is on -- the analog of wvSplitKQ's
+    // "A fits in LDS" check that selects its _sml_ kernel.
+    static constexpr index_t kLdsStageMaxK = 8192;
 
     static constexpr bool kIsUnscaled  = GemmDecodeScaleLayoutTraits<XScaleLayout>::is_unscaled &&
                                          GemmDecodeScaleLayoutTraits<WScaleLayout>::is_unscaled;
     static constexpr bool kIsPerTensor = GemmDecodeScaleLayoutTraits<XScaleLayout>::is_per_tensor &&
                                          GemmDecodeScaleLayoutTraits<WScaleLayout>::is_per_tensor;
+    // Per-token (wvSplitKQ-style activation quant): X carries one FP32 scale
+    // per token (per output row m, an [M] vector); W stays per-tensor (one
+    // scalar). The token scale is folded in the epilogue as a per-row factor
+    // x_scale[m] * w_scale, so the K-loop is identical to PerTensor -- only the
+    // X-scale load moves from a loop-invariant scalar to a per-row gather.
+    static constexpr bool kIsPerToken  = GemmDecodeScaleLayoutTraits<XScaleLayout>::is_per_token &&
+                                         GemmDecodeScaleLayoutTraits<WScaleLayout>::is_per_tensor;
+    // Any scaled subconfig shares the per-tensor W scalar load + epilogue fold.
+    static constexpr bool kIsScaled    = kIsPerTensor || kIsPerToken;
 
     static_assert(kOutputAxis == GemmDecodeOutputAxis::SmallM,
                   "GemmDecodeUniversalKernel P0 supports only SmallM orientation.");
@@ -67,14 +103,30 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                   "GemmDecodeUniversalKernel requires kMPerWarp >= 1.");
     static_assert(kNPerWarp >= 1,
                   "GemmDecodeUniversalKernel requires kNPerWarp >= 1.");
-    static_assert(Problem::kWarpsPerBlock == 1,
-                  "GemmDecodeUniversalKernel P0 expects exactly one warp per block.");
-    static_assert(kIsUnscaled || kIsPerTensor,
-                  "GemmDecodeUniversalKernel only supports (unscaled, unscaled) and "
-                  "(PerTensor, PerTensor) scale layouts; blockscale uses the dedicated "
-                  "GemmDecodeBlockscaleKernel.");
+    static_assert(Problem::kWarpsPerBlock >= 1,
+                  "GemmDecodeUniversalKernel requires kWarpsPerBlock >= 1.");
+    // Multi-warp (kWarpsPerBlock>1) is the §15.F occupancy probe ("B1-lite"):
+    // it packs kWarpsPerBlock independent warps per workgroup, each owning one
+    // output column, to lift wavefronts/CU on the small M=1 grid. It is wired
+    // only for the mp=np=1 autotuned M=1 winner; register-tiled mp/np stay on
+    // the single-warp path.
+    static_assert(Problem::kWarpsPerBlock == 1 || (kMPerWarp == 1 && kNPerWarp == 1),
+                  "GemmDecodeUniversalKernel multi-warp path requires kMPerWarp == "
+                  "kNPerWarp == 1.");
+    static_assert(kIsUnscaled || kIsPerTensor || kIsPerToken,
+                  "GemmDecodeUniversalKernel only supports (unscaled, unscaled), "
+                  "(PerTensor, PerTensor), and (PerToken, PerTensor) scale layouts; "
+                  "blockscale uses the dedicated GemmDecodeBlockscaleKernel.");
     static_assert(!Problem::kBPreshuffle,
                   "GemmDecodeUniversalKernel: preshuffled-B path lands in P4.");
+    static_assert(!kBias2D || kHasBias,
+                  "GemmDecodeUniversalKernel kBias2D requires kHasBias.");
+    // A-in-LDS staging is implemented in (and only benefits) the multi-warp
+    // path, where warps share the activation row. The multi-warp path is
+    // already restricted to mp == np == 1, so this keeps the contract tight.
+    static_assert(!kStageAInLds || Problem::kWarpsPerBlock > 1,
+                  "GemmDecodeUniversalKernel kStageAInLds requires kWarpsPerBlock > 1 "
+                  "(multi-warp path; A reuse across warps is what it stages).");
 
     struct Kargs
     {
@@ -97,6 +149,14 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         // 1 disables split-K; > 1 enables AtomicAdd epilogue. Caller must
         // zero-init p_c when k_batch > 1 so partials accumulate from zero.
         index_t k_batch;
+
+        // 2D modular-broadcast bias extents (wvSplitK* Bx/By). Only read when
+        // Problem::kBias2D is true: the bias is indexed
+        //   bias[(feat % bias_x) + (tok % bias_y) * bias_x].
+        // For the flat 1D bias (kBias2D == false) these are ignored; setting
+        // bias_y = 1, bias_x = N reproduces the 1D result.
+        index_t bias_x;
+        index_t bias_y;
     };
 
     CK_TILE_HOST static Kargs MakeKernelArgs(const void* p_a,
@@ -122,11 +182,16 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                      stride_a,
                      stride_b,
                      stride_c,
-                     k_batch};
+                     k_batch,
+                     /*bias_x=*/0,
+                     /*bias_y=*/1};
     }
 
-    // Overload for PerTensor scaled subconfig. p_x_scale / p_w_scale are
-    // FP32 scalars (one per tensor) and p_bias is an optional [N] vector.
+    // Overload for the scaled subconfigs. p_w_scale is always a per-tensor FP32
+    // scalar; p_x_scale is a per-tensor FP32 scalar (PerTensor) or an [M] FP32
+    // activation-scale vector indexed by token/row (PerToken). p_bias is an
+    // optional [N] vector. Same entry point for both -- the layout is selected
+    // at compile time by the Problem's (XScaleLayout, WScaleLayout).
     CK_TILE_HOST static Kargs MakeKernelArgs(const void* p_a,
                                              const void* p_b,
                                              void*       p_c,
@@ -139,17 +204,26 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                                              index_t     stride_a,
                                              index_t     stride_b,
                                              index_t     stride_c,
-                                             index_t     k_batch = 1)
+                                             index_t     k_batch = 1,
+                                             // 2D-bias extents; ignored unless
+                                             // Problem::kBias2D. bias_y = 1,
+                                             // bias_x = N reproduces 1D bias.
+                                             index_t     bias_x = 0,
+                                             index_t     bias_y = 1)
     {
         return Kargs{p_a,       p_b,       p_c,      p_x_scale, p_w_scale, p_bias,
                      M,         N,         K,        stride_a,  stride_b,  stride_c,
-                     k_batch};
+                     k_batch,   bias_x,    bias_y};
     }
 
     CK_TILE_HOST static constexpr auto GridSize(const Kargs& hargs)
     {
+        // Multi-warp packs kWarpsPerBlock independent warps per workgroup, each
+        // owning one N column, so the N grid shrinks by that factor. The
+        // single-warp default (kWarpsPerBlock==1) leaves this unchanged.
         return dim3(static_cast<uint32_t>(integer_divide_ceil(hargs.M, kMPerWarp)),
-                    static_cast<uint32_t>(integer_divide_ceil(hargs.N, kNPerWarp)),
+                    static_cast<uint32_t>(
+                        integer_divide_ceil(hargs.N, kNPerWarp * Problem::kWarpsPerBlock)),
                     static_cast<uint32_t>(hargs.k_batch));
     }
 
@@ -197,6 +271,34 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         {
             return fail("GemmDecodeUniversalKernel requires N divisible by kNPerWarp.");
         }
+        if constexpr(kStageAInLds)
+        {
+            // The staged A row must fit the LDS budget (see kLdsStageMaxK).
+            if(kargs.K > kLdsStageMaxK)
+            {
+                return fail("GemmDecodeUniversalKernel kStageAInLds requires K <= "
+                            "kLdsStageMaxK (the A row must fit in LDS).");
+            }
+        }
+        if constexpr(Problem::kWarpsPerBlock > 1)
+        {
+            // Each workgroup owns kWarpsPerBlock consecutive columns; require an
+            // exact tiling so no warp's B-row read runs past N (the block-level
+            // tile distribution loads all kWarpsPerBlock rows together, so a
+            // partial last group cannot be masked per-warp on load).
+            if(kargs.N % (kNPerWarp * Problem::kWarpsPerBlock) != 0)
+            {
+                return fail("GemmDecodeUniversalKernel multi-warp path requires N "
+                            "divisible by kNPerWarp * kWarpsPerBlock.");
+            }
+            // The probe keeps the K loop full-length (the point is more warps,
+            // not shorter waves); split-K is intentionally out of scope.
+            if(kargs.k_batch != 1)
+            {
+                return fail("GemmDecodeUniversalKernel multi-warp path requires "
+                            "k_batch == 1.");
+            }
+        }
         // M need not be divisible by kMPerWarp: the kernel launches
         // ceil(M / kMPerWarp) row-blocks, clamps the tail block's A-row loads
         // in-bounds, and masks those rows in the epilogue, so any runtime M is
@@ -208,18 +310,18 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             // the buffer.
             return fail("GemmDecodeUniversalKernel AtomicAdd split-K requires N % 2 == 0.");
         }
-        if constexpr(kIsPerTensor)
+        if constexpr(kIsScaled)
         {
             if(kargs.p_x_scale == nullptr || kargs.p_w_scale == nullptr)
             {
-                return fail("GemmDecodeUniversalKernel PerTensor requires non-null scale "
+                return fail("GemmDecodeUniversalKernel scaled path requires non-null scale "
                             "pointers.");
             }
             // The dot2 K-loop body packs FP8x4 -> two BF16x2 pairs, so each
             // lane's K slice must contain a multiple of 4 FP8 elements.
             if((kVector % 4) != 0)
             {
-                return fail("GemmDecodeUniversalKernel PerTensor FP8 path requires "
+                return fail("GemmDecodeUniversalKernel scaled FP8 path requires "
                             "kVector divisible by 4.");
             }
         }
@@ -230,30 +332,329 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                 return fail("GemmDecodeUniversalKernel kHasBias requires a non-null bias "
                             "pointer.");
             }
+            if constexpr(kBias2D)
+            {
+                // The modular bias index needs strictly-positive extents (the
+                // % operands). bias_y == 1 with bias_x == N reproduces the 1D
+                // bias; any larger period tiles/broadcasts.
+                if(kargs.bias_x <= 0 || kargs.bias_y <= 0)
+                {
+                    return fail("GemmDecodeUniversalKernel kBias2D requires bias_x >= 1 and "
+                                "bias_y >= 1.");
+                }
+            }
         }
         return true;
     }
 
+    // Resolve the bias element index for output element (feat, tok), where
+    // feat is the output-feature index (the column n in SmallM) and tok is the
+    // token index (the row m in SmallM). The flat 1D bias is just bias[feat]
+    // (per-feature, broadcast across tokens); the 2D modular-broadcast bias
+    // tiles over both axes with periods bias_x (feature) and bias_y (token),
+    // matching wvSplitK*'s BIAS[(feat % Bx) + (tok % By) * Bx].
+    CK_TILE_DEVICE static index_t BiasIndex(index_t feat, index_t tok, const Kargs& kargs)
+    {
+        if constexpr(kBias2D)
+        {
+            return (feat % kargs.bias_x) + (tok % kargs.bias_y) * kargs.bias_x;
+        }
+        else
+        {
+            (void)tok;
+            (void)kargs;
+            return feat;
+        }
+    }
+
+    // X-side scale for output row m (the token index in SmallM). PerTensor
+    // broadcasts the single loop-invariant scalar passed in `x_scale_pertensor`;
+    // PerToken gathers p_x_scale[m] (the [M] activation-scale vector). Unscaled
+    // returns the identity. Keeps the two epilogue store sites uniform.
+    CK_TILE_DEVICE static ComputeDataType
+    XScaleForRow(const Kargs& kargs, index_t m, ComputeDataType x_scale_pertensor)
+    {
+        if constexpr(kIsPerToken)
+        {
+            return type_convert<ComputeDataType>(
+                static_cast<const XScaleDataType*>(kargs.p_x_scale)[m]);
+        }
+        else
+        {
+            (void)kargs;
+            (void)m;
+            return x_scale_pertensor;
+        }
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
+    {
+        if constexpr(!kPersistent)
+        {
+            // One workgroup per logical tile: the hardware block / grid ids map
+            // straight onto (m_block, n_block, k_id) and the logical grid is
+            // gridDim itself -- bit-identical to the pre-persistent kernel.
+            RunTile(kargs,
+                    static_cast<index_t>(blockIdx.x),
+                    static_cast<index_t>(blockIdx.y),
+                    static_cast<index_t>(blockIdx.z),
+                    static_cast<index_t>(gridDim.x),
+                    static_cast<index_t>(gridDim.y));
+        }
+        else
+        {
+            // Persistent fat-WG (wvSplitK* "1 WG/CU"): the launcher capped the
+            // grid at the CU count, so each workgroup grid-strides over the full
+            // logical tile space. The logical extents mirror GridSize() exactly
+            // (so the decoded (blk_x, blk_y, blk_z) reproduce the per-tile
+            // launch's blockIdx), and every work item is visited once, so the
+            // result is identical to the per-tile launch. All warps of a WG share
+            // the loop index (derived from the uniform block/grid ids), so any
+            // block_sync_lds() in RunTile is reached by the whole workgroup.
+            const index_t logical_grid_m = integer_divide_ceil(kargs.M, kMPerWarp);
+            const index_t logical_grid_n =
+                integer_divide_ceil(kargs.N, kNPerWarp * Problem::kWarpsPerBlock);
+            const index_t plane    = logical_grid_m * logical_grid_n;
+            const index_t num_work = plane * kargs.k_batch;
+            const index_t stride   = get_grid_size();
+
+            for(index_t w = get_block_id(); w < num_work; w += stride)
+            {
+                const index_t blk_z = w / plane;
+                const index_t rem   = w - blk_z * plane;
+                const index_t blk_y = rem / logical_grid_m;
+                const index_t blk_x = rem - blk_y * logical_grid_m;
+                RunTile(kargs, blk_x, blk_y, blk_z, logical_grid_m, logical_grid_n);
+            }
+        }
+    }
+
+    // Compute one logical tile (blk_x, blk_y, blk_z) of the output. blk_* are
+    // the (m_block, n_block, k_id) indices -- the hardware block ids for the
+    // per-tile launch, or the decoded grid-stride work index for the persistent
+    // launch. logical_grid_m / logical_grid_n are the logical (non-persistent)
+    // grid extents, used by the chiplet swizzle to remap a flat wgid.
+    CK_TILE_DEVICE void RunTile(const Kargs& kargs,
+                                index_t      blk_x,
+                                index_t      blk_y,
+                                index_t      blk_z,
+                                index_t      logical_grid_m,
+                                index_t      logical_grid_n) const
     {
         constexpr index_t kTileN = get_warp_size() * kVector;
 
+        // ---- Multi-warp occupancy path (design doc §15.F probe, "B1-lite") ----
+        // Pack kWarpsPerBlock independent warps into one workgroup so the small
+        // M=1 grid schedules ~kWarpsPerBlock x more wavefronts per CU. The
+        // single-warp WG (64 threads) is capped near 10-28% occupancy by the
+        // workgroups-per-CU limit -- not by registers (M=1 uses ~32 VGPR) -- so
+        // adding warps/WG, without shortening the K loop the way split-K does,
+        // is the lever §15.F flagged as the one untested M=1 occupancy probe.
+        // Warp w in n-group blk_y owns column n = blk_y*WPB + w of
+        // row m = blk_x; A is the shared activation row (warp-replicated
+        // broadcast distribution), B is one row per warp (output distribution,
+        // P0 = warp_id). Restricted to mp=np=1, k_batch=1 by the asserts /
+        // IsSupportedArgument above.
+        if constexpr(Problem::kWarpsPerBlock > 1)
+        {
+            const index_t warp_id = get_warp_id();
+            const index_t m       = blk_x;
+            const index_t n       = blk_y * Problem::kWarpsPerBlock + warp_id;
+
+            if(m >= kargs.M || n >= kargs.N)
+                return;
+
+            // W is per-tensor for every scaled subconfig (one scalar); the X
+            // scale is a per-tensor scalar (PerTensor) or gathered per-row in
+            // the epilogue (PerToken), so only the W scalar is preloaded here.
+            ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
+            ComputeDataType w_scale_val = type_convert<ComputeDataType>(1.0f);
+            if constexpr(kIsScaled)
+            {
+                w_scale_val = type_convert<ComputeDataType>(
+                    *static_cast<const WScaleDataType*>(kargs.p_w_scale));
+                if constexpr(kIsPerTensor)
+                    x_scale_val = type_convert<ComputeDataType>(
+                        *static_cast<const XScaleDataType*>(kargs.p_x_scale));
+            }
+
+            const auto b_view = make_naive_tensor_view<address_space_enum::global,
+                                                        memory_operation_enum::set,
+                                                        kBCoherence>(
+                static_cast<const BDataType*>(kargs.p_b),
+                make_tuple(kargs.N, kargs.K),
+                make_tuple(kargs.stride_b, 1),
+                number<kVector>{},
+                number<1>{});
+
+            // B: kWarpsPerBlock consecutive rows, one per warp (P0 = warp_id).
+            // Shared by both the global and A-in-LDS paths below.
+            auto b_window = make_tile_window(
+                b_view,
+                make_tuple(number<Problem::kWarpsPerBlock>{}, number<kTileN>{}),
+                {blk_y * Problem::kWarpsPerBlock, 0},
+                Policy::template MakeOutputTileDistribution<Problem>());
+
+            ComputeDataType acc      = type_convert<ComputeDataType>(0.0f);
+            const index_t   num_iter = kargs.K / kTileN;
+
+            // dot2 / plain accumulate of one (A-tile, B-tile) pair into acc.
+            auto accumulate = [&](auto& a_tile, auto& b_tile) {
+                if constexpr(Problem::kUseDot2)
+                {
+                    static_for<0, kVector / 2, 1>{}([&](auto ipair) {
+                        uint32_t a_pair;
+                        uint32_t b_pair;
+                        if constexpr(std::is_same_v<ADataType, fp8_t>)
+                        {
+                            constexpr index_t word = ipair.value / 2;
+                            constexpr index_t sel  = ipair.value % 2;
+                            a_pair                 = fp8x2_to_bf16x2<sel>(
+                                a_tile.get_thread_buffer().template get_as<uint32_t>(
+                                    number<word>{}));
+                            b_pair = fp8x2_to_bf16x2<sel>(
+                                b_tile.get_thread_buffer().template get_as<uint32_t>(
+                                    number<word>{}));
+                        }
+                        else
+                        {
+                            a_pair = a_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                            b_pair = b_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                        }
+                        acc = dot2_bf16_packed_add(acc, a_pair, b_pair);
+                    });
+                }
+                else
+                {
+                    static_for<0, kVector, 1>{}([&](auto iv) {
+                        const auto a_val = type_convert<ComputeDataType>(
+                            a_tile.get_thread_buffer().template get_as<ADataType>(iv));
+                        const auto b_val = type_convert<ComputeDataType>(
+                            b_tile.get_thread_buffer().template get_as<BDataType>(iv));
+                        acc += a_val * b_val;
+                    });
+                }
+            };
+
+            // Double-buffered prefetch over an A window (global or LDS-staged)
+            // and the shared B window: issue iter (i+1)'s loads before consuming
+            // iter i, so the next fetch's HBM latency overlaps the current
+            // tile's dot2. The single-warp M=1 kernel runs at MLP=1
+            // (synchronous load->wait->compute) and is latency-bound at low
+            // occupancy (§15.F rocprof: VALU 12%, MemUnitStalled ~0, HBM ~45%
+            // of ideal), so raising memory-level parallelism is the lever that
+            // occupancy alone (kWarpsPerBlock) does not reach.
+            auto run_kloop = [&](auto& a_window) {
+                auto a_cur = load_tile(a_window);
+                auto b_cur = load_tile(b_window);
+                for(index_t i = 0; i < num_iter; ++i)
+                {
+                    move_tile_window(a_window, {0, kTileN});
+                    move_tile_window(b_window, {0, kTileN});
+                    if(i + 1 < num_iter)
+                    {
+                        auto a_next = load_tile(a_window);
+                        auto b_next = load_tile(b_window);
+                        accumulate(a_cur, b_cur);
+                        a_cur = a_next;
+                        b_cur = b_next;
+                    }
+                    else
+                    {
+                        accumulate(a_cur, b_cur);
+                    }
+                }
+            };
+
+            if constexpr(kStageAInLds)
+            {
+                // wvSplitK* A-in-LDS: under the broadcast distribution every
+                // warp would re-read the same A row from global each K-iter.
+                // Stage row m into LDS once (all WG threads cooperate, scalar
+                // strided copy), then stream it from LDS. Bounded by
+                // kLdsStageMaxK (IsSupportedArgument rejects a larger K) -- the
+                // analog of wvSplitKQ's "A fits in LDS" _sml_ launch condition.
+                __shared__ ADataType a_smem[kLdsStageMaxK];
+                const auto* a_global = static_cast<const ADataType*>(kargs.p_a) +
+                                       static_cast<index_t>(m) * kargs.stride_a;
+                if constexpr(kPersistent)
+                {
+                    // Persistent reuse: a prior grid-stride iteration's warps may
+                    // still be streaming this WG's a_smem when we loop back to
+                    // restage. Fence the WAR hazard before overwriting it. (The
+                    // whole workgroup runs the same tile sequence, so the barrier
+                    // is uniform.)
+                    block_sync_lds();
+                }
+                for(index_t c = static_cast<index_t>(threadIdx.x); c < kargs.K;
+                    c += static_cast<index_t>(kBlockSize))
+                {
+                    a_smem[c] = a_global[c];
+                }
+                block_sync_lds();
+
+                const auto a_lds_view = make_naive_tensor_view<address_space_enum::lds>(
+                    a_smem,
+                    make_tuple(static_cast<index_t>(1), kargs.K),
+                    make_tuple(kargs.K, static_cast<index_t>(1)),
+                    number<kVector>{},
+                    number<1>{});
+                auto a_window = make_tile_window(
+                    a_lds_view,
+                    make_tuple(number<1>{}, number<kTileN>{}),
+                    {0, 0},
+                    Policy::template MakeXBroadcastTileDistribution<Problem>());
+                run_kloop(a_window);
+            }
+            else
+            {
+                // A: the single shared row m, read from global and broadcast
+                // (replicated) to every warp.
+                const auto a_view = make_naive_tensor_view<address_space_enum::global>(
+                    static_cast<const ADataType*>(kargs.p_a),
+                    make_tuple(kargs.M, kargs.K),
+                    make_tuple(kargs.stride_a, 1),
+                    number<kVector>{},
+                    number<1>{});
+                auto a_window = make_tile_window(
+                    a_view,
+                    make_tuple(number<1>{}, number<kTileN>{}),
+                    {m, 0},
+                    Policy::template MakeXBroadcastTileDistribution<Problem>());
+                run_kloop(a_window);
+            }
+
+            acc = wavefront_reduce_sum(acc);
+            if(get_lane_id() == 0)
+            {
+                if constexpr(kIsScaled)
+                    acc = acc * XScaleForRow(kargs, m, x_scale_val) * w_scale_val;
+                if constexpr(kHasBias)
+                {
+                    const auto* p_bias = static_cast<const CDataType*>(kargs.p_bias);
+                    acc += type_convert<ComputeDataType>(p_bias[BiasIndex(n, m, kargs)]);
+                }
+                auto* p_c                       = static_cast<CDataType*>(kargs.p_c);
+                p_c[m * kargs.stride_c + n] = type_convert<CDataType>(acc);
+            }
+            return;
+        }
+
         // (m_block, n_block) recovery. With the chiplet-swizzle path enabled,
-        // the hardware (blockIdx.x, blockIdx.y) pair is treated as a flat
-        // wgid, remapped through the XCD-aware permutation, and then
-        // unflattened so consecutive logical wgids land on the same XCD's
-        // L2 slice. k_id stays on blockIdx.z and is *not* part of the
+        // the (blk_x, blk_y) tile pair is treated as a flat wgid, remapped
+        // through the XCD-aware permutation, and then unflattened so
+        // consecutive logical wgids land on the same XCD's L2 slice. The
+        // logical grid extents (not gridDim, which is the CU count under the
+        // persistent launch) drive the unflatten. k_id = blk_z is *not* part of the
         // remap: each split-K shard has its own contiguous (m_block, n_block)
         // sweep and can independently benefit from the chunked layout.
         index_t m_block;
         index_t n_block;
         if constexpr(Problem::kChipletSwizzle)
         {
-            const index_t num_m_blocks = static_cast<index_t>(gridDim.x);
-            const index_t num_n_blocks = static_cast<index_t>(gridDim.y);
-            const index_t hw_wgid =
-                static_cast<index_t>(blockIdx.y) * num_m_blocks +
-                static_cast<index_t>(blockIdx.x);
+            const index_t num_m_blocks = logical_grid_m;
+            const index_t num_n_blocks = logical_grid_n;
+            const index_t hw_wgid      = blk_y * num_m_blocks + blk_x;
             const index_t logical_wgid =
                 GemmDecodeChipletSwizzle::remap_wgid(hw_wgid,
                                                     num_m_blocks * num_n_blocks,
@@ -264,12 +665,12 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         }
         else
         {
-            m_block = static_cast<index_t>(blockIdx.x);
-            n_block = static_cast<index_t>(blockIdx.y);
+            m_block = blk_x;
+            n_block = blk_y;
         }
         const index_t m_base  = m_block * kMPerWarp;
         const index_t n_base  = n_block * kNPerWarp;
-        const index_t k_id    = static_cast<index_t>(blockIdx.z);
+        const index_t k_id    = blk_z;
         const index_t k_batch = kargs.k_batch;
 
         if(m_base >= kargs.M || n_base >= kargs.N)
@@ -287,15 +688,18 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         const index_t k_offset       = iter_start * kTileN;
         const index_t num_iter       = my_iter;
 
-        // Loop-invariant scale broadcast: PerTensor reads two FP32 scalars.
+        // Loop-invariant scale broadcast. W is per-tensor (one scalar) for every
+        // scaled subconfig; PerTensor also reads a single X scalar, while
+        // PerToken gathers X per output row (x_scale[m]) in the epilogue below.
         ComputeDataType x_scale_val = type_convert<ComputeDataType>(1.0f);
         ComputeDataType w_scale_val = type_convert<ComputeDataType>(1.0f);
-        if constexpr(kIsPerTensor)
+        if constexpr(kIsScaled)
         {
-            x_scale_val = type_convert<ComputeDataType>(
-                *static_cast<const XScaleDataType*>(kargs.p_x_scale));
             w_scale_val = type_convert<ComputeDataType>(
                 *static_cast<const WScaleDataType*>(kargs.p_w_scale));
+            if constexpr(kIsPerTensor)
+                x_scale_val = type_convert<ComputeDataType>(
+                    *static_cast<const XScaleDataType*>(kargs.p_x_scale));
         }
 
         const auto a_view = make_naive_tensor_view<address_space_enum::global>(
@@ -304,7 +708,9 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             make_tuple(kargs.stride_a, 1),
             number<kVector>{},
             number<1>{});
-        const auto b_view = make_naive_tensor_view<address_space_enum::global>(
+        const auto b_view = make_naive_tensor_view<address_space_enum::global,
+                                                    memory_operation_enum::set,
+                                                    kBCoherence>(
             static_cast<const BDataType*>(kargs.p_b),
             make_tuple(kargs.N, kargs.K),
             make_tuple(kargs.stride_b, 1),
@@ -474,10 +880,12 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                     constexpr index_t acc_idx = jm.value * kNPerWarp + jn.value;
                     ComputeDataType out_acc   = acc[number<acc_idx>{}];
 
-                    // PerTensor: fold the two scalar scales into the reduced acc.
-                    if constexpr(kIsPerTensor)
+                    // Fold the scales into the reduced acc: PerTensor uses the
+                    // two preloaded scalars; PerToken uses x_scale[m_row] (this
+                    // row's token scale) * the per-tensor w_scale.
+                    if constexpr(kIsScaled)
                     {
-                        out_acc = out_acc * x_scale_val * w_scale_val;
+                        out_acc = out_acc * XScaleForRow(kargs, m_row, x_scale_val) * w_scale_val;
                     }
 
                     // Bias: add bias[n] to the first split-K shard only so the
@@ -489,8 +897,8 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                         {
                             const auto* p_bias =
                                 static_cast<const CDataType*>(kargs.p_bias);
-                            const auto bias_val =
-                                type_convert<ComputeDataType>(p_bias[n]);
+                            const auto bias_val = type_convert<ComputeDataType>(
+                                p_bias[BiasIndex(n, m_row, kargs)]);
                             out_acc += bias_val;
                         }
                     }

@@ -3,12 +3,16 @@
 
 #pragma once
 
-// One-shot instantiation header for the P0 default tile config:
-// BF16/BF16 unscaled SmallM with kVector=8, kMPerWarp=kNPerWarp=1.
-// In P1+ this header is generated per-config by
-// `gemm_decode_instance_builder.py` driven from `configs/default_config.json`;
-// during P0 the sweep matrix has a single entry so we keep the file as a
-// hand-written reference of what the codegen will emit.
+// Hand-written instance header for the P3 FP8 PerToken SmallM tile config:
+// FP8/FP8 inputs, BF16 output, FP32 PerToken X scale ([M] activation vector) +
+// PerTensor W scale (one scalar), kVector=16, kUseDot2=true,
+// kMPerWarp=kNPerWarp=1, kHasBias=false.
+//
+// Mirrors gemm_decode_universal_fp8_smallm_pertensor.hpp; the only difference is
+// the X scale layout (PerToken vs PerTensor), which moves the X-scale read from
+// a loop-invariant scalar to a per-row gather in the epilogue (the K-loop is
+// identical). This is the wvSplitKQ-style per-token activation-quant member of
+// the family, so gemm_decode subsumes the per-token decode path too.
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm_decode/gemm_decode.hpp"
@@ -16,16 +20,13 @@
 #define GEMM_DECODE_UNIVERSAL_KERNEL_DEFINED 1
 
 // Sweep knobs the codegen / benchmark driver overrides per config via -D.
-// Defaults reproduce the original single P0 instance (kMPerWarp=kNPerWarp=1,
-// kVector=8, no swizzle).
+// kVector is fixed by the dot2 contract on this path (16 for the FP8 dot2
+// K-loop, 8 for the BF16 fallback), so it is not a -D knob here.
 #ifndef GEMM_DECODE_M_PER_WARP
 #define GEMM_DECODE_M_PER_WARP 1
 #endif
 #ifndef GEMM_DECODE_N_PER_WARP
 #define GEMM_DECODE_N_PER_WARP 1
-#endif
-#ifndef GEMM_DECODE_VECTOR
-#define GEMM_DECODE_VECTOR 8
 #endif
 #ifndef GEMM_DECODE_CHIPLET_SWIZZLE
 #define GEMM_DECODE_CHIPLET_SWIZZLE false
@@ -36,8 +37,8 @@
 #ifndef GEMM_DECODE_CHIPLET_CHUNK
 #define GEMM_DECODE_CHIPLET_CHUNK 8
 #endif
-// P0 wvSplitKQ-recipe knobs (default off -> single-warp, no recipe). The
-// builder overrides these for the multi-warp / fat-WG sweep rows.
+// P0 wvSplitKQ-recipe knobs (default off). The builder overrides these for the
+// multi-warp / fat-WG sweep rows.
 #ifndef GEMM_DECODE_WARPS_PER_BLOCK
 #define GEMM_DECODE_WARPS_PER_BLOCK 1
 #endif
@@ -51,9 +52,17 @@
 #define GEMM_DECODE_PERSISTENT false
 #endif
 
+#ifdef CK_TILE_USE_OCP_FP8
+using SelectedADataType = ck_tile::fp8_t;
+using SelectedBDataType = ck_tile::fp8_t;
+using SelectedCDataType = ck_tile::bf16_t;
+#else
+// Build is configured without OCP FP8; fall back to BF16 so the executable
+// still links. Running with -DCK_USE_OCP_FP8=ON re-routes to the FP8 path.
 using SelectedADataType = ck_tile::bf16_t;
 using SelectedBDataType = ck_tile::bf16_t;
 using SelectedCDataType = ck_tile::bf16_t;
+#endif
 
 using SelectedGemmDecodeProblem =
     ck_tile::GemmDecodeProblem<SelectedADataType,
@@ -62,10 +71,17 @@ using SelectedGemmDecodeProblem =
                                SelectedCDataType,
                                /*XScaleDataType=*/float,
                                /*WScaleDataType=*/float,
+#ifdef CK_TILE_USE_OCP_FP8
+                               ck_tile::GemmDecodeScaleLayout::PerToken,
+                               ck_tile::GemmDecodeScaleLayout::PerTensor,
+                               /*kVector=*/16,
+                               /*kUseDot2=*/true,
+#else
                                /*XScaleLayout=*/void,
                                /*WScaleLayout=*/void,
-                               /*kVector=*/GEMM_DECODE_VECTOR,
+                               /*kVector=*/8,
                                /*kUseDot2=*/false,
+#endif
                                /*kUsePackedFp32=*/false,
                                /*kMPerWarp=*/GEMM_DECODE_M_PER_WARP,
                                /*kNPerWarp=*/GEMM_DECODE_N_PER_WARP,

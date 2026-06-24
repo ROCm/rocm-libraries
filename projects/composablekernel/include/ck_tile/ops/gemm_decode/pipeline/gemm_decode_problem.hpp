@@ -119,7 +119,37 @@ template <typename ADataType_,
           // gfx950 / MI355X chiplet count.
           bool    kChipletSwizzle_                = false,
           index_t kChipletNumXcds_                = 8,
-          index_t kChipletChunkSize_              = 8>
+          index_t kChipletChunkSize_              = 8,
+          // 2D modular-broadcast bias (wvSplitK* Bx/By indirection). When
+          // true, the bias epilogue indexes
+          //   bias[(feat % bias_x) + (tok % bias_y) * bias_x]
+          // using the runtime bias_x / bias_y extents carried in Kargs, where
+          // feat is the output-feature index and tok is the token index.
+          // When false (default) the bias is the flat 1D vector indexed by
+          // feat, so the common path stays branch-free. Requires kHasBias.
+          bool    kBias2D_                        = false,
+          // Stage the shared activation row in LDS (wvSplitK* A-in-LDS /
+          // WD-OPT-21). Only meaningful in the multi-warp path, where every
+          // warp would otherwise re-read the same A row from global each
+          // K-iteration; with this flag the workgroup loads row m into LDS
+          // once and all warps stream it from LDS. Requires kWarpsPerBlock > 1
+          // and kMPerWarp == kNPerWarp == 1.
+          bool    kStageAInLds_                   = false,
+          // Mark the B (weight) global loads non-temporal (wvSplitK* streams B
+          // with cache-bypassing loads). B is the dominant ~N*K traffic and is
+          // read once per element with no temporal reuse, so a non-temporal
+          // hint keeps it from evicting the reused A / scales from cache. Pure
+          // performance hint -- correctness is unchanged.
+          bool    kStreamB_                       = false,
+          // Persistent fat-WG launch (wvSplitK* "1 WG/CU" geometry). When true
+          // the launcher caps the grid at the CU count and each workgroup
+          // grid-strides over the logical (m_block, n_block, k_id) tile space
+          // instead of one workgroup per tile. Pairs with kWarpsPerBlock > 1 so
+          // a single fat workgroup owns a CU and sweeps many output columns,
+          // amortizing launch/setup and keeping A resident -- the launch-shape
+          // half of wvSplitKQ's recipe. Pure scheduling change; each tile is
+          // still computed exactly once, so results are unchanged.
+          bool    kPersistent_                    = false>
 struct GemmDecodeProblem
 {
     using ADataType        = remove_cvref_t<ADataType_>;
@@ -138,6 +168,10 @@ struct GemmDecodeProblem
     static constexpr index_t kNPerWarp           = kNPerWarp_;
     static constexpr GemmDecodeOutputAxis kOutputAxis = kOutputAxis_;
     static constexpr bool    kHasBias            = kHasBias_;
+    static constexpr bool    kBias2D             = kBias2D_;
+    static constexpr bool    kStageAInLds        = kStageAInLds_;
+    static constexpr bool    kStreamB            = kStreamB_;
+    static constexpr bool    kPersistent         = kPersistent_;
     static constexpr bool    kBPreshuffle        = kBPreshuffle_;
 
     static constexpr bool    kChipletSwizzle     = kChipletSwizzle_;
