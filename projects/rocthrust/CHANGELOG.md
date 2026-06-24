@@ -3,7 +3,7 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## Since last release ROCm 7.13
+## rocThrust 4.5.0 for ROCm 7.14
 
 ### Added
 
@@ -13,6 +13,10 @@ Documentation for rocThrust available at
 ### Changed
 
 * rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
 
 ## Since last release ROCm 7.12
 
