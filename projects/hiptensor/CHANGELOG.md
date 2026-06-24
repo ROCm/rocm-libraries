@@ -2,12 +2,14 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## Since last release ROCm 7.13
+## hipTensor 2.3.0 for ROCm 7.14
 
 ### Added
 
 * Added support for new GPU target gfx1250.
 * Added YAML-driven CTest test filter standardization, applying `quick`/`standard`/`comprehensive`/`full` tier labels to the installed test tree so tests can be run by tier with `ctest -L <tier>`.
+* Added hipTensor to the TheRock build system, enabling source builds, artifact distribution, and CI testing on both Linux and Windows.
+* Added native Linux packages with HPC SDK metapackages: `amdrocm-hiptensor` (runtime), `amdrocm-hiptensor-devel` (headers and CMake config), and `amdrocm-hiptensor-test` (CTest binaries).
 
 ### Optimized
 
