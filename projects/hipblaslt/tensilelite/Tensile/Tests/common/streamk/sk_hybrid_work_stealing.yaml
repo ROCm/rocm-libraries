@@ -6,7 +6,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -30,11 +30,11 @@ GlobalParameters:
 # runs for both stealing-off and stealing-on across both hybrid sub-paths.
 .SkHybridCommonFork: &sk_hybrid_common_fork
   - KernelLanguage: ["Assembly"]
-  - PrefetchLocalRead: [True]
+  - PrefetchLocalRead: [1]
   - 1LDSBuffer: [1]
   - ExpandPointerSwap: [False]
   - GlobalSplitU: [0]
-  - MIArchVgpr: [0]
+  - MIArchVgpr: [False]
   - PrefetchGlobalRead: [2]
   - ScheduleIterAlg: [3]
   - SourceSwap: [True]
