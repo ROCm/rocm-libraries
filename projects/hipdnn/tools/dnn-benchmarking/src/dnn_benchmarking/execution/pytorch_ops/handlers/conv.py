@@ -117,9 +117,7 @@ def _conv_forward(
         )
     # Asymmetric padding can't be expressed via conv padding; pre-pad explicitly.
     padded_x = _pad_conv_input(x, pre, post)
-    return conv_fn(
-        padded_x, w, stride=stride, dilation=dilation, groups=groups
-    )
+    return conv_fn(padded_x, w, stride=stride, dilation=dilation, groups=groups)
 
 
 def _conv_padding_is_symmetric(node: Dict[str, Any]) -> bool:

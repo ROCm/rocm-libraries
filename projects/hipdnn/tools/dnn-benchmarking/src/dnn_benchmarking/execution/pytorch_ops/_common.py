@@ -120,8 +120,10 @@ def _store_tensor(
     # every iteration. Coerce only the declared dtype/device, which is a no-op
     # (no copy, no kernel) when the op already produced them -- the common case.
     existing = tensors.get(uid)
-    if existing is not None and existing is not value and (
-        value.dtype != existing.dtype or value.device != existing.device
+    if (
+        existing is not None
+        and existing is not value
+        and (value.dtype != existing.dtype or value.device != existing.device)
     ):
         value = value.to(dtype=existing.dtype, device=existing.device)
     tensors[uid] = value
