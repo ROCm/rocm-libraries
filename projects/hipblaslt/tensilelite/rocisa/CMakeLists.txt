@@ -123,7 +123,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     )
 
     # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.
-    if(NOT TARGET stinkytofu)
+    if(NOT TARGET stinkytofu::stinkytofu)
         find_package(stinkytofu QUIET)
         if(NOT stinkytofu_FOUND)
             set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
@@ -138,7 +138,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     endif()
 
     if(NOT DEFINED _stinkytofu_from_subdirectory)
-        get_target_property(_st_imported stinkytofu IMPORTED)
+        get_target_property(_st_imported stinkytofu::stinkytofu IMPORTED)
         if(_st_imported)
             set(_stinkytofu_from_subdirectory FALSE)
         else()
@@ -147,24 +147,39 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     endif()
 
     target_link_libraries(_rocisa PUBLIC roc::origami)
-    target_link_libraries(_rocisa PRIVATE hip::host stinkytofu)
+    target_link_libraries(_rocisa PRIVATE hip::host stinkytofu::stinkytofu)
+
+    # rocisa<->stinkytofu conversion glue. These sources live in the stinkytofu
+    # source tree but are rocisa-side bindings (they include rocisa headers and
+    # define init_stinkytofu), so they compile into _rocisa, not libstinkytofu.
+    # rocisa owns them directly here rather than relying on stinkytofu to inject
+    # them, so the de-bundled (find_package) build links them too.
+    set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+    target_sources(_rocisa PRIVATE
+        "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
+        "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
+    )
+
     if(_stinkytofu_from_subdirectory)
         # Source-built stinkytofu via add_subdirectory: generated headers are in
         # the stinkytofu/ subdirectory of the binary dir.
         target_include_directories(_rocisa PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
-        set(_st_build_rpath "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu")
-    else()
-        # Installed stinkytofu: include dirs come from the exported target.
-        get_target_property(_st_loc stinkytofu IMPORTED_LOCATION)
-        if(_st_loc)
-            cmake_path(GET _st_loc PARENT_PATH _st_build_rpath)
-        else()
-            set(_st_build_rpath "")
-        endif()
     endif()
+    # _build_info.py is intentionally NOT in install() rules for production
+    # wheels/packages, acting as the source-build sentinel. Dev/editable installs
+    # pass -DROCISA_INCLUDE_BUILD_INFO=ON to include it; that flag also marks a
+    # dev build, where libstinkytofu lives in a temp install prefix off the
+    # loader's default search path.
+    option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
+
+    # Directory containing libstinkytofu, resolved by CMake for the active
+    # config. $<TARGET_FILE_DIR:...> handles both the add_subdirectory target
+    # (build output dir) and the imported package target (IMPORTED_LOCATION_<CONFIG>)
+    # without hand-matching configs.
+    set(_st_lib_dir "$<TARGET_FILE_DIR:stinkytofu::stinkytofu>")
     set_target_properties(_rocisa PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocisa"
-        BUILD_RPATH "${_st_build_rpath}"
+        BUILD_RPATH "${_st_lib_dir}"
     )
     if(_stinkytofu_from_subdirectory)
         # Source-built sibling: no installed libstinkytofu exists, so the wheel carries
@@ -175,28 +190,40 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         if(WIN32)
             add_custom_command(TARGET _rocisa POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:stinkytofu>
+                    $<TARGET_FILE:stinkytofu::stinkytofu>
                     $<TARGET_FILE_DIR:_rocisa>
             )
         endif()
+    elseif(ROCISA_INCLUDE_BUILD_INFO)
+        # Dev/editable find_package build: libstinkytofu is installed to a temp
+        # prefix off the loader's default search path, so bake its dir into the
+        # install RPATH from the link line. Gated on the dev-build signal so
+        # released ROCm builds stay RPATH-free and rely on libstinkytofu being
+        # resident in rocm/lib.
+        set_target_properties(_rocisa PROPERTIES INSTALL_RPATH_USE_LINK_PATH ON)
     endif()
-    # Installed stinkytofu is a standard ROCm library on the loader's search path (like
-    # libyaml behind PyYAML); _rocisa's DT_NEEDED resolves it from there, so no
-    # wheel-local copy or RPATH is needed in that case.
+    # In a released build, installed stinkytofu is a standard ROCm library on the
+    # loader's search path (like libyaml behind PyYAML); _rocisa's DT_NEEDED
+    # resolves it from there, so no wheel-local copy or RPATH is needed.
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/__init__.py"
         COPYONLY
     )
+    # STINKYTOFU_ROOT_DIR feeds @STINKYTOFU_ROOT_DIR@ in _build_info.py (the
+    # staleness check scans stinkytofu sources too, since the conversion glue is
+    # compiled into _rocisa). It is set via PARENT_SCOPE only in the
+    # add_subdirectory build; in the de-bundled find_package build it is unset,
+    # which would leave the path empty and make the check scan the CWD. Point it
+    # at the real stinkytofu source tree.
+    if(NOT STINKYTOFU_ROOT_DIR)
+        cmake_path(ABSOLUTE_PATH _stinkytofu_src_dir NORMALIZE OUTPUT_VARIABLE STINKYTOFU_ROOT_DIR)
+    endif()
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"
         "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py"
         @ONLY
     )
-    # _build_info.py is intentionally NOT in install() rules so it is absent
-    # from wheels and pre-built packages, acting as the source-build sentinel.
-    # For editable/dev installs, pass -DROCISA_INCLUDE_BUILD_INFO=ON to include it.
-    option(ROCISA_INCLUDE_BUILD_INFO "Install _build_info.py for staleness detection" OFF)
     if(ROCISA_INCLUDE_BUILD_INFO)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_build_info.py" DESTINATION rocisa)
     endif()
@@ -207,9 +234,9 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(TARGETS _rocisa DESTINATION rocisa)
         if(_stinkytofu_from_subdirectory)
             # Source-built: vendor libstinkytofu into the wheel — no installed copy exists.
-            install(FILES $<TARGET_FILE:stinkytofu> DESTINATION rocisa)
+            install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             if(NOT WIN32)
-                install(FILES $<TARGET_SONAME_FILE:stinkytofu> DESTINATION rocisa)
+                install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             endif()
         endif()
         # Installed stinkytofu ships in its own ROCm package; it is not bundled here.
