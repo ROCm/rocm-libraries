@@ -1181,11 +1181,15 @@ SOrSaveExecB64 = _make_scalar_unary_class("SOrSaveExecB64", "s_or_saveexec_b64",
 # (dst, src0, src1) or create specialized ones for ternary / vector-shift.
 
 
-def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
+                        shift_position: int = 0):
     """Factory for ternary instruction shim classes (dst, src0, src1, src2).
 
     Also accepts native rocisa shift-ternary API ``(dst, shiftHex, src0, src1)``
-    where ``shiftHex`` maps to logical ``src0``.
+    where ``shiftHex`` is placed at ISA operand position ``shift_position``:
+      - 0: srcs = [shiftHex, src0, src1]  (default, legacy)
+      - 1: srcs = [src0, shiftHex, src1]  (v_lshl_add, v_lshl_or)
+      - 2: srcs = [src0, src1, shiftHex]  (v_add_lshl)
     """
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
@@ -1194,7 +1198,12 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType"):
                  vop3: Any = None, **kw):
         _ = kw
         if shiftHex is not None:
-            s0, s1, s2 = shiftHex, src0, src1
+            if shift_position == 1:
+                s0, s1, s2 = src0, shiftHex, src1
+            elif shift_position == 2:
+                s0, s1, s2 = src0, src1, shiftHex
+            else:
+                s0, s1, s2 = shiftHex, src0, src1
         else:
             s0, s1, s2 = src0, src1, src2
         CommonInstruction.__init__(
@@ -2805,17 +2814,17 @@ VLShiftLeftB16 = _make_vector_shift_class("VLShiftLeftB16", "v_lshlrev_b16", Ins
 # VLShiftRightB32 — real class (see Vector ALU section above)
 # VLShiftLeftB64 — real class (see Vector ALU section above)
 # VLShiftRightB64 — real class (see Vector ALU section above)
-_VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32)
+_VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32, shift_position=1)
 # logicalIR: VAShiftRightI32
 VAShiftRightI32 = _make_vector_shift_class("VAShiftRightI32", "v_ashrrev_i32", InstType.INST_I32)
 # logicalIR: VLShiftLeftOrB32
-VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32)
-_VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32)
+VLShiftLeftOrB32 = _make_ternary_class("VLShiftLeftOrB32", "v_lshl_or_b32", InstType.INST_B32, shift_position=1)
+_VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32, shift_position=2)
 # logicalIR: VAddLShiftLeftU32 (composite)
-VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32)
-_VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32)
+VAddLShiftLeftU32 = _make_ternary_class("VAddLShiftLeftU32", "v_add_lshl_u32", InstType.INST_U32, shift_position=2)
+_VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32, shift_position=1)
 # logicalIR: VLShiftLeftAddU32 (composite)
-VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32)
+VLShiftLeftAddU32 = _make_ternary_class("VLShiftLeftAddU32", "v_lshl_add_u32", InstType.INST_U32, shift_position=1)
 # logicalIR: VMovB32  -- real class defined at the bottom of this file
 # (after ``CommonInstruction`` / ``_to_stinky_register`` are in scope).
 # Intentionally NOT declared here so ``from rocisa.instruction import

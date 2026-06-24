@@ -1044,8 +1044,8 @@ def vectorStaticMultiplyAdd(product, operand, multiplier, accumulator,
                                comment=dComment))
         else:
             module.add(VLShiftLeftAddU32(
-                dst=product, src0=multiplier_log2, src1=operand,
-                src2=accumulator, comment=dComment))
+                dst=product, shiftHex=multiplier_log2, src0=operand,
+                src1=accumulator, comment=dComment))
     else:
         if -16 <= multiplier <= 64:
             module.add(VMadU32U24(dst=product, src0=multiplier, src1=operand,
@@ -1113,7 +1113,7 @@ def vectorAddMultiplyBpe(dst, src0, src1, bpe, comment=""):
             module.addCommentAlign(comment + " (bpe is 1, no mul)")
         else:
             module.add(VAddLShiftLeftU32(
-                dst=dstVgpr, src0=bpe_log2, src1=src0Vgpr, src2=src1Vgpr,
+                dst=dstVgpr, shiftHex=bpe_log2, src0=src0Vgpr, src1=src1Vgpr,
                 comment=mcomment))
     return module
 
