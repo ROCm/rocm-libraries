@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <functional>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
@@ -90,6 +91,7 @@ public:
     // forward declarations
     struct LinearIndex;
     struct CompositeIndex;
+    struct RaggedCompositeIndex;
 
     using iterator_category = std::forward_iterator_tag;
     using value_type = std::conditional_t<IsConst, const void*, void*>;
@@ -100,7 +102,7 @@ public:
     using TensorType = std::conditional_t<IsConst,
                                           std::reference_wrapper<const ITensor>,
                                           std::reference_wrapper<ITensor>>;
-    using IndexType = std::variant<LinearIndex, CompositeIndex>;
+    using IndexType = std::variant<LinearIndex, CompositeIndex, RaggedCompositeIndex>;
 
     ITensorIterator() = default;
 
@@ -290,6 +292,169 @@ public:
         TensorType tensor;
     };
 
+    /**
+     * @brief Iterator index for ragged tensors.
+     *
+     * Walks each batch's full per-batch range `[ragged_offset[b], ragged_offset[b+1])`
+     * in turn, visiting exactly `ragged_offset[B]` physical elements. The B+1
+     * `rowOffsets` are snapshotted once (at `begin()`/`end()`) so traversal performs
+     * no per-step aux reads.
+     *
+     * The variable (sequence) axis is identified from the stride pattern rather than
+     * hardcoded: physical memory is always BSHD, so batch (logical index 0) carries
+     * the largest stride and the sequence axis carries the next-largest. This makes
+     * the sequence axis logical index 1 for BSHD and logical index 2 for BHSD without
+     * special-casing. See ALMIOPEN-2124 implementation plan §2.2.
+     */
+    struct RaggedCompositeIndex
+    {
+        RaggedCompositeIndex(TensorType tensor, std::vector<int64_t> rowOffsets, bool isEnd)
+            : indices(tensor.get().dims().size(), 0)
+            , rowOffsets(std::move(rowOffsets))
+            , tensor(tensor)
+        {
+            const auto& strides = this->tensor.get().strides();
+
+            // Sequence axis == the non-batch axis with the largest stride
+            // (== H*D in physical BSHD, for both BSHD and BHSD logical orders).
+            seqAxis = 1;
+            for(int j = 2; j < static_cast<int>(strides.size()); ++j)
+            {
+                if(strides[static_cast<size_t>(j)] > strides[static_cast<size_t>(seqAxis)])
+                {
+                    seqAxis = j;
+                }
+            }
+            seqStride = strides.empty() ? int64_t{1} : strides[static_cast<size_t>(seqAxis)];
+
+#ifndef NDEBUG
+            validatePreconditions();
+#endif
+
+            const int64_t batchCount = numBatches();
+            if(isEnd)
+            {
+                if(!indices.empty())
+                {
+                    indices[0] = batchCount;
+                }
+            }
+            else
+            {
+                // Skip leading empty batches so begin() lands on a real element.
+                while(indices[0] < batchCount && seqExtent(indices[0]) == 0)
+                {
+                    ++indices[0];
+                }
+            }
+        }
+
+        RaggedCompositeIndex(const RaggedCompositeIndex& other) = default;
+
+        RaggedCompositeIndex(RaggedCompositeIndex&&) = default;
+
+        RaggedCompositeIndex& operator=(const RaggedCompositeIndex& other) = default;
+
+        RaggedCompositeIndex& operator=(RaggedCompositeIndex&& other) = default;
+
+        RaggedCompositeIndex& operator++()
+        {
+            const auto& dims = tensor.get().dims();
+
+            // Rightmost-first carry over the non-batch axes. The sequence axis is
+            // bounded by the current batch's per-batch extent; every other non-batch
+            // axis ranges fully over its dims().
+            for(int dim = static_cast<int>(dims.size()) - 1; dim >= 1; --dim)
+            {
+                const auto dimIdx = static_cast<size_t>(dim);
+                ++indices[dimIdx];
+                const int64_t bound = (dim == seqAxis) ? seqExtent(indices[0]) : dims[dimIdx];
+                if(indices[dimIdx] < bound)
+                {
+                    return *this;
+                }
+                indices[dimIdx] = 0;
+            }
+
+            // Carry into the batch axis, skipping empty batches.
+            const int64_t batchCount = numBatches();
+            do
+            {
+                ++indices[0];
+            } while(indices[0] < batchCount && seqExtent(indices[0]) == 0);
+            return *this;
+        }
+
+        RaggedCompositeIndex operator++(int)
+        {
+            auto temp{*this};
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(const RaggedCompositeIndex& other) const
+        {
+            return indices == other.indices && &tensor.get() == &other.tensor.get();
+        }
+
+        bool operator!=(const RaggedCompositeIndex& other) const
+        {
+            return !((*this) == other);
+        }
+
+        bool isOutOfBounds() const
+        {
+            return indices.empty() || indices[0] == numBatches();
+        }
+
+        int64_t getValue() const
+        {
+            return tensor.get().getIndex(indices);
+        }
+
+        std::vector<int64_t> indices;
+        std::vector<int64_t> rowOffsets;
+        TensorType tensor;
+        int seqAxis{1};
+        int64_t seqStride{1};
+
+    private:
+        int64_t numBatches() const
+        {
+            return static_cast<int64_t>(rowOffsets.size()) - 1;
+        }
+
+        // Per-batch sequence extent: number of sequence rows in batch b.
+        int64_t seqExtent(int64_t b) const
+        {
+            if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+            {
+                return 0;
+            }
+            const auto bIdx = static_cast<size_t>(b);
+            return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+        }
+
+#ifndef NDEBUG
+        void validatePreconditions() const
+        {
+            const auto& dims = tensor.get().dims();
+            const int64_t batchCount = numBatches();
+            assert(seqStride > 0 && "sequence stride must be positive");
+            for(int64_t b = 0; b < batchCount; ++b)
+            {
+                const auto bIdx = static_cast<size_t>(b);
+                assert(rowOffsets[bIdx + 1] >= rowOffsets[bIdx]
+                       && "ragged offsets must be monotonic non-decreasing");
+                assert((rowOffsets[bIdx + 1] - rowOffsets[bIdx]) % seqStride == 0
+                       && "per-batch block must be a whole number of sequence rows");
+                assert(seqExtent(b) <= dims[static_cast<size_t>(seqAxis)]
+                       && "per-batch sequence extent must not exceed S_max");
+            }
+        }
+#endif
+    };
+
 private:
     void throwIfOutOfBounds(const std::string& reason) const
     {
@@ -304,6 +469,13 @@ private:
         if(tensor.get().isPacked())
         {
             return LinearIndex(tensor, isEnd);
+        }
+        // Ragged tensors expose a non-empty B+1 offset table; dense strided tensors
+        // return {} and fall through to the regular CompositeIndex.
+        auto rowOffsets = tensor.get().raggedRowOffsets();
+        if(!rowOffsets.empty())
+        {
+            return RaggedCompositeIndex(tensor, std::move(rowOffsets), isEnd);
         }
         return CompositeIndex(tensor, isEnd);
     }
@@ -356,8 +528,24 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return throwIfOutOfBounds(
-            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
+        return throwIfOutOfBounds(getIndexImpl(indices));
+    }
+
+    /**
+     * @brief Returns the B+1 ragged row offsets (element units), widened to int64_t.
+     *
+     * Dense tensors return an empty vector (the iterator then uses Linear/Composite
+     * indexing as today). Ragged tensors override this to expose their offset table,
+     * which the iterator snapshots once to build a RaggedCompositeIndex.
+     *
+     * @note The literal RFC §4.5 traversal hook `virtual IndexType makeIndex(bool)` is
+     * not implementable on the non-templated ITensor base: IndexType is scoped to the
+     * (const/non-const) iterator template. This non-templated data hook keeps all
+     * template-dependent index types iterator-internal. See ALMIOPEN-2124 plan §2.1.
+     */
+    virtual std::vector<int64_t> raggedRowOffsets() const
+    {
+        return {};
     }
 
     virtual ITensorIterator<false> begin() = 0;
@@ -371,6 +559,20 @@ public:
     virtual void markDeviceModified() = 0;
 
 protected:
+    /**
+     * @brief Computes the physical offset for a multi-dim index.
+     *
+     * Default (dense) implementation is the inner product of indices and strides.
+     * Ragged tensors override this to base each batch at `ragged_offset[b]`, which
+     * makes every addressing path (getHostValue/setHostValue/operator(),
+     * CompositeIndex::getValue, TensorView) ragged-aware at once. The argument-count
+     * check stays in the non-virtual getIndex forwarder. See ALMIOPEN-2124 plan §2.1.
+     */
+    virtual int64_t getIndexImpl(const std::vector<int64_t>& indices) const
+    {
+        return std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0});
+    }
+
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     int64_t throwIfOutOfBounds(int64_t index) const
     {

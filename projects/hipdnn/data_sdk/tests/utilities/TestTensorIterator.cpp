@@ -4,7 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <memory>
 #include <numeric>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -451,6 +453,84 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
     ++it;
     index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
     EXPECT_EQ(index, 3);
+}
+
+// ============================================================================
+// Index-strategy selection: ragged vs dense (RaggedCompositeIndex hook)
+// ============================================================================
+
+namespace
+{
+
+std::shared_ptr<ITensor> makeRaggedOffsetAux(const std::vector<int64_t>& offsets)
+{
+    const auto count = static_cast<int64_t>(offsets.size());
+    auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{count, 1, 1, 1});
+    for(int64_t i = 0; i < count; ++i)
+    {
+        aux->setHostValue(static_cast<int32_t>(offsets[static_cast<size_t>(i)]), i, 0, 0, 0);
+    }
+    return aux;
+}
+
+} // namespace
+
+TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
+{
+    // BSHD-packed: dims [B,S,H,D]={2,3,2,2}, strides {12,4,2,1}, off[B]=20.
+    auto aux = makeRaggedOffsetAux({0, 8, 20});
+    RaggedTensor<float> tensor({2, 3, 2, 2}, {12, 4, 2, 1}, aux);
+
+    auto it = tensor.begin();
+
+    // The iterator resolves to a RaggedCompositeIndex (not Linear/Composite).
+    auto indices = std::get<ITensorIterator<false>::RaggedCompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices.size(), 4);
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 0);
+    EXPECT_EQ(indices[2], 0);
+    EXPECT_EQ(indices[3], 0);
+
+    // Visits exactly off[B] == 20 elements.
+    int count = 0;
+    for(auto walk = tensor.begin(); walk != tensor.end(); ++walk)
+    {
+        ++count;
+    }
+    EXPECT_EQ(count, 20);
+}
+
+TEST(TestTypeErasedIteratorRagged, DensePackedStillLinear)
+{
+    Tensor<float> tensor({2, 3});
+    auto it = tensor.begin();
+
+    // Dense packed tensors still resolve to LinearIndex.
+    EXPECT_NO_THROW(std::get<ITensorIterator<false>::LinearIndex>(it.index()));
+}
+
+TEST(TestTypeErasedIteratorRagged, DenseStridedStillComposite)
+{
+    Tensor<float> tensor({2, 3}, {6, 2});
+    auto it = tensor.begin();
+
+    // Dense strided tensors still resolve to CompositeIndex.
+    EXPECT_NO_THROW(std::get<ITensorIterator<false>::CompositeIndex>(it.index()));
+}
+
+// ============================================================================
+// Dense regression guard for the getIndexImpl refactor
+// ============================================================================
+
+TEST(TestTypeErasedIteratorRagged, DenseAddressingUnchanged)
+{
+    const Tensor<float> tensor({2, 3, 4, 5});
+    // 1*60 + 2*20 + 3*5 + 4*1 = 119 (unchanged by the getIndexImpl forwarding).
+    EXPECT_EQ(tensor.getIndex(1, 2, 3, 4), 119);
+    EXPECT_EQ(tensor.getIndex(0, 0, 0, 0), 0);
+
+    const std::vector<int64_t> indices = {1, 2, 3, 4};
+    EXPECT_EQ(tensor.getIndex(indices), 119);
 }
 
 // ============================================================================
