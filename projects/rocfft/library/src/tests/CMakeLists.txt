@@ -35,7 +35,6 @@ set_target_properties( rocfft-internal-test PROPERTIES
   CXX_STANDARD_REQUIRED ON
 )
 
-# Hold the test to the same warning bar as the rest of the library.
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
 # Link rocfft-function-pool directly (not roc::rocfft, which would
@@ -45,8 +44,7 @@ target_link_libraries( rocfft-internal-test PRIVATE
   hip::host
 )
 
-# Use a pre-installed GTest if available, otherwise download and build
-# it (gives BUILD_GTEST=ON support and a PIC build that links cleanly).
+# Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
 if( NOT BUILD_GTEST )
   find_package( GTest QUIET )
 endif()
@@ -60,17 +58,15 @@ else()
 endif()
 
 include( GoogleTest )
-gtest_discover_tests( rocfft-internal-test )
+gtest_discover_tests( rocfft-internal-test
+  TEST_FILTER ${ROCFFT_INTERNAL_TESTS_FILTER}
+)
 
-# Optionally run the tests at build time, failing the build on test
-# failure.  run_internal_tests.cmake applies the filter and also fails
-# if the filter selects nothing (gtest exits 0 on an empty selection).
+# Run at build time; --no-tests=error fails if the filter matched nothing.
 if( ROCFFT_RUN_INTERNAL_TESTS )
   add_custom_command( TARGET rocfft-internal-test POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-      -DTEST_EXE=$<TARGET_FILE:rocfft-internal-test>
-      -DTEST_FILTER=${ROCFFT_INTERNAL_TESTS_FILTER}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/run_internal_tests.cmake
+    COMMAND ${CMAKE_CTEST_COMMAND} --no-tests=error --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running internal tests..."
     VERBATIM )
 endif()
