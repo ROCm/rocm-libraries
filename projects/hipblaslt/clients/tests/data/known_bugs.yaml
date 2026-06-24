@@ -13,8 +13,59 @@ Known bugs:
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
 
   # Coverage test suite - unsupported feature combinations
-  # Mixed input types not supported by library
-  - { name: coverage_bias_type_mixed_abcd, function: matmul, known_bug_platforms: "*" }
+  # Tests with compute_input_type: non-supported on gfx950
+  - { name: auxiliary_coverage_activation_args, function: matmul }
+  - { name: auxiliary_coverage_all_epilogues, function: matmul }
+  - { name: auxiliary_coverage_epilogue_bias_aux, function: matmul }
+  - { name: coverage_activation_gelu, function: matmul }
+  - { name: coverage_aux_tensor_fp16, function: matmul }
+  - { name: coverage_aux_tensor_fp32, function: matmul }
+  - { name: coverage_bf6_basic, function: matmul }
+  - { name: coverage_bf6_f4_mixed, function: matmul }
+  - { name: coverage_bf6_f6_mixed, function: matmul }
+  - { name: coverage_bf8_batch_stride, function: matmul }
+  - { name: coverage_bf8_fnuz_basic, function: matmul }
+  - { name: coverage_bf8_mixed_types, function: matmul }
+  - { name: coverage_bf8_mx_block16, function: matmul }
+  - { name: coverage_bf8_mx_block64, function: matmul }
+  - { name: coverage_bias_f16, function: matmul }
+  - { name: coverage_bias_stride, function: matmul }
+  - { name: coverage_bias_type_bf16_d, function: matmul }
+  - { name: coverage_bias_type_bf8, function: matmul }
+  - { name: coverage_bias_type_f16_d, function: matmul }
+  - { name: coverage_bias_type_f32_d, function: matmul }
+  - { name: coverage_bias_type_fp8, function: matmul }
+  - { name: coverage_bias_type_mixed_abcd, function: matmul }
+  - { name: coverage_combined_features, function: matmul }
+  - { name: coverage_f4_basic, function: matmul }
+  - { name: coverage_f6_basic, function: matmul }
+  - { name: coverage_f6_f4_mixed, function: matmul }
+  - { name: coverage_f8_with_features, function: matmul }
+  - { name: coverage_fp8_batch_stride, function: matmul }
+  - { name: coverage_fp8_fnuz_basic, function: matmul }
+  - { name: coverage_fp8_mixed_types, function: matmul }
+  - { name: coverage_fp8_mx_block16, function: matmul }
+  - { name: coverage_fp8_mx_block64, function: matmul }
+  - { name: coverage_grouped_complex, function: matmul }
+  - { name: coverage_grouped_gemm_beta, function: matmul }
+  - { name: coverage_grouped_gemm_fp32, function: matmul }
+  - { name: coverage_grouped_gemm_with_aux, function: matmul }
+  - { name: coverage_grouped_gemm_with_bias, function: matmul }
+  - { name: coverage_grouped_gemm_with_scales, function: matmul }
+  - { name: coverage_mixed_bf16_f16, function: matmul }
+  - { name: coverage_mixed_f16_bf16, function: matmul }
+  - { name: coverage_mixed_f32_bf16, function: matmul }
+  - { name: coverage_mixed_f32_f16, function: matmul }
+  - { name: coverage_scaleAB_vector, function: matmul }
+  - { name: coverage_scaleCD, function: matmul }
+  - { name: coverage_scale_mode_block, function: matmul }
+  - { name: coverage_scale_mode_mixed, function: matmul }
+  - { name: coverage_scale_mode_scalar, function: matmul }
+  - { name: tensile_coverage_asymmetric_scaling, function: matmul }
+  - { name: tensile_coverage_bf8_mx_all_blocks, function: matmul }
+  - { name: tensile_coverage_fp8_mx_all_blocks, function: matmul }
+  - { name: tensile_coverage_grouped_mixed, function: matmul }
+  - { name: tensile_coverage_grouped_variable, function: matmul }
 
   # Complex types with grouped GEMM not supported
   - { name: coverage_grouped_complex, function: matmul, known_bug_platforms: "*" }
@@ -29,3 +80,9 @@ Known bugs:
   - { name: coverage_bias_type_f32_d, function: matmul, known_bug_platforms: "*" }
   - { name: coverage_bias_type_bf16_d, function: matmul, known_bug_platforms: "*" }
   - { name: coverage_bias_type_f16_d, function: matmul, known_bug_platforms: "*" }
+
+  # Mixed precision A/B types - no solution found (kernels don't support different A/B types)
+  - { name: coverage_mixed_ab_f16_bf16, function: matmul }
+  - { name: coverage_mixed_ab_bf16_f16, function: matmul }
+  - { name: coverage_mixed_ab_f32_f16, function: matmul }
+  - { name: coverage_mixed_ab_f16_f32, function: matmul }

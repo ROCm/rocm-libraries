@@ -3,6 +3,7 @@
 # Targets uncovered code in grouped GEMM, complex numbers, and advanced features
 include: hipblaslt_common.yaml
 include: matmul_common.yaml
+include: known_bugs.yaml
 
 Tests:
 # ==============================================================================
@@ -914,6 +915,72 @@ Tests:
 # Phase 1 Quick Wins: tensile_host.cpp coverage improvements
 # ============================================================================
 
+# ============================================================================
+# PHASE 1: Grouped GEMM Variants (+50 lines expected)
+# Targets: tensile_host.cpp lines 1295-1722, 3359-3386
+# ============================================================================
+
+# Test 1: Large group count (16 groups) with variable problem sizes
+- name: tensile_coverage_grouped_16
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: [0.0, 1.0]
+  M: [128, 256, 512]
+  N: [128, 256, 512]
+  K: [64, 128, 256]
+  grouped_gemm: 16
+  batch_count: 1
+
+# Test 2: Variable group sizes with comprehensive transpose/beta combos
+# Creates 36 test variations (3 group counts × 2 transA × 2 transB × 3 beta)
+- name: tensile_coverage_grouped_variable
+  category: pre_checkin
+  function: matmul
+  a_type: bf16_r
+  b_type: bf16_r
+  c_type: bf16_r
+  d_type: bf16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: [0.0, 0.5, 1.0]
+  M: 256
+  N: 256
+  K: 128
+  grouped_gemm: [3, 7, 12]
+  batch_count: 1
+
+# Test 3: Mixed precision grouped GEMM with different A/B types
+- name: tensile_coverage_grouped_mixed
+  category: pre_checkin
+  function: matmul
+  a_type: [f16_r, bf16_r, f32_r]
+  b_type: [f16_r, bf16_r, f32_r]
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 128
+  N: 128
+  K: 128
+  grouped_gemm: 5
+  batch_count: 1
+
 # Grouped GEMM: Large batch counts (targets lines 3359-3386)
 - name: coverage_grouped_gemm_large_batch
   category: pre_checkin
@@ -932,6 +999,172 @@ Tests:
   N: 128
   K: 64
   grouped_gemm: 8
+  batch_count: 1
+
+# ============================================================================
+# PHASE 2: Transpose Combinations (+30 lines expected)
+# Targets: tensile_host.cpp problem override logic for different transpose modes
+# ============================================================================
+
+# Test 4: All transpose combinations with FP32 (NN, NT, TN, TT)
+- name: tensile_coverage_transpose_all
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: [1.0, 2.0]
+  beta: [0.0, 1.0]
+  M: [128, 256]
+  N: [128, 256]
+  K: [64, 128]
+  batch_count: [1, 4]
+
+# Test 5: Transpose with FP16 and complex strides
+- name: tensile_coverage_transpose_strided
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: 1.0
+  M: 256
+  N: 256
+  K: 128
+  stride_a: [0, 65536]
+  stride_b: [0, 65536]
+  stride_c: 65536
+  stride_d: 65536
+  batch_count: 2
+
+# ============================================================================
+# PHASE 3: Scaling Modes for FP8/BF8 (+25 lines expected)
+# Targets: tensile_host.cpp scaling mode selection and MX format handling
+# ============================================================================
+
+# Test 6: FP8 with all MX block sizes (16, 32, 64)
+- name: tensile_coverage_fp8_mx_all_blocks
+  category: pre_checkin
+  function: matmul
+  a_type: f8_r
+  b_type: f8_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  scaleA: 3
+  scaleB: 3
+  scaleA_format: [1, 2, 3]
+  scaleB_format: [1, 2, 3]
+  batch_count: 1
+
+# Test 7: BF8 with all MX block sizes
+- name: tensile_coverage_bf8_mx_all_blocks
+  category: pre_checkin
+  function: matmul
+  a_type: bf8_r
+  b_type: bf8_r
+  c_type: bf16_r
+  d_type: bf16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  scaleA: 3
+  scaleB: 3
+  scaleA_format: [1, 2, 3]
+  scaleB_format: [1, 2, 3]
+  batch_count: 1
+
+# Test 8: Asymmetric scaling modes (different for A and B)
+- name: tensile_coverage_asymmetric_scaling
+  category: pre_checkin
+  function: matmul
+  a_type: f8_r
+  b_type: f8_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  scaleA: [1, 3]
+  scaleB: [1, 3]
+  scaleA_format: 1
+  scaleB_format: 3
+  batch_count: 1
+
+# ============================================================================
+# PHASE 4: Solution Index & Algorithm Selection (+15 lines expected)
+# Targets: tensile_host.cpp explicit solution index and algorithm paths
+# ============================================================================
+
+# Test 9: Explicit solution index selection
+- name: tensile_coverage_solution_index
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  solution_index: [0, 1, 2]
+  batch_count: 1
+
+# Test 10: Algorithm selection with preferences
+- name: tensile_coverage_algorithm_search
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 512
+  N: 512
+  K: 256
+  algo: [0, 1, 2]
   batch_count: 1
 
 # Grouped GEMM: Beta accumulation (targets beta path in grouped context)
@@ -1516,4 +1749,160 @@ Tests:
   N: 128
   K: 64
   initialization: uniform_01
+  batch_count: 1
+
+# ============================================================================
+# PHASE 4: rocblaslt_auxiliary.cpp Coverage Tests (+87 lines expected)
+# ============================================================================
+
+# Phase 4.1: Matrix Layout Attributes - Custom Strides
+# Targets: rocblaslt_auxiliary.cpp matrix layout attribute handling
+- name: auxiliary_coverage_custom_strides
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: 1.0
+  M: 256
+  N: 256
+  K: 128
+  stride_a: [32768, 65536]
+  stride_b: [32768, 65536]
+  stride_c: 65536
+  stride_d: 65536
+  batch_count: [2, 4]
+
+# Phase 4.1: Matrix Layout Attributes - Row vs Column Order
+- name: auxiliary_coverage_layout_order
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 128
+  N: 128
+  K: 64
+  order: [col, row]
+  batch_count: 1
+
+# Phase 4.2: Epilogue & Activation - All Epilogue Modes
+# Targets: rocblaslt_auxiliary.cpp epilogue attribute setting
+- name: auxiliary_coverage_all_epilogues
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  activation_type: [relu, gelu, sigmoid]
+  batch_count: 1
+
+# Phase 4.2: Epilogue with Bias and Auxiliary Output
+- name: auxiliary_coverage_epilogue_bias_aux
+  category: pre_checkin
+  function: matmul
+  a_type: bf16_r
+  b_type: bf16_r
+  c_type: bf16_r
+  d_type: bf16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  use_e: 1
+  aux_type: bf16_r
+  bias_vector: 1
+  bias_type: bf16_r
+  activation_type: [relu, gelu]
+  batch_count: 1
+
+# Phase 4.2: Activation Parameters - Different Argument Values
+- name: auxiliary_coverage_activation_args
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  activation_type: gelu
+  activation_arg1: [0.5, 1.0, 2.0]
+  activation_arg2: [0.0, 0.5, 1.0]
+  batch_count: 1
+
+# Phase 4.3: Preference & Algorithm - Workspace Limits
+# Targets: rocblaslt_auxiliary.cpp preference attribute handling
+- name: auxiliary_coverage_workspace_limits
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 512
+  N: 512
+  K: 256
+  workspace_size: [0, 1048576, 16777216]
+  batch_count: 1
+
+# Phase 4.3: Algorithm Search with Max Solutions
+- name: auxiliary_coverage_algorithm_max_solutions
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  max_solutions: [1, 4, 8]
   batch_count: 1
