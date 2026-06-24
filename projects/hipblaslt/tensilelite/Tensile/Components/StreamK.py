@@ -224,9 +224,12 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         return module
 
     def acquireFence(self, writer) -> Module:
+        # Drop stale dev-scope cache lines so the next dependent read (the flag
+        # word in getFlagValue, or the partials after the flag is observed) is
+        # re-fetched from the L2-coherent point.
         module = Module("StreamK acquire fence (dev-scope)")
         module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate partials after flag"))
+            comment="acquire: invalidate before dependent dev-scope read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
 
@@ -280,22 +283,32 @@ class StreamK(Component):
 
     @staticmethod
     def _depthUForTc(kernel, tc):
-        """Return the per-tensor-character DepthU (element count along unroll).
+        """Return the per-StreamK-iteration K-stride (element count) for a tensor.
 
-        For MX scale tensors, DepthU is divided by the MX block size because
-        there is one scale element per MXBlock data elements.
+        StreamK counts iterations in full DepthU units, so non-sparse data
+        tensors always use DepthU even in multi-DU mode (where _DepthU{A,B} is
+        the smaller per-uid swizzle sub-stride, not a compression).
+
         For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
         is 32 * 256 so an additional *32 multiplier is needed.
+
+        For Sparse problems the compressed data operand and the Metadata
+        tensor genuinely hold fewer elements per DepthU of computation, so
+        they advance by their per-tensor _DepthU{A,B,Metadata} stride (the
+        develop behavior); using full DepthU there would over-advance the SRD.
         """
-        key = "_DepthU%s" % tc
-        if key in kernel:
-            _DepthU = kernel[key]
-            if tc in ("MXSA", "MXSB") and kernel.get("UseSubtileImpl"):
-                # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
-                # so the effective K stride for the scale tensor is DepthU * 32.
-                # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
-                _DepthU = (_DepthU * 32)
-            return _DepthU
+        if tc in ("MXSA", "MXSB"):
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                _DepthU = kernel[key]
+                if kernel.get("UseSubtileImpl"):
+                    _DepthU = (_DepthU * 32)
+                return _DepthU
+            return kernel["DepthU"]
+        if kernel["ProblemType"]["Sparse"]:
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                return kernel[key]
         return kernel["DepthU"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
@@ -1363,7 +1376,10 @@ class StreamK(Component):
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
         module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
                                   mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        # Release the flag store: drain the store and (on dev-scope arches) global_wb
+        # the flag word to the L2-coherent point so a peer's acquire can observe it.
+        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
+        module.add(memOrder.releaseFence(writer))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
@@ -1379,6 +1395,8 @@ class StreamK(Component):
         """
         module = Module("Buffer Load Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
+        # Acquire before the read so this (and every spin re-read) sees device memory.
+        module.add(memOrder.acquireFence(writer))
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_getFlagValue_tmpSgprBuffer", preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))

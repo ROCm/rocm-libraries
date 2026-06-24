@@ -8,7 +8,6 @@ GlobalParameters:
   #PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-#  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -20,9 +19,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   NumElementsToValidate: -1
   BoundsCheck: 0
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
 #  PrintTensorA: True
 #  PrintTensorB: True
 #  PrintTensorC: True

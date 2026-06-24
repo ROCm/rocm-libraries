@@ -20,7 +20,6 @@ GlobalParameters:
   # PrintTensorA: 0x3 #0x1
   # PrintTensorRef: 0x3
   # ShortNames: False
-  # MergeFiles: True
   DataInitTypeA: 3 #12 #3
   DataInitTypeB: 3 #13 #3
   DataInitTypeC: 3 #3
