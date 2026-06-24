@@ -297,6 +297,25 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         up   = math::min(math::max(up, -kSwiGluClamp), kSwiGluClamp);
         return gate * up;
     }
+
+    // Clamp limit for swiglu_oai_and_mul (gpt-oss / OAI form): gate clamped to <= L,
+    // up clamped to [-L, L]; L hardcoded to 7.0. alpha = 1.702 per gpt-oss default.
+    static constexpr float kSwiGluOaiLimit = 7.0f;
+    static constexpr float kSwiGluOaiAlpha = 1.702f;
+
+    // Helper: apply OAI SwiGLU activation gate*sigmoid(alpha*gate)*(up+1) with pre-activation
+    // clamp (gate upper-bounded, up symmetric). Mirrors ck_tile::moe::Swiglu in
+    // ck_tile/ops/flatmm/kernel/moe_flatmm_kernel.hpp. Distinct from swiglustep (no +1, no alpha).
+    // Used by all four swiglu_oai_and_mul epilogue paths (quant/non-quant x pipeline-A/B).
+    __host__ __device__ static constexpr float apply_swiglu_oai_activation(float gate, float up)
+    {
+        gate = math::min(gate, kSwiGluOaiLimit);                            // gate <= 7
+        up   = math::min(math::max(up, -kSwiGluOaiLimit), kSwiGluOaiLimit); // up in [-7, 7]
+        // sigmoid(alpha*gate) = 1 / (1 + exp(-alpha*gate)).
+        const float sig = 1.0f / (1.0f + math::exp(kSwiGluOaiAlpha * -gate));
+        return gate * sig * (up + 1.0f);                                    // OAI form
+    }
+
     using mfma_selector =
         MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, is_single_rate_mfma>;
 
@@ -1506,6 +1525,26 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     }
                                     c_thread_buf_fp32(cidx) = apply_swiglustep_activation(gate, up);
                                 }
+                                else if constexpr(ActivationOperation ==
+                                                  Activation::swiglu_oai_and_mul)
+                                {
+                                    const float scale_up =
+                                        p_scale_b[(n0 * NWave * NPerXdl + problem.N) *
+                                                  PerTokenQuant];
+                                    float gate = scale_a * scale_b * c_thread_buf[cidx];
+                                    float up   = scale_a * scale_up * c_thread_buf_up[cidx];
+                                    if constexpr(MulRoutedWeight)
+                                    {
+                                        gate = gate * topk_weights.template AsType<float>()[m4];
+                                        up   = up * topk_weights.template AsType<float>()[m4];
+                                    }
+                                    if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                    {
+                                        gate *= 16;
+                                        up *= 16;
+                                    }
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                }
                             }
                             else
                             {
@@ -1578,6 +1617,18 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
                                     c_thread_buf_fp32(cidx) = apply_swiglustep_activation(gate, up);
+                                }
+                                else if constexpr(ActivationOperation ==
+                                                  Activation::swiglu_oai_and_mul)
+                                {
+                                    float gate = c_thread_buf[cidx];
+                                    float up   = c_thread_buf_up[cidx];
+                                    if constexpr(MulRoutedWeight)
+                                    {
+                                        gate = gate * topk_weights.template AsType<float>()[m4];
+                                        up   = up * topk_weights.template AsType<float>()[m4];
+                                    }
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
                                 }
                             }
                             else
@@ -2011,6 +2062,26 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     }
                                     c_thread_buf_fp32(cidx) = apply_swiglustep_activation(gate, up);
                                 }
+                                else if constexpr(ActivationOperation ==
+                                                  Activation::swiglu_oai_and_mul)
+                                {
+                                    const float scale_up =
+                                        p_scale_b[(n0 * NWave * NPerXdl + problem.N) *
+                                                  PerTokenQuant];
+                                    float gate = scale_a * scale_b * c_thread_buf[cidx];
+                                    float up   = scale_a * scale_up * c_thread_buf_up[cidx];
+                                    if constexpr(MulRoutedWeight)
+                                    {
+                                        gate = gate * topk_weights.template AsType<float>()[m4];
+                                        up   = up * topk_weights.template AsType<float>()[m4];
+                                    }
+                                    if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                    {
+                                        gate *= 16;
+                                        up *= 16;
+                                    }
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
+                                }
                             }
                             else
                             {
@@ -2083,6 +2154,18 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
                                     c_thread_buf_fp32(cidx) = apply_swiglustep_activation(gate, up);
+                                }
+                                else if constexpr(ActivationOperation ==
+                                                  Activation::swiglu_oai_and_mul)
+                                {
+                                    float gate = c_thread_buf[cidx];
+                                    float up   = c_thread_buf_up[cidx];
+                                    if constexpr(MulRoutedWeight)
+                                    {
+                                        gate = gate * topk_weights.template AsType<float>()[m4];
+                                        up   = up * topk_weights.template AsType<float>()[m4];
+                                    }
+                                    c_thread_buf_fp32(cidx) = apply_swiglu_oai_activation(gate, up);
                                 }
                             }
                             else

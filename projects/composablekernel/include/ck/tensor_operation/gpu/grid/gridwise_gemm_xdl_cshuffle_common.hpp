@@ -30,7 +30,8 @@ enum Activation
 {
     gelu_and_mul       = 0,
     silu_and_mul       = 1,
-    swiglustep_and_mul = 2
+    swiglustep_and_mul = 2,
+    swiglu_oai_and_mul = 3
 };
 
 template <typename ALayout,
