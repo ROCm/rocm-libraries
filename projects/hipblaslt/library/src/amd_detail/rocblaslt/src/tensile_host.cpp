@@ -2807,10 +2807,12 @@ namespace
                 // otherwise the directory may have been created by ExtOp/Transform installs
                 // without a corresponding Tensile library (multi-arch non-TheRock builds).
                 {
-                    auto processor_path  = path / processor;
-                    auto mapping_msgpack = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
-                    auto mapping_yaml    = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_yaml))
+                    auto processor_path     = path / processor;
+                    auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
+                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
+                    auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
+                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
+                       || std::filesystem::exists(mapping_yaml))
                         path = std::move(processor_path);
                 }
 
@@ -2881,10 +2883,11 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath))
+                if(!std::filesystem::exists(tensileLibPath)
+                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
                 {
-                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath << ": "
-                              << strerror(errno) << std::endl;
+                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
+                              << " (or .zlib variant): " << strerror(errno) << std::endl;
                     // rocblaslt_abort();
                 }
 

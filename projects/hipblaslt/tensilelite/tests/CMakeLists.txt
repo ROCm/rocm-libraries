@@ -49,6 +49,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/CompressedLibraryLoad_test.cpp"
     )
 endif()
 
@@ -62,6 +63,7 @@ target_link_libraries(tensilelite-tests
         hip::device
         ${CMAKE_DL_LIBS}
         ${hipblaslt_msgpack_target}
+        ZLIB::ZLIB
 )
 
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
