@@ -6,14 +6,14 @@ For every rule: what it is, *why* it exists, and *what breaks* if you ignore it.
 
 This page is for engine contributors. If you are authoring kernels, you mostly
 need [`onboarding.md`](./onboarding.md); come back here if you touch
-`ck_dsl/core/`, `ck_dsl/helpers/`, `ck_dsl/instances/`, or `ck_dsl_c/`.
+`ck_dsl/core/`, `ck_dsl/helpers/`, `ck_dsl/instances/`, or `Cpp/`.
 
 ---
 
 ## 1. LLVM-IR emission is byte-identical across the two engines
 
 **The rule.** For every kernel family and config, the LLVM-IR text emitted by the
-Python engine (`ck_dsl/`) and by the C++ engine (`ck_dsl_c/`) must be the *same
+Python engine (`ck_dsl/`) and by the C++ engine (`Cpp/`) must be the *same
 bytes*.
 
 **Why.** The C++ engine is what the hipDNN provider links so kernels can be served
@@ -27,7 +27,7 @@ tests pass — until the differential gate catches it, or a provider ships a ker
 that no longer matches the Python-validated one. A change to one engine that
 isn't mirrored in the other is the single most common way to break the codebase.
 
-**How to stay safe.** Run the gate (`ck_dsl_c/tools/check_byte_identity.sh`) as
+**How to stay safe.** Run the gate (`tools/check_byte_identity.py`) as
 your definition of done. See [`engine_contributing.md`](./engine_contributing.md).
 
 ---
@@ -88,7 +88,7 @@ golden snapshot.
 **The rule.** The public engine entry points (`ckc_lower_kernel_to_llvm`,
 `ckc_ir_serialize`, …) are `extern "C"` and unmangled. Don't give them C++
 linkage, don't change their signatures casually, and don't rename the headers
-under `ck_dsl_c/include/ckc/`.
+under `Cpp/include/ckc/`.
 
 **Why.** The pybind binding and the hipDNN provider link against these symbols by
 their unmangled C names. C++ linkage would mangle them and break the `.so`/plugin
@@ -150,7 +150,7 @@ change, linked because a default path pointed at it.
 
 **What breaks if you ignore it.** You debug a "bug" that is really the old binary;
 you can lose a day to it. [`troubleshooting.md`](./troubleshooting.md) catalogs the
-specific symptoms. `ck_dsl_c/tools/build.sh` and `BUILD.md` exist to make the
+specific symptoms. `tools/check_byte_identity.py` and `BUILD.md` exist to make the
 fresh-build path the only path.
 
 ---

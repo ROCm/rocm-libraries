@@ -2,7 +2,7 @@
 
 This is the canonical build and artifact-hygiene reference for:
 
-- the **ck_dsl C engine** (`projects/composablekernel/python/ck_dsl_c`), which
+- the **ck_dsl C engine** (`projects/composablekernel/python/Cpp`), which
   lowers the ck_dsl IR to LLVM and is compiled into a static archive
   `libckc_core.a`; and
 - the **ck-dsl-provider** hipDNN plugin
@@ -16,7 +16,7 @@ silently".
 ## TL;DR: the canonical build script
 
 ```bash
-projects/composablekernel/python/ck_dsl_c/tools/ckc_build.sh
+projects/composablekernel/python/tools/check_byte_identity.py
 ```
 
 This single script:
@@ -55,7 +55,7 @@ it's broken" before:
 ### Engine
 
 ```bash
-cmake -S projects/composablekernel/python/ck_dsl_c -B <build> -DCMAKE_BUILD_TYPE=Release
+cmake -S projects/composablekernel/python/Cpp -B <build> -DCMAKE_BUILD_TYPE=Release
 cmake --build <build> --target ckc_core -j$(nproc)
 # -> <build>/libckc_core.a   (this is the ONLY archive the provider should link)
 ```
@@ -173,7 +173,7 @@ hash of the engine sources and injects it (plus a human `engine_version`) into
 `src/core/ckc_build_id.cpp` as compile definitions — scoped to that single TU
 so no emission object is touched (the `.ll` byte-identity contract holds). The
 stamp is exposed by `ckc_build_id()` / `ckc_engine_version()`
-(`include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.sh` on
+(`include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.py` on
 every run, and surfaced through the pybind `build_id` attribute. The change to
 any tracked source byte changes the build-id, so a stale or mixed-build archive
 is detectable.

@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Implemented on both engines (Python and C++) |
 | **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
-| **Implementation** | Python: `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py`. C++: `ck_dsl_c/src/core/ir/serialize.cpp` (`ckc_ir_parse` and the serializer), header `ck_dsl_c/include/ckc/ir_serialize.h`. |
+| **Implementation** | Python: `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py`. C++: `Cpp/core/ir/serialize.cpp` (`ckc_ir_parse` and the serializer), header `Cpp/include/ckc/ir_serialize.h`. |
 | **Scope** | A fully round-trippable text encoding of a `KernelDef` (`ck_dsl/core/ir.py`) |
 
 ---

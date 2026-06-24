@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | **Status** | Proposed (enactable plan) |
-| **Scope** | `python/ck_dsl` (Python), `python/ck_dsl_c` (C → C++20), `dnn-providers/ck-dsl-provider` (C++ hipDNN plugin) |
+| **Scope** | `python/ck_dsl` (Python), `python/Cpp` (C → C++20), `dnn-providers/ck-dsl-provider` (C++ hipDNN plugin) |
 | **Type** | Architecture + Test Infrastructure + Migration |
-| **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `ck_dsl_c` |
+| **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `Cpp` |
 | **Owner** | CK DSL team |
 | **Target horizon** | Multi-phase; each phase independently shippable. Differential soak ≈ 2–4 weeks before any default flip. |
 
@@ -13,13 +13,13 @@
 
 ## 0. Executive summary (TL;DR)
 
-We maintain the same kernel-generation engine **twice** — once in Python (`ck_dsl`, the research/authoring surface) and once in C99 (`ck_dsl_c`, the Python-free engine the hipDNN provider links). Equivalence is held together today by a sampled `sha256` byte-identity harness. That works, but the dual implementation is a growing tax: the repo's own history records repeated **SSA-numbering drift** and **GCC argument-evaluation-order** bugs that exist *only because there are two implementations*.
+We maintain the same kernel-generation engine **twice** — once in Python (`ck_dsl`, the research/authoring surface) and once in C99 (`Cpp`, the Python-free engine the hipDNN provider links). Equivalence is held together today by a sampled `sha256` byte-identity harness. That works, but the dual implementation is a growing tax: the repo's own history records repeated **SSA-numbering drift** and **GCC argument-evaluation-order** bugs that exist *only because there are two implementations*.
 
 This RFC proposes a single, coherent program that:
 
-1. **Reorganizes** `ck_dsl_c` from 220 flat dot-named files (`helper_ck_dsl.helpers.atoms.c`) into a real subfolder tree mirroring the Python package.
+1. **Reorganizes** `Cpp` from 220 flat dot-named files (`helper_ck_dsl.helpers.atoms.c`) into a real subfolder tree mirroring the Python package.
 2. **Builds a comprehensive, repeatable test spine** — an IR verifier, a round-trippable IR serialization, IR-level diff, `.ll` byte-identity, fuzzing under sanitizers, golden/regression gates, and **detailed on-GPU numeric tests across every instance family** — before any risky refactor.
-3. **Migrates** `ck_dsl_c` from C99 to **C++20**, incrementally and parity-gated, using namespaces (which also structurally fix the duplicate-symbol problem) and exceptions (which map 1:1 to Python's `raise`).
+3. **Migrates** `Cpp` from C99 to **C++20**, incrementally and parity-gated, using namespaces (which also structurally fix the duplicate-symbol problem) and exceptions (which map 1:1 to Python's `raise`).
 4. **Introduces a Python "veneer" / dual-backend flag**: the `IRBuilder` and instance layer can switch between the **native Python** backend and the **C++** backend (via pybind11) — `python` | `cpp` | `both`. `both` runs *both* and asserts equality on everything.
 5. **Closes all gaps and drift** between Python and C++ so every family Python supports reaches full C++ parity (IR + `.ll` + numeric).
 6. **Completes the dispatcher** beyond today's fp16-RCR-GEMM-only scope to all families, fixing the known `rdna_wmma` arch-gating bug, kept in lockstep via the dispatch-parity harness.
@@ -34,7 +34,7 @@ The chosen architecture is explicitly **dual-backend-behind-a-flag with continuo
 
 ### 1.1 The dual-maintenance tax
 - `ck_dsl` (Python): ~core 10.5k + helpers 21k + instances 54k LOC. The authoring surface; fast to iterate; the source of truth for correctness.
-- `ck_dsl_c` (C99): 220 `src/*.c` + 146 headers, ~157k LOC. A faithful, byte-identical port whose only reason to exist is **no Python at runtime** in the provider.
+- `Cpp` (C99): 220 `src/*.c` + 146 headers, ~157k LOC. A faithful, byte-identical port whose only reason to exist is **no Python at runtime** in the provider.
 - `ck-dsl-provider` (C++17): the hipDNN plugin that links `libckc_core.a` (C-JIT path) and/or ships pre-built HSACO/`.ll`.
 
 Every new op family, atom, or knob must be written **2–3 times** and kept byte-identical. The byte-identity bar means even cosmetic Python refactors can break the C port.
@@ -55,7 +55,7 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 ## 2. Goals and non-goals
 
 ### 2.1 Goals
-- G1. A **clean, foldered** `ck_dsl_c` source tree mirroring the Python package; no dot-names.
+- G1. A **clean, foldered** `Cpp` source tree mirroring the Python package; no dot-names.
 - G2. A **comprehensive differential test harness** covering: IR well-formedness, IR equivalence, `.ll` byte-identity, fuzzing, golden regression, and **numeric correctness on real GPUs for every instance family**.
 - G3. **Every example is repeatable**: deterministic, single-command, golden-recorded, CI-smoked.
 - G4. A **C++20** engine that compiles cleanly with `-Wall -Wextra -Werror` and passes ASan/UBSan.
@@ -78,7 +78,7 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 | Component | Language | Role | Notes |
 |---|---|---|---|
 | `ck_dsl` | Python | authoring + reference lowering | `core/ir.py` (`IRBuilder`), `core/lower_llvm.py` (4099 LOC), `runtime/comgr.py`, `dispatch/`, `heuristics/`, `instances/` |
-| `ck_dsl_c` | C99 | Python-free engine | 220 `src/*.c`, 146 headers; gfx950 byte-baseline; `tests/parity` (63 emit pairs) |
+| `Cpp` | C99 | Python-free engine | 220 `src/*.c`, 146 headers; gfx950 byte-baseline; `tests/parity` (63 emit pairs) |
 | `ck-dsl-provider` | C++17 | hipDNN plugin | GEMM/Attention/Conv engines; `runtime/` header-only core; Fast / JIT / C-JIT paths; `dispatch_parity` harness |
 
 **Known C-port gaps** (to be closed in WS5): fused-MoE e2e host runtime (`CKC_ERR_NOTIMPL`), RDNA WMMA op wiring (`lower_llvm_mma.c:282`), buffer-addrspace tensor views, smoothquant/pooling distribution helpers, conv `LdsLayout`/`WarpGrid` accessors, attention I64-KV/fp8 side paths, stale `img2col` "stubbed load" comment (verify real).
@@ -102,7 +102,7 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
                                           │               │
                      ┌────────────────────▼──┐   ┌────────▼─────────────────┐
                      │  PYTHON backend         │   │  CPP backend (pybind11)  │
-                     │  native build + lower   │   │  → ck_dsl_c (C++20) core  │
+                     │  native build + lower   │   │  → Cpp (C++20) core  │
                      └────────────┬────────────┘   └───────────┬──────────────┘
                                   │   serialize IR / emit .ll   │
                                   └──────────────┬──────────────┘
@@ -383,7 +383,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 - **Sweep targets** (committed source/scripts/CI/tests/docs, *not* build dirs): usernames/NTIDs, emails (e.g. `@amd.com`), internal hostnames (login hosts, node names), personal absolute paths (absolute `workspace`/`home` checkout paths, `~/work`, `/tmp/claude*`, personal venvs, `~/.ssh/<key>`).
 - **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$USER`/`$TMPDIR`/`$HIPDNN_ROOT` etc.), or documented placeholders (`<login-host>`/`<user>`/`<repo>`); a gitignored-local-config pattern (e.g. `~/.ckdsl_env`) for remote-cluster scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
-- **Guard:** the deny-list check `ck_dsl_c/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
+- **Guard:** the deny-list check `Cpp/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
 
 **AC.** Zero personal usernames/emails/internal-hostnames + zero personal absolute paths in committed source/scripts/CI/tests; docs genericized/placeholdered; deny-list guard live; functionality preserved via env/relative. **Sequencing:** after WS10 (engine quiesces), coordinate the deny-list with WS19; sweep the final state once. Blocks the PR/merge.
 
@@ -391,12 +391,12 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS19 — Build/config/artifact hygiene: make staleness loud-failing [defense-in-depth]
 
-**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `ck_dsl_c/build` archive (`CKC_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
+**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `Cpp/build` archive (`CKC_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
 
 **Key constraint:** stamp **artifacts, not the emitted `.ll`** — a hash comment in the `.ll` would break the byte-identity differential gate (Python doesn't emit it). Stamps live in the archive/HSACO/manifest metadata; consumers validate those.
 
 - **L1 — Versioning / freshness stamps (the core guard).** Single `CKC_ENGINE_VERSION` (semver) + a build-id = content-hash of the engine source. Embed in artifacts: `ckc_build_id()`/`ckc_engine_version()` in `libckc_core.a`, a `.note` on the comgr HSACO, `engine_version`+`source_hash` in `kernels/<arch>/manifest.json`, engine ver in the `ck.dsl.ir/v1` header. **Consumers validate + fail loud on mismatch** (provider C-JIT checks the archive's source-hash vs current; runtime checks manifest compat).
-- **L2 — Commit guards.** `.gitignore` all engine build products (`build*/`, `*.a/.o/.so`, `CMakeCache`, `_deps/`); pre-commit hook **rejects** committing them (so `ck_dsl_c/build` never re-commits); remove the checked-in stale build dirs. Distinguish the *intentionally-shipped* `kernels/<arch>` bundles (committed, but L1-stamped + regeneratable).
+- **L2 — Commit guards.** `.gitignore` all engine build products (`build*/`, `*.a/.o/.so`, `CMakeCache`, `_deps/`); pre-commit hook **rejects** committing them (so `Cpp/build` never re-commits); remove the checked-in stale build dirs. Distinguish the *intentionally-shipped* `kernels/<arch>` bundles (committed, but L1-stamped + regeneratable).
 - **L3 — Single canonical build entrypoint.** One script/top-CMake that builds engine+provider+demos with all correct flags/paths baked in (`HIPDNN_ROOT`/`HIPDNN_BUILD_DIR`/`-D__HIP_PLATFORM_AMD__`/the full `_deps` include set/`CKC_LIB`→**fresh** archive). The provider builds the engine fresh, not from a stale checked-in `.a`. No hand-rolled `g++`.
 - **L4 — CI gates (blocking).** Build-from-clean; the differential harness (vs Python + vs target); "no committed build artifacts"; L1 stamp validation; the golden gate.
 - **L5 — Sync integrity.** Replace rsync-with-gitignore-filter (shipped stale copies) with content-hash-verified sync / `git archive` snapshots; remote build verifies source-hash before building.
@@ -475,14 +475,14 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Premise.** The WS/wave/RFC nomenclature in this document is **internal program management** — it must NOT appear in any user-facing doc (READMEs, the rest of `dsl_docs`) or inline code comment. Those describe **functionality and usage**. Conversely, the real capabilities built across this program must be **documented as functionality**. This RFC is the *sole* permitted home of the WS language (and may be relocated out of the shipped `dsl_docs` tree). **Standing rule for all contributors/agents:** never embed `WSn`/`Wave X`/`RFC §…`/task numbers in shipped docs or comments — write what the code does and why.
 
-**Wave 1 — Scrub.** Remove every WS/Wave/RFC-cross-ref/task-number reference from user-facing docs + inline comments across `ck_dsl`, `ck_dsl_c`, `ck-dsl-provider`; reframe each as a functionality/why comment. (Agents have added many, e.g. `RFC WS1.T1.2`, `WS2 differential`, `(WS11)`.)
+**Wave 1 — Scrub.** Remove every WS/Wave/RFC-cross-ref/task-number reference from user-facing docs + inline comments across `ck_dsl`, `Cpp`, `ck-dsl-provider`; reframe each as a functionality/why comment. (Agents have added many, e.g. `RFC WS1.T1.2`, `WS2 differential`, `(WS11)`.)
 
 **Wave 2 — Cover** (document new functionality in READMEs + `dsl_docs` + docstrings):
 - `ck.dsl.ir/v1` serialization (`serialize`/`parse`/`canonicalize`) → `dsl_docs/ir_lowering` + reframe `ir_serialization_format.md` as a clean format reference.
 - The IR verifier (`verify`/`verify_or_raise`).
 - The differential test harness (`run_diff.py` modes `ll`/`ir`/`verify` + `--canonical`/`--pyroot`/`--golden`, `numeric.py`, the golden anchor) → a tests README or `dsl_docs/development/testing.md`.
 - Dispatch family coverage (gemm fp16/bf16, norm, conv, attention, moe) → `dispatch/README.md`.
-- The `ck_dsl_c` C++ engine README (what it is, C++20/CMake build, the parity harness, the bindings).
+- The `Cpp` C++ engine README (what it is, C++20/CMake build, the parity harness, the bindings).
 - The pybind `ckc_engine` bindings README; numeric-harness usage.
 
 **Wave 3 — Reconcile + consistency.** Update stale docs for the reorganized C tree (`reference/file_index`); reconcile `limitations.md` (MLIR-as-input stays a non-goal; `ck.dsl.ir/v1` is a *machine* interchange, not human authoring); refresh `reference/` indexes (`api_index`, `op_vocabulary`) for the new public surface; style/consistency pass; verify in-doc examples run (tie to example-repeatability).

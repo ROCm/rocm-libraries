@@ -4,7 +4,7 @@
 > **Which path are you on?** This program teaches you to **author and optimize
 > kernels** — the right starting point for almost everyone. If instead you are
 > going to **modify the engine internals** (anything under `ck_dsl/core/`,
-> `ck_dsl/helpers/`, `ck_dsl/instances/`, or the C++ engine in `ck_dsl_c/`), read
+> `ck_dsl/helpers/`, `ck_dsl/instances/`, or the C++ engine in `Cpp/`), read
 > [`engine_contributing.md`](./engine_contributing.md) first: the engine exists as
 > two implementations kept byte-for-byte identical, and there are non-obvious
 > rules ([`invariants.md`](./invariants.md)) you can break silently. Authors can

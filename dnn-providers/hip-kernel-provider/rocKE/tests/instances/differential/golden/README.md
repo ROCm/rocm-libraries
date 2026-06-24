@@ -1,4 +1,4 @@
-# ck_dsl_c L5 golden anchor
+# Cpp L5 golden anchor
 
 `llvm_gfx_all.json` is the **absolute regression anchor** for the C engine's
 emitted output. It records, per emit mode, per family, per sampled config, the

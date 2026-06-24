@@ -1,4 +1,4 @@
-# Known gaps — ck_dsl_c engine
+# Known gaps — Cpp engine
 
 This is the authoritative, named-debt inventory for the C++ port of the ck_dsl
 lowering engine. It records the parts of the Python engine that are **not yet
@@ -9,7 +9,7 @@ it is currently blocked, and *what would unblock it*.
 
 The C++ engine's definition-of-done is **byte-identical LLVM-IR emission**
 versus the Python engine across every kernel family (see
-`tools/check_byte_identity.sh`). As of the latest authoritative verification:
+`tools/check_byte_identity.py`). As of the latest authoritative verification:
 
 - Full fresh `-Werror` build of `libckc_core.a`: **passes**.
 - Byte-identity gate at both LLVM flavors (`llvm20`, `llvm22`): **GREEN for all
@@ -155,14 +155,14 @@ header change is a conscious decision when a `CKC_ADDR_BUFFER` producer lands.
 
 ```bash
 # Full fresh build (must succeed under -Werror)
-cmake -S ck_dsl_c -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release
+cmake -S Cpp -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/ckc_verify -j
 
 # Byte-identity gate, both LLVM flavors (must be GREEN for all families)
-CK_DSL_LLVM_FLAVOR=llvm20 ck_dsl_c/tools/check_byte_identity.sh --build-root /tmp/ckc_verify
-CK_DSL_LLVM_FLAVOR=llvm22 ck_dsl_c/tools/check_byte_identity.sh --build-root /tmp/ckc_verify
+CK_DSL_LLVM_FLAVOR=llvm20 tools/check_byte_identity.py --build-root /tmp/ckc_verify
+CK_DSL_LLVM_FLAVOR=llvm22 tools/check_byte_identity.py --build-root /tmp/ckc_verify
 
 # Random-spec differential fuzz (must be all IDENTICAL)
-python3 ck_dsl_c/tests/differential/fuzz_diff.py --only gemm,elementwise,reduce \
+python3 tests/instances/differential/fuzz_diff.py --only gemm,elementwise,reduce \
     --cli /tmp/ckc_irart/ir_lower_cli
 ```

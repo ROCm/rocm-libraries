@@ -18,7 +18,7 @@ output, hangs, faults, slowness), see the "Debugging Patterns" section of
 ### "undefined symbol: ckc_… " when loading the provider or pybind module
 The consumer linked against an archive that predates your change, or against the
 wrong archive. **Fix:** rebuild the engine fresh and point the consumer at *that*
-archive. Use `ck_dsl_c/tools/build.sh` (it builds the engine fresh and links the
+archive. Use `tools/check_byte_identity.py` (it builds the engine fresh and links the
 provider against it by construction). See [`invariants.md`](./invariants.md#7-build-on-local-disk-never-trust-a-stale-archive).
 
 ### "it doesn't compile" — but only in one checkout / on the cluster
@@ -28,7 +28,7 @@ build from current source in `/tmp` is the source of truth.
 
 ### The provider build can't find hipDNN headers / `_deps` / `SDPA`
 A by-hand build dropped a required flag. The full set lives in
-[`../../../ck_dsl_c/BUILD.md`](../../../ck_dsl_c/BUILD.md) ("the flags that get
+[`../../../BUILD.md`](../../../BUILD.md) ("the flags that get
 forgotten") — `-D__HIP_PLATFORM_AMD__`, the generated `build/` include set
 including `_deps`, the SDPA enable, and an explicit fresh `CKC_LIB`. Prefer
 `tools/build.sh`, which bakes them all.
@@ -95,10 +95,10 @@ signal that protects the contract.
 You didn't build it (or built it elsewhere). Build into the default location, or
 pass `--archive`:
 ```bash
-cmake -S ck_dsl_c -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/ckc_verify -j
+cmake -S Cpp -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/ckc_verify -j
 # default archive path is $TMPDIR/ckc_verify/libckc_core.a
 ```
-`ck_dsl_c/tools/check_byte_identity.sh` does the build + gate together.
+`tools/check_byte_identity.py` does the build + gate together.
 
 ---
 
@@ -112,7 +112,7 @@ normally; only kernel *launch* does. Run launch steps through the privileged pat
 your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
-### `No module named 'ck_dsl'` / `ck_dsl_c`
+### `No module named 'ck_dsl'` / `Cpp`
 `PYTHONPATH` isn't pointing at `projects/composablekernel/python`. Set it
 (`PYTHONPATH=<…>/projects/composablekernel/python`) and run from there.
 
@@ -140,7 +140,7 @@ being rejected. Check `squeue` before concluding a run failed.
 ## When in doubt
 
 1. Rebuild fresh from current source into `/tmp`.
-2. Run `ck_dsl_c/tools/check_byte_identity.sh`.
+2. Run `tools/check_byte_identity.py`.
 3. Only then debug the source.
 
 Most of the time, steps 1–2 resolve it.

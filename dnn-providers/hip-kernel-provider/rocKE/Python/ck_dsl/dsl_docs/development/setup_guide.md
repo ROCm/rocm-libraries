@@ -103,9 +103,9 @@ engine:
 
 ```bash
 # 1. engine archive (no GPU needed):
-cmake -S python/ck_dsl_c -B /tmp/ckc_build -DCMAKE_BUILD_TYPE=Release
+cmake -S python/Cpp -B /tmp/ckc_build -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/ckc_build -j"$(nproc)"
-# 2. the pybind module (see python/ck_dsl_c/bindings/ for its CMake):
+# 2. the pybind module (see python/Cpp/bindings/ for its CMake):
 #    build it into a dir, then put that dir on PYTHONPATH:
 export PYTHONPATH=python:/path/to/ckc_engine_build_dir
 python -c "import ckc_engine; print('engine build_id:', ckc_engine.build_id())"
@@ -119,7 +119,7 @@ python -c "import ck_dsl, ck_dsl.core.backend as b; print('backend:', b.resolve_
 # build + run a GEMM on the GPU (prints TFLOPS + PASS/FAIL):
 python -m ck_dsl.examples.common.universal_gemm_verify --arch gfx950 --m 1024 --n 1024 --k 1024
 # the cross-engine byte-identity gate (no GPU):
-ck_dsl_c/tools/check_byte_identity.sh
+tools/check_byte_identity.py
 ```
 
 ---
@@ -165,7 +165,7 @@ python -c "from ck_dsl.runtime import comgr; print('comgr:', comgr._resolve_lib(
 Use CMake with the Visual Studio or Clang toolchain:
 
 ```bat
-cmake -S python\ck_dsl_c -B build_win -DCMAKE_BUILD_TYPE=Release
+cmake -S python\Cpp -B build_win -DCMAKE_BUILD_TYPE=Release
 cmake --build build_win --config Release -j
 ```
 

@@ -11,7 +11,7 @@ example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected
 python/ck_dsl/examples/               # Python-owned example generators
 python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
 python/ck_dsl/examples/common/ck_tile_parity.py               # small-op parity harness
-ck_dsl_c/tests/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
+tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
 
 ## Environment

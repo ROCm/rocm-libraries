@@ -8,7 +8,7 @@ how to switch between them, and every interconnect.
 | | Front end (builder: spec → IR) | Back end (lowerer: IR → `.ll`) |
 |---|---|---|
 | **Python** | `ck_dsl.instances.*` (e.g. `build_universal_gemm`) via `IRBuilder` | `ck_dsl.core.lower_llvm.lower_kernel_to_llvm` |
-| **C++** | `ck_dsl_c` `ckc_build_*` | `ck_dsl_c` `ckc_lower_kernel_to_llvm` |
+| **C++** | `Cpp` `ckc_build_*` | `Cpp` `ckc_lower_kernel_to_llvm` |
 
 - **Python** is the authoring front end (the crown jewel) and the differential **oracle**.
 - **C++** is a first-class runtime engine — it can build *and* lower with **no Python present** (what the hipDNN provider ships).
@@ -40,7 +40,7 @@ flowchart LR
 1. **`CK_DSL_BACKEND` / `resolve_backend()`** — picks which back end lowers a *Python-authored* kernel (`ck_dsl/core/backend.py`).
 2. **The `ckc_engine` pybind module** — exposes the C++ engine to Python: the generic `lower_serialized_ir(ir_text, arch)`, the per-family `<fam>_lower_llvm` / `_serialize_ir` / `_verify`, and `build_id()` / `engine_version()`.
 3. **The IR seam** — `serialize(KernelDef)` (Python) → `ckc_ir_parse` (C++): a Python-built kernel reaches the C++ lowerer as serialized `ck.dsl.ir/v1` text (the C++ engine can't take a Python object directly). This is the path the `cpp` backend uses for arbitrary kernels.
-4. **The byte-identity gate** — `ck_dsl_c/tools/check_byte_identity.sh` / `run_diff`; `both` mode asserts it at runtime. Keeps the two back ends equal (see [`engine_parity.md`](../development/engine_parity.md)).
+4. **The byte-identity gate** — `tools/check_byte_identity.py` / `run_diff`; `both` mode asserts it at runtime. Keeps the two back ends equal (see [`engine_parity.md`](../development/engine_parity.md)).
 5. **The hipDNN provider** — the pure-C++ runtime that links the C++ engine (below).
 
 ## Switching the lowering back end (Python-authored kernels)
@@ -82,7 +82,7 @@ flowchart LR
 - **IR-artifact** — parse shipped serialized IR, then the C++ lowerer + `comgr` (no C++ builder needed).
 - **C-JIT** — the C++ builder *and* lowerer at runtime (`CK_DSL_C_JIT=1`); fully Python-free.
 
-Provider flags (`CK_DSL_C_JIT`, `CK_DSL_KERNEL_LIB_PATH`, `HIPDNN_PLUGIN_PATH`, `CK_DSL_ALLOW_ENGINE_MISMATCH`) are in [`../reference/env_flags.md`](../reference/env_flags.md); build details in `ck_dsl_c/BUILD.md`.
+Provider flags (`CK_DSL_C_JIT`, `CK_DSL_KERNEL_LIB_PATH`, `HIPDNN_PLUGIN_PATH`, `CK_DSL_ALLOW_ENGINE_MISMATCH`) are in [`../reference/env_flags.md`](../reference/env_flags.md); build details in `BUILD.md`.
 
 ## Rule of thumb
 

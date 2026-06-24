@@ -99,7 +99,7 @@ plan below shifts.
   HSACO bytes** (loadable via `hipModuleLoadData`, no Python state
   required at launch time). (This finding reflects the M1 state, when
   the DSL was Python-only. There is now also a peer C++ engine
-  (`ck_dsl_c/`) that lowers byte-identical LLVM-IR; the provider has
+  (`Cpp/`) that lowers byte-identical LLVM-IR; the provider has
   since shipped with three execution modes — prebuilt HSACO, JIT from
   shipped `.ll` via comgr, and a Python-free C-JIT path — so the
   "runtime JIT requires a Python interpreter" implication below is

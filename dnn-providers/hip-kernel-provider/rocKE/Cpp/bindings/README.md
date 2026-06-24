@@ -1,4 +1,4 @@
-# ckc_engine — pybind11 binding for the C++ ck_dsl_c engine
+# ckc_engine — pybind11 binding for the C++ Cpp engine
 
 This directory is the binding layer of the dual-backend path. It builds a
 Python extension module, `ckc_engine`, that wraps the prebuilt C++ engine
@@ -7,7 +7,7 @@ archive (`libckc_core.a`) and exposes its public C API to Python.
 It is **additive and isolated**: it adds only new files under `bindings/`, links
 the engine archive read-only, and `#include`s the public headers in
 `../include/ckc/`. It does **not** modify the engine `src/`/`include/`, the main
-`ck_dsl_c/CMakeLists.txt`, or the Python `ck_dsl` package.
+`CMakeLists.txt`, or the Python `ck_dsl` package.
 
 ## Module API
 
@@ -61,7 +61,7 @@ engine are copied into a `std::string` and `free`'d.
 1. Build the engine archive (read-only; never modify the engine):
 
    ```bash
-   cmake -S ck_dsl_c -B /tmp/ckc_pybind/engine -DCMAKE_BUILD_TYPE=Release
+   cmake -S Cpp -B /tmp/ckc_pybind/engine -DCMAKE_BUILD_TYPE=Release
    cmake --build /tmp/ckc_pybind/engine -j"$(nproc)"
    # -> /tmp/ckc_pybind/engine/libckc_core.a
    ```
@@ -70,7 +70,7 @@ engine are copied into a `std::string` and `free`'d.
    python that has pybind11):
 
    ```bash
-   cmake -S ck_dsl_c/bindings -B /tmp/ckc_pybind/build \
+   cmake -S Cpp/bindings -B /tmp/ckc_pybind/build \
      -DCMAKE_BUILD_TYPE=Release \
      -DCKC_ENGINE_ARCHIVE=/tmp/ckc_pybind/engine/libckc_core.a \
      -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \

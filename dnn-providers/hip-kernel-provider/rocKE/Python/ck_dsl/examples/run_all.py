@@ -68,6 +68,10 @@ class Example:
 
     ``module``  -- dotted module run via ``python -m`` (must have a ``main``
                    returning an int exit code, the ck_dsl example convention).
+    ``script``  -- optional absolute path run via ``python <script>`` instead of
+                   ``-m module`` (for lanes that live outside the package, e.g.
+                   the numeric differential lane under tests/). ``module`` is
+                   then just the human label shown in the report.
     ``argv``    -- fixed deterministic arguments appended after the module.
     ``family``  -- coarse grouping for the report (gemm / elementwise / ...).
     ``needs_gpu`` -- if True, SKIP (not FAIL) when no GPU is visible.
@@ -79,6 +83,7 @@ class Example:
 
     name: str
     module: str
+    script: Optional[str] = None
     argv: Tuple[str, ...] = ()
     family: str = "misc"
     needs_gpu: bool = True
@@ -143,7 +148,8 @@ REGISTRY: List[Example] = [
     # prints a per-config PASS/DRIFT table that is fully seed-deterministic.
     Example(
         name="numeric_differential_lane",
-        module="ck_dsl_c.tests.differential.numeric",
+        module="tests/instances/differential/numeric.py",
+        script=str(PYROOT.parent / "tests" / "instances" / "differential" / "numeric.py"),
         argv=("--arch", "gfx950"),
         family="differential",
         arch="gfx950",
@@ -285,7 +291,10 @@ def run_one(ex: Example, *, bless: bool, live_arch: Optional[str]) -> RunResult:
     env.setdefault("TMPDIR", "/tmp")
     # Force determinism knobs that some torch kernels honor.
     env.setdefault("PYTHONHASHSEED", "0")
-    cmd = [sys.executable, "-m", ex.module, *ex.argv]
+    if ex.script:
+        cmd = [sys.executable, ex.script, *ex.argv]
+    else:
+        cmd = [sys.executable, "-m", ex.module, *ex.argv]
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=ex.timeout, env=env
