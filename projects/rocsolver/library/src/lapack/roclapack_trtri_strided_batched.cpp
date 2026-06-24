@@ -62,9 +62,9 @@ rocblas_status rocsolver_trtri_strided_batched_impl(rocblas_handle handle,
     size_t size_tmpcopy;
     // size of arrays of pointers (for batched cases)
     size_t size_workArr;
-    rocsolver_trtri_getMemorySize<false, true, T>(diag, n, batch_count, &size_work1, &size_work2,
-                                                  &size_work3, &size_work4, &size_tmpcopy,
-                                                  &size_workArr, &optim_mem);
+    rocsolver_trtri_getMemorySize<false, true, T>(handle, diag, n, batch_count, &size_work1,
+                                                  &size_work2, &size_work3, &size_work4,
+                                                  &size_tmpcopy, &size_workArr, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,

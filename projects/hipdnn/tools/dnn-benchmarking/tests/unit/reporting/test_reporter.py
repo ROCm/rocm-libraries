@@ -30,7 +30,7 @@ class TestReporter:
 
         result = output.getvalue()
         assert "hipDNN Benchmark: test_conv_fwd" in result
-        assert "/test/graph.json" in result
+        assert str(Path("/test/graph.json")) in result
         assert "Engine ID:  1" in result
         assert "Warmup:     10 iterations" in result
         assert "Benchmark:  100 iterations" in result
@@ -106,9 +106,7 @@ class TestReporter:
         output = io.StringIO()
         reporter = Reporter(output=output)
 
-        reporter.print_validation(
-            True, "Validation stubbed - CPU reference not available"
-        )
+        reporter.print_validation(True, "Validation skipped - reference unavailable")
 
         result = output.getvalue()
         assert "SKIPPED" in result

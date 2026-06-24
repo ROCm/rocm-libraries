@@ -91,8 +91,8 @@ void checkRunningStatisticsTensorVirtuality(
     // Optional running statistics tensors must be non-virtual if present
     if(bnAttr.prev_running_mean_tensor_uid().has_value())
     {
-        const auto& bnTensorAttrPrevRunningMean = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
+        const auto& bnTensorAttrPrevRunningMean
+            = findTensorAttributes(tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
         if(bnTensorAttrPrevRunningMean.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -103,8 +103,8 @@ void checkRunningStatisticsTensorVirtuality(
 
     if(bnAttr.prev_running_variance_tensor_uid().has_value())
     {
-        const auto& bnTensorAttrPrevRunningVar = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
+        const auto& bnTensorAttrPrevRunningVar
+            = findTensorAttributes(tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
         if(bnTensorAttrPrevRunningVar.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -115,8 +115,8 @@ void checkRunningStatisticsTensorVirtuality(
 
     if(bnAttr.next_running_mean_tensor_uid().has_value())
     {
-        const auto& bnTensorAttrNextRunningMean = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.next_running_mean_tensor_uid().value());
+        const auto& bnTensorAttrNextRunningMean
+            = findTensorAttributes(tensorMap, bnAttr.next_running_mean_tensor_uid().value());
         if(bnTensorAttrNextRunningMean.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -127,8 +127,8 @@ void checkRunningStatisticsTensorVirtuality(
 
     if(bnAttr.next_running_variance_tensor_uid().has_value())
     {
-        const auto& bnTensorAttrNextRunningVar = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.next_running_variance_tensor_uid().value());
+        const auto& bnTensorAttrNextRunningVar
+            = findTensorAttributes(tensorMap, bnAttr.next_running_variance_tensor_uid().value());
         if(bnTensorAttrNextRunningVar.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -145,14 +145,10 @@ void checkTensorVirtuality1Node(
         tensorMap)
 {
     // Check for virtual tensors - 1-node case (solo batchnorm training)
-    const auto& bnTensorX
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
-    const auto& bnTensorScale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
-    const auto& bnTensorBias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
-    const auto& bnTensorY
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
+    const auto& bnTensorX = findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
+    const auto& bnTensorScale = findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
+    const auto& bnTensorBias = findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
+    const auto& bnTensorY = findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
 
     if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
        || bnTensorY.virtual_())
@@ -166,7 +162,7 @@ void checkTensorVirtuality1Node(
     if(bnAttr.mean_tensor_uid().has_value())
     {
         const auto& bnTensorMean
-            = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
+            = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
         if(bnTensorMean.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -176,8 +172,8 @@ void checkTensorVirtuality1Node(
 
     if(bnAttr.inv_variance_tensor_uid().has_value())
     {
-        const auto& bnTensorInvVar = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.inv_variance_tensor_uid().value());
+        const auto& bnTensorInvVar
+            = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
         if(bnTensorInvVar.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -197,14 +193,10 @@ void checkTensorVirtuality2Node(
         tensorMap)
 {
     // Check for virtual tensors - 2-node case (batchnorm training + activation)
-    const auto& bnTensorX
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
-    const auto& bnTensorScale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
-    const auto& bnTensorBias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
-    const auto& bnTensorY
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
+    const auto& bnTensorX = findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
+    const auto& bnTensorScale = findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
+    const auto& bnTensorBias = findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
+    const auto& bnTensorY = findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
 
     if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
        || !bnTensorY.virtual_())
@@ -218,7 +210,7 @@ void checkTensorVirtuality2Node(
     if(bnAttr.mean_tensor_uid().has_value())
     {
         const auto& bnTensorMean
-            = hip_kernel_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
+            = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
         if(bnTensorMean.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -228,8 +220,8 @@ void checkTensorVirtuality2Node(
 
     if(bnAttr.inv_variance_tensor_uid().has_value())
     {
-        const auto& bnTensorInvVar = hip_kernel_utils::findTensorAttributes(
-            tensorMap, bnAttr.inv_variance_tensor_uid().value());
+        const auto& bnTensorInvVar
+            = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
         if(bnTensorInvVar.virtual_())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -240,10 +232,8 @@ void checkTensorVirtuality2Node(
 
     checkRunningStatisticsTensorVirtuality(bnAttr, tensorMap);
 
-    const auto& actTensorIn0
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
-    const auto& actTensorOut
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
 
     if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
     {
@@ -263,7 +253,7 @@ BatchnormFwdTrainingPlanBuilder::BatchnormFwdTrainingPlanBuilder(
 }
 
 bool BatchnormFwdTrainingPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
@@ -323,29 +313,29 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
 }
 
 size_t BatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const HipKernelSettings& executionSettings) const
+    [[maybe_unused]] const Settings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
 void BatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings) const
+    [[maybe_unused]] Settings& executionSettings) const
 {
 }
 
 void BatchnormFwdTrainingPlanBuilder::buildPlan(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
     {
@@ -384,7 +374,7 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
     BatchnormFwdTrainingPlanBuilder::getCustomKnobs(
-        [[maybe_unused]] const HipKernelHandle& handle,
+        [[maybe_unused]] const Handle& handle,
         [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};

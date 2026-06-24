@@ -21,6 +21,7 @@
 
 #include "SgprPadding.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace asm_sdpa_engine
@@ -303,6 +304,21 @@ static_assert(sizeof(fmha_bwd_odo_args) == 256, "fmha_bwd_odo_args size mismatch
 
 static_assert(sizeof(fmha_bwd_post_kernel_args) == 192,
               "fmha_bwd_post_kernel_args size mismatch with AITER ABI");
+
+// Per-field offset checks for the most load-bearing kernarg fields.  sizeof
+// pins total layout, but the kernel reads each field by SGPR index — a
+// toolchain change that honoured `__attribute__((packed))` differently could
+// keep the total size while shifting individual offsets and silently corrupt
+// the dispatch.  Offsets below come from AITER's mha_bwd.h hex annotations
+// (commit 9522048).
+static_assert(offsetof(fmha_bwd_dqdkdv_args, ptr_dq) == 0x00,
+              "fmha_bwd_dqdkdv_args::ptr_dq offset drift vs AITER ABI");
+static_assert(offsetof(fmha_bwd_dqdkdv_args, seqlen_q) == 0xb0,
+              "fmha_bwd_dqdkdv_args::seqlen_q offset drift vs AITER ABI");
+static_assert(offsetof(fmha_bwd_dqdkdv_args, Ts) == 0xc0,
+              "fmha_bwd_dqdkdv_args::Ts offset drift vs AITER ABI");
+static_assert(offsetof(fmha_bwd_post_kernel_args, Hs_dq_acc) == 0x20,
+              "fmha_bwd_post_kernel_args::Hs_dq_acc offset drift vs AITER ABI");
 
 // NOLINTEND(readability-identifier-naming)
 

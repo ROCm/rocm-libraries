@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
+from ..common import torch_support
 from ..metrics.arch import detect_arch
 from .statistics import BenchmarkStats
 
@@ -100,12 +101,17 @@ class ProviderEngineResult:
         provider: Provider name.
         engine_id: Engine ID used.
         status: One of 'success', 'error', 'skipped'.
+        role: ``engine`` for hipDNN engine rows, ``reference`` for timed
+            validation-provider rows that are shown for comparison but are not
+            counted as pass/fail engine combinations.
         cpu_build_time_ms: CPU graph-build time.
         gpu_kernel_stats: GPU kernel timing statistics.
         e2e_stats: End-to-end wall-clock timing statistics.
         correctness: Correctness comparison result.
         error_message: Error message only (no partial timing on error).
         skip_reason: Reason this combination was skipped.
+        warnings: Non-fatal warnings for this row, such as reference timing
+            paths that are not solely built-in PyTorch operators.
         workspace_bytes: hipDNN-reserved workspace size in bytes.
         analytical_flops: Total analytical FLOPs across compute nodes
             (None for purely bandwidth-bound graphs).
@@ -147,10 +153,12 @@ class ProviderEngineResult:
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
+    _VALID_ROLES = {"engine", "reference"}
 
     provider: str
     engine_id: int
     status: Literal["success", "error", "skipped"]
+    role: Literal["engine", "reference"] = "engine"
     plugin_path: Optional[str] = None
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
@@ -159,6 +167,7 @@ class ProviderEngineResult:
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
+    warnings: Optional[List[str]] = None
     # Always-on metrics (None when collection failed or skipped)
     workspace_bytes: Optional[int] = None
     analytical_flops: Optional[int] = None
@@ -179,6 +188,10 @@ class ProviderEngineResult:
                 f"Invalid status '{self.status}'. "
                 f"Must be one of: {self._VALID_STATUSES}"
             )
+        if self.role not in self._VALID_ROLES:
+            raise ValueError(
+                f"Invalid role '{self.role}'. " f"Must be one of: {self._VALID_ROLES}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -196,8 +209,12 @@ class ProviderEngineResult:
             "engine_id": self.engine_id,
             "status": self.status,
         }
+        if self.role != "engine":
+            d["role"] = self.role
         if self.plugin_path is not None:
             d["plugin_path"] = self.plugin_path
+        if self.warnings:
+            d["warnings"] = list(self.warnings)
         # extra_metrics is exclusively populated by the opt-in
         # profiling orchestrator, which the suite runner only fires on
         # the success path. Asserting the invariant here makes it
@@ -299,21 +316,22 @@ class GraphResult:
         Returns:
             StatusCounts with the four bucket counts.
         """
+        engine_results = [r for r in self.results if r.role == "engine"]
         passed = sum(
             1
-            for r in self.results
+            for r in engine_results
             if r.status == "success"
             and (r.correctness is None or r.correctness.tolerance_match is not False)
         )
         failed = sum(
             1
-            for r in self.results
+            for r in engine_results
             if r.status == "success"
             and r.correctness is not None
             and r.correctness.tolerance_match is False
         )
-        skipped = sum(1 for r in self.results if r.status == "skipped")
-        errored = sum(1 for r in self.results if r.status == "error")
+        skipped = sum(1 for r in engine_results if r.status == "skipped")
+        errored = sum(1 for r in engine_results if r.status == "error")
         return StatusCounts(
             passed=passed, failed=failed, skipped=skipped, errored=errored
         )
@@ -343,7 +361,11 @@ class SuiteMetadata:
         fail_combinations: Combinations that failed correctness.
         skip_combinations: Combinations skipped (unsupported).
         error_combinations: Combinations that errored during execution.
-        rocm_version: ROCm version string.
+        rocm_version: ROCm/HIP version string (None on CUDA hosts).
+        cuda_version: CUDA toolkit version the torch wheel was built
+            against (None on ROCm hosts).
+        cudnn_version: cuDNN version string, decoded major.minor.patch
+            (None on ROCm hosts or when cuDNN is unavailable).
         gpu_model: GPU model name.
         gpu_arch: GPU gfx target (e.g. "gfx90a", "gfx942"). Useful for
             keying arch-specific PMC counter sets when analysing the
@@ -379,6 +401,8 @@ class SuiteMetadata:
     skip_combinations: int
     error_combinations: int
     rocm_version: Optional[str] = None
+    cuda_version: Optional[str] = None
+    cudnn_version: Optional[str] = None
     gpu_model: Optional[str] = None
     gpu_arch: Optional[str] = None
     python_version: Optional[str] = None
@@ -409,6 +433,8 @@ class SuiteMetadata:
             "skip_combinations": self.skip_combinations,
             "error_combinations": self.error_combinations,
             "rocm_version": self.rocm_version,
+            "cuda_version": self.cuda_version,
+            "cudnn_version": self.cudnn_version,
             "gpu_model": self.gpu_model,
             "gpu_arch": self.gpu_arch,
             "python_version": self.python_version,
@@ -490,6 +516,8 @@ class SuiteResult:
             skip_combinations=total_skip,
             error_combinations=total_error,
             rocm_version=env_info.get("rocm_version"),
+            cuda_version=env_info.get("cuda_version"),
+            cudnn_version=env_info.get("cudnn_version"),
             gpu_model=env_info.get("gpu_model"),
             gpu_arch=env_info.get("gpu_arch"),
             python_version=env_info.get("python_version"),
@@ -542,31 +570,62 @@ class SuiteResult:
         p.write_text(self.to_json())
 
 
+def _format_cudnn_version(raw: Optional[int]) -> Optional[str]:
+    """Decode the packed integer from ``torch.backends.cudnn.version()``.
+
+    torch exposes cuDNN's version only as a packed int (e.g. ``92000``),
+    so we decode it to a human-readable ``major.minor.patch`` string.
+    cuDNN 9+ packs as ``major*10000 + minor*100 + patch``; earlier
+    releases used ``major*1000 + minor*100 + patch``. Returns ``None``
+    for a missing/zero version.
+    """
+    if not raw:
+        return None
+    if raw >= 90000:
+        major, minor, patch = raw // 10000, (raw % 10000) // 100, raw % 100
+    else:
+        major, minor, patch = raw // 1000, (raw % 1000) // 100, raw % 100
+    return f"{major}.{minor}.{patch}"
+
+
 def collect_environment_info() -> Dict[str, Any]:
-    """Collect ROCm/GPU/Python/hipDNN versions plus static machine metadata.
+    """Collect ROCm/CUDA/GPU/Python/hipDNN versions plus static machine metadata.
 
     Combines the legacy version probes (torch hip, hipdnn_frontend) with
     the host- and GPU-side static info from
-    :func:`metrics.machine_info.collect_machine_info`. Never raises;
-    missing values are ``None`` so :class:`SuiteMetadata` can serialise
-    a stable shape.
+    :func:`metrics.machine_info.collect_machine_info`. On a CUDA host the
+    ROCm/hipDNN probes stay ``None`` and ``cuda_version``/``cudnn_version``
+    are populated instead (and vice versa on ROCm). Never raises; missing
+    values are ``None`` so :class:`SuiteMetadata` can serialise a stable
+    shape.
     """
     python_version = (
         f"{sys.version_info.major}.{sys.version_info.minor}"
         f".{sys.version_info.micro}"
     )
     rocm_version: Optional[str] = None
+    cuda_version: Optional[str] = None
+    cudnn_version: Optional[str] = None
     gpu_model: Optional[str] = None
     hipdnn_version: Optional[str] = None
 
     try:
-        import torch
+        if torch_support.module_available():
+            import torch
 
-        if hasattr(torch.version, "hip"):
-            rocm_version = torch.version.hip
-        if torch.cuda.is_available():
-            gpu_model = torch.cuda.get_device_name(0)
-    except ImportError:
+            if hasattr(torch.version, "hip"):
+                rocm_version = torch.version.hip
+            if torch_support.is_cuda_build():
+                cuda_version = getattr(torch.version, "cuda", None)
+                try:
+                    cudnn_version = _format_cudnn_version(
+                        torch.backends.cudnn.version()
+                    )
+                except Exception:
+                    cudnn_version = None
+            if torch_support.gpu_available():
+                gpu_model = torch.cuda.get_device_name(0)
+    except Exception:
         pass
 
     try:
@@ -584,6 +643,8 @@ def collect_environment_info() -> Dict[str, Any]:
 
     info: Dict[str, Any] = {
         "rocm_version": rocm_version,
+        "cuda_version": cuda_version,
+        "cudnn_version": cudnn_version,
         "gpu_model": gpu_model,
         "gpu_arch": gpu_arch,
         "python_version": python_version,
