@@ -34,7 +34,6 @@
 #include <functional>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <typeinfo>
@@ -81,27 +80,6 @@ static std::string formatModulePath(const std::vector<const std::string*>& modul
         out += moduleNames[i] ? *moduleNames[i] : std::string("<null>");
     }
     return out;
-}
-
-static void appendCallableFingerprint(const rocisa::Module& module, std::ostringstream& os,
-                                      bool includeModuleName) {
-    if (includeModuleName) os << "Module(" << module.name << "){";
-    for (const auto& item : module.itemList) {
-        if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
-            appendCallableFingerprint(*subMod, os, /*includeModuleName=*/true);
-        } else if (item) {
-            os << typeid(*item).name() << ':' << itemToString(item.get()) << '\n';
-        } else {
-            os << "<null>\n";
-        }
-    }
-    if (includeModuleName) os << '}';
-}
-
-static std::string fingerprintCallableModuleBody(const rocisa::Module& module) {
-    std::ostringstream os;
-    appendCallableFingerprint(module, os, /*includeModuleName=*/false);
-    return os.str();
 }
 
 // Forward decls (definitions appear below; convertFLATModifiers references them).
@@ -989,9 +967,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     std::vector<BasicBlock*> bbStack;
     bbStack.push_back(currentBB);
 
-    // Intern identical duplicate isCallable bodies so StinkyAsmModule keeps one
-    // callee Function per name. Same name with a different body is a producer bug.
-    std::unordered_map<std::string, std::pair<std::string, std::string>> callableInternByName;
+    // Callable names are Function symbols. rocisa duplicate activation canonicalization must run
+    // before conversion, so any duplicate callable name reaching this point is a producer bug.
+    std::unordered_map<std::string, std::string> callableDefPathByName;
 
     // Process each item
     std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
@@ -1143,22 +1121,19 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
 
         const std::string fnName = subMod.callableName.empty() ? subMod.name : subMod.callableName;
-        const std::string fp = fingerprintCallableModuleBody(subMod);
         const std::string path = formatModulePath(names);
         const std::string defPath =
             path.empty() ? subMod.name : path + std::string("/") + subMod.name;
 
-        const auto it = callableInternByName.find(fnName);
-        if (it != callableInternByName.end()) {
-            if (it->second.first != fp) {
-                report_fatal_error(
-                    "Duplicate isCallable rocisa Module for '" + fnName +
-                    "' with different bodies (fingerprint mismatch). First definition at '" +
-                    it->second.second + "', conflicting definition at '" + defPath + "'.");
-            }
-            return ModuleSubtreeAction::SkipSubtree;
+        const auto it = callableDefPathByName.find(fnName);
+        if (it != callableDefPathByName.end()) {
+            report_fatal_error("Duplicate isCallable rocisa Module for '" + fnName +
+                               "'. First definition at '" + it->second +
+                               "', conflicting definition at '" + defPath +
+                               "'. Duplicate activation functions should be canonicalized by "
+                               "rocisa removeDuplicatedFunction before StinkyTofu conversion.");
         }
-        callableInternByName.emplace(fnName, std::make_pair(fp, defPath));
+        callableDefPathByName.emplace(fnName, defPath);
 
         Function& callee = stinkyAsmModule.createFunction(fnName, /*isCallee=*/true);
         BasicBlock* calleeEntry = callee.getEntryBlock();
