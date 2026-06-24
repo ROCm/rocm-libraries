@@ -729,12 +729,14 @@ class TestToStinky(unittest.TestCase):
         self.assertEqual(name, "vgprValuA")
         self.assertEqual(offsets, [1, 2])
 
-    def test_named_resolved_skips_symbolic(self):
-        # When regIdx is resolved (>= 0), symbolic name is NOT set —
-        # stinkytofu code generator must use numeric index directly.
+    def test_named_resolved_preserves_symbolic(self):
+        # Resolved registers still carry symbolic names for readable asm.
         rc = RegisterContainer("v", RegName("ValuA", [1, 2]), 0, 1)
         reg = rc.to_stinky()
-        self.assertFalse(reg.has_reg_name())
+        self.assertTrue(reg.has_reg_name())
+        name, offsets = reg.get_reg_name()
+        self.assertEqual(name, "vgprValuA")
+        self.assertEqual(offsets, [1, 2])
 
     def test_named_sgpr_prefix(self):
         rc = RegisterContainer("s", RegName("KArg"), -1, 1)

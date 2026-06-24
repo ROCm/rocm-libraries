@@ -472,13 +472,16 @@ class _PostProcessModule:
     1. Wait-marker expansion (s_waitcnt → s_wait_loadcnt/etc)
     2. VCmpX expansion (v_cmpx_* → v_cmp_* + s_mov_b32 exec_lo)
     3. s_delay_alu insertion (register dependency scheduling hints)
+    4. Preamble injection (.set directives from ValueSet/RegSet items)
     """
 
-    __slots__ = ("_inner", "_insert_delay_alu")
+    __slots__ = ("_inner", "_insert_delay_alu", "_preamble")
 
-    def __init__(self, inner: Any, insert_delay_alu: bool = False) -> None:
+    def __init__(self, inner: Any, insert_delay_alu: bool = False,
+                 preamble: str = "") -> None:
         self._inner = inner
         self._insert_delay_alu = insert_delay_alu
+        self._preamble = preamble
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
@@ -491,6 +494,9 @@ class _PostProcessModule:
         asm = _postprocess_carry(asm)
         if self._insert_delay_alu:
             asm = _postprocess_delay_alu(asm)
+        asm = asm.replace("+-", "-")
+        if self._preamble:
+            asm = self._preamble + asm
         return asm
 
     def getName(self) -> str:
@@ -1613,6 +1619,9 @@ class Module(Item):
         for inst in self._collect_logical_insts():
             lm.add(inst)
 
+        # Collect .set directives (ValueSet/RegSet) as preamble text.
+        preamble = self._collect_set_directives()
+
         # --- DEBUG: dump LogicalModule IR before lowering ---
         import os as _os
         _dump_dir = _os.environ.get("DUMP_STINKY_MODULE")
@@ -1632,7 +1641,8 @@ class Module(Item):
             pass
 
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch)),
-                                  insert_delay_alu=_do_delay_alu)
+                                  insert_delay_alu=_do_delay_alu,
+                                  preamble=preamble)
 
     def _collect_logical_insts(self) -> List[Any]:
         """In-order walk of leaf instructions exposing ``to_stinky_logical``.
@@ -1666,6 +1676,19 @@ class Module(Item):
             else:
                 out.append(logical)
         return out
+
+    def _collect_set_directives(self) -> str:
+        """Walk module tree and collect all ValueSet/RegSet toString() output."""
+        parts: List[str] = []
+        self._walk_set_directives(parts)
+        return "".join(parts)
+
+    def _walk_set_directives(self, parts: List[str]) -> None:
+        for it in self.itemList:
+            if isinstance(it, Module):
+                it._walk_set_directives(parts)
+            elif isinstance(it, ValueSet):
+                parts.append(it.toString())
 
     # ---------------------------------------------------------- internal
     def _reparent(self, item: Any) -> None:

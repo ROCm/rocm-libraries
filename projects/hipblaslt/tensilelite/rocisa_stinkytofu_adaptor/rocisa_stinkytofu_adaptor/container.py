@@ -616,17 +616,14 @@ class RegisterContainer(Container):
         if self.isAbs:
             reg.set_abs(True)
 
-        # MSB offset is left to InsertVgprMsbPass; binding has no
-        # set_offset.
-
-        if self.regName is not None and self.regIdx == -1:
-            # Only attach symbolic name when the register is still unresolved.
-            # After convert_text_variables_to_registers, regIdx holds the
-            # concrete index and stinkytofu should use that directly.
-            symbolic = self.getCompleteRegNameWithType()
+        if self.regName is not None:
+            name = self.getRegNameWithType()
+            offsets = list(self.regName.offsets)
+            if self.msb > 0:
+                offsets.append(-self.msb)
             if self.isMacro:
-                symbolic = "\\" + symbolic
-            reg.set_reg_name(symbolic, [])
+                name = "\\" + name
+            reg.set_reg_name(name, offsets)
 
         return reg
 

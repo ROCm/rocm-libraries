@@ -6731,8 +6731,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         _dump_dir = os.environ.get("DUMP_STINKY_MODULE", "/tmp/stinky_dump")
         os.makedirs(_dump_dir, exist_ok=True)
         _backend_tag = os.environ.get("ROCISA_BACKEND", "native")
-        _inner_mod = getattr(stModule, '_inner', stModule)
-        _dump_asm = _inner_mod.emitAssembly()
+        _dump_asm = stModule.emitAssembly()
         _dump_path = os.path.join(_dump_dir, f"stmodule_{_backend_tag}.s")
         with open(_dump_path, "w") as _df:
           _df.write(_dump_asm)
