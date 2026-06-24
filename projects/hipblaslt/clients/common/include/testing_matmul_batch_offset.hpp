@@ -87,16 +87,21 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     size_t size_C_sub = size_t(ldc) * size_t(N);
     size_t size_D_sub = size_t(ldd) * size_t(N);
 
-    // Full buffer sizes: [offset padding] + [matrix data]
-    // The offset padding comes FIRST because:
-    // - Pointer array points to buffer BASE
-    // - Kernel adds offset to BASE to get actual data location
-    // - So actual data is at BASE + offset
-    // Offsets are already in elements (the API takes element offsets).
-    size_t size_A_full = offset_a + size_A_sub;
-    size_t size_B_full = offset_b + size_B_sub;
-    size_t size_C_full = offset_c + size_C_sub;
-    size_t size_D_full = offset_d + size_D_sub;
+    // Calculate padding needed for negative offsets (in elements)
+    // If offset is negative, we need padding BEFORE the base pointer
+    // If offset is positive, padding is at the beginning (offset space)
+    size_t padding_a = (offset_a < 0) ? size_t(-offset_a) : 0;
+    size_t padding_b = (offset_b < 0) ? size_t(-offset_b) : 0;
+    size_t padding_c = (offset_c < 0) ? size_t(-offset_c) : 0;
+    size_t padding_d = (offset_d < 0) ? size_t(-offset_d) : 0;
+
+    // Full buffer sizes: [padding for negative offsets] + [matrix data] + [positive offset space]
+    // Layout for negative offset:  [padding|matrix_data]  base points to start of matrix_data
+    // Layout for positive offset:  [matrix_data|padding]  base points to start of buffer
+    size_t size_A_full = padding_a + size_A_sub + (offset_a > 0 ? size_t(offset_a) : 0);
+    size_t size_B_full = padding_b + size_B_sub + (offset_b > 0 ? size_t(offset_b) : 0);
+    size_t size_C_full = padding_c + size_C_sub + (offset_c > 0 ? size_t(offset_c) : 0);
+    size_t size_D_full = padding_d + size_D_sub + (offset_d > 0 ? size_t(offset_d) : 0);
 
     // Allocate host memory for full buffers
     host_vector<Ti> h_A_full(size_A_full * batch_count);
@@ -106,14 +111,21 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     host_vector<To> h_D_gold(size_D_sub * batch_count);    // CPU reference
 
     // Initialize matrices with known pattern
-    // Data must be placed at (base + offset) because the offset API tells the kernel
-    // to start reading at that location
+    // For negative offsets: base points to (padding + 0), data at (base + negative_offset) = padding region
+    // For positive offsets: base points to 0, data at (base + positive_offset) = offset region
     for(int b = 0; b < batch_count; b++)
     {
-        // Initialize each batch's sub-matrix at the offset location
-        Ti* A_batch = h_A_full.data() + b * size_A_full + offset_a;
-        Ti* B_batch = h_B_full.data() + b * size_B_full + offset_b;
-        To* C_batch = h_C_full.data() + b * size_C_full + offset_c;
+        // Calculate base pointer for this batch (after padding for negative offsets)
+        Ti* A_base = h_A_full.data() + b * size_A_full + padding_a;
+        Ti* B_base = h_B_full.data() + b * size_B_full + padding_b;
+        To* C_base = h_C_full.data() + b * size_C_full + padding_c;
+
+        // Data location is at (base + offset)
+        // For negative offset: base + (-N) points backward into padding region
+        // For positive offset: base + (+N) points forward into buffer
+        Ti* A_batch = A_base + offset_a;
+        Ti* B_batch = B_base + offset_b;
+        To* C_batch = C_base + offset_c;
 
         // Simple initialization: A and B with small integers
         for(int64_t j = 0; j < A_col; j++)
@@ -144,6 +156,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         hipMemcpy(d_C_full, h_C_full.data(), sizeof(To) * size_C_full * batch_count, hipMemcpyHostToDevice));
 
     // Setup pointer arrays for base addresses
+    // Base pointers must point AFTER the padding (for negative offset support)
     std::vector<Ti*> h_batch_A(batch_count);
     std::vector<Ti*> h_batch_B(batch_count);
     std::vector<To*> h_batch_C(batch_count);
@@ -151,10 +164,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
 
     for(int b = 0; b < batch_count; b++)
     {
-        h_batch_A[b] = d_A_full + b * size_A_full;
-        h_batch_B[b] = d_B_full + b * size_B_full;
-        h_batch_C[b] = d_C_full + b * size_C_full;
-        h_batch_D[b] = d_D_full + b * size_D_full;
+        h_batch_A[b] = d_A_full + b * size_A_full + padding_a;
+        h_batch_B[b] = d_B_full + b * size_B_full + padding_b;
+        h_batch_C[b] = d_C_full + b * size_C_full + padding_c;
+        h_batch_D[b] = d_D_full + b * size_D_full + padding_d;
     }
 
     // Allocate device memory for pointer arrays
@@ -282,9 +295,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     for(int b = 0; b < batch_count; b++)
     {
         // Get pointers to sub-matrices (with element offset applied)
-        Ti* A_sub = h_A_full.data() + b * size_A_full + offset_a;
-        Ti* B_sub = h_B_full.data() + b * size_B_full + offset_b;
-        To* C_sub = h_C_full.data() + b * size_C_full + offset_c;
+        // Base is at padding, then add offset (which may be negative)
+        Ti* A_sub = h_A_full.data() + b * size_A_full + padding_a + offset_a;
+        Ti* B_sub = h_B_full.data() + b * size_B_full + padding_b + offset_b;
+        To* C_sub = h_C_full.data() + b * size_C_full + padding_c + offset_c;
         To* D_sub = h_D_gold.data() + b * size_D_sub;
 
         // Simple GEMM: D = alpha * A * B + beta * C
@@ -363,7 +377,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         for(int b = 0; b < batch_count; b++)
         {
             // GPU result is at (base + offset) within each batch's buffer
-            To* result_gpu = h_D_full.data() + b * size_D_full + offset_d;
+            // Base is at padding_d, then add offset_d (which may be negative)
+            To* result_gpu = h_D_full.data() + b * size_D_full + padding_d + offset_d;
             To* result_cpu = h_D_gold.data() + b * size_D_sub;
 
             for(size_t i = 0; i < size_D_sub; i++)
