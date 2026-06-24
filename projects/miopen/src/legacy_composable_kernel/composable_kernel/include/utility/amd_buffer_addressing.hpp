@@ -32,7 +32,7 @@ __device__ int32x4_t make_wave_buffer_resource(T* p_wave, index_t element_space_
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
     uint64_t num_records = static_cast<uint64_t>(element_space_size) * sizeof(T);
     wave_buffer_resource.range(Number<1>{}) |= static_cast<int32_t>((num_records & 0x7f) << 25);
-    wave_buffer_resource.range(Number<2>{}) = static_cast<int32_t>(num_records >> 7);
+    wave_buffer_resource.range(Number<2>{})  = static_cast<int32_t>(num_records >> 7);
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
 #else
     // wavewise base address (64 bit)
