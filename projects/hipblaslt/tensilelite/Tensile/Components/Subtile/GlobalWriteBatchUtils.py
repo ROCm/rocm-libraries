@@ -120,6 +120,15 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
     pt = kernel["ProblemType"]
     if pt.get("Gradient", False):
         return False
+    # Complex / F64 epilogues (alpha, beta, pack/convert) still address the raw
+    # "ValuC+N" staging slots and were not routed through _valuCVgpr, so the
+    # bypass would read uninitialized registers. FP4 subtile is never complex or
+    # F64, so this only guards hypothetical subtile configs from silent corruption.
+    computeDt = pt.get("ComputeDataType")
+    destDt = pt.get("DestDataType")
+    if (computeDt is not None and (computeDt.isComplex() or computeDt.isDouble())) \
+            or (destDt is not None and (destDt.isComplex() or destDt.isDouble())):
+        return False
     if use_bias == DataDirection.READ:
         # The bias-add epilogue (VAddF32 / VAddPKF32, GlobalWriteBatch._epilogue)
         # now resolves its ValuC src1 reads through _valuCVgpr, so bias read is
@@ -153,6 +162,11 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
     # applyScaleVec bypass is only validated for beta=0 (C = A*B).
     # Non-zero beta interacts with _addSumAlphaWithCBeta in untested ways.
     if beta and (pt.get("UseScaleAlphaVec", False) or pt.get("UseScaleAB", "None") == "Vector"):
+        return False
+    # GroupLoadStore + beta adds an extra C-load/addressing path in the store
+    # (see _preciseStorePerElem) that was not audited against the source-map
+    # remap; disable the bypass conservatively when both are active.
+    if beta and kernel.get("GroupLoadStore", False):
         return False
     dest = pt.get("DestDataType")
     # _addSumAlphaWithCBeta: non-HPA Half path (VAddPKF16) is not updated.

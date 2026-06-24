@@ -333,8 +333,19 @@ class StreamK(Component):
         if miwt0 > 1:
             # Keep MIWaveTile[0]-column alignment, matching the cap above.
             headroomElems = (headroomElems // miwt0) * miwt0
-        # The epilogue VGPR reserve (Subtile/Kernel.py EPILOGUE_TEMP_MARGIN) guarantees
-        # at least one miwt0 column fits, so never shrink below that floor.
+        # Floor at one miwt0 column so the store loop always makes forward progress.
+        # This backstop is safe for two independent reasons, so it cannot push the
+        # staging checkout past MaxVgpr in practice:
+        #   1. The VGPR-first accumulator ceiling (Subtile/Kernel.py
+        #      estimateVgprAccumulatorSplit: epiCeil reserves valuCStage +
+        #      EPILOGUE_STORE_TEMP_VGPRS, with valuCStage >= one miwt0 column)
+        #      guarantees the pool watermark here leaves room for >= one column,
+        #      i.e. headroomElems >= miwt0 — so the max() normally just returns
+        #      headroomElems.
+        #   2. The deferred-partials path runs after the main-loop A/B/scale working
+        #      set is freed, so RegisterPool.checkOutAligned reuses those freed holes
+        #      BELOW the watermark before extending the pool; the size()-based bound
+        #      above is therefore conservative (the real checkout start can be lower).
         safeElems = max(miwt0, headroomElems)
         return min(numElementsPerBatch, safeElems)
 
@@ -1547,6 +1558,17 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
+                        # Index-base convention (intentionally differs from
+                        # GlobalWriteBatch / fixupBatch, which subtract startVgprValu):
+                        # the subtile deferred-partials path stages into a
+                        # WORKSPACE-relative ValuC window whose ss.elementSumIdx is
+                        # already 0-based, so no startVgprValu subtraction is applied
+                        # (startVgprValuOffset=0). _isLegalValuCOffset / the spare
+                        # redirect add startVgprValu back when forming the physical
+                        # index, and the overflow precheck (maxValuCOffset above) uses
+                        # this same 0-based formula, so the convention is internally
+                        # consistent. The legacy (non-subtile) path keeps the
+                        # valu-relative base for backward compatibility.
                         startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
                         valuCOffset = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset
                         accReadInst = codeAccVgprRead.popFirstItem()
@@ -1595,7 +1617,14 @@ class StreamK(Component):
                 # TODO KUPO!!!!!!!!!!!!!!!!
                 # newSumIdxV = sumIdxV - writer.states.c.startVgprValu
                 # covers sgemm, gemm_ex(HHS/HSS/BBS/BSS (HPA=T)), int8 (int8x4?)
-                if kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle():
+                # Under the VGPR-first bypass (partialsSkipCopies) the acc→ValuC
+                # staging copies are skipped, so the "ValuC+N" slots referenced
+                # below are stale — the accumulator lives in the physical VGPR
+                # tracked by valuCSourceMap. These force/check paths are debug-only
+                # (writer.db flags, off by default), so disable them rather than
+                # emit assertions/overwrites against the unpopulated staging slots.
+                if (kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle()) \
+                        and not partialsSkipCopies:
                     if writer.db["ForceExpectedValue"]:
                         module.add(VMovB32(dst=vgpr("ValuC+%u"%sumIdxV), src=writer.db["ValueCExpectedValue"], comment="force expected value"))
                         # module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdxV), src=self.debugConfig["ValueCExpectedValue"], comment="force expected value" ))
@@ -2125,7 +2154,12 @@ class StreamK(Component):
             for vi in range(0, gwvw):
                 sumIdxV = ss.elementSumIdx[elementIdx] + vi
                 # covers sgemm, gemm_ex(HHS/HSS/BBS/BSS (HPA=T)), int8 (int8x4?)
-                if kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle():
+                # Skip under the VGPR-first bypass (fixupSkipCopies): the acc→ValuC
+                # staging is not populated, so the "ValuC+N" slots are stale (the
+                # reduction operates on the physical accumulator VGPR via
+                # _fixupEffOffset). These are debug-only (writer.db) paths.
+                if (kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle()) \
+                        and not fixupSkipCopies:
                     if writer.db["ForceExpectedValue"]:
                         module.add(VMovB32(dst=vgpr("ValuC+%u"%sumIdxV), src=writer.db["ValueCExpectedValue"], comment="force expected value"))
                     if writer.db["ForceVSerial"]:

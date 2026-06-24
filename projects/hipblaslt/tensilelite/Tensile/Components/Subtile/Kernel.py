@@ -378,6 +378,19 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
 # TileInfo — runtime tile state
 ################################################################################
 
+# Extra VGPRs the epilogue store checks out ABOVE the ValuC staging window, used
+# to bound the VGPR-first accumulator ceiling (estimateVgprAccumulatorSplit).
+# Derived from KernelWriterAssembly.globalWriteElements' per-batch temporaries:
+#   tmpVgpr (store address/temp scratch, ~6) + cvtVgpr (data convert, ~4) ≈ 8.
+# UseSubtileImpl BF16/FP16 instead checks out a 7-reg cvtVgprStruct with
+# 2-alignment (numCvtVgprs=7, cvtAlign=2), which adds ~3 data regs + up to 1
+# alignment hole = +4 over the base — still covered by this margin because the
+# StreamK deferred-partials path's extra demand is bounded separately by
+# StreamK._vgprFirstWorkspaceBatchCap. Keep this in sync with those checkout
+# sizes: growing the epilogue store temporaries means growing this margin.
+EPILOGUE_STORE_TEMP_VGPRS = 8
+
+
 class VgprAccSplit(NamedTuple):
   """Result of TileInfo.estimateVgprAccumulatorSplit (pure, no allocation).
 
@@ -761,6 +774,7 @@ class TileInfo:
     pgr = int(kernel.get("PrefetchGlobalRead", 0))
     candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
 
+    worstNumVgpr = 0
     for partSizeM, partSizeN in candidates:
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
@@ -782,7 +796,13 @@ class TileInfo:
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if writer.vgprPool.size() + numVgpr <= maxVgpr:
         return numVgpr
-    return numVgpr
+      worstNumVgpr = max(worstNumVgpr, numVgpr)
+    # No partition fits under MaxVgpr. Return the LARGEST working-set estimate
+    # (not the last candidate's, which is arbitrary) so the caller's main-loop
+    # ceiling is the most conservative: this minimizes the VGPR-backed
+    # accumulator count and biases estimateVgprAccumulatorSplit toward the safe
+    # AGPR-first fallback rather than an optimistic ceiling that overflows.
+    return worstNumVgpr
 
   def estimateVgprAccumulatorSplit(self, writer, kernel):
     """Estimate the VGPR-first accumulator split decision WITHOUT allocating.
@@ -939,18 +959,6 @@ class TileInfo:
         minStoreElems = 1
       stageElems = max(miwt0, minStoreElems)
       valuCStage = min(wholeTileStage, stageElems * perElem)
-      # Base overhead = tmpVgpr (6) + cvtVgpr (4, 1-aligned) ~ 8 for non-UseSubtileImpl.
-      # UseSubtileImpl BF16/FP16 checks out a 7-reg cvtVgprStruct with 2-alignment
-      # (see KernelWriterAssembly.py globalWriteElements, numCvtVgprs=7, cvtAlign=2),
-      # adding 3 data regs plus up to 1 alignment hole = +4 above the base.
-      # The StreamK deferred-partials write path (partialsWriteProcedure) would
-      # otherwise stage AGPR tiles ~4 VGPRs higher than the global-write path
-      # (it allocates a workspace address VGPR not present in the global path),
-      # which could push staging past v255 for VGPR-first kernels. That extra
-      # demand is bounded directly at the source by
-      # StreamK._vgprFirstWorkspaceBatchCap, which clamps the partials/fixup batch
-      # size for VGPR-first kernels, so the base margin is sufficient here.
-      EPILOGUE_TEMP_MARGIN = 8
       # Post-loop store staging runs after the main-loop A/B/scale VGPRs are no
       # longer needed. Its ceiling therefore only reserves room above the
       # VGPR-backed accumulators themselves:
@@ -958,7 +966,9 @@ class TileInfo:
       #   staging_end   = staging_start + valuCStage - 1
       #   constraint:   staging_end < maxVgpr
       #               => epiCeil = maxVgpr - valuCStage - margin
-      epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_TEMP_MARGIN
+      # The margin (EPILOGUE_STORE_TEMP_VGPRS) covers the store's per-batch temp
+      # checkouts; see its definition for the derivation and the StreamK note.
+      epiCeil = maxVgprBeforeAgpr - valuCStage - EPILOGUE_STORE_TEMP_VGPRS
 
       vgprAccLimit = min(mainCeil, epiCeil)
 
@@ -998,6 +1008,12 @@ class TileInfo:
     split decision, this method performs the register checkouts accordingly.
     """
     self.vgprTiles = []
+    # Re-run the estimate against the LIVE register pools here (rather than reusing
+    # a value computed earlier): est.startVgprValu and est.vgprAccLimit are then
+    # anchored to the current pool watermark, so there is no estimate-vs-allocation
+    # drift. The split (estimate) and these checkouts both measure the pool by its
+    # high-water size() (vgprPool.size()), so the comparison below (nextVgprEnd vs
+    # vgprAccLimit) is on a single consistent metric.
     est = self.estimateVgprAccumulatorSplit(writer, kernel)
     numMMATiles       = est.numMMATiles
     numMMATilesPerReg = est.numMMATilesPerReg
