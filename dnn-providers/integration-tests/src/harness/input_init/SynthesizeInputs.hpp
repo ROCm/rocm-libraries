@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "harness/golden/input_init/SynthesisTracker.hpp"
+#include "harness/input_init/SynthesisTracker.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests
 {
 
 // ── Per-op fill functions ─────────────────────────────────────────────────────
@@ -107,8 +107,9 @@ inline SynthesisResult
         return SynthesisResult::unsupported("not BatchnormInferenceAttributesVarianceExt");
     }
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->mean_tensor_uid(), -0.1f, 0.1f, rng);
-    tracker.fillFree(a->variance_tensor_uid(), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->mean_tensor_uid(), -1.0f, 1.0f, rng);
+    // Variance must be non-negative
+    tracker.fillFree(a->variance_tensor_uid(), 0.1f, 1.0f, rng);
     tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
@@ -128,11 +129,11 @@ inline SynthesisResult
         return SynthesisResult::unsupported("not BatchnormAttributes");
     }
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
-    tracker.fillFree(a->bias_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -2.0f, 2.0f, rng);
+    tracker.fillFree(a->bias_tensor_uid(), -2.0f, 2.0f, rng);
     tracker.fillFree(a->epsilon_tensor_uid(), 0.0f, 1.0f, rng);
-    tracker.fillFree(a->prev_running_mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    tracker.fillFree(a->prev_running_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
+    tracker.fillFree(a->prev_running_mean_tensor_uid().value_or(0), -2.0f, 2.0f, rng);
+    tracker.fillFree(a->prev_running_variance_tensor_uid().value_or(0), -2.0f, 2.0f, rng);
     tracker.fillFree(a->momentum_tensor_uid().value_or(0), 0.0f, 1.0f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
@@ -157,11 +158,11 @@ inline SynthesisResult
     {
         return SynthesisResult::unsupported("not BatchnormBackwardAttributes");
     }
-    tracker.fillFree(a->dy_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->dy_tensor_uid(), -0.1f, 0.1f, rng);
     tracker.fillFree(a->x_tensor_uid(), -1.0f, 1.0f, rng);
     tracker.fillFree(a->mean_tensor_uid().value_or(0), -0.1f, 0.1f, rng);
-    tracker.fillFree(a->inv_variance_tensor_uid().value_or(0), 0.5f, 1.5f, rng);
-    tracker.fillFree(a->scale_tensor_uid(), -1.0f, 1.0f, rng);
+    tracker.fillFree(a->inv_variance_tensor_uid().value_or(0), 1.9f, 2.0f, rng);
+    tracker.fillFree(a->scale_tensor_uid(), -0.1f, 0.1f, rng);
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
@@ -491,4 +492,4 @@ inline SynthesisResult synthesizeNodeInputs(const hipdnn_flatbuffers_sdk::data_o
     }
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests

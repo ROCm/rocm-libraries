@@ -21,7 +21,7 @@
 #include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Loaded tensors keyed by tensor UID. Holds every tensor declared by the graph —
@@ -325,4 +325,4 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     return bundle;
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

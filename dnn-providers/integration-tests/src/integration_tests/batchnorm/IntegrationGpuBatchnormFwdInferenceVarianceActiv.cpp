@@ -149,25 +149,6 @@ public:
     }
 
 protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
-    {
-        bundle.sentinelFillOutputTensors();
-
-        bundle.tensors.at(BnInfVarActivTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::MEAN_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        // Variance must be non-negative; use positive range
-        bundle.tensors.at(BnInfVarActivTensorIds::VARIANCE_UID)
-            ->fillTensorWithRandomValues(0.1f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-    }
-
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();

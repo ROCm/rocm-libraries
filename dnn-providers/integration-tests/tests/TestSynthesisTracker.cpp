@@ -10,11 +10,11 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
-#include "harness/golden/input_init/SynthesisTracker.hpp"
+#include "harness/input_init/SynthesisTracker.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests;
 
 namespace
 {

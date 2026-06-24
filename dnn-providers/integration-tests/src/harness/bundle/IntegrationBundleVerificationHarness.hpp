@@ -22,9 +22,9 @@
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Output tensors, keyed by uid. Used both for the engine's computed "actual"
@@ -55,19 +55,15 @@ using OutputTensors
 //   * Virtual (inter-node) tensors are allocated internally by each executor; the
 //     variant packs we build carry only real (input + output) tensors.
 //
-// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
-//   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
-//             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
-//             pointwise) through the synthesis switch. Zero behavioral change.
-//   Stage 2 — Migrate structured recipes one op at a time: copy the exact
-//             ranges/seeds/derivation from each non-golden subclass override
-//             into the corresponding fill function, using fillComputed/tensorAt
-//             for derived inputs. Delete each override once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via SynthesisTracker.
-class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
+// NOTE: Stages 1-3 of init unification are done (ALMIOPEN-1969 follow-up).
+//   Both harnesses share SynthesisTracker + SynthesizeInputs from harness/input_init/.
+//   Remaining: 3 non-golden overrides kept for fused-graph range conflicts or
+//   specialized stress tests (BN backward activ, BN fwd training activ,
+//   conv backward weights large-values).
+class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationGraphGoldenReferenceVerificationHarness(bool requiresDevice)
+    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
         : _requiresDevice(requiresDevice)
     {
     }
@@ -279,4 +275,4 @@ private:
                           float rtol);
 };
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

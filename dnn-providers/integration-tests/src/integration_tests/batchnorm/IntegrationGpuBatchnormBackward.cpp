@@ -127,29 +127,6 @@ public:
     }
 
 protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
-    {
-        bundle.sentinelFillOutputTensors();
-
-        bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-        if(!CalcStats)
-        {
-            bundle.tensors.at(BatchnormBwdTensorIds::MEAN_UID)
-                ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-            bundle.tensors.at(BatchnormBwdTensorIds::INV_VARIANCE_UID)
-                ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
-        }
-    }
-
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();

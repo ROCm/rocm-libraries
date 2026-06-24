@@ -208,41 +208,6 @@ public:
     }
 
 protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
-    {
-        bundle.sentinelFillOutputTensors();
-
-        // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
-
-        // X input: default range
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-
-        // Scale and bias: -2.0 to 2.0 to match MIOpen
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1);
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2);
-
-        // Running mean: only initialize PREV (input), leave NEXT (output) with sentinel
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
-           != bundle.tensors.end())
-        {
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1000);
-        }
-
-        // Running variance: only initialize PREV (input), leave NEXT (output) with sentinel
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
-           != bundle.tensors.end())
-        {
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2000);
-        }
-    }
-
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();

@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
 #include <ostream>
@@ -24,16 +24,16 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/golden/UnverifiableBundleReport.hpp"
-#include "harness/golden/input_init/SynthesizeInputs.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/input_init/SynthesizeInputs.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // ---- virtual defaults ------------------------------------------------------
 
-void IntegrationGraphGoldenReferenceVerificationHarness::executeGraphThroughEngine(
+void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
     std::unordered_map<int64_t, void*>& variantPack)
 {
     auto handle = getSharedHandle();
@@ -89,7 +89,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::executeGraphThroughEngi
     ASSERT_TRUE(result.is_good()) << result.get_message();
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::runReferenceExecutor(
+void IntegrationBundleVerificationHarness::runReferenceExecutor(
     ReferenceExecutorType type, std::unordered_map<int64_t, void*>& variantPack)
 {
     auto executor = makeReferenceExecutor(type);
@@ -97,8 +97,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runReferenceExecutor(
 }
 
 std::unique_ptr<IReferenceGraphExecutor>
-    IntegrationGraphGoldenReferenceVerificationHarness::makeReferenceExecutor(
-        ReferenceExecutorType type)
+    IntegrationBundleVerificationHarness::makeReferenceExecutor(ReferenceExecutorType type)
 {
     switch(type)
     {
@@ -113,12 +112,12 @@ std::unique_ptr<IReferenceGraphExecutor>
 
 // ---- top-level dispatch ----------------------------------------------------
 
-VerificationMode IntegrationGraphGoldenReferenceVerificationHarness::getVerificationMode() const
+VerificationMode IntegrationBundleVerificationHarness::getVerificationMode() const
 {
     return TestConfig::get().getVerificationMode();
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::runComparison()
+void IntegrationBundleVerificationHarness::runComparison()
 {
     if(_bundle->outputTensorUids.empty())
     {
@@ -168,7 +167,7 @@ void skipEngineCouldNotRun(const std::filesystem::path& bundlePath, const std::s
 }
 } // namespace
 
-std::optional<OutputTensors> IntegrationGraphGoldenReferenceVerificationHarness::runEngineOrSkip()
+std::optional<OutputTensors> IntegrationBundleVerificationHarness::runEngineOrSkip()
 {
     std::string error;
     auto engineOutputs = runEngineCapturingOutputs(error);
@@ -179,7 +178,7 @@ std::optional<OutputTensors> IntegrationGraphGoldenReferenceVerificationHarness:
     return engineOutputs;
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::runGoldenMode()
+void IntegrationBundleVerificationHarness::runGoldenMode()
 {
     if(!_bundle->hasGoldenOutputs)
     {
@@ -194,8 +193,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runGoldenMode()
     compareAgainstGolden(*engineOutputs);
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::runExplicitRefMode(
-    ReferenceExecutorType type)
+void IntegrationBundleVerificationHarness::runExplicitRefMode(ReferenceExecutorType type)
 {
     auto engineOutputs = runEngineOrSkip();
     if(!engineOutputs)
@@ -224,7 +222,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runExplicitRefMode(
     }
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
+void IntegrationBundleVerificationHarness::runAutoMode()
 {
     auto engineOutputs = runEngineOrSkip();
     if(!engineOutputs)
@@ -289,7 +287,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::runAutoMode()
 
 // ---- inputs ----------------------------------------------------------------
 
-bool IntegrationGraphGoldenReferenceVerificationHarness::ensureInputsAvailable()
+bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
 {
     if(_bundle->tensors.has_value())
     {
@@ -298,7 +296,7 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::ensureInputsAvailable()
     return synthesizeInputs();
 }
 
-bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
+bool IntegrationBundleVerificationHarness::synthesizeInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -354,7 +352,7 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
 // make an unwritten output indistinguishable from a legitimately-computed zero,
 // so engine and reference could silently agree on garbage (both untouched zeros)
 // and the comparison would vacuously pass.
-OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateSentinelOutputs() const
+OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -369,8 +367,8 @@ OutputTensors IntegrationGraphGoldenReferenceVerificationHarness::allocateSentin
 }
 
 std::unordered_map<int64_t, void*>
-    IntegrationGraphGoldenReferenceVerificationHarness::buildVariantPack(OutputTensors& outputs,
-                                                                         bool useDevice) const
+    IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs,
+                                                           bool useDevice) const
 {
     std::unordered_map<int64_t, void*> variantPack;
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
@@ -392,8 +390,7 @@ std::unordered_map<int64_t, void*>
 }
 
 std::optional<OutputTensors>
-    IntegrationGraphGoldenReferenceVerificationHarness::runEngineCapturingOutputs(
-        std::string& error)
+    IntegrationBundleVerificationHarness::runEngineCapturingOutputs(std::string& error)
 {
     OutputTensors engineOutputs = allocateSentinelOutputs();
     auto variantPack = buildVariantPack(engineOutputs, /*useDevice=*/_requiresDevice);
@@ -422,9 +419,9 @@ std::optional<OutputTensors>
     return engineOutputs;
 }
 
-IntegrationGraphGoldenReferenceVerificationHarness::RefRunResult
-    IntegrationGraphGoldenReferenceVerificationHarness::runReferenceCapturingOutputs(
-        ReferenceExecutorType type, OutputTensors& refOutputs)
+IntegrationBundleVerificationHarness::RefRunResult
+    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(ReferenceExecutorType type,
+                                                                       OutputTensors& refOutputs)
 {
     refOutputs = allocateSentinelOutputs();
     const bool useDevice = _requiresDevice && (type == ReferenceExecutorType::GPU);
@@ -447,14 +444,13 @@ IntegrationGraphGoldenReferenceVerificationHarness::RefRunResult
     return {RefStatus::RAN, {}};
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::markOutputsModified(
-    OutputTensors& outputs) const
+void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
 {
     markOutputsModifiedFor(outputs, _requiresDevice);
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::markOutputsModifiedFor(
-    OutputTensors& outputs, bool device)
+void IntegrationBundleVerificationHarness::markOutputsModifiedFor(OutputTensors& outputs,
+                                                                  bool device)
 {
     for(auto& [uid, tensor] : outputs)
     {
@@ -471,16 +467,15 @@ void IntegrationGraphGoldenReferenceVerificationHarness::markOutputsModifiedFor(
 
 // ---- comparison ------------------------------------------------------------
 
-void IntegrationGraphGoldenReferenceVerificationHarness::compareAgainstGolden(
-    OutputTensors& engineOutputs)
+void IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
     compareEach(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
         return *_bundle->tensors->at(uid);
     });
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputs(
-    OutputTensors& engineOutputs, OutputTensors& expected)
+void IntegrationBundleVerificationHarness::compareOutputs(OutputTensors& engineOutputs,
+                                                          OutputTensors& expected)
 {
     compareEach(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
         return *expected.at(uid);
@@ -488,8 +483,8 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputs(
 }
 
 template <typename ExpectedLookup>
-void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTensors& engineOutputs,
-                                                                     ExpectedLookup expectedFor)
+void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutputs,
+                                                       ExpectedLookup expectedFor)
 {
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -514,27 +509,27 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
 
 // ---- reporting helpers -----------------------------------------------------
 
-void IntegrationGraphGoldenReferenceVerificationHarness::skipUnverifiable(const std::string& reason)
+void IntegrationBundleVerificationHarness::skipUnverifiable(const std::string& reason)
 {
     UnverifiableBundleReport::get().record(
         _bundlePath.string(), reason, UnverifiableSeverity::UNVERIFIABLE);
     GTEST_SKIP() << "Unverifiable: " << reason << " (" << _bundlePath << ")";
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::recordRefError(const std::string& reason)
+void IntegrationBundleVerificationHarness::recordRefError(const std::string& reason)
 {
     UnverifiableBundleReport::get().record(
         _bundlePath.string(), reason, UnverifiableSeverity::REF_ERROR);
 }
 
-std::string IntegrationGraphGoldenReferenceVerificationHarness::refLabel(ReferenceExecutorType type)
+std::string IntegrationBundleVerificationHarness::refLabel(ReferenceExecutorType type)
 {
     return type == ReferenceExecutorType::GPU ? "GPU reference" : "CPU reference";
 }
 
 // ---- comparison + tolerance machinery --------------------------------------
 
-void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputTensor(
+void IntegrationBundleVerificationHarness::compareOutputTensor(
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
@@ -555,7 +550,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareOutputTensor(
     }
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::writeTensorDiffReport(
+void IntegrationBundleVerificationHarness::writeTensorDiffReport(
     std::ostream& os,
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -589,7 +584,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::writeTensorDiffReport(
 }
 
 template <typename T>
-void IntegrationGraphGoldenReferenceVerificationHarness::writeFpDiffReport(
+void IntegrationBundleVerificationHarness::writeFpDiffReport(
     std::ostream& os,
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -603,14 +598,14 @@ void IntegrationGraphGoldenReferenceVerificationHarness::writeFpDiffReport(
     hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
 }
 
-std::string IntegrationGraphGoldenReferenceVerificationHarness::labelFor(
+std::string IntegrationBundleVerificationHarness::labelFor(
     int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs)
 {
     const auto* name = attrs.name();
     return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
 }
 
-std::string IntegrationGraphGoldenReferenceVerificationHarness::reportHeader(
+std::string IntegrationBundleVerificationHarness::reportHeader(
     int64_t uid,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
@@ -619,7 +614,7 @@ std::string IntegrationGraphGoldenReferenceVerificationHarness::reportHeader(
     float rtol) const
 {
     std::ostringstream os;
-    os << "\nGolden comparison FAILED\n"
+    os << "\nBundle output comparison FAILED\n"
        << "  Bundle: " << _bundlePath << "\n"
        << "  Tensor: " << labelFor(uid, attrs) << " (UID " << uid << ", output)\n"
        << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
@@ -628,13 +623,13 @@ std::string IntegrationGraphGoldenReferenceVerificationHarness::reportHeader(
     return os.str();
 }
 
-std::string IntegrationGraphGoldenReferenceVerificationHarness::dataTypeName(
+std::string IntegrationBundleVerificationHarness::dataTypeName(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::resolveTolerances(
+void IntegrationBundleVerificationHarness::resolveTolerances(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
     float& atol,
@@ -646,7 +641,7 @@ void IntegrationGraphGoldenReferenceVerificationHarness::resolveTolerances(
 }
 
 template <typename T>
-float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForNodeAttributes(
+float IntegrationBundleVerificationHarness::toleranceForNodeAttributes(
     hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
@@ -686,7 +681,7 @@ float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForNodeAttrib
     }
 }
 
-float IntegrationGraphGoldenReferenceVerificationHarness::deriveDefaultTolerance(
+float IntegrationBundleVerificationHarness::deriveDefaultTolerance(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
@@ -705,7 +700,7 @@ float IntegrationGraphGoldenReferenceVerificationHarness::deriveDefaultTolerance
     return found ? maxTolerance : 1e-3f;
 }
 
-float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForDataType(
+float IntegrationBundleVerificationHarness::toleranceForDataType(
     hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
@@ -726,19 +721,30 @@ float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForDataType(
     }
 }
 
-void IntegrationGraphGoldenReferenceVerificationHarness::applyMetadataGuards() const
+void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
+    // VRAM is an execution-feasibility guard: the engine allocates the same
+    // buffers and runs the same graph regardless of how its output is verified,
+    // so this applies to every bundle (golden or reference-verified).
     if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
            _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
     {
         GTEST_SKIP() << *reason;
     }
 
-    if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-           _bundle->metadata, TestConfig::get().getCurrentArch()))
+    // Arch-lock only matters for golden data: golden output VALUES are
+    // numerically arch-specific (AITER / GPU-ref generated). Inputs are not
+    // arch-locked. When there is no golden data the engine output is verified
+    // against a reference executor run on THIS device, so the bundle's recorded
+    // arch is irrelevant and must not gate the test.
+    if(_bundle->hasGoldenOutputs)
     {
-        GTEST_SKIP() << *reason;
+        if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
+               _bundle->metadata, TestConfig::get().getCurrentArch()))
+        {
+            GTEST_SKIP() << *reason;
+        }
     }
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

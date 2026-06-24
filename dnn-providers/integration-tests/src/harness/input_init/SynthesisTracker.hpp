@@ -15,7 +15,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests
 {
 
 // Pre-allocated input tensors keyed by uid, handed to a fill function to populate.
@@ -227,4 +227,4 @@ private:
     std::vector<std::string> _refusals;
 };
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests

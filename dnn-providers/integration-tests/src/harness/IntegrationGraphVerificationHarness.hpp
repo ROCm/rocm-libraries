@@ -30,6 +30,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/input_init/SynthesizeInputs.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -42,7 +43,6 @@ template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
-    int _deviceId = 0;
     std::string _testCaseNote;
     std::string _testCaseLayout;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
@@ -54,10 +54,9 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
 
-        // Initialize HIP
-        ASSERT_EQ(hipInit(0), hipSuccess);
-        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
-
+        // HIP initializes lazily on first runtime use; the shared hipdnn handle
+        // (getSharedHandle -> hipdnnCreate) does this before any graph executes,
+        // so no explicit hipInit is needed here.
         skipIfTomlMatched(currentTestName());
     }
 
@@ -308,17 +307,80 @@ protected:
         });
     }
 
-    virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
+    virtual void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
     {
         bundle.sentinelFillOutputTensors();
 
-        for(auto& tensorPair : bundle.tensors)
+        auto [serialized, serErr] = graph.to_binary();
+        if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
         {
-            if(!bundle.isOutput(tensorPair.first))
+            initializeBundleFallback(bundle, seed);
+            return;
+        }
+
+        const auto* fb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serialized.data());
+        if(fb == nullptr || fb->nodes() == nullptr)
+        {
+            initializeBundleFallback(bundle, seed);
+            return;
+        }
+
+        std::vector<int64_t> leafInputUids;
+        InputTensorMap inputs;
+        for(auto& [uid, tensor] : bundle.tensors)
+        {
+            if(!bundle.isOutput(uid))
             {
-                bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
+                leafInputUids.push_back(uid);
+                inputs[uid] = std::move(tensor);
+            }
+        }
+
+        std::mt19937 rng(seed);
+        SynthesisTracker tracker(leafInputUids, inputs);
+
+        bool synthesisOk = true;
+        for(const auto* node : *fb->nodes())
+        {
+            if(node == nullptr)
+            {
+                continue;
+            }
+            auto result = synthesizeNodeInputs(*node, tracker, rng);
+            if(!result.filled)
+            {
+                synthesisOk = false;
+                break;
+            }
+        }
+
+        if(synthesisOk)
+        {
+            auto finalResult = tracker.finish("synthesis");
+            synthesisOk = finalResult.filled;
+        }
+
+        for(auto& [uid, tensor] : inputs)
+        {
+            bundle.tensors[uid] = std::move(tensor);
+        }
+
+        if(!synthesisOk)
+        {
+            initializeBundleFallback(bundle, seed);
+        }
+    }
+
+    void initializeBundleFallback(hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                                  unsigned int seed)
+    {
+        for(auto& [uid, tensor] : bundle.tensors)
+        {
+            if(!bundle.isOutput(uid))
+            {
+                bundle.randomizeTensor(uid, -1.0f, 1.0f, seed);
             }
         }
     }
