@@ -131,7 +131,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
     }
 
     // 2. invalid size
-    if(m < 0 || n < 0 || ldv < 2 * kd || ldc < m)
+    if(m < 0 || n < 0 || kd < 1 || ldv < 2 * kd || ldc < m)
     {
         return rocblas_status_invalid_size;
     }
@@ -188,7 +188,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     const T negone = -1;
 
     // quick return
-    if(m == 0 || n == 0 || kd == 0 || batch_count == 0)
+    if(m == 0 || n == 0 || batch_count == 0)
         return rocblas_status_success;
 
     hipStream_t stream;
