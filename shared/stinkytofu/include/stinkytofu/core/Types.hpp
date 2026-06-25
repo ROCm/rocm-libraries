@@ -53,12 +53,6 @@ struct GemmTileConfig {
 /// Pass-specific feature configuration
 /// Categorizes optimization behaviors into semantics, properties, and features
 struct PassFeatureConfig {
-    /// Barrier semantics and unrolling behavior
-    /// These are code structure PROPERTIES (not optional features)
-    struct BarrierConfig {
-        bool unrollMovableBarrier = false;  ///< Whether GEMM barriers can be moved during unroll
-    };
-
     /// Loop structure and unrolling properties
     /// These are code structure PROPERTIES (not optional features)
     struct LoopConfig {
@@ -76,36 +70,29 @@ struct PassFeatureConfig {
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
+        /// Max in-flight tensor_load_to_lds credits (HW queue depth, to connect to sw math cycles).
+        /// 0 disables the throttle (current behavior).
+        int globalReadQueueDepth = 0;
+        /// Modeled cycles until one tensor_load_to_lds credit frees. Fed from the
+        /// cost/cycle model; varies with layout and problem size.
+        int globalReadDrainLatency = 0;
     };
 
-    /// Generic before/after instruction-order snapshot written by PassManager.
-    struct PassOrderSnapshotConfig {
-        /// Output path; if non-empty, PassManager records snapshots into JSON
-        /// for tools/stinkytofu-analysis (schema stinkytofu-dag-schedule-v1).
-        std::string jsonPath;
-        /// Prepended to each region title (e.g. Tensile pipeline group: loopWithPrefetch).
-        std::string titlePrefix;
-        /// `Pass::getName()` strings; after each listed pass, emit one region.
-        /// If empty and jsonPath is set, defaults to StinkyDAGSchedulerPass only.
-        std::vector<std::string> dumpAfterPasses;
-    };
-
-    BarrierConfig barrierConfig;
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
-    PassOrderSnapshotConfig passOrderSnapshot;
 };
 
-/// Assembler capability flags propagated from rocisa asmCaps into stinkytofu.
-///
-/// These are target/toolchain capabilities discovered by probing the assembler
-/// (see `initAsmCaps` in rocisa `hardware_caps.hpp`). They are populated by
-/// the rocisa conversion layer and consumed by stinkytofu passes without
-/// introducing a direct dependency on rocisa headers from the pass layer.
+/// VGPR MSB encoding mode supported by the toolchain.
+enum class VgprMsbMode : uint8_t {
+    None,   ///< Toolchain does not support `s_set_vgpr_msb`
+    Msb8,   ///< 8-bit form only (`s_set_vgpr_msb 0`)
+    Msb16,  ///< 16-bit form (`s_set_vgpr_msb 0x0101`) — packs prev + curr MSB
+};
+
+/// Toolchain capabilities discovered by probing the assembler (via comgr or
+/// rocisa's initAsmCaps).  Populated either by the rocisa conversion layer or
+/// by ToolchainCaps::probe() for the standalone path.
 struct AsmCapsConfig {
-    /// Whether the assembler accepts the 16-bit form of `s_set_vgpr_msb`
-    /// (immediate encodes both the current instruction's MSB in the low byte
-    /// and the previous instruction's MSB in the high byte).
-    bool hasVgprMsb16 = false;
+    VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 };
 }  // namespace stinkytofu

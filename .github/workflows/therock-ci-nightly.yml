@@ -19,6 +19,7 @@ jobs:
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
       linux_build_runs_on: ${{ steps.linux_projects.outputs.build_runs_on }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
@@ -45,6 +46,14 @@ jobs:
           path: TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
 
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -55,11 +64,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install pydantic requests
 
+      - name: Compute package version
+        id: rocm_package_version
+        run: |
+          python TheRock/build_tools/compute_rocm_package_version.py --release-type=dev
+
       - name: Determine Linux projects to run
         id: linux_projects
         env:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
+          CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -68,6 +83,7 @@ jobs:
         env:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
+          CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -81,11 +97,8 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx1151"
-          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
-          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          CI_CONFIG_PATH: ci-config
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
@@ -106,6 +119,7 @@ jobs:
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
@@ -129,6 +143,7 @@ jobs:
     secrets: inherit
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}

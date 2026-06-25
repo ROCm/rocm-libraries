@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,102 +30,123 @@
 
 #include "utility.h"
 
-//
-// hipsparseSpMVDescr_st
-//
-rocsparse_spmv_descr hipsparseSpMVDescr_st::get_spmv_descr()
+hipsparseSpMVDescr_st::Entry::Entry(Entry&& other) noexcept
+    : operation(other.operation)
+    , alg(other.alg)
+    , scalar_datatype(other.scalar_datatype)
+    , compute_datatype(other.compute_datatype)
+    , spmv_descr(other.spmv_descr)
+    , buffer_size_stage_analysis(other.buffer_size_stage_analysis)
+    , buffer_size_stage_compute(other.buffer_size_stage_compute)
+    , compute_buffer(other.compute_buffer)
+    , is_buffer_size_called(other.is_buffer_size_called)
+    , is_stage_analysis_called(other.is_stage_analysis_called)
+    , is_implicit_stage_analysis_called(other.is_implicit_stage_analysis_called)
+    , is_stage_compute_subsequent(other.is_stage_compute_subsequent)
 {
-    return this->m_spmv_descr;
+    // Transfer ownership of the owned resources; the moved-from object's
+    // destructor must not double-free them.
+    other.spmv_descr     = nullptr;
+    other.compute_buffer = nullptr;
 }
 
-void hipsparseSpMVDescr_st::set_spmv_descr(rocsparse_spmv_descr value)
+hipsparseSpMVDescr_st::Entry::~Entry()
 {
-    this->m_spmv_descr = value;
+    // Destructors cannot propagate status codes, so the rocsparse / hip
+    // return values are intentionally discarded here. Entries are only
+    // destroyed at sparse-matrix-descriptor tear-down time (via
+    // m_entries.clear() in the implicit destructor), so failures
+    // here would only mean a leaked rocsparse descriptor or hip buffer
+    // (already on the tear-down path).
+    if(this->spmv_descr != nullptr)
+    {
+        (void)rocsparse_destroy_spmv_descr(this->spmv_descr);
+        this->spmv_descr = nullptr;
+    }
+
+    if(this->compute_buffer != nullptr)
+    {
+        (void)hipFree(this->compute_buffer);
+        this->compute_buffer = nullptr;
+    }
 }
 
-bool hipsparseSpMVDescr_st::is_stage_analysis_called() const
+hipsparseSpMVDescr_st::Entry* hipsparseSpMVDescr_st::find_entry(rocsparse_operation operation,
+                                                                rocsparse_spmv_alg  alg,
+                                                                rocsparse_datatype  scalar_datatype,
+                                                                rocsparse_datatype compute_datatype)
 {
-    return this->m_is_stage_analysis_called;
+    for(auto& entry : this->m_entries)
+    {
+        if(entry.operation == operation && entry.alg == alg
+           && entry.scalar_datatype == scalar_datatype
+           && entry.compute_datatype == compute_datatype)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
 }
 
-bool hipsparseSpMVDescr_st::is_implicit_stage_analysis_called() const
+hipsparseStatus_t hipsparseSpMVDescr_st::add_entry(hipsparseHandle_t   handle,
+                                                   rocsparse_operation operation,
+                                                   rocsparse_spmv_alg  alg,
+                                                   rocsparse_datatype  scalar_datatype,
+                                                   rocsparse_datatype  compute_datatype,
+                                                   Entry**             out_entry)
 {
-    return this->m_is_implicit_stage_analysis_called;
+    // Build the entry as a local first. If any of the rocsparse calls below
+    // fails the local entry's destructor frees the partially-initialized
+    // rocsparse_spmv_descr, so push_back is only reached on full success.
+    Entry entry;
+    entry.operation        = operation;
+    entry.alg              = alg;
+    entry.scalar_datatype  = scalar_datatype;
+    entry.compute_datatype = compute_datatype;
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_spmv_descr(&entry.spmv_descr));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
+                                                       entry.spmv_descr,
+                                                       rocsparse_spmv_input_alg,
+                                                       &entry.alg,
+                                                       sizeof(entry.alg),
+                                                       nullptr));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
+                                                       entry.spmv_descr,
+                                                       rocsparse_spmv_input_operation,
+                                                       &entry.operation,
+                                                       sizeof(entry.operation),
+                                                       nullptr));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
+                                                       entry.spmv_descr,
+                                                       rocsparse_spmv_input_scalar_datatype,
+                                                       &entry.scalar_datatype,
+                                                       sizeof(entry.scalar_datatype),
+                                                       nullptr));
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
+                                                       entry.spmv_descr,
+                                                       rocsparse_spmv_input_compute_datatype,
+                                                       &entry.compute_datatype,
+                                                       sizeof(entry.compute_datatype),
+                                                       nullptr));
+
+    // Move the fully-built entry into the cache. Entry's move constructor is
+    // noexcept, so push_back is strong-exception-safe and any vector
+    // reallocation relocates existing entries by moving their owned
+    // rocsparse descriptors / compute buffers (never double-freed). Take
+    // the address only after push_back so that *out_entry refers to the
+    // final stored location, not the local 'entry' that is about to die.
+    this->m_entries.push_back(std::move(entry));
+    *out_entry = &this->m_entries.back();
+
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 
-size_t hipsparseSpMVDescr_st::get_buffer_size_stage_analysis() const
-{
-    return this->m_buffer_size_stage_analysis;
-}
-
-size_t hipsparseSpMVDescr_st::get_buffer_size_stage_compute() const
-{
-    return this->m_buffer_size_stage_compute;
-}
-
-void* hipsparseSpMVDescr_st::get_buffer()
-{
-    return this->m_buffer;
-}
-
-void** hipsparseSpMVDescr_st::get_buffer_reference()
-{
-    return &this->m_buffer;
-}
-
-bool hipsparseSpMVDescr_st::is_stage_compute_subsequent() const
-{
-    return this->m_is_stage_compute_subsequent;
-}
-
-bool hipsparseSpMVDescr_st::is_buffer_size_called() const
-{
-    return this->m_is_buffer_size_called;
-}
-
-void hipsparseSpMVDescr_st::stage_analysis_called()
-{
-    this->m_is_stage_analysis_called = true;
-}
-
-void hipsparseSpMVDescr_st::implicit_stage_analysis_called()
-{
-    this->m_is_implicit_stage_analysis_called = true;
-}
-
-void hipsparseSpMVDescr_st::set_buffer_size_stage_analysis(size_t value)
-{
-    this->m_buffer_size_stage_analysis = value;
-}
-
-void hipsparseSpMVDescr_st::set_buffer_size_stage_compute(size_t value)
-{
-    this->m_buffer_size_stage_compute = value;
-}
-
-void hipsparseSpMVDescr_st::set_buffer(void* value)
-{
-    this->m_buffer = value;
-}
-
-void hipsparseSpMVDescr_st::stage_compute_subsequent()
-{
-    this->m_is_stage_compute_subsequent = true;
-}
-
-void hipsparseSpMVDescr_st::buffer_size_called()
-{
-    this->m_is_buffer_size_called = true;
-}
-
-hipsparseSpMVDescr_st::~hipsparseSpMVDescr_st()
-{
-    (void)hipFree(this->get_buffer());
-}
-
-//
 // hipsparseSpMatDescr_st
-//
 rocsparse_spmat_descr hipsparseSpMatDescr_st::get_spmat_descr()
 {
     return this->m_spmat_descr;
@@ -533,6 +554,7 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
         hipsparse::hipDataTypeToHCCDataType(valueType)));
 }
 
+#ifdef HIPSPARSE_WITH_SPMV_BSR
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -637,6 +659,7 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
 
     return status;
 }
+#endif /* HIPSPARSE_WITH_SPMV_BSR */
 
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         int64_t                rows,

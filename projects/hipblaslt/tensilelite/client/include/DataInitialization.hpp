@@ -64,10 +64,20 @@ namespace TensileLite
                 || dt == rocisa::DataType::BFloat8;
         }
 
-        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        inline bool isF6(const TensorDescriptor& tensor)
         {
-            return isMXTensor(problem.a(), problem.mxBlockA())
-                || isMXTensor(problem.b(), problem.mxBlockB());
+            auto const dt = tensor.dataType();
+
+            return dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6;
+        }
+
+        inline bool isMXProblemExceptF6(const ContractionProblemGemm& problem)
+        {
+            bool isAnyF6 = isF6(problem.a()) or isF6(problem.b());
+            return !isAnyF6 &&
+                (isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB()));
         }
 
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
@@ -905,7 +915,7 @@ namespace TensileLite
                    && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
-                    bool isMX = isMXProblem(*m_currentGemmProblem);
+                    bool isMX = isMXProblemExceptF6(*m_currentGemmProblem);
                     if(isMX)
                     {
                         initializeMXData(*m_currentGemmProblem);
@@ -916,6 +926,28 @@ namespace TensileLite
                                    m_groupedOffsets,
                                    *m_currentGemmProblem,
                                    hipMemcpyDeviceToDevice);
+                        // Sync cpuInput.current from cpuInput.valid for MX
+                        // tensors so the CPU reference reads the regenerated
+                        // data that matches what the GPU received.
+                        for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                      ContractionProblemGemm::TENSOR::B,
+                                      ContractionProblemGemm::TENSOR::MXSA,
+                                      ContractionProblemGemm::TENSOR::MXSB})
+                        {
+                            auto& desc = m_currentGemmProblem->tensors()[ti];
+                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                            if(it == m_vdata[ti].pristine.end())
+                                continue;
+                            auto& p = it->second;
+                            if(p.cpuInput.valid && p.cpuInput.current)
+                            {
+                                size_t bytes = multiplyElementSize(
+                                    p.maxElements, desc.elementBytes());
+                                std::memcpy(p.cpuInput.current.get(),
+                                            p.cpuInput.valid.get(),
+                                            bytes);
+                            }
+                        }
                     }
                 }
             }

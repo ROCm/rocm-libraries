@@ -281,8 +281,6 @@ GlobalParameters:
   EnqueuesPerSync: 20
   KeepBuildTmp: true
   KernelTime: true
-  MinKForGSU: 1
-  NewClient: 2
   NumElementsToValidate: 0
   NumWarmups: 20
   PrintSolutionRejectionReason: true

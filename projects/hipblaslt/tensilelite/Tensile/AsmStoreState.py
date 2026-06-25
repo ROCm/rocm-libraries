@@ -21,7 +21,7 @@
 ################################################################################
 
 from .AsmAddressCalculation import AddrCalculation
-from .Common import DataDirection
+from .Common import DataDirection, isSubtileMultiDU
 from .Common.DataType import DataType
 
 from math import ceil, trunc, modf
@@ -83,7 +83,7 @@ class StoreState:
             if ss.optSGPRUsage == 'BufferLoad_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = 0
-                self.numTempSgprPerBatch   = kernelWriter.states.laneSGPRCount
+                self.numTempSgprPerBatch = (2 if getattr(kernelWriter.states, 'storeAlign8', False) else 1) * kernelWriter.states.laneSGPRCount
             elif ss.optSGPRUsage == 'BufferLoad_Edge_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = kernelWriter.states.laneSGPRCount
@@ -253,7 +253,13 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels. Non-multi-DU reuses the Bias column address
+                # (localReferenceVgpr) for the SAV LDS read, so a dedicated SAV
+                # address would only force a redundant per-read recompute in
+                # emitLdChange.
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -296,7 +302,10 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels (see note above).
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None

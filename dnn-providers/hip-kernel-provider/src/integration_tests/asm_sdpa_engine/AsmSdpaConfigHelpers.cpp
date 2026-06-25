@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -12,6 +13,7 @@ namespace asm_sdpa_engine
 {
 using namespace hipdnn_frontend;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
 static DataType toDataType(const std::string& configDataType)
 {
@@ -41,8 +43,8 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config)
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         maskStr = "BottomRightCausal";
         break;
-    case MaskType::WINDOW_GENERIC:
-        maskStr = "WindowGeneric";
+    case MaskType::SLIDING_WINDOW:
+        maskStr = "SlidingWindow";
         break;
     default:
         maskStr = "UnknownMask";
@@ -66,7 +68,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     const int64_t batch = 2;
     const int64_t numHeads = 4;
     const int64_t seqQ = 256;
-    const int64_t seqKv = 256;
+    const int64_t seqKv = 128;
 
     // Determine data type
     const DataType dataType = toDataType(config.dtype);
@@ -116,7 +118,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
         attributes.set_causal_mask_bottom_right(true);
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask with arbitrary bounds
         attributes.set_diagonal_band_left_bound(64);
         attributes.set_diagonal_band_right_bound(64);

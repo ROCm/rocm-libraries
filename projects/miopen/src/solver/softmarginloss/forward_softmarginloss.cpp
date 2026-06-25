@@ -235,8 +235,11 @@ ConvSolution SoftMarginLossForward::GetSolution(
                     size = (size + LOCAL_SIZE_REDUCE - 1) / LOCAL_SIZE_REDUCE;
                 }
 
+                // The final ReduceSum kernel signature takes tensor_view_t<1>; passing the
+                // 5D o_tv would corrupt the kernarg buffer (80B written into 16B slot).
+                auto o_tv_1d          = get_inner_expanded_tv<1>(deref(params.oDesc));
                 decltype(auto) kernel = handle_.Run(kernels[kernelCnt]);
-                kernel(reduce_in, params.o, size, o_tv);
+                kernel(reduce_in, params.o, size, o_tv_1d);
 
                 if(profiling)
                 {
@@ -244,14 +247,11 @@ ConvSolution SoftMarginLossForward::GetSolution(
                     (void)hipEventSynchronize(stop.get());
                     (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
 
-                    // Clean up
-                    (void)hipEventDestroy(start.get());
-                    (void)hipEventDestroy(stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
 
                     handle_.EnableProfiling(true);
-                };
+                }
             };
         };
     }

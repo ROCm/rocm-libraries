@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
@@ -242,7 +243,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
     }
 
     // MX scaling configuration: each e8m0 scale covers 32 elements in K
-    static constexpr int BlockScaleSize = 32;
+    static constexpr int ScaleGranularityK = 32;
 
     template <typename Problem,
               typename OverrideADataType = remove_cvref_t<typename Problem::ADataType>>
@@ -542,7 +543,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         constexpr index_t MIterPerWarp = MPerBlock / (MWarp * MPerXdl);
         constexpr index_t KPerXdl      = WarpTile::at(number<2>{});
         constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
-        constexpr index_t KPerLane     = KPerXdl / BlockScaleSize / K_Lane;
+        constexpr index_t KPerLane     = KPerXdl / ScaleGranularityK / K_Lane;
 
         // Effective pack sizes: fall back to 1 when iteration count < pack size
         constexpr index_t MXdlPackEff =
@@ -580,7 +581,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
 
         constexpr index_t KPerXdl      = WarpTile::at(number<2>{});
         constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
-        constexpr index_t KPerLane     = KPerXdl / BlockScaleSize / K_Lane;
+        constexpr index_t KPerLane     = KPerXdl / ScaleGranularityK / K_Lane;
 
         // Effective pack sizes: fall back to 1 when iteration count < pack size
         constexpr index_t NXdlPackEff =
