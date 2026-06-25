@@ -65,6 +65,23 @@ Make the base stale-base check concrete and stricter. High-coupling files:
 Overlap with the base branch on any of these since the PR diverged → **mandatory** rebase + re-run
 (base default is strong-recommend).
 
+### Tightens — stale-base on validator vs. validated-data (no file overlap)
+Some merge-time breakage has **no file overlap at all**: one PR changes a *validator or allow-list*
+while another adds *data the validator checks*. Treat these as a coupled pair even though they touch
+different paths. The concrete hipBLASLt instance:
+- Validator / allow-list: `projects/hipblaslt/tensilelite/Tensile/Common/GlobalParameters.py` (the
+  global-parameter registry and the `_assertGlobalParametersAreValid` ignored-key allow-list), plus
+  the enforcing test `projects/hipblaslt/tensilelite/Tensile/Tests/unit/test_input_yaml_corpus_clean.py`.
+- Validated data: YAML fixtures under `projects/hipblaslt/tensilelite/Tensile/Tests/**` (e.g.
+  `common/gemm/**`).
+
+If, since the PR diverged, the base branch changed the validator/allow-list **and** this PR adds or
+edits validated data (or vice-versa), neither PR's own CI can see the collision → **mandatory**
+rebase + re-run the strict-corpus test (`test_input_yaml_corpus_is_strict_clean`) before merge.
+Generalize the check: when a PR *narrows* an allow-list/schema, scan the base for in-flight PRs
+adding data the new rule would reject; when a PR *adds validated data*, confirm the allow-list/schema
+on the merge-target still accepts it.
+
 ### Tightens — approvals
 Changes to the high-coupling files above need **≥ 2 hipBLASLt code-owner approvals** after the
 local team review (stricter than a generic base approval count).
@@ -96,3 +113,10 @@ PR #7796 (StaggerU for TDM) was green ~2.5h before #7750 (SGPR release for wave-
 landed in `KernelWriterAssembly.py`, then merged ~3 days later without re-test — producing a
 gfx1250 compile fault on develop that neither PR's own CI could have seen. That is exactly the
 stale-base-on-high-coupling-file case the pre-merge gate flags as **mandatory rebase + re-run**.
+
+PR #7781 added gfx950 MXFP8 YAML fixtures carrying dead `MergeFiles` / `DeviceLDS` keys, while #8714
+removed those keys from the `GlobalParameters` allow-list. The two PRs shared **no file**, so both
+went green; once both were on `develop` the strict-corpus unit test
+(`test_input_yaml_corpus_is_strict_clean`) rejected the fixtures, and the break only surfaced
+downstream in the ROCm/TheRock rocm-libraries bump (TheRock #6133, tracked by #8810). That is the
+validator-vs-validated-data collision the no-file-overlap gate above is designed to catch.
