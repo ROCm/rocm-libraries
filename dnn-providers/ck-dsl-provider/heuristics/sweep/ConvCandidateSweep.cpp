@@ -573,8 +573,10 @@ int sweepMain(const std::string& shapesPath, const std::string& outPath,
     // that would produce artificially low tflops for the first shape's kernels.
     {
         void* dummy = nullptr;
-        hipMalloc(&dummy, 4);
-        hipDeviceSynchronize();
+        if (hipMalloc(&dummy, 4) != hipSuccess)
+            std::cerr << "[Sweep] WARNING: HIP context warmup hipMalloc failed (non-fatal)\n";
+        if (hipDeviceSynchronize() != hipSuccess)
+            std::cerr << "[Sweep] WARNING: HIP context warmup hipDeviceSynchronize failed (non-fatal)\n";
         hipFree(dummy);
     }
 

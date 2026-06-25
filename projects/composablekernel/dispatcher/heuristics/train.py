@@ -310,6 +310,7 @@ def train_single_target(
     model.fit(
         X_train,
         y_train,
+        feature_name=list(feature_names),
         eval_set=[(X_val, y_val)],
         eval_metric=["rmse"],
         callbacks=[
@@ -330,6 +331,7 @@ def run_cv(
     operation: str,
     n_splits: int = 5,
     use_log: bool = True,
+    arch: str = "",
 ) -> dict:
     """Run GroupKFold cross-validation and return OOF predictions + metrics.
 
@@ -370,11 +372,12 @@ def run_cv(
         f"{' (log-space)' if apply_log else ''}"
     )
 
-    X = feature_engine.extract_batch(df_valid)
+    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
+        if operation == "grouped_conv" \
+        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
     groups = compute_group_keys(df_valid, operation)
-    feature_names = feature_engine.get_feature_names()
     cat_features = feature_engine.get_categorical_features()
 
     unique_groups = np.unique(groups)
@@ -448,6 +451,7 @@ def train_final_model(
     operation: str,
     init_model=None,
     use_log: bool = True,
+    arch: str = "",
 ) -> lgb.LGBMRegressor:
     """Train the final model on all valid data.
 
@@ -482,10 +486,11 @@ def train_final_model(
 
     apply_log = use_log and target in LOG_TARGETS
 
-    X = feature_engine.extract_batch(df_valid)
+    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
+        if operation == "grouped_conv" \
+        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
-    feature_names = feature_engine.get_feature_names()
     cat_features = feature_engine.get_categorical_features()
     cat_indices = [feature_names.index(c) for c in cat_features if c in feature_names]
 
@@ -493,6 +498,7 @@ def train_final_model(
     model.fit(
         X,
         y,
+        feature_name=list(feature_names),
         categorical_feature=cat_indices if cat_indices else "auto",
         init_model=init_model,
     )
@@ -650,7 +656,8 @@ def main():
 
         t0 = time.time()
         cv_result = run_cv(
-            df, fe, target, params, operation, n_splits=args.n_splits, use_log=use_log
+            df, fe, target, params, operation, n_splits=args.n_splits, use_log=use_log,
+            arch=args.arch,
         )
         cv_time = time.time() - t0
 
@@ -683,6 +690,7 @@ def main():
             operation,
             init_model=init_model_path,
             use_log=use_log,
+            arch=args.arch,
         )
         train_time = time.time() - t0
 
@@ -690,18 +698,15 @@ def main():
         model.booster_.save_model(str(model_path))
         print(f"  Saved {model_path} ({train_time:.1f}s)")
 
-        importances = dict(
-            zip(
-                fe.get_feature_names(),
-                model.feature_importances_.tolist(),
-            )
-        )
+        arch_feature_names = model.booster_.feature_name()
+        importances = dict(zip(arch_feature_names, model.feature_importances_.tolist()))
         imp_path = out_dir / f"feature_importances_{target}.json"
         with open(imp_path, "w") as f:
             json.dump(importances, f, indent=2)
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
-    model_feature_names = fe.get_feature_names()
+    # model_feature_names: the arch-filtered list the final model was trained on.
+    model_feature_names = model.booster_.feature_name()
     spec = {
         "op_type": operation,
         "dtype": args.dtype,
@@ -713,11 +718,10 @@ def main():
         "tflops_log_transform": use_log and "tflops" in LOG_TARGETS,
         "params": params,
     }
-    # For grouped_conv, record the extraction indices so C++ can project the full
-    # superset vector down to this model's feature subset without a name lookup table.
+    # Record the superset positions so C++ can project ml_extract_conv_features()
+    # output down to this model's arch-specific feature subset.
     if operation == "grouped_conv":
-        from feature_engine_grouped_conv import GroupedConvFeatureEngine as _GCFe
-        superset = _GCFe().get_feature_names()
+        superset = fe.get_feature_names()
         superset_index = {name: i for i, name in enumerate(superset)}
         spec["feature_indices"] = [superset_index[n] for n in model_feature_names]
     with open(out_dir / "feature_spec.json", "w") as f:

@@ -142,18 +142,13 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int,
     print(f"TFLOPS range: {df['tflops'].min():.3f} – {df['tflops'].max():.3f}")
     print(f"Valid rows: {df['is_valid'].sum():,} / {len(df):,}")
 
-    # Compute named feature columns and select the arch-specific subset.
-    fe = GroupedConvFeatureEngine(**{k.removeprefix("hw_"): v for k, v in hw.items()})
-    feat_df = fe.extract_batch_named(df)
-    arch_features = FEATURE_SETS.get(arch, fe.get_feature_names())
-    print(f"Feature columns: {len(arch_features)} ({arch})")
-
-    meta_cols = [c for c in df.columns if c not in fe.get_feature_names()]
-    out_df = pd.concat([df[meta_cols].reset_index(drop=True),
-                        feat_df[arch_features].reset_index(drop=True)], axis=1)
+    # Features are computed by train.py at training time via extract_batch_arch().
+    # Report how many features the arch model will train on.
+    arch_feature_count = len(FEATURE_SETS.get(arch, GroupedConvFeatureEngine().get_feature_names()))
+    print(f"Feature columns at train time: {arch_feature_count} ({arch})")
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    out_df.to_parquet(output_path, index=False)
+    df.to_parquet(output_path, index=False)
     print(f"Written: {output_path}")
 
 

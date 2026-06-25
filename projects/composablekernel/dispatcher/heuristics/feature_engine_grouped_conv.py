@@ -31,10 +31,9 @@ def _build_feature_sets() -> dict:
     all_features = GroupedConvFeatureEngine().get_feature_names()
     # Features present in the gfx950 superset but absent from the gfx942/gfx90a
     # baseline models.  Kept gfx950-only until those archs are retrained.
-    _gfx950_only = {"log_num_tiles_m", "is_mem_x_log_num_tiles_m",
-                    "log_gemm_m_raw", "gemm_m_lt_num_cus",
-                    "log_gemm_m_over_num_cus", "is_mem_x_log_gemm_m_raw",
-                    "log_cu_fill", "k_tiles_over_mn_tiles", "waves_per_max_occ",
+    _gfx950_only = {"log_num_tiles_m",
+                    "log_gemm_m_raw", "gemm_m_lt_num_cus", "log_gemm_m_over_num_cus",
+                    "log_cu_fill", "k_tiles_over_mn_tiles",
                     "wave_quant_efficiency", "log_k_per_active_cu", "is_subwave"}
     base_101 = [f for f in all_features if f not in _gfx950_only]
 
@@ -63,10 +62,10 @@ def _build_feature_sets() -> dict:
         "problem_smaller_than_tile_k",
         "is_mem_x_log_num_tiles_m", "is_mem_x_log_gemm_m_raw",
         "aspect_ratio_filter", "log2_filter", "waves_per_max_occ",
+        # Near-zero importance on gfx950 (sub-CU regime rare in training data)
+        "gemm_m_lt_num_cus",
     }
-    gfx950_features = [f for f in all_features
-                       if f not in _gfx950_zero_importance
-                       and f != "gemm_m_lt_num_cus"]
+    gfx950_features = [f for f in all_features if f not in _gfx950_zero_importance]
     return {
         "gfx942": base_101,
         "gfx90a": base_101,
@@ -332,8 +331,8 @@ class GroupedConvFeatureEngine(FeatureEngine):
         pipeline_str = str(kernel.get("pipeline", "compv3"))
         pipeline_code = PIPELINE_MAP.get(pipeline_str, 0)
 
-        # Estimate warps (assuming 256 thread block)
-        num_warps = block_size / 4.0
+        # block_size/4, not block_size/wavefront_size — divisor frozen for model parity with C++.
+        num_warps = block_size / 4.0  # warp_m=2, warp_n=2 → block_size/4; frozen for C++ parity
 
         tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
         tile_mn = gemm_m_per_block * gemm_n_per_block
@@ -657,7 +656,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
         block_size = (
             df["block_size"].values.astype(np.float64)
             if "block_size" in df.columns
-            else np.full(n, 16.0)
+            else np.full(n, 256.0)
         )
         gemm_m_per_block = df["gemm_m_per_block"].values.astype(np.float64)
         gemm_n_per_block = df["gemm_n_per_block"].values.astype(np.float64)
@@ -671,7 +670,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
             else np.zeros(n)
         )
 
-        num_warps = block_size / 4.0
+        num_warps = block_size / 4.0  # warp_m=2, warp_n=2 → block_size/4; frozen for C++ parity
         tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
         tile_mn = gemm_m_per_block * gemm_n_per_block
 
@@ -1009,6 +1008,23 @@ class GroupedConvFeatureEngine(FeatureEngine):
         """Return extract_batch() result as a DataFrame with feature names as columns."""
         arr = self.extract_batch(df)
         return pd.DataFrame(arr, columns=self.get_feature_names(), index=df.index)
+
+    def extract_batch_arch(
+        self, df: pd.DataFrame, arch: str
+    ) -> tuple[np.ndarray, list[str]]:
+        """Extract features and slice to the arch-specific subset from FEATURE_SETS.
+
+        Returns (X, feature_names) where X has shape (n_rows, n_arch_features).
+        Falls back to the full superset if arch is not in FEATURE_SETS.
+        """
+        arr = self.extract_batch(df)
+        all_names = self.get_feature_names()
+        if arch not in FEATURE_SETS:
+            return arr, all_names
+        arch_names = FEATURE_SETS[arch]
+        name_to_col = {n: i for i, n in enumerate(all_names)}
+        col_indices = [name_to_col[n] for n in arch_names]
+        return arr[:, col_indices], arch_names
 
 
 # Initialised after the class definition so _build_feature_sets() can call
