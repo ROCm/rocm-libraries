@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Verify hipDNN graphs deserialize/validate without running any kernel.
 
-Levels (each strictly more than the previous):
-  --level json   : pure-Python GraphLoader.load_json + validate (no hipDNN)
-  --level graph  : hipdnn_frontend Graph().from_json + .validate()
-  --level opgraph: + build_operation_graph(handle): assembles and finalizes the
-                   backend operation-graph descriptor (NO plan build, NO kernel
-                   execution). The graph/opgraph levels need a built hipDNN.
+Levels:
+  --level json   : pure-Python GraphLoader.load_json + validate (no hipDNN build)
+  --level opgraph: hipdnn_frontend from_json + validate + build_operation_graph,
+                   i.e. assemble and finalize the backend operation-graph descriptor
+                   (NO plan build, NO kernel execution). Needs a built hipDNN.
 
 Usage:
-  python tools/check_deserialize.py --level graph 'Workloads/**/*.json'
+  python tools/check_deserialize.py --level opgraph 'Workloads/**/*.json'
 """
 import argparse, glob, json, os, sys
 from pathlib import Path
@@ -27,37 +26,44 @@ def iter_files(patterns):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="+")
-    ap.add_argument("--level", choices=("json", "graph", "opgraph"), default="graph")
-    ap.add_argument("--src", help="dnn-benchmarking src/ dir for --level json", default=None)
+    ap.add_argument("--level", choices=("json", "opgraph"), default="opgraph")
+    ap.add_argument(
+        "--src", help="dnn-benchmarking src/ dir for --level json", default=None
+    )
     ap.add_argument("--show", type=int, default=20, help="max failures to print")
     args = ap.parse_args()
 
     files = sorted(set(iter_files(args.paths)))
     if not files:
-        print("no files matched", file=sys.stderr); return 2
+        print("no files matched", file=sys.stderr)
+        return 2
 
     loader = handle = hipdnn = None
     if args.level == "json":
         if args.src:
             sys.path.insert(0, args.src)
         from dnn_benchmarking.graph import GraphLoader
+
         loader = GraphLoader()
     else:
         try:
             import hipdnn_frontend as hipdnn
         except ImportError:
-            print("hipdnn_frontend not importable; build hipDNN (setup.sh) first.",
-                  file=sys.stderr)
+            print(
+                "hipdnn_frontend not importable; build hipDNN (setup.sh) first.",
+                file=sys.stderr,
+            )
             return 3
-        if args.level == "opgraph":
-            handle = hipdnn.Handle()
+        handle = hipdnn.Handle()
 
     ok = fail = 0
     failures = []
     for f in files:
         try:
             if args.level == "json":
-                g = loader.load_json(Path(f)); loader.validate(g); loader.extract_tensor_info(g)
+                g = loader.load_json(Path(f))
+                loader.validate(g)
+                loader.extract_tensor_info(g)
             else:
                 s = Path(f).read_text()
                 g = hipdnn.Graph()
@@ -67,10 +73,9 @@ def main():
                 r = g.validate()
                 if r.is_bad():
                     raise RuntimeError(f"validate: {r.get_message()}")
-                if args.level == "opgraph":
-                    r = g.build_operation_graph(handle)
-                    if r.is_bad():
-                        raise RuntimeError(f"build_operation_graph: {r.get_message()}")
+                r = g.build_operation_graph(handle)
+                if r.is_bad():
+                    raise RuntimeError(f"build_operation_graph: {r.get_message()}")
             ok += 1
         except Exception as e:  # noqa: BLE001
             fail += 1

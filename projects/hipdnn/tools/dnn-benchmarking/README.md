@@ -431,10 +431,7 @@ without building a plan or running a kernel. It has three escalating levels:
 # Pure-Python loader only (no hipDNN build required)
 python tools/check_deserialize.py --level json --src src 'Workloads/**/*.json'
 
-# Round-trip through the real hipdnn_frontend (needs a built hipDNN)
-python tools/check_deserialize.py --level graph 'Workloads/**/*.json'
-
-# Also build/finalize the backend operation graph (needs a built hipDNN)
+# Full deserialize + build/finalize the backend operation graph (needs a built hipDNN)
 python tools/check_deserialize.py --level opgraph 'Workloads/**/*.json'
 ```
 
