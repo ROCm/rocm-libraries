@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 COVERAGE_PROJECT_METADATA = {
     "hiprand": ("hipRAND", "ml-libs/hipRAND", "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF"),
     "rocrand": ("rocRAND", "math-libs/rocRAND", "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF"),
+    "rocfft": ("rocFFT", "math-libs/rocFFT", "-DTHEROCK_ENABLE_FFT=ON -DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF"),
 }
 
 
