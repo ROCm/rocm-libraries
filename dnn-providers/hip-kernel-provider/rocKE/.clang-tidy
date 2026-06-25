@@ -1,0 +1,26 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# rocKE-local clang-tidy configuration.
+#
+# rocKE is a vendored dual-engine CK-DSL kernel stack (Python frontend + C++
+# `ckc_core` backend) whose public surface is an intentionally flat,
+# snake_case `extern "C"` ABI (`ckc_*`, `ckc_strbuf`, `ckc_vec`, ...). That ABI
+# is contractual: the Python and C++ engines must emit byte-identical AMDGPU
+# LLVM IR, so symbol names cannot be freely refactored to match the hipDNN
+# house style (CamelCase types / camelBack functions). The hip-kernel-provider
+# `.clang-tidy` (a symlink to projects/hipdnn/.clang-tidy) enforces that house
+# style with `WarningsAsErrors: "*"` and `HeaderFilterRegex: '.'`, which is
+# incompatible with rocKE's ABI.
+#
+# clang-tidy discovers the nearest `.clang-tidy` for each translation unit and,
+# because InheritParentConfig defaults to false, this file fully replaces the
+# inherited hipDNN config for every rocKE source and header. rocKE keeps its own
+# build-hardening regime (-Wall -Wextra -Werror, see CMakeLists.txt) plus the
+# cross-engine byte-identity gate (tools/check_byte_identity.py) as its quality
+# bar, so the repo-wide tidy gate is disabled here rather than partially relaxed.
+Checks: "-*"
+WarningsAsErrors: ""
+HeaderFileExtensions: ['h', 'hpp']
+# Do not surface diagnostics from rocKE headers pulled into any translation unit.
+HeaderFilterRegex: '$^'
