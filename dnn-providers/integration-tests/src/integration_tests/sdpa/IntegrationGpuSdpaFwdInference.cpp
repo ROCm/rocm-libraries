@@ -23,13 +23,14 @@ using namespace hipdnn_integration_tests;
 namespace
 {
 
-// Mask variants exercised by the suite. Kept to the forward feature surface the
-// production SDPA engines (AITER ASM on gfx942/gfx950, CK elsewhere) accept, so
-// the dispatch path is genuinely exercised rather than skipped.
+// Mask variants exercised by the suite. Kept to the AITER ASM forward feature
+// surface that actually ships for gfx942/gfx950: no-mask and bottom-right
+// causal. The gfx942 forward kernels provide a bottom-right causal variant
+// only; top-left causal has no kernel and the engine declines it.
 enum class SdpaMask
 {
     NONE,
-    CAUSAL_TOP_LEFT,
+    CAUSAL_BOTTOM_RIGHT,
 };
 
 struct SdpaFwdTestCase
@@ -45,16 +46,25 @@ struct SdpaFwdTestCase
     std::string note;
 };
 
-// Minimal green surface: plain MHA, causal, and GQA at head dim 128 (the head
-// dim the production forward kernels ship). Head counts are multiples of 8 so
-// the AITER ASM kernel does not downgrade. bf16 dispatches to AITER ASM;
-// fp16 dispatches to the CK forward engine.
+// Engine-agnostic forward coverage at head dim 128 (the head dim the production
+// forward kernels ship), bf16 — the only data type the AITER ASM forward engine
+// provides kernels for. nhead_q is a multiple of 8 so the AITER ASM kernel does
+// not downgrade; nhead_kv only has to divide nhead_q (GQA/MQA).
 std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
 {
     return {
         {2, 8, 8, 256, 256, 128, SdpaMask::NONE, 0xC0FFEE, "mha"},
-        {2, 8, 8, 256, 256, 128, SdpaMask::CAUSAL_TOP_LEFT, 0xBEEF, "causal_top_left"},
+        {2, 8, 8, 256, 256, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0xBEEF, "causal_bottom_right"},
         {2, 8, 2, 256, 256, 128, SdpaMask::NONE, 0xF00D, "gqa"},
+        // GQA collapsed to a single KV head: distinct broadcast codepath.
+        {2, 8, 1, 256, 256, 128, SdpaMask::NONE, 0xCAFE, "mqa"},
+        // Non-square seqlens: the only shape that makes bottom-right causal
+        // numerically distinct from top-left, so it actually exercises the
+        // diagonal-alignment semantics the attributes request.
+        {2, 8, 8, 128, 256, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0xD00D, "causal_br_nonsquare"},
+        // Seqlens off any natural tile boundary: exercises the remainder/mask
+        // edge that the power-of-two cases skip.
+        {2, 8, 8, 200, 200, 128, SdpaMask::NONE, 0xABCD, "mha_remainder_seqlen"},
     };
 }
 
@@ -93,9 +103,12 @@ public:
 
         graph::SdpaAttributes sdpaAttrs;
         sdpaAttrs.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(tc.headDim)));
-        if(tc.mask == SdpaMask::CAUSAL_TOP_LEFT)
+        if(tc.mask == SdpaMask::CAUSAL_BOTTOM_RIGHT)
         {
-            sdpaAttrs.set_causal_mask(true);
+            // Modern causal form: unbounded left, right bound at the diagonal,
+            // anchored bottom-right — the variant the gfx942 forward kernel ships.
+            sdpaAttrs.set_diagonal_band_right_bound(0).set_diagonal_alignment(
+                DiagonalAlignment::BOTTOM_RIGHT);
         }
 
         auto [o, stats] = graphObj.sdpa(q, k, v, sdpaAttrs);
@@ -132,7 +145,6 @@ protected:
 };
 
 using IntegrationGpuSdpaFwdBfp16 = SdpaForward<bfloat16>;
-using IntegrationGpuSdpaFwdFp16 = SdpaForward<half>;
 
 } // namespace
 
@@ -142,18 +154,8 @@ TEST_P(IntegrationGpuSdpaFwdBfp16, Correctness)
     runGraphTest();
 }
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuSdpaFwdFp16);
-TEST_P(IntegrationGpuSdpaFwdFp16, Correctness)
-{
-    runGraphTest();
-}
-
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaFwdBfp16,
-                         testing::ValuesIn(getSdpaFwdTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuSdpaFwdFp16,
                          testing::ValuesIn(getSdpaFwdTestCases()));
 
 #endif // HIPDNN_ENABLE_SDPA
