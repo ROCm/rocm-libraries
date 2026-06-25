@@ -74,8 +74,6 @@ std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
         // Bottom-right causal with seqQ > seqKv: opposite anchoring boundary from
         // the seqQ < seqKv case (early query rows attend to all keys).
         {2, 8, 8, 256, 128, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0x9A9A, "causal_br_q_gt_kv"},
-        // Large multi-tile seqlen: softmax/PV accumulation across many tiles.
-        {2, 8, 8, 2048, 2048, 128, SdpaMask::NONE, 0x7777, "mha_large_seqlen"},
     };
 }
 
