@@ -26,74 +26,66 @@ SOFTWARE.
 #include <unistd.h>
 #endif
 
-#include<thread>
-#include "logger.hpp"
+#include <thread>
+
 #include "handle.hpp"
+#include "logger.hpp"
 
 namespace rpp {
 
 #if !GPU_SUPPORT
 
-struct HandleImpl
-{
+struct HandleImpl {
     size_t nBatchSize = 1;
     Rpp32u numThreads = 0;
     RppBackend backend = RppBackend::RPP_HOST_BACKEND;
     InitHandle* initHandle = nullptr;
 
-    void PreInitializeBufferCPU()
-    {
+    void PreInitializeBufferCPU() {
         this->initHandle = new InitHandle();
         this->initHandle->nbatchSize = this->nBatchSize;
-        this->initHandle->mem.mcpu.scratchBufferHost = (Rpp32f *)malloc(sizeof(Rpp32f) * 99532800 * this->nBatchSize); // 7680 * 4320 * 3
+        this->initHandle->mem.mcpu.scratchBufferHost =
+            (Rpp32f*)malloc(sizeof(Rpp32f) * 99532800 * this->nBatchSize);  // 7680 * 4320 * 3
     }
 };
 
-Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl())
-{
+Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
     impl->nBatchSize = batchSize;
     impl->backend = RppBackend::RPP_HOST_BACKEND;
     numThreads = std::min(numThreads, std::thread::hardware_concurrency());
-    if(numThreads == 0)
-        numThreads = batchSize;
+    if (numThreads == 0) numThreads = batchSize;
     impl->numThreads = numThreads;
     impl->PreInitializeBufferCPU();
 }
 
 Handle::~Handle() {}
 
-void Handle::rpp_destroy_object_host()
-{
+void Handle::rpp_destroy_object_host() {
     free(this->GetInitHandle()->mem.mcpu.scratchBufferHost);
     delete this->GetInitHandle();
     this->impl = nullptr;
 }
 
-size_t Handle::GetBatchSize() const
-{
+size_t Handle::GetBatchSize() const {
     return this->impl->nBatchSize;
 }
 
-Rpp32u Handle::GetNumThreads() const
-{
+Rpp32u Handle::GetNumThreads() const {
     return this->impl->numThreads;
 }
 
-RppBackend Handle::GetBackend() const
-{
+RppBackend Handle::GetBackend() const {
     return this->impl->backend;
 }
 
-void Handle::SetBatchSize(size_t bSize) const
-{
+void Handle::SetBatchSize(size_t bSize) const {
     this->impl->nBatchSize = bSize;
 }
 
-InitHandle* Handle::GetInitHandle() const
-{
+InitHandle* Handle::GetInitHandle() const {
     return impl->initHandle;
 }
 
-#endif // GPU_SUPPORT
+#endif  // GPU_SUPPORT
 
-} // namespace rpp
+}  // namespace rpp

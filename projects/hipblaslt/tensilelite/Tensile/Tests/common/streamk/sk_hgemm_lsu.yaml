@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -40,7 +40,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - MatrixInstruction:
           - [16,16,16,1, 1, 1,1, 1,1]
@@ -53,8 +53,8 @@ BenchmarkProblems:
           # - [16,16,16,1, 1, 1,1, 1,2]
         - DepthU: [256]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
-        - ExpandPointerSwap: [0]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
         # - LocalReadVectorWidth: [4, 8]
         # - NumElementsPerBatchStore: [0, 16]
         - PrefetchGlobalRead: [2]
@@ -88,7 +88,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - MatrixInstruction:
           - [16,16,16,1, 1, 1,1, 1,1]
@@ -108,8 +108,8 @@ BenchmarkProblems:
         - WorkGroup:
           - [4,4,4]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
-        - ExpandPointerSwap: [0]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
         # - LocalReadVectorWidth: [4, 8]
         # - NumElementsPerBatchStore: [0, 16]
         - PrefetchGlobalRead: [2]

@@ -31,46 +31,38 @@ SOFTWARE.
 namespace rpp {
 
 template <class F, F f>
-struct manage_deleter
-{
+struct manage_deleter {
     template <class T>
-    void operator()(T* x) const
-    {
-        if(x != nullptr)
-        {
+    void operator()(T* x) const {
+        if (x != nullptr) {
             f(x);
         }
     }
 };
 
-struct null_deleter
-{
+struct null_deleter {
     template <class T>
-    void operator()(T* /*x*/) const
-    {
-    }
+    void operator()(T* /*x*/) const {}
 };
 
 template <class T, class F, F f>
 using manage_ptr = std::unique_ptr<T, manage_deleter<F, f>>;
 
 template <class T>
-struct element_type
-{
+struct element_type {
     using type = typename T::element_type;
 };
 
 template <class T>
-using remove_ptr = typename std::conditional<std::is_pointer<T>::value,
-                                             std::remove_pointer<T>,
+using remove_ptr = typename std::conditional<std::is_pointer<T>::value, std::remove_pointer<T>,
                                              element_type<T>>::type::type;
 
 template <class T>
 using shared = std::shared_ptr<remove_ptr<T>>;
 
-} // namespace rpp
+}  // namespace rpp
 
 #define RPP_MANAGE_PTR(T, F) \
-    rpp::manage_ptr<typename std::remove_pointer<T>::type, decltype(&F), &F> // NOLINT
+    rpp::manage_ptr<typename std::remove_pointer<T>::type, decltype(&F), &F>  // NOLINT
 
 #endif
