@@ -7,7 +7,12 @@ from typing import Any, Dict, List
 
 import torch.nn.functional as F
 
-from ._common import _node_param, _node_uid
+from ._common import (
+    _effective_compute_type,
+    _is_float32_compute,
+    _node_param,
+    _node_uid,
+)
 from .handlers.norm import _rmsnorm_graph_can_use_builtin
 from .handlers.reduction import _reduction_mode_name
 from .handlers.resample import _resample_has_asymmetric_padding, _resample_mode_name
@@ -27,22 +32,15 @@ def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
         op_type = str(node.get("type", ""))
         name = str(node.get("name") or op_type)
 
-        if op_type == "LayernormAttributes":
-            if (
-                _node_uid(node, "mean_tensor_uid", ("outputs",), required=False)
-                is not None
-                or _node_uid(
-                    node, "inv_variance_tensor_uid", ("outputs",), required=False
-                )
-                is not None
-            ):
-                warnings.append(
-                    f"{name}: LayernormAttributes uses torch.nn.functional.layer_norm "
-                    "for y but computes requested mean/inv-variance outputs manually; "
-                    "PyTorch reference timing is not solely built-in PyTorch operator time."
-                )
+        if not _is_float32_compute(node, graph_json):
+            cdt = _effective_compute_type(node, graph_json)
+            warnings.append(
+                f"{name}: graph compute_data_type={cdt!r} is not float32; the PyTorch "
+                f"reference assumes float32 accumulation and does not honor other compute "
+                f"types, so its results and timing may diverge from the graph's execution."
+            )
 
-        elif op_type == "RMSNormAttributes":
+        if op_type == "RMSNormAttributes":
             reasons: List[str] = []
             if not hasattr(F, "rms_norm"):
                 reasons.append("torch.nn.functional.rms_norm is unavailable")
