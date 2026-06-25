@@ -11,9 +11,7 @@ object claims to be stage X but actually isn't."
 
 from Tensile.Components.Subtile.LogicalScheduler import (
     Dep,
-    GRPlacement,
     LogicalScheduler,
-    LRPlacement,
     ReadGranularity,
     SchedulerConfig,
 )

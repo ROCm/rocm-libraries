@@ -36,6 +36,7 @@ from .ScheduleTypes import (
     AugmentedSchedule,
     EmittedSchedule,
     LogicalSchedule,
+    PartitionSchedule,
 )
 
 from ...Common.GlobalParameters import globalParameters
@@ -1389,7 +1390,7 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
-    def place_GRs(self) -> LogicalSchedule:
+    def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
 
         Phase 1: Build ordered GR list from partition traversal respecting gr granularities.

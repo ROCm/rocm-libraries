@@ -8,8 +8,12 @@ passes.
 
 Stage progression
 -----------------
-    LogicalSchedule    — output of place_GRs():
-        partitions with MFMA / LR / GR placements; .deps and .preOps empty.
+    LogicalSchedule    — ``self._partitions`` after the GR pass (all partitions):
+        MFMA / LR / GR placements; .deps and .preOps empty.
+        Not the return type of ``place_GRs()`` (that is a single partition).
+
+    PartitionSchedule  — one partition's subIterK slots (``List[SubIterKSlot]``);
+        returned by ``place_GRs()``.
 
     AnnotatedSchedule  — output of remove_cross_deps():
         same container; .deps and .preOps populated by dependency analysis.
@@ -30,6 +34,7 @@ from typing import TYPE_CHECKING, List, TypeAlias
 if TYPE_CHECKING:
     from .LogicalScheduler import EmittedModule, SubIterKSlot
 
+PartitionSchedule: TypeAlias = "List[SubIterKSlot]"
 LogicalSchedule:   TypeAlias = "List[List[SubIterKSlot]]"
 AnnotatedSchedule: TypeAlias = "List[List[SubIterKSlot]]"
 AugmentedSchedule: TypeAlias = "List[List[SubIterKSlot]]"
