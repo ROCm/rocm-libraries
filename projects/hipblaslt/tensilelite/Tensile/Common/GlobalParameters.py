@@ -58,7 +58,7 @@ globalParameters["PreciseKernelTime"] = (
 # timing between GSU / non-GSU kernels
 globalParameters["PinClocks"] = False  # T=pin gpu clocks and fan, F=don't
 globalParameters["HardwareMonitor"] = (
-    True  # False: disable benchmarking client monitoring clocks using rocm-smi.
+    True  # False: disable benchmarking client monitoring clocks using amd-smi.
 )
 globalParameters["MinFlopsPerSync"] = (
     1  # Minimum number of flops per sync to increase stability for small problems
@@ -272,7 +272,7 @@ globalParameters["LibraryUpdateComment"] = (
 )
 
 # internal, i.e., gets set during startup
-globalParameters["ROCmSMIPath"] = None  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None  # /usr/bin/amd-smi
 globalParameters["HipClangVersion"] = "0.0.0"
 
 # default runtime is selected based on operating system, user can override
@@ -718,7 +718,7 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
 # e.g. RocProfCounter: 42 to pass silently.
 globalParameterTypeOverrides = {
     "ClientExecutionLockPath": {type(None), str},   # path or unset
-    "ROCmSMIPath":             {type(None), str},   # path, populated at startup
+    "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
 }
@@ -811,17 +811,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    # Keys with a sanctioned opt-out from the strict gate. Three categories:
-    #   - Dead (no consumer anywhere; safe to silently drop):
-    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
-    "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
-    "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
-    "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
-    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
-    "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
-    "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
-    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
-    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
+    # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
@@ -829,17 +819,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
     "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
     "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
-    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
-    #     dc2c963c Mar2025); kept so the one stale YAML
-    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
-    #     rename the YAML key to PrintIndexAssignmentInfo.
-    "PrintIndexAssignments",
-    #   - Misplaced solution parameter: registered in
-    #     defaultBenchmarkCommonParameters (solution-level), not
-    #     globalParameters; YAMLs that put it under GlobalParameters:
-    #     have the value silently dropped. Follow-up: relocate to
-    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
-    "MaxLDS",
 ]
 
 
@@ -888,13 +867,19 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
     try:
-        globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+        globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
     except OSError:
-        if os.name == "nt":
-            # rocm-smi is not presently supported on Windows so do not require it.
-            pass
-        else:
-            raise
+        # amd-smi is only needed at runtime to pin clocks/fans during benchmarking
+        # and tuning; it is not required to build libraries or validate logic.
+        # It is also not presently supported on Windows. Treat a missing amd-smi as
+        # non-fatal: leave AMDSMIPath unset (None) so that clock pinning is skipped,
+        # rather than aborting the build in environments that do not ship amd-smi.
+        globalParameters["AMDSMIPath"] = None
+        if os.name != "nt":
+            printWarning(
+                "Could not locate amd-smi; GPU clock/fan pinning will be disabled. "
+                "Install the amdsmi package to enable it."
+            )
 
     if "AsanBuild" in config:
         globalParameters["AsanBuild"] = config["AsanBuild"]
@@ -951,13 +936,18 @@ def setupRestoreClocks():
     import atexit
 
     def restoreClocks():
-        # Clocks will only be pinned if rocm-smi is available, therefore
+        # Clocks will only be pinned if amd-smi is available, therefore
         # we only need to restore if found.
         if globalParameters["PinClocks"]:
-            rsmi = globalParameters["ROCmSMIPath"]
-            if rsmi is not None:
-                subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-                subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+            asmi = globalParameters["AMDSMIPath"]
+            if asmi is not None:
+                # amd-smi set/reset require elevated privileges.
+                # Reset clocks/overdrive to default and return fans to
+                # automatic (driver) control.
+                cmd = [asmi, "reset", "-g", "0", "--clocks", "--fans"]
+                if hasattr(os, "geteuid") and os.geteuid() != 0:
+                    cmd = ["sudo", "-n"] + cmd
+                subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     atexit.register(restoreClocks)
 

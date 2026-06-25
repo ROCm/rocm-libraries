@@ -1,0 +1,504 @@
+########################################
+# MXFP8 FAIL_VERIFY reproducer — branch users/maemmett/tl-multiple-du-2 @ d2ca9b6780b
+#
+# Captures every distinct MXFP8 kernel that produced verification failures
+# (norm_error >= 1e-3) in a full 1100-size hipblaslt-bench --verify sweep on
+# MI355X (gfx950).  Sweep config: A=f8_r B=f8_r C=bf16_r D=bf16_r,
+# compute=f32_r, scaleA=scaleB=1001 (MX swizzled scales), transA=T transB=N,
+# alpha=1 beta=0, batch=1, initialization=trig_float.
+#
+# Of 1100 sizes: 868 PASS (78.9%), 232 FAIL_VERIFY (21.1%), 0 no-solution.
+# The 232 failures fall on exactly 10 distinct macro-tiles, all of the form
+# F8BS_MXAE8B32_MXBE8B32 ... MI16x16x1 ... PGR1 PLR1 SIA3 DTL1 StreamK3
+# StaggerU0 UseSubtileImpl1 WGM16, DepthU=256.  Every failing tile is a
+# NON-SQUARE "narrow" subtile (MIWT_M != MIWT_N).
+#
+# This test pins each failing kernel's MatrixInstruction (+ its scheduler
+# params) and validates against the CPU reference (NumElementsToValidate: -1).
+# A correct kernel passes; these kernels are expected to FAIL validation.
+#
+# Per-tile data (tile  ->  #fails / norm_error range  ->  heuristic-selected
+# minimized failing size proven with hipblaslt-bench --verify --print_kernel_info,
+# i.e. the smallest (m,n,k) where the heuristic still selects this exact tile
+# AND verify still fails):
+#
+#   MT256x224x256 MIWT[4,14]  WG[4,1] : 78 fails ne 0.014-0.132 ; min (7296,1792,2048) ne=0.104
+#   MT192x320x256 MIWT[6,10]  WG[2,2] : 56 fails ne 0.017-0.152 ; min (6528,2176,1280) ne=0.137
+#   MT320x192x256 MIWT[10,6]  WG[2,2] : 42 fails ne 0.016-0.153 ; min (5120,3072,1280) ne=0.127
+#   MT224x256x256 MIWT[14,4]  WG[1,4] : 28 fails ne 0.012-0.113 ; min (5504,2560,1792) ne=0.113
+#   MT384x160x256 MIWT[6,10]  WG[4,1] : 11 fails ne 0.016-1.4e4 ; min (384,35072,256) ne=6.3e3 *CATASTROPHIC*
+#   MT448x128x256 MIWT[14,4]  WG[2,2] :  5 fails ne 0.013-0.120 ; min (896,14336,1792) ne=0.116
+#   MT160x384x256 MIWT[10,6]  WG[1,4] :  4 fails ne 0.079-0.151 ; min (17920,768,1536) ne=0.124
+#   MT128x224x256 MIWT[2,14]  WG[4,1] :  3 fails ne 0.083-0.098 ; min (2176,3072,1792) ne=0.107
+#   MT128x448x256 MIWT[4,14]  WG[2,2] :  3 fails ne 0.019-0.121 ; min (128,22144,39424) ne=0.078
+#   MT224x128x256 MIWT[14,2]  WG[1,4] :  2 fails ne 0.098-0.114 ; min (6656,1024,3072) ne=0.098
+#
+# Catastrophic vs mild:  9 of the 11 MT384x160 failures are catastrophic
+# (norm_error ~6e3-1.4e4, garbage output) at the extreme aspect ratio M=384,
+# N>=34176.  All other tiles produce "mild" drift (norm_error 0.01-0.15),
+# consistent with an mainloop/StreamK partial-tile accumulation bug whose
+# wrong-element rate scales with K body-iter count.
+#
+# The heuristic only selects these large narrow tiles for large M/N problems,
+# so the *heuristic-confirmed* minimized sizes above stay multi-thousand in M.
+# Because this test PINS the kernel directly, it instead uses small single-/
+# few-tile ProblemSizes (K = 4-16*DepthU) to keep CPU validation cheap; the
+# StreamK=3 K-split over a single output tile exercises the same partial-tile
+# accumulation path that fails at scale.  The heuristic-confirmed real sizes
+# above are recorded for reference and reproducible directly with
+# hipblaslt-bench (see repo /home/bnemanic/mxfp8_repro/).
+#
+# ---------------------------------------------------------------------------
+# EMPIRICAL VERIFICATION STATUS (branch @ d2ca9b6780b, gfx950 MI355X):
+# Ran through the full TensileLite flow (NumElementsToValidate: -1, CPU
+# reference) on 2026-06-09.  ALL 10 pinned kernels reproduce the bug at these
+# small sizes.  Consistent per-tile signature:
+#     [MT_M, MT_N, 1, 1024]  (1 tile, K= 4*DU)  -> PASSED  (control)
+#     [MT_M, MT_N, 1, 4096]  (1 tile, K=16*DU)  -> FAILED  (validation mismatch)
+#     [2*tiles, 1, 2048]     (4 tiles, K= 8*DU) -> FAILED  (validation mismatch)
+# The K=1024 PASS / K=4096 FAIL split confirms the failure scales with K
+# body-iteration count (StreamK/mainloop accumulation), matching the mild
+# norm_error class observed in the bench sweep.  A correct build is expected
+# to flip every FAILED row to PASSED.
+#
+# Reproduce:
+#   cd projects/hipblaslt/tensilelite
+#   PYTHONPATH=../build/release/tensilelite/rocisa HIP_VISIBLE_DEVICES=<free_gpu> \
+#     python3.12 Tensile/bin/Tensile \
+#       --prebuilt-client build_tmp/tensilelite/client/tensilelite-client \
+#       Tensile/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml /tmp/out
+#   # (build the client once with:  invoke build-client --build-dir build_tmp)
+# Or via pytest:
+#   python3 -m pytest Tensile/Tests/common/gemm/gfx950/mxfp8_verify_fail_repro.yaml \
+#       --prebuilt-client build_tmp/tensilelite/client/tensilelite-client -v
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 32
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+  UseEffLike: False
+
+BenchmarkProblems:
+
+  ########################################
+  # MT256x224x256  MIWT[4,14] WG[4,1] — dominant failing tile (78 fails)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 14,  4, 1]   # MT 256x224
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 224, 1, 1024]    # 1 tile, K=4*DU
+          - Exact: [256, 224, 1, 4096]    # 1 tile, K=16*DU
+          - Exact: [512, 448, 1, 2048]    # 4 tiles, K=8*DU
+
+  ########################################
+  # MT192x320x256  MIWT[6,10] WG[2,2] — 56 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 10,  2, 2]   # MT 192x320
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [192, 320, 1, 1024]
+          - Exact: [192, 320, 1, 4096]
+          - Exact: [384, 640, 1, 2048]
+
+  ########################################
+  # MT320x192x256  MIWT[10,6] WG[2,2] — 42 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 6,  2, 2]   # MT 320x192
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [320, 192, 1, 1024]
+          - Exact: [320, 192, 1, 4096]
+          - Exact: [640, 384, 1, 2048]
+
+  ########################################
+  # MT224x256x256  MIWT[14,4] WG[1,4] — 28 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 14, 4,  1, 4]   # MT 224x256
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [224, 256, 1, 1024]
+          - Exact: [224, 256, 1, 4096]
+          - Exact: [448, 512, 1, 2048]
+
+  ########################################
+  # MT384x160x256  MIWT[6,10] WG[4,1] — 11 fails (9 CATASTROPHIC)
+  # Failure regime: M=384 (one tile in M), large N.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 10,  4, 1]   # MT 384x160
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 160, 1, 1024]
+          - Exact: [384, 160, 1, 4096]
+          - Exact: [384, 1600, 1, 2048]    # M=1 tile, N=10 tiles (catastrophic regime)
+
+  ########################################
+  # MT448x128x256  MIWT[14,4] WG[2,2] — 5 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 14, 4,  2, 2]   # MT 448x128
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [448, 128, 1, 1024]
+          - Exact: [448, 128, 1, 4096]
+          - Exact: [896, 256, 1, 2048]
+
+  ########################################
+  # MT160x384x256  MIWT[10,6] WG[1,4] — 4 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 6,  1, 4]   # MT 160x384
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [160, 384, 1, 1024]
+          - Exact: [160, 384, 1, 4096]
+          - Exact: [320, 768, 1, 2048]
+
+  ########################################
+  # MT128x224x256  MIWT[2,14] WG[4,1] — 3 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 14,  4, 1]   # MT 128x224
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 224, 1, 1024]
+          - Exact: [128, 224, 1, 4096]
+          - Exact: [256, 448, 1, 2048]
+
+  ########################################
+  # MT128x448x256  MIWT[4,14] WG[2,2] — 3 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 14,  2, 2]   # MT 128x448
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 448, 1, 1024]
+          - Exact: [128, 448, 1, 4096]
+          - Exact: [256, 896, 1, 2048]
+
+  ########################################
+  # MT224x128x256  MIWT[14,2] WG[1,4] — 2 fails
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 14, 2,  1, 4]   # MT 224x128
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [224, 128, 1, 1024]
+          - Exact: [224, 128, 1, 4096]
+          - Exact: [448, 256, 1, 2048]
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:
