@@ -81,14 +81,16 @@ def test_assign_global_parameters_incompatible_version_exits(isolate_globals, is
         GP.assignGlobalParameters({"MinimumRequiredVersion": "999.0.0"}, isa_info_map)
 
 
-def test_assign_global_parameters_locateexe_oserror_raises(isolate_globals, isa_info_map, monkeypatch):
-    # rocm-smi not found (non-Windows) -> the except OSError arm re-raises.
+def test_assign_global_parameters_locateexe_oserror_nonfatal(isolate_globals, isa_info_map, monkeypatch):
+    # amd-smi not found (non-Windows) -> the except OSError arm is non-fatal:
+    # it warns and leaves AMDSMIPath unset (None) instead of re-raising, so the
+    # build/logic steps still run in environments that do not ship amd-smi.
     _stub_hipcc(monkeypatch)
     monkeypatch.setattr(GP, "locateExe",
-                        lambda d, n: (_ for _ in ()).throw(OSError("Failed to locate rocm-smi")))
+                        lambda d, n: (_ for _ in ()).throw(OSError("Failed to locate amd-smi")))
     monkeypatch.setattr(GP.os, "name", "posix")
-    with pytest.raises(OSError):
-        GP.assignGlobalParameters({}, isa_info_map)
+    GP.assignGlobalParameters({}, isa_info_map)
+    assert GP.globalParameters["AMDSMIPath"] is None
 
 
 def test_assign_global_parameters_min_version_compatible(isolate_globals, isa_info_map, monkeypatch):
@@ -116,7 +118,7 @@ def test_assign_global_parameters_prints_caps_when_verbose(isolate_globals, isa_
 
 def test_setup_restore_clocks_handler(isolate_globals, monkeypatch):
     # Capture the atexit-registered handler and invoke it with PinClocks on +
-    # a stubbed rocm-smi path + stubbed subprocess.call.
+    # a stubbed amd-smi path + stubbed subprocess.call.
     captured = []
     import atexit
     monkeypatch.setattr(atexit, "register", lambda fn: captured.append(fn) or fn)
@@ -124,11 +126,11 @@ def test_setup_restore_clocks_handler(isolate_globals, monkeypatch):
     monkeypatch.setattr(GP.subprocess, "call", lambda *a, **k: calls.append(a))
 
     GP.globalParameters["PinClocks"] = True
-    GP.globalParameters["ROCmSMIPath"] = "rocm-smi"
+    GP.globalParameters["AMDSMIPath"] = "amd-smi"
     GP.setupRestoreClocks()
     assert captured, "a restore handler should be registered"
-    captured[0]()  # invoke -> the resetclocks/setfan subprocess.call branch
-    assert len(calls) == 2
+    captured[0]()  # invoke -> the single `amd-smi reset` subprocess.call branch
+    assert len(calls) == 1
 
 
 def test_setup_restore_clocks_handler_no_smi(isolate_globals, monkeypatch):
@@ -138,7 +140,7 @@ def test_setup_restore_clocks_handler_no_smi(isolate_globals, monkeypatch):
     calls = []
     monkeypatch.setattr(GP.subprocess, "call", lambda *a, **k: calls.append(a))
     GP.globalParameters["PinClocks"] = True
-    GP.globalParameters["ROCmSMIPath"] = None  # -> no calls
+    GP.globalParameters["AMDSMIPath"] = None  # -> no calls
     GP.setupRestoreClocks()
     captured[0]()
     assert calls == []

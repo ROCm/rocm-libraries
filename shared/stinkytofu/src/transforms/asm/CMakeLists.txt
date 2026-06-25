@@ -5,7 +5,6 @@ target_sources(stinkytofu_objs PRIVATE
     InstructionSizeCosting.cpp
     AccumulateInstructionSizePass.cpp
     SwPrefetchInsertionPass.cpp
-    PassOrderSnapshotJson.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     CFGBuilderPass.cpp
@@ -27,10 +26,12 @@ target_sources(stinkytofu_objs PRIVATE
     InsertClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
+    RemoveInstructionPass.cpp
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
     InsertWaitAluPass.cpp
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
+    StinkyWmmaVgprReorderPass.cpp
 )
