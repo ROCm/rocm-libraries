@@ -422,6 +422,26 @@ git commit -m "track <new_file>.tar.gz with DVC"
 
 Commit only the `.dvc` pointer file and the updated `.gitignore` — never the tar archive itself.
 
+### Validating graphs
+
+`tools/check_deserialize.py` checks that graph JSON files deserialize and validate
+without building a plan or running a kernel. It has three escalating levels:
+
+```bash
+# Pure-Python loader only (no hipDNN build required)
+python tools/check_deserialize.py --level json --src src 'Workloads/**/*.json'
+
+# Round-trip through the real hipdnn_frontend (needs a built hipDNN, no GPU)
+python tools/check_deserialize.py --level graph 'Workloads/**/*.json'
+
+# Also build the operation graph (needs a built hipDNN and a GPU)
+python tools/check_deserialize.py --level opgraph 'Workloads/**/*.json'
+```
+
+Run this after adding new workload graphs to confirm hipDNN can load them. Paths may
+be globs, directories, or tarball-extracted trees; the script exits non-zero on any
+failure and prints the first failures with their error messages.
+
 ## Running Tests
 
 ### Quick Start
