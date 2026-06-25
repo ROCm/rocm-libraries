@@ -241,7 +241,7 @@ class LocalRead(Component):
             tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok
 
-    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment="", ldsByteOffset=None, bothHalves=False):
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, ldsByteOffset=None, bothHalves=False, comment=""):
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP, ldsByteOffset, bothHalves)
         fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)

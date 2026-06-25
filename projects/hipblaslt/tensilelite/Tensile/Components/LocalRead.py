@@ -1675,7 +1675,7 @@ class LocalReadMFMA(LocalRead):
                             # half tokens.
                             tdmBothHalves = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
                                              and not tP.get("isM", False) and numVectorsPerTile == 1)
-                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, comment=comment, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves)
+                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves, comment=comment)
                             # TODO - handle vector-load
                             with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo2") as tmpSgprInfo:
                                 tmpSgpr = tmpSgprInfo.idx
