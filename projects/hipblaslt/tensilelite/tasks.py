@@ -348,3 +348,63 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task(
+    help={
+        "build_dir": "Path to coverage build dir.",
+        "gpu_targets": "GPU targets (e.g. gfx90a,gfx942).",
+        "rocm_path": "Path to ROCm installation.",
+        "clean": "Remove build directory before building.",
+    }
+)
+def build_coverage(
+    c,
+    build_dir="build_cov",
+    gpu_targets=None,
+    rocm_path=None,
+    clean=False,
+):
+    """Build TensileLite with code coverage instrumentation.
+
+    Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
+    """
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        if not gpu_targets:
+            print("Error: No GPU detected and no gpu_targets provided.")
+            return
+
+    if clean and os.path.exists(build_dir):
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
+
+    os.makedirs(build_dir, exist_ok=True)
+
+    rocm = rocm_path or _detect_rocm()
+    cmake_c = os.path.join(rocm, "bin", "amdclang")
+    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
+
+    cmake_cmd = [
+        "cmake",
+        "--preset", "tensilelite",
+        "-S", "../",
+        "-B", build_dir,
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DGPU_TARGETS={gpu_targets}",
+        f"-DCMAKE_C_COMPILER={cmake_c}",
+        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        "-DTENSILELITE_ENABLE_COVERAGE=ON",
+        "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DTENSILELITE_BUILD_TESTING=ON",
+        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+    ]
+
+    if shutil.which("ccache"):
+        cmake_cmd.extend([
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ])
+
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
