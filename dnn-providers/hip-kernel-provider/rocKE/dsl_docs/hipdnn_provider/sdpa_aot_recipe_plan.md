@@ -4,11 +4,22 @@
 
 Add a repeatable, build-time AOT recipe for one rocKE SDPA forward kernel using only the Python rocKE implementation. The output is a loose HSACO plus metadata sidecar in the build tree. A later task will bundle HSACO files into a kpack archive.
 
+## Branch refresh notes
+
+The source branch was rebased/merged after the original plan. The relevant changes are:
+
+- The Python package is now `rocke`, rooted at `rocKE/Python/rocke`. Old `rocKE/Python/ck_dsl` paths and `ck_dsl.*` imports are stale.
+- The C++ engine naming moved from `ckc_*` to `rocke_*`: `librocke_core.a`, `rocke_engine`, `ROCKE_BACKEND`, and `ROCKE_CPP_STRICT`.
+- The first SDPA kernel still lives in `instances/common/fmha_mfma.py`, but the default kernel name prefix is now `rocke_fmha_fwd_mfma`.
+- `compile_kernel()` now defaults through `ROCKE_BACKEND` and the package default is the C++ engine. This plan must not rely on that default. The SDPA AOT CLI should use `compile_kernel_via_hipcc()` for this first example. If a future direct LLVM/comgr path is added, it must explicitly select the Python backend.
+- CMake helper/target names should use `rocke_` names, not `ckc_` names.
+
 ## Constraints
 
 - First example is SDPA forward, not GEMM.
-- Use only `rocKE/Python/ck_dsl` code paths.
-- Do not use `ckc_core`, `ckc_engine`, C++ lowering, C++ metadata APIs, or C ABI producers.
+- Use only `rocKE/Python/rocke` code paths.
+- Do not use `rocke_core`, `rocke_engine`, C++ lowering, C++ metadata APIs, or C ABI producers.
+- Do not depend on `ROCKE_BACKEND=cpp`, `ROCKE_BACKEND=both`, or `ROCKE_CPP_STRICT`.
 - Do not install generated artifacts.
 - Do not embed HSACO binaries in provider sources.
 - Do not create a kpack archive in this task.
@@ -19,12 +30,12 @@ Add a repeatable, build-time AOT recipe for one rocKE SDPA forward kernel using 
 
 Use dense SDPA/FMHA forward:
 
-- Builder: `Python/ck_dsl/instances/common/fmha_mfma.py`
+- Builder: `Python/rocke/instances/common/fmha_mfma.py`
 - Spec types: `FmhaMfmaSpec`, `FmhaCommonSpec`, `FmhaShape`
 - Build helper: `build_fmha_fwd_mfma`
 - Launch helper: `fmha_fwd_mfma_grid`
 - Signature helper: `fmha_fwd_mfma_signature`
-- Existing numeric reference: `Python/ck_dsl/examples/common/fmha_fwd_verify_hip.py`
+- Existing numeric reference: `Python/rocke/examples/common/fmha_fwd_verify_hip.py`
 
 Use `fmha_mfma` instead of `attention_unified` for the first example because it is a single dense SDPA kernel with deterministic grid and signature. `attention_unified` adds paged-KV layout, 2D/3D path selection, optional split/reduce kernels, workspace, block tables, and dynamic launch behavior that belongs in a later dispatcher task.
 
@@ -85,8 +96,8 @@ Dtype policy:
 Add:
 
 ```text
-rocKE/Python/ck_dsl/aot/__init__.py
-rocKE/Python/ck_dsl/aot/instance_schema.py
+rocKE/Python/rocke/aot/__init__.py
+rocKE/Python/rocke/aot/instance_schema.py
 ```
 
 Parser responsibilities:
@@ -99,12 +110,16 @@ Parser responsibilities:
 6. Normalize dtype aliases to internal `f16`.
 7. Validate shape constraints:
    - `seqlen_q % 16 == 0`
+   - `seqlen_k % 16 == 0`
    - `head_size in {32, 64, 128, 192, 256}`
    - `num_query_heads % num_kv_heads == 0`
    - `mask_mode == "none"` initially
 8. Build:
 
 ```python
+from rocke.instances import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_mfma import FmhaMfmaSpec, is_valid_spec
+
 common = FmhaCommonSpec(
     FmhaShape(
         head_size=head_size,
@@ -149,14 +164,20 @@ Implementation steps:
 3. Build the kernel:
 
 ```python
+from rocke.instances.common.fmha_mfma import build_fmha_fwd_mfma
+
 kernel = build_fmha_fwd_mfma(spec, arch=arch)
 ```
 
 4. Compile with the existing Python HIP path:
 
 ```python
+from rocke.helpers.compile import compile_kernel_via_hipcc
+
 artifact = compile_kernel_via_hipcc(kernel, arch=arch)
 ```
+
+Use `compile_kernel_via_hipcc()` intentionally. It lowers through the Python HIP backend and does not consult `ROCKE_BACKEND`, so it avoids the C++ engine default.
 
 5. Write loose build-tree outputs only:
 
@@ -176,7 +197,7 @@ Optional debug output can be added only if an existing helper exposes it cleanly
 Add:
 
 ```text
-rocKE/Python/ck_dsl/aot/sidecar.py
+rocKE/Python/rocke/aot/sidecar.py
 ```
 
 Inputs:
@@ -224,7 +245,7 @@ Output schema:
     "shape_constraints": {
       "batch": {"equals": 2},
       "seqlen_q": {"equals": 64, "multiple_of": 16},
-      "seqlen_k": {"equals": 64},
+      "seqlen_k": {"equals": 64, "multiple_of": 16},
       "num_query_heads": {"equals": 4},
       "num_kv_heads": {"equals": 4},
       "head_size": {"equals": 64},
@@ -304,13 +325,13 @@ For BSHD row-major `[B, S, H, D]`:
 Add:
 
 ```text
-rocKE/cmake/ckc_aot.cmake
+rocKE/cmake/rocke_aot.cmake
 ```
 
 Function:
 
 ```cmake
-ckc_add_aot_instance(
+rocke_add_aot_instance(
   NAME sdpa_fwd_f16_bshd_gfx950_q64_k64_h4_d64
   INSTANCE aot/instances/sdpa_fwd_f16_bshd_gfx950_q64_k64_h4_d64.json
   OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/aot"
@@ -327,7 +348,7 @@ ${OUTPUT_DIR}/${NAME}.sidecar.json
 Aggregate target:
 
 ```text
-ckc_aot_artifacts
+rocke_aot_artifacts
 ```
 
 Dependencies:
@@ -337,7 +358,7 @@ Dependencies:
 - Python AOT modules;
 - Python SDPA builder modules.
 
-No `install()` calls. No provider install path. No kpack archive. No binary embedding. No `ckc_core` dependency.
+No `install()` calls. No provider install path. No kpack archive. No binary embedding. No `rocke_core` or `rocke_engine` dependency.
 
 ## Tests
 
@@ -364,7 +385,7 @@ Cover:
 Build:
 
 ```bash
-cmake --build <build> --target ckc_aot_artifacts
+cmake --build <build> --target rocke_aot_artifacts
 ```
 
 Assert:
@@ -376,14 +397,14 @@ Assert:
 
 ### GPU numeric acceptance
 
-Extend `fmha_fwd_verify_hip.py` or add a sibling verifier that:
+Extend `fmha_fwd_verify_hip.py` or add a sibling verifier under `Python/rocke/examples/common/` that:
 
 1. loads generated `.hsaco`;
 2. reads generated `.sidecar.json`;
 3. packs args from the sidecar;
 4. runs the same dense attention reference check as the existing example.
 
-Pass condition: existing tolerance from `fmha_fwd_verify_hip.py`.
+Pass condition: existing tolerance from `Python/rocke/examples/common/fmha_fwd_verify_hip.py`.
 
 ## Docs
 
