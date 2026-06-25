@@ -226,6 +226,12 @@ if( BUILD_CODE_COVERAGE )
 endif()
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   enable_testing()
+
+# CI passes -DROCFFT_ENABLE_COVERAGE=ON (the standardized coverage flag); map it
+# onto BUILD_CODE_COVERAGE before the library subdir is processed below.
+option(ROCFFT_ENABLE_COVERAGE "Enable code coverage (alias for BUILD_CODE_COVERAGE)" OFF)
+if( ROCFFT_ENABLE_COVERAGE )
+  set( BUILD_CODE_COVERAGE ON )
 endif()
 
 add_subdirectory( library )

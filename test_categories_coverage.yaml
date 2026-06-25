@@ -35,3 +35,14 @@ projects:
     ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/benchmark/.*|.*/_deps/.*|.*deps.*'
     llvm_profile_pattern: '%m'
     test_category: quick
+
+  rocfft:
+    enabled: true
+    coverage_objects:
+      # Coverage is collected from the rocFFT library.
+      libraries:
+        - librocfft.so
+      test_binaries: []
+    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
