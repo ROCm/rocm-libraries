@@ -153,4 +153,91 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     return {graph, getConfigDescription(config), config.arch};
 }
 
+GraphTestCase configToCompatibleGraphTestCaseWithStats(const fmha_v3_fwdConfig& config)
+{
+    using namespace hipdnn_frontend;
+    using namespace hipdnn_frontend::graph;
+    using namespace hipdnn_data_sdk::utilities;
+
+    const int64_t batch = 2;
+    const int64_t numHeads = 4;
+    const int64_t seqQ = 256;
+    const int64_t seqKv = 128;
+
+    const DataType dataType = toDataType(config.dtype);
+
+    const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
+    const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
+    const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+
+    auto graph = std::make_shared<Graph>();
+    graph->set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(dataType);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(dataType);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(dataType);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaFwdKernelConfigStatsTest");
+    attributes.set_generate_stats(true);
+
+    auto maskType = static_cast<MaskType>(config.mask);
+    switch(maskType)
+    {
+    case MaskType::NO_MASK:
+        break;
+    case MaskType::TOP_LEFT_CAUSAL:
+        attributes.set_diagonal_band_left_bound(-1);
+        attributes.set_diagonal_band_right_bound(0);
+        attributes.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+        attributes.set_causal_mask(true);
+        break;
+    case MaskType::BOTTOM_RIGHT_CAUSAL:
+        attributes.set_diagonal_band_left_bound(-1);
+        attributes.set_diagonal_band_right_bound(0);
+        attributes.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
+        attributes.set_causal_mask_bottom_right(true);
+        break;
+    case MaskType::SLIDING_WINDOW:
+        attributes.set_diagonal_band_left_bound(64);
+        attributes.set_diagonal_band_right_bound(64);
+        break;
+    default:
+        break;
+    }
+
+    auto batchMode = static_cast<BatchMode>(config.mode);
+    if(batchMode == BatchMode::GROUP)
+    {
+        const std::vector<int64_t> seqLenDims = {batch};
+        auto seqLenStrides = generateStrides(seqLenDims);
+
+        auto seqLenQ = std::make_shared<TensorAttributes>();
+        seqLenQ->set_dim(seqLenDims).set_stride(seqLenStrides).set_data_type(DataType::INT32);
+
+        auto seqLenKv = std::make_shared<TensorAttributes>();
+        seqLenKv->set_dim(seqLenDims).set_stride(seqLenStrides).set_data_type(DataType::INT32);
+
+        attributes.set_seq_len_q(seqLenQ);
+        attributes.set_seq_len_kv(seqLenKv);
+    }
+
+    auto [o, stats] = graph->sdpa(q, k, v, attributes);
+
+    o->set_output(true);
+    o->set_data_type(dataType);
+
+    stats->set_output(true);
+    stats->set_data_type(DataType::FLOAT);
+
+    return {graph, getConfigDescription(config) + "Stats", config.arch};
+}
+
 } // namespace asm_sdpa_engine
