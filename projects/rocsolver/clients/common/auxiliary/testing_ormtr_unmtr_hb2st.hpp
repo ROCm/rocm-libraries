@@ -479,7 +479,9 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     }
 
     // V is ldv x nv
-    I nt = ceildiv(nq - 1, kd);
+    I nt = 0;
+    if(kd > 0)
+        nt = ceildiv(nq - 1, kd);
     I nv_blocks = nt * (nt + 1) / 2;
     I nv = nv_blocks * kd;
 
