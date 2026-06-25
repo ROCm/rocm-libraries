@@ -24,21 +24,14 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                RpptDescPtr srcDescPtr,
-                                Rpp8u *dstPtr,
-                                RpptDescPtr dstDescPtr,
-                                Rpp8u *lutPtr,
-                                RpptROIPtr roiTensorPtrSrc,
-                                RpptRoiType roiType,
-                                RppLayoutParams layoutParams)
-{
+RppStatus lut_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                RpptDescPtr dstDescPtr, Rpp8u* lutPtr, RpptROIPtr roiTensorPtrSrc,
+                                RpptRoiType roiType, RppLayoutParams layoutParams) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(dstDescPtr->n)
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -50,20 +43,20 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // LUT with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -71,8 +64,7 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = lutPtr[srcPtrTemp[0]];
                     *dstPtrTempG = lutPtr[srcPtrTemp[1]];
                     *dstPtrTempB = lutPtr[srcPtrTemp[2]];
@@ -90,16 +82,15 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -107,8 +98,7 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = lutPtr[*srcPtrTempR];
                     dstPtrTemp[1] = lutPtr[*srcPtrTempG];
                     dstPtrTemp[2] = lutPtr[*srcPtrTempB];
@@ -126,23 +116,19 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8u *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8u *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = lutPtr[*srcPtrTemp];
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -161,50 +147,43 @@ RppStatus lut_u8_u8_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus lut_u8_f16_host_tensor(Rpp8u *srcPtr,
-                                 RpptDescPtr srcDescPtr,
-                                 Rpp16f *dstPtr,
-                                 RpptDescPtr dstDescPtr,
-                                 Rpp16f *lutPtr,
-                                 RpptROIPtr roiTensorPtrSrc,
-                                 RpptRoiType roiType,
-                                 RppLayoutParams layoutParams)
-{
+RppStatus lut_u8_f16_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
+                                 RpptDescPtr dstDescPtr, Rpp16f* lutPtr, RpptROIPtr roiTensorPtrSrc,
+                                 RpptRoiType roiType, RppLayoutParams layoutParams) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(dstDescPtr->n)
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp8u *srcPtrImage;
-        Rpp16f *dstPtrImage;
+        Rpp8u* srcPtrImage;
+        Rpp16f* dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        Rpp8u *srcPtrChannel;
-        Rpp16f *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        Rpp8u* srcPtrChannel;
+        Rpp16f* dstPtrChannel;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // LUT with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8u *srcPtrRow;
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8u* srcPtrRow;
             Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp8u *srcPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u* srcPtrTemp;
                 Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -212,8 +191,7 @@ RppStatus lut_u8_f16_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = lutPtr[srcPtrTemp[0]];
                     *dstPtrTempG = lutPtr[srcPtrTemp[1]];
                     *dstPtrTempB = lutPtr[srcPtrTemp[2]];
@@ -231,27 +209,25 @@ RppStatus lut_u8_f16_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
-            Rpp16f *dstPtrRow;
+            Rpp16f* dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB;
-                Rpp16f *dstPtrTemp;
+                Rpp16f* dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
                 srcPtrTempB = srcPtrRowB;
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = lutPtr[*srcPtrTempR];
                     dstPtrTemp[1] = lutPtr[*srcPtrTempG];
                     dstPtrTemp[2] = lutPtr[*srcPtrTempB];
@@ -269,25 +245,21 @@ RppStatus lut_u8_f16_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
-                Rpp8u *srcPtrRow;
-                Rpp16f *dstPtrRow;
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
+                Rpp8u* srcPtrRow;
+                Rpp16f* dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
-                    Rpp8u *srcPtrTemp;
-                    Rpp16f *dstPtrTemp;
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                    Rpp8u* srcPtrTemp;
+                    Rpp16f* dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = lutPtr[*srcPtrTemp];
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -306,50 +278,43 @@ RppStatus lut_u8_f16_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus lut_u8_f32_host_tensor(Rpp8u *srcPtr,
-                                 RpptDescPtr srcDescPtr,
-                                 Rpp32f *dstPtr,
-                                 RpptDescPtr dstDescPtr,
-                                 Rpp32f *lutPtr,
-                                 RpptROIPtr roiTensorPtrSrc,
-                                 RpptRoiType roiType,
-                                 RppLayoutParams layoutParams)
-{
+RppStatus lut_u8_f32_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                 RpptDescPtr dstDescPtr, Rpp32f* lutPtr, RpptROIPtr roiTensorPtrSrc,
+                                 RpptRoiType roiType, RppLayoutParams layoutParams) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(dstDescPtr->n)
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp8u *srcPtrImage;
-        Rpp32f *dstPtrImage;
+        Rpp8u* srcPtrImage;
+        Rpp32f* dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
-        Rpp8u *srcPtrChannel;
-        Rpp32f *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        Rpp8u* srcPtrChannel;
+        Rpp32f* dstPtrChannel;
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // LUT with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
-            Rpp8u *srcPtrRow;
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
+            Rpp8u* srcPtrRow;
             Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
-                Rpp8u *srcPtrTemp;
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                Rpp8u* srcPtrTemp;
                 Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -357,8 +322,7 @@ RppStatus lut_u8_f32_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = lutPtr[srcPtrTemp[0]];
                     *dstPtrTempG = lutPtr[srcPtrTemp[1]];
                     *dstPtrTempB = lutPtr[srcPtrTemp[2]];
@@ -376,27 +340,25 @@ RppStatus lut_u8_f32_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB;
-            Rpp32f *dstPtrRow;
+            Rpp32f* dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB;
-                Rpp32f *dstPtrTemp;
+                Rpp32f* dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
                 srcPtrTempB = srcPtrRowB;
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = lutPtr[*srcPtrTempR];
                     dstPtrTemp[1] = lutPtr[*srcPtrTempG];
                     dstPtrTemp[2] = lutPtr[*srcPtrTempB];
@@ -414,25 +376,21 @@ RppStatus lut_u8_f32_host_tensor(Rpp8u *srcPtr,
         }
 
         // LUT without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
-                Rpp8u *srcPtrRow;
-                Rpp32f *dstPtrRow;
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
+                Rpp8u* srcPtrRow;
+                Rpp32f* dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
-                    Rpp8u *srcPtrTemp;
-                    Rpp32f *dstPtrTemp;
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+                    Rpp8u* srcPtrTemp;
+                    Rpp32f* dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = lutPtr[*srcPtrTemp];
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -451,21 +409,14 @@ RppStatus lut_u8_f32_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                RpptDescPtr srcDescPtr,
-                                Rpp8s *dstPtr,
-                                RpptDescPtr dstDescPtr,
-                                Rpp8s *lutPtr,
-                                RpptROIPtr roiTensorPtrSrc,
-                                RpptRoiType roiType,
-                                RppLayoutParams layoutParams)
-{
+RppStatus lut_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                RpptDescPtr dstDescPtr, Rpp8s* lutPtr, RpptROIPtr roiTensorPtrSrc,
+                                RpptRoiType roiType, RppLayoutParams layoutParams) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
 
     omp_set_dynamic(0);
 #pragma omp parallel for num_threads(dstDescPtr->n)
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -477,20 +428,20 @@ RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // LUT with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -498,8 +449,7 @@ RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = lutPtr[(Rpp32s)(srcPtrTemp[0]) + 128];
                     *dstPtrTempG = lutPtr[(Rpp32s)(srcPtrTemp[1]) + 128];
                     *dstPtrTempB = lutPtr[(Rpp32s)(srcPtrTemp[2]) + 128];
@@ -517,16 +467,15 @@ RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // LUT with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -534,8 +483,7 @@ RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = lutPtr[(Rpp32s)(*srcPtrTempR) + 128];
                     dstPtrTemp[1] = lutPtr[(Rpp32s)(*srcPtrTempG) + 128];
                     dstPtrTemp[2] = lutPtr[(Rpp32s)(*srcPtrTempB) + 128];
@@ -553,27 +501,23 @@ RppStatus lut_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // LUT without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8s *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8s *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         //*dstPtrTemp = lutPtr[(Rpp32s)*srcPtrTemp + 128];
                         *dstPtrTemp++ = lutPtr[(Rpp32s)*srcPtrTemp++ + 128];
-                        //srcPtrTemp++;
-                        //dstPtrTemp++;
+                        // srcPtrTemp++;
+                        // dstPtrTemp++;
                     }
 
                     srcPtrRow += srcDescPtr->strides.hStride;

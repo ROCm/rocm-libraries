@@ -1,0 +1,314 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeAlpha: 3 # alpha=random (use 2 for power-of-2 when FUSE_ALPHA_INTO_PK8_SCALE=True)
+  DataInitTypeBeta: 0  # required for fuse alpha path (no beta)
+  DataInitTypeBias: 21 # bias to verify correctness
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+  PrintSolutionRejectionReason: True
+  KeepBuildTmp: True
+
+BenchmarkProblems:
+  ########################################
+  # Section 1: Fused alpha pk8 happy path
+  # Tests canUsePk8FP8Conversion=True:
+  #   - No bias, no activation, no beta
+  #   - Sequential register layout (VectorWidthA=1, SourceSwap=0)
+  #   - Alpha is fused into v_cvt_scalef32_sr_pk8_fp8_f32 scale operand
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: f8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      SparseA: False
+      Activation: False
+      UseBias: 0
+      SupportUserArgs: True
+      Batched: True
+      StochasticRounding: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1,  1,  8, 2,  2, 2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - StoreVectorWidth: [8]  # gwvw >= 8, required for pk8 path
+        - VectorWidthA: [1]      # ensures hasSequentialValuC=True
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - WorkGroupMapping: [1]
+        - WorkGroupMappingXCC: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [False]    # ensures hasSequentialValuC=True
+        - ActivationFuncCall: [false]
+        - 1LDSBuffer: [1]
+        - StaggerU: [32]
+        - StaggerUMapping: [0]
+        - StaggerUStride: [256]
+        - WavefrontSize: [32]
+        - ConvertAfterDS: [ False ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 256, 256, 1, 64]
+          - Exact: [ 512, 512, 1, 512]
+
+  ########################################
+  # Section 2: SR + Bias + Activation + Alpha
+  # Tests skipRearrangement fix path:
+  #   - canUsePk8FP8Conversion=False (bias + activation disable fuse)
+  #   - Verifies bias/activation/alpha interact correctly
+  #     with non-fused SR conversion
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: f8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      SparseA: False
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: ['s']
+      SupportUserArgs: True
+      Batched: True
+      StochasticRounding: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1,  1,  8, 2,  2, 2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - StoreVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - WorkGroupMapping: [1]
+        - WorkGroupMappingXCC: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [False]
+        - ActivationFuncCall: [true]
+        - 1LDSBuffer: [1]
+        - StaggerU: [32]
+        - StaggerUMapping: [0]
+        - StaggerUStride: [256]
+        - WavefrontSize: [32]
+        - ConvertAfterDS: [ False ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 512, 512, 1, 512]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+
+  ########################################
+  # Section 3: FP8 non-SR pk8 path
+  # Tests v_cvt_scalef32_pk8_fp8_f32 (no stochastic rounding)
+  # with gwvw=8 (StoreVectorWidth=8)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: f8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      SparseA: False
+      Activation: False
+      UseBias: 0
+      SupportUserArgs: True
+      Batched: True
+      StochasticRounding: False
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1,  1,  8, 2,  2, 2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - StoreVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - WorkGroupMapping: [1]
+        - WorkGroupMappingXCC: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [False]
+        - ActivationFuncCall: [false]
+        - 1LDSBuffer: [1]
+        - StaggerU: [32]
+        - StaggerUMapping: [0]
+        - StaggerUStride: [256]
+        - WavefrontSize: [32]
+        - ConvertAfterDS: [ False ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 256, 256, 1, 64]
+
+  ########################################
+  # Section 4: BF8 non-SR pk8 path
+  # Tests v_cvt_scalef32_pk8_bf8_f32 (no stochastic rounding)
+  # with gwvw=8 (StoreVectorWidth=8)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b8
+      DestDataType: b8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      SparseA: False
+      Activation: False
+      UseBias: 0
+      SupportUserArgs: True
+      Batched: True
+      StochasticRounding: False
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1,  1,  8, 2,  2, 2]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [64]
+        - StoreVectorWidth: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - WorkGroupMapping: [1]
+        - WorkGroupMappingXCC: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [False]
+        - ActivationFuncCall: [false]
+        - 1LDSBuffer: [1]
+        - StaggerU: [32]
+        - StaggerUMapping: [0]
+        - StaggerUStride: [256]
+        - WavefrontSize: [32]
+        - ConvertAfterDS: [ False ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 256, 256, 1, 64]

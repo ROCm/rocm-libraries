@@ -42,11 +42,12 @@ function(apply_test_category_labels target_name yaml_file working_dir)
         return()
     endif()
 
-    # Check if optional install_test_file parameter was provided
-    set(install_test_file "${ARGV3}")
-    # Optional 5th parameter: resource_group token forwarded to the parser via
-    # --resource-group. Empty string means "not provided".
-    set(resource_group "${ARGV4}")
+    # Use ARGN rather than ARGV<N>; unset ARGV<N> variables can fall through to
+    # parent scopes when this function is called from another function.
+    set(install_test_file "")
+    set(resource_group "")
+    list(POP_FRONT ARGN install_test_file resource_group)
+
     set(extra_args "")
     if(resource_group)
         list(APPEND extra_args "--resource-group" "${resource_group}")

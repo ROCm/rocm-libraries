@@ -54,8 +54,8 @@ custom.config:
       DestDataType: s
       F32XdlMathOp: X
       HighPrecisionAccumulate: False
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
