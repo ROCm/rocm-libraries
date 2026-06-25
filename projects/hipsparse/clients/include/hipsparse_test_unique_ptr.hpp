@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,40 @@ namespace hipsparse_test
     // device_malloc wraps hipMalloc and provides same API as malloc
     static void* device_malloc(size_t byte_size)
     {
-        void* pointer;
-        PRINT_IF_HIP_ERROR(hipMalloc(&pointer, byte_size));
+        // Always start from a defined value so a failed allocation never hands
+        // back an uninitialized pointer that downstream code would dereference.
+        void*      pointer = nullptr;
+        hipError_t status  = hipMalloc(&pointer, byte_size);
+        if(status != hipSuccess)
+        {
+            // Surface enough context to tell an out-of-memory condition apart
+            // from a lost/faulted device on CI runners.
+            size_t     free_mem   = 0;
+            size_t     total_mem  = 0;
+            hipError_t mem_status = hipMemGetInfo(&free_mem, &total_mem);
+
+            fprintf(stderr,
+                    "device_malloc: hipMalloc of %zu bytes failed: hip error %d (%s). ",
+                    byte_size,
+                    status,
+                    hipGetErrorString(status));
+            if(mem_status == hipSuccess)
+            {
+                fprintf(stderr,
+                        "Device memory free/total = %zu/%zu MB.\n",
+                        free_mem >> 20,
+                        total_mem >> 20);
+            }
+            else
+            {
+                fprintf(stderr,
+                        "hipMemGetInfo also failed: hip error %d (%s) -- device may be lost.\n",
+                        mem_status,
+                        hipGetErrorString(mem_status));
+            }
+
+            pointer = nullptr;
+        }
         return pointer;
     }
 

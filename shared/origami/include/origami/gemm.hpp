@@ -9,8 +9,10 @@
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
+namespace gemm {
 
 /**
  * @brief Per-operand cache hit rates for L1, L2, and MALL.
@@ -27,7 +29,7 @@ using cache_hit_rates_t = std::tuple<double, double, double, double, double, dou
  * This struct bundles grid dimensions, occupancy info, and other
  * values computed from problem, config, and hardware.
  */
-struct context_t {
+struct ORIGAMI_EXPORT context_t {
   /// Heuristic parameters (cached to avoid repeated lookups).
   heuristic_params_t heuristic{};
 
@@ -96,7 +98,7 @@ struct context_t {
  * @param config Kernel configuration.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_work_utilization(const problem_t& problem, const config_t& config);
+ORIGAMI_EXPORT double calculate_work_utilization(const problem_t& problem, const config_t& config);
 
 /**
  * @brief calculate the output utilization which is the ratio of the useful problem volume to the
@@ -107,7 +109,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
  * @param vector_elems elements in the vector.
  * @return double ratio of the useful problem volume to the total scheduled volume.
  */
-double calculate_output_utilization(const problem_t& problem,
+ORIGAMI_EXPORT double calculate_output_utilization(const problem_t& problem,
                                     const config_t& config,
                                     size_t vector_elems);
 
@@ -119,7 +121,7 @@ double calculate_output_utilization(const problem_t& problem,
  * @param element_size_bits size in bits
  * @return size_t
  */
-size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+ORIGAMI_EXPORT size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
  * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
@@ -135,7 +137,7 @@ size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
  * @param splitting_factor K-split factor.
  * @return workgroup_mapping_t Predicted workgroup mapping.
  */
-workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
+ORIGAMI_EXPORT workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const config_t& config,
                                               size_t grid_m,
@@ -152,7 +154,7 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
  * @return tuple<reduction_t, size_t, size_t, size_t, size_t>
  *         (reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
  */
-std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
+ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
@@ -168,7 +170,7 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
  * @param b_dtype Data type of operand B
  * @return bool True if MT fits in LDS, false otherwise
  */
-bool check_lds_capacity(const hardware_t& hardware,
+ORIGAMI_EXPORT bool check_lds_capacity(const hardware_t& hardware,
                         const dim3_t& mt,
                         const data_type_t& a_dtype,
                         const data_type_t& b_dtype);
@@ -180,7 +182,7 @@ bool check_lds_capacity(const hardware_t& hardware,
  * @param num_active_cus number of CU's
  * @return double memory bandwidth
  */
-double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus);
+ORIGAMI_EXPORT double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus);
 
 /**
  * @brief Compute MALL tile dimensions: how many concurrent workgroup tiles fit in MALL.
@@ -191,7 +193,7 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
  * @param wgm_value Workgroup mapping slab width.
  * @return std::pair<size_t, size_t> (mall_tile_m, mall_tile_n).
  */
-std::pair<size_t, size_t> compute_mall_tiles(size_t grid_m,
+ORIGAMI_EXPORT std::pair<size_t, size_t> compute_mall_tiles(size_t grid_m,
                                              size_t grid_n,
                                              size_t active_cus,
                                              size_t wgm_value);
@@ -209,7 +211,7 @@ std::pair<size_t, size_t> compute_mall_tiles(size_t grid_m,
  * @param wgm_value Workgroup mapping slab width.
  * @return std::pair<size_t, size_t> (l2_tile_m, l2_tile_n).
  */
-std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
+ORIGAMI_EXPORT std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
                                            const hardware_t& hardware,
                                            const config_t& config,
                                            size_t grid_m,
@@ -229,7 +231,7 @@ std::pair<size_t, size_t> compute_l2_tiles(const problem_t& problem,
  * @param id Linear workgroup ID.
  * @return dim4_t 4D tile coordinate.
  */
-dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, size_t id);
+ORIGAMI_EXPORT dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, size_t id);
 
 /**
  * @brief Count unique tile coordinates touched by a contiguous range of workgroup IDs.
@@ -243,7 +245,7 @@ dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, s
  * @param count Number of workgroups in the range.
  * @return dim4_t Unique tile counts in each dimension.
  */
-dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t count);
+ORIGAMI_EXPORT dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t count);
 
 /**
  * @brief Count unique tiles for a specific XCD during a specific timestep.
@@ -259,7 +261,7 @@ dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t coun
  * @param timestep_id Timestep index (0-based).
  * @return dim4_t Unique tile counts in each dimension.
  */
-dim4_t count_unique_tiles(const dim4_t& grid,
+ORIGAMI_EXPORT dim4_t count_unique_tiles(const dim4_t& grid,
                           const workgroup_mapping_t& wgm_mapping,
                           size_t N_CU,
                           size_t num_xcd,
@@ -275,7 +277,7 @@ dim4_t count_unique_tiles(const dim4_t& grid,
  * @param timestep_id Timestep index (0-based).
  * @return dim4_t Unique tile counts in each dimension.
  */
-dim4_t count_unique_tiles_timestep(const dim4_t& grid,
+ORIGAMI_EXPORT dim4_t count_unique_tiles_timestep(const dim4_t& grid,
                                    const workgroup_mapping_t& wgm_mapping,
                                    size_t N_CU,
                                    size_t timestep_id);
@@ -288,7 +290,7 @@ dim4_t count_unique_tiles_timestep(const dim4_t& grid,
  * @param mi Micro tile dimensions
  * @return size_t Number of matrix instructions
  */
-size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
+ORIGAMI_EXPORT size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
 
 /**
  * @brief Compute arithmetic intensity.
@@ -299,7 +301,7 @@ size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
  * @param bytes_per_element bytes per element
  * @return double arithmetic intensity.
  */
-double arithmetic_intensity(double m, double n, double k, double bytes_per_element);
+ORIGAMI_EXPORT double arithmetic_intensity(double m, double n, double k, double bytes_per_element);
 
 /**
  * @brief Emulated tf32 arithmetic intensity.
@@ -310,7 +312,7 @@ double arithmetic_intensity(double m, double n, double k, double bytes_per_eleme
  * @param bytes_per_element bytes per element
  * @return double arithmetic intensity.
  */
-double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element);
+ORIGAMI_EXPORT double emulated_tf32_arithmetic_intensity(double m, double n, double k, double bytes_per_element);
 
 /**
  * @brief Compute TF32 X1 conversion overhead (SS_BSS path).
@@ -320,7 +322,7 @@ double emulated_tf32_arithmetic_intensity(double m, double n, double k, double b
  * @param config Kernel configuration.
  * @return double Latency in cycles.
  */
-double compute_cvt_overhead_x1(const problem_t& problem,
+ORIGAMI_EXPORT double compute_cvt_overhead_x1(const problem_t& problem,
                                const hardware_t& hardware,
                                const config_t& config);
 
@@ -332,7 +334,7 @@ double compute_cvt_overhead_x1(const problem_t& problem,
  * @param config Kernel configuration.
  * @return double Latency in cycles.
  */
-double compute_cvt_overhead(const problem_t& problem,
+ORIGAMI_EXPORT double compute_cvt_overhead(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config);
 
@@ -344,7 +346,7 @@ double compute_cvt_overhead(const problem_t& problem,
  * @param config Kernel configuration.
  * @return size_t Latency in cycles.
  */
-size_t compute_mt_compute_latency(const problem_t& problem,
+ORIGAMI_EXPORT size_t compute_mt_compute_latency(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config);
 
@@ -357,7 +359,7 @@ size_t compute_mt_compute_latency(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Predicted L2-hitrate.
  */
-double estimate_l2_hit(const problem_t& problem,
+ORIGAMI_EXPORT double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        const context_t& context);
@@ -371,7 +373,7 @@ double estimate_l2_hit(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Predicted MALL-hitrate.
  */
-double estimate_mall_hit(const problem_t& problem,
+ORIGAMI_EXPORT double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
                          const context_t& context);
@@ -388,7 +390,7 @@ double estimate_mall_hit(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return cache_hit_rates_t
  */
-cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
+ORIGAMI_EXPORT cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
                                            const hardware_t& hardware,
                                            const config_t& config,
                                            const context_t& context);
@@ -402,7 +404,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
  * @param l2_capacity_bytes l2 capacity in bytes
  * @return double
  */
-double compute_l2_hit_rate_global(const problem_t& problem,
+ORIGAMI_EXPORT double compute_l2_hit_rate_global(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
                                   size_t l2_capacity_bytes);
@@ -416,7 +418,7 @@ double compute_l2_hit_rate_global(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
-double compute_memory_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
                               const context_t& context);
@@ -434,7 +436,7 @@ double compute_memory_latency(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Epilogue latency in cycles.
  */
-double compute_epilogue_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context);
@@ -448,7 +450,7 @@ double compute_epilogue_latency(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
-double compute_tile_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
                             const context_t& context);
@@ -462,7 +464,7 @@ double compute_tile_latency(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Latency in cycles.
  */
-double compute_timestep_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_timestep_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context);
@@ -480,7 +482,7 @@ double compute_timestep_latency(const problem_t& problem,
  * @param context Execution context with derived parameters.
  * @return double Latency in cycles (0 if no parallel reduction).
  */
-double compute_parallel_reduction_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& problem,
                                           const hardware_t& hardware,
                                           const config_t& config,
                                           const context_t& context);
@@ -495,9 +497,10 @@ double compute_parallel_reduction_latency(const problem_t& problem,
  * @param max_cus
  * @return double Latency in cycles.
  */
-double compute_total_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              size_t max_cus);
 
+}  // namespace gemm
 }  // namespace origami

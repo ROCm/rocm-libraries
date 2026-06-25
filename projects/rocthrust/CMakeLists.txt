@@ -8,13 +8,13 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.4.0")
+set(VERSION_STRING "4.5.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
 set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependencies rocPRIM and rocRAND
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.13" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
@@ -64,6 +64,8 @@ option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build rocThrust with offload compression" ON)
+option(ROCTHRUST_USE_LIBHIPCXX "Build rocThrust using libhipcxx backend, if available" ON)
+option(ROCTHRUST_USE_LIBCUDACXX "Build rocThrust using libcudacxx backend, if available" ON)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
@@ -152,13 +154,6 @@ else()
   endif()
 endif()
 
-# Compressed offload binaries are currently not working with the SPIR-V target
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  if(BUILD_OFFLOAD_COMPRESS)
-    message(FATAL_ERROR "Cannot combine SPIR-V and BUILD_OFFLOAD_COMPRESS")
-  endif()
-endif()
-
 # Set up options for obtaining dependencies rocPRIM and rocRAND.
 # PACKAGE: Search for an install package that contains the dependency.
 # MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
@@ -214,6 +209,14 @@ endif()
 if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+endif()
+
+if (ROCTHRUST_USE_LIBHIPCXX)
+  add_compile_definitions(USE_LIBHIPCXX)
+endif()
+
+if (ROCTHRUST_USE_LIBCUDACXX)
+  add_compile_definitions(USE_LIBCUDACXX)
 endif()
 
 # Address Sanitizer

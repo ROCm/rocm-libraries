@@ -24,18 +24,13 @@ SOFTWARE.
 
 #include "hip_tensor_executors.hpp"
 
-__global__ void audio_tensor_mul_scalar_hip(float *srcPtr,
-                                            uint srcStride,
-                                            float *dstPtr,
-                                            uint dstStride,
-                                            int *srcLengthTensor,
-                                            float scalarValue)
-{
+__global__ void audio_tensor_mul_scalar_hip(float* srcPtr, uint srcStride, float* dstPtr,
+                                            uint dstStride, int* srcLengthTensor,
+                                            float scalarValue) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if (id_x >= srcLengthTensor[id_z])
-        return;
+    if (id_x >= srcLengthTensor[id_z]) return;
 
     uint srcIdx = (id_z * srcStride) + id_x;
     uint dstIdx = (id_z * dstStride) + id_x;
@@ -48,29 +43,21 @@ __global__ void audio_tensor_mul_scalar_hip(float *srcPtr,
     rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 }
 
-RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f *srcPtr,
-                                           Rpp32f scalarValue,
-                                           RpptDescPtr srcDescPtr,
-                                           Rpp32f *dstPtr,
-                                           RpptDescPtr dstDescPtr,
-                                           Rpp32s *srcLengthTensor,
-                                           rpp::Handle& handle)
-{
+RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f* srcPtr, Rpp32f scalarValue,
+                                           RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
+                                           RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
+                                           rpp::Handle& handle) {
     Rpp32s globalThreads_x = (srcDescPtr->strides.nStride + 7) >> 3;
     Rpp32s globalThreads_y = 1;
     Rpp32s globalThreads_z = srcDescPtr->n;
-    
+
     hipLaunchKernelGGL(audio_tensor_mul_scalar_hip,
-                       dim3(ceil((Rpp32f)globalThreads_x/LOCAL_THREADS_X_1DIM), ceil((Rpp32f)globalThreads_y/LOCAL_THREADS_Y_1DIM), ceil((Rpp32f)globalThreads_z/LOCAL_THREADS_Z_1DIM)),
-                       dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
-                       0,
-                       handle.GetStream(),
-                       srcPtr,
-                       srcDescPtr->strides.nStride,
-                       dstPtr,
-                       dstDescPtr->strides.nStride,
-                       srcLengthTensor,
-                       scalarValue);
-        
+                       dim3(ceil((Rpp32f)globalThreads_x / LOCAL_THREADS_X_1DIM),
+                            ceil((Rpp32f)globalThreads_y / LOCAL_THREADS_Y_1DIM),
+                            ceil((Rpp32f)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
+                       dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
+                       handle.GetStream(), srcPtr, srcDescPtr->strides.nStride, dstPtr,
+                       dstDescPtr->strides.nStride, srcLengthTensor, scalarValue);
+
     return RPP_SUCCESS;
 }
